@@ -41,6 +41,8 @@ export async function validateSessionToken(token: string) {
         avatar_url: userTable.avatar_url,
         email: userTable.email,
         setup_at: userTable.setup_at,
+        created_at: userTable.created_at,
+        updated_at: userTable.updated_at,
       },
       session: sessionTable,
     })

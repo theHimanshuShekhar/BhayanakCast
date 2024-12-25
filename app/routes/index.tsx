@@ -9,7 +9,7 @@ function Home() {
   const { user } = Route.useRouteContext();
   return (
     <>
-      <Navbar loggedInUser={user} />
+      <Navbar user={user} />
       <div className="flex flex-col gap-4 p-6">
         <div className="text-2xl">Room List</div>
       </div>
