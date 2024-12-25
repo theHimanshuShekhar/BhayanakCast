@@ -3,8 +3,6 @@ import { integer, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-co
 export const user = pgTable("user", {
   id: integer().primaryKey().generatedAlwaysAsIdentity(),
   name: text(),
-  // first_name: text(),
-  // last_name: text(),
   avatar_url: text(),
   email: text().unique().notNull(),
 
@@ -13,7 +11,6 @@ export const user = pgTable("user", {
     .defaultNow()
     .$onUpdate(() => new Date()),
   setup_at: timestamp(),
-  terms_accepted_at: timestamp(),
 });
 
 export const oauthAccount = pgTable(

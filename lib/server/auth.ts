@@ -1,6 +1,6 @@
 import { sha256 } from "@oslojs/crypto/sha2";
 import { encodeBase32LowerCaseNoPadding, encodeHexLowerCase } from "@oslojs/encoding";
-import { Discord, GitHub, Google } from "arctic";
+import { Discord } from "arctic";
 import { eq } from "drizzle-orm";
 import { deleteCookie, getCookie, setCookie } from "vinxi/http";
 
@@ -38,8 +38,6 @@ export async function validateSessionToken(token: string) {
         // Only return the necessary user data for the client
         id: userTable.id,
         name: userTable.name,
-        // first_name: userTable.first_name,
-        // last_name: userTable.last_name,
         avatar_url: userTable.avatar_url,
         email: userTable.email,
         setup_at: userTable.setup_at,
@@ -93,16 +91,6 @@ export const discord = new Discord(
   process.env.DISCORD_CLIENT_ID as string,
   process.env.DISCORD_CLIENT_SECRET as string,
   process.env.DISCORD_REDIRECT_URI as string,
-);
-export const github = new GitHub(
-  process.env.GITHUB_CLIENT_ID as string,
-  process.env.GITHUB_CLIENT_SECRET as string,
-  process.env.GITHUB_REDIRECT_URI || null,
-);
-export const google = new Google(
-  process.env.GOOGLE_CLIENT_ID as string,
-  process.env.GOOGLE_CLIENT_SECRET as string,
-  process.env.GOOGLE_REDIRECT_URI as string,
 );
 
 /**

@@ -6,7 +6,7 @@ export const Route = createFileRoute("/signin")({
   beforeLoad: async ({ context }) => {
     if (context.user) {
       throw redirect({
-        to: "/dashboard",
+        to: "/",
       });
     }
   },
@@ -25,12 +25,6 @@ function AuthPage() {
             size="lg"
           >
             Sign in with Discord
-          </Button>
-          <Button formAction="/api/auth/github" type="submit" variant="outline" size="lg">
-            Sign in with GitHub
-          </Button>
-          <Button formAction="/api/auth/google" type="submit" variant="outline" size="lg">
-            Sign in with Google
           </Button>
         </form>
       </div>

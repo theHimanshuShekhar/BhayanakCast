@@ -42,7 +42,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         content: "width=device-width, initial-scale=1",
       },
       {
-        title: "TanStarter",
+        title: "BhayanakCast",
       },
     ],
     links: [{ rel: "stylesheet", href: appCss }],
@@ -61,12 +61,14 @@ function RootComponent() {
 function RootDocument({ children }: { readonly children: React.ReactNode }) {
   return (
     // suppress since we're updating the "dark" class in a custom script below
-    <html suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning>
       <head>
         <Meta />
       </head>
       <body>
-        {children}
+        <div className="max-h-screen min-h-screen bg-gray-900 text-gray-100">
+          {children}
+        </div>
         <ScrollRestoration />
         <ReactQueryDevtools buttonPosition="bottom-left" />
         <Suspense>
