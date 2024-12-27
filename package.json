@@ -1,9 +1,10 @@
 {
-  "name": "tanstarter",
+  "name": "bhayanakcast",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vinxi dev",
+    "server": "bun run server/ws.ts",
     "build": "vinxi build",
     "start": "vinxi start",
     "lint": "eslint .",
@@ -26,10 +27,12 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.38.2",
+    "express": "^4.21.2",
     "lucide-react": "^0.469.0",
     "postgres": "^3.4.5",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "socket.io": "^4.8.1",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
     "vinxi": "^0.5.1"
@@ -40,6 +43,7 @@
     "@tanstack/eslint-plugin-query": "^5.62.9",
     "@tanstack/eslint-plugin-router": "^1.87.6",
     "@types/eslint__js": "^8.42.3",
+    "@types/express": "^5.0.0",
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
