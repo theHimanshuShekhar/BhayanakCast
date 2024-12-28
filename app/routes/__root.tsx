@@ -66,7 +66,7 @@ function RootDocument({ children }: { readonly children: React.ReactNode }) {
         <Meta />
       </head>
       <body>
-        <div className="max-h-screen min-h-screen bg-gray-900 text-gray-100">
+        <div className="max-h-screen min-h-screen overflow-y-scroll bg-gray-900 p-6 text-purple-500">
           {children}
         </div>
         <ScrollRestoration />
