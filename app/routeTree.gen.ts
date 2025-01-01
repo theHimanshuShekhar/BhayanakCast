@@ -13,6 +13,7 @@
 import { Route as rootRoute } from './routes/__root'
 import { Route as SigninImport } from './routes/signin'
 import { Route as IndexImport } from './routes/index'
+import { Route as RoomRoomidRoomnameImport } from './routes/room.$roomid.$roomname'
 
 // Create/Update Routes
 
@@ -25,6 +26,12 @@ const SigninRoute = SigninImport.update({
 const IndexRoute = IndexImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRoute,
+} as any)
+
+const RoomRoomidRoomnameRoute = RoomRoomidRoomnameImport.update({
+  id: '/room/$roomid/$roomname',
+  path: '/room/$roomid/$roomname',
   getParentRoute: () => rootRoute,
 } as any)
 
@@ -46,6 +53,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SigninImport
       parentRoute: typeof rootRoute
     }
+    '/room/$roomid/$roomname': {
+      id: '/room/$roomid/$roomname'
+      path: '/room/$roomid/$roomname'
+      fullPath: '/room/$roomid/$roomname'
+      preLoaderRoute: typeof RoomRoomidRoomnameImport
+      parentRoute: typeof rootRoute
+    }
   }
 }
 
@@ -54,36 +68,41 @@ declare module '@tanstack/react-router' {
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/signin': typeof SigninRoute
+  '/room/$roomid/$roomname': typeof RoomRoomidRoomnameRoute
 }
 
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/signin': typeof SigninRoute
+  '/room/$roomid/$roomname': typeof RoomRoomidRoomnameRoute
 }
 
 export interface FileRoutesById {
   __root__: typeof rootRoute
   '/': typeof IndexRoute
   '/signin': typeof SigninRoute
+  '/room/$roomid/$roomname': typeof RoomRoomidRoomnameRoute
 }
 
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/signin'
+  fullPaths: '/' | '/signin' | '/room/$roomid/$roomname'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/signin'
-  id: '__root__' | '/' | '/signin'
+  to: '/' | '/signin' | '/room/$roomid/$roomname'
+  id: '__root__' | '/' | '/signin' | '/room/$roomid/$roomname'
   fileRoutesById: FileRoutesById
 }
 
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   SigninRoute: typeof SigninRoute
+  RoomRoomidRoomnameRoute: typeof RoomRoomidRoomnameRoute
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   SigninRoute: SigninRoute,
+  RoomRoomidRoomnameRoute: RoomRoomidRoomnameRoute,
 }
 
 export const routeTree = rootRoute
@@ -97,7 +116,8 @@ export const routeTree = rootRoute
       "filePath": "__root.tsx",
       "children": [
         "/",
-        "/signin"
+        "/signin",
+        "/room/$roomid/$roomname"
       ]
     },
     "/": {
@@ -105,6 +125,9 @@ export const routeTree = rootRoute
     },
     "/signin": {
       "filePath": "signin.tsx"
+    },
+    "/room/$roomid/$roomname": {
+      "filePath": "room.$roomid.$roomname.tsx"
     }
   }
 }

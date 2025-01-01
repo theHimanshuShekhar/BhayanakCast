@@ -1,7 +1,9 @@
 import express, { type Express, type Request, type Response } from "express";
 import { Server, type Socket } from "socket.io";
 import { createServer } from "node:http";
-import type { User } from "~/lib/server/db/schema";
+import { userRoom, type User } from "~/lib/server/db/schema";
+import { db } from "~/lib/server/db";
+import { and, eq } from "drizzle-orm";
 
 const port = process.env.WEBSOCKET_SERVER_PORT || 8800;
 
@@ -25,6 +27,10 @@ io.on("connection", (socket: Socket) => {
     console.log("websocket disconnected! ", socket.id);
     delete connections[socket.id];
     console.log("Number of connections: ", Object.keys(connections).length);
+
+    // WIP
+    const roomId = 1;
+    removeUserFromRoom(Number.parseInt(socket.id), roomId);
   });
 });
 
@@ -35,3 +41,10 @@ app.get("/", (_req: Request, res: Response) => {
 });
 
 httpServer.listen(port, () => console.log(`Websocket server running on port: ${port}`));
+
+const removeUserFromRoom = async (userId: number, roomId: number) => {
+  await db
+    .delete(userRoom)
+    .where(and(eq(userRoom.user_id, userId), eq(userRoom.room_id, roomId)))
+    .execute();
+};

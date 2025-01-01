@@ -1,5 +1,6 @@
 import { MagicCard } from "~/lib/components/ui/magic-card";
 import AvatarCircles from "./avatar-circles";
+import { Room } from "~/lib/server/db/schema";
 
 const avatars = [
   {
@@ -28,11 +29,7 @@ const avatars = [
   },
 ];
 
-interface RoomCardProps {
-  roomName: string;
-}
-
-export function RoomCard({ roomName }: RoomCardProps) {
+export function RoomCard({ room }: { room: Room }) {
   return (
     <div
       className={"h-[200px] w-full flex-col gap-4 sm:h-[300px] md:h-[300px] lg:h-[250px]"}
@@ -41,7 +38,7 @@ export function RoomCard({ roomName }: RoomCardProps) {
         className="flex cursor-pointer flex-col items-center justify-center whitespace-nowrap border text-center text-4xl shadow-2xl"
         gradientColor={"#262626"}
       >
-        <div className="pb-2">{roomName}</div>
+        <div className="pb-2">{room.name}</div>
         <AvatarCircles
           numPeople={avatars.length}
           avatarUrls={avatars.slice(0, 5)}

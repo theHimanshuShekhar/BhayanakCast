@@ -3,8 +3,6 @@ import { Button } from "~/lib/components/ui/button";
 import type { User } from "~/lib/server/db/schema";
 
 function Navbar({ user }: { user: User | null }) {
-  console.log(user);
-
   return (
     <div className="flex justify-between">
       <h1 className="cursor-pointer select-none text-4xl font-bold">BhayanakCast</h1>

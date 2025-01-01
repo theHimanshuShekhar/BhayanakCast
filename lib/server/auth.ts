@@ -37,6 +37,7 @@ export async function validateSessionToken(token: string) {
       user: {
         // Only return the necessary user data for the client
         id: userTable.id,
+        uuid: userTable.uuid,
         name: userTable.name,
         avatar_url: userTable.avatar_url,
         email: userTable.email,
