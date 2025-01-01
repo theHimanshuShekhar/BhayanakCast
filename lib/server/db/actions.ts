@@ -1,6 +1,6 @@
 import { eq, and } from "drizzle-orm";
 import { db } from ".";
-import { room, User, user, userRoom, type Room, type UserRoom } from "./schema";
+import { room, type User, user, userRoom, type Room, type UserRoom } from "./schema";
 
 // Add a new room
 export const getOrCreateRoom = async (
@@ -160,4 +160,8 @@ export const fetchRooms = async () => {
     );
 
   return Object.values(groupedRooms);
+};
+
+export const removeUserFromAllRooms = async (user_uuid: string) => {
+  await db.delete(userRoom).where(eq(userRoom.user_uuid, user_uuid));
 };

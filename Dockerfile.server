@@ -15,4 +15,4 @@ RUN  bun install --frozen-lockfile --production
 # run the app
 USER bun
 EXPOSE 8800/tcp
-ENTRYPOINT [ "bun", "run", "server/ws.ts" ]
+ENTRYPOINT [ "bun", "--hot", "server/ws.ts" ]

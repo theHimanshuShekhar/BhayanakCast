@@ -1,54 +1,8 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { createServerFn } from "@tanstack/start";
-import {
-  addUserToRoomIfNotExists,
-  fetchRoomDataFromID,
-  getOrCreateRoom,
-} from "~/lib/server/db/actions";
+import { useEffect, useState } from "react";
+import { createRoom, addUserToRoom, getRoom } from "~/lib/functions";
 
-const createRoom = createServerFn({
-  method: "GET",
-})
-  .validator(({ roomid, roomname }: { roomid: string; roomname: string }) => {
-    return {
-      roomid: roomid,
-      roomname: roomname,
-    };
-  })
-  .handler(async (ctx) => {
-    // Get existing room or create new room
-    const { roomid, roomname } = ctx.data;
-    return await getOrCreateRoom(roomid, roomname);
-  });
-
-const getRoom = createServerFn({
-  method: "GET",
-})
-  .validator(({ roomid }: { roomid: string }) => {
-    return {
-      roomid: roomid,
-    };
-  })
-  .handler(async (ctx) => {
-    // Get existing room or create new room
-    const { roomid } = ctx.data;
-    return await fetchRoomDataFromID(roomid);
-  });
-
-const addUserToRoom = createServerFn({
-  method: "POST",
-})
-  .validator(({ userUUID, roomUUID }: { userUUID: string; roomUUID: string }) => {
-    return {
-      userUUID: userUUID,
-      roomUUID: roomUUID,
-    };
-  })
-  .handler(async (ctx) => {
-    // Get existing room or create new room
-    const { userUUID, roomUUID } = ctx.data;
-    await addUserToRoomIfNotExists(userUUID, roomUUID);
-  });
+import { socket } from "~/lib/sockets/socket";
 
 export const Route = createFileRoute("/room/$roomid/$roomname")({
   component: RoomPageComponent,
@@ -67,7 +21,7 @@ export const Route = createFileRoute("/room/$roomid/$roomname")({
   loader: async ({ context, params }) => {
     return {
       user: context.user,
-      roomData: await getRoom({
+      initialRoomData: await getRoom({
         data: { roomid: params.roomid },
       }),
     };
@@ -75,15 +29,51 @@ export const Route = createFileRoute("/room/$roomid/$roomname")({
 });
 
 function RoomPageComponent() {
-  const { user, roomData } = Route.useLoaderData();
+  const { user, initialRoomData } = Route.useLoaderData();
+  const [isConnected, setIsConnected] = useState(socket.connected);
+  const [roomData, setRoomData] = useState(initialRoomData);
 
-  console.log("CurrentUser", user);
+  useEffect(() => {
+    if (!user) return;
+    if (!socket.connected) socket.connect();
+
+    function onConnect() {
+      setIsConnected(true);
+    }
+
+    function onDisconnect() {
+      if (user) socket.emit("leave_room", user.uuid);
+      setIsConnected(false);
+    }
+
+    socket.on("connect", onConnect);
+    socket.on("disconnect", onDisconnect);
+
+    socket.on("room_update", (roomDetails) => {
+      console.log(roomDetails);
+      setRoomData(roomDetails);
+    });
+
+    socket.emit("user_connected", user);
+    socket.emit("join_room", user.uuid, roomData.uuid);
+
+    return () => {
+      socket.off("room_update");
+      socket.off("connect", onConnect);
+      socket.off("disconnect", onDisconnect);
+    };
+  });
 
   return (
     <>
+      <ConnectionState isConnected={isConnected} />
       <div className="font-bold">
         <pre>{JSON.stringify(roomData, null, 2)}</pre>
       </div>
     </>
   );
+}
+
+function ConnectionState({ isConnected }: { isConnected: boolean }) {
+  return <p>State: {`${isConnected}`}</p>;
 }

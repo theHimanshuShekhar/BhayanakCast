@@ -1,6 +1,6 @@
 import { MagicCard } from "~/lib/components/ui/magic-card";
 import AvatarCircles from "./avatar-circles";
-import { Room } from "~/lib/server/db/schema";
+import type { Room } from "~/lib/server/db/schema";
 
 const avatars = [
   {

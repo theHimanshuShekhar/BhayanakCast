@@ -5,7 +5,9 @@ import type { User } from "~/lib/server/db/schema";
 function Navbar({ user }: { user: User | null }) {
   return (
     <div className="flex justify-between">
-      <h1 className="cursor-pointer select-none text-4xl font-bold">BhayanakCast</h1>
+      <a href={"/"} className="cursor-pointer select-none text-4xl font-bold">
+        BhayanakCast
+      </a>
       {user ? (
         <div className="text-center align-middle text-xl font-semibold">{user.name}</div>
       ) : (
