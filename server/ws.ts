@@ -29,8 +29,8 @@ io.on("connection", (socket: Socket) => {
     console.log("Number of connections: ", Object.keys(connections).length);
 
     // WIP
-    const roomId = 1;
-    removeUserFromRoom(Number.parseInt(socket.id), roomId);
+    // const roomId = 1;
+    // removeUserFromRoom(Number.parseInt(socket.id), roomId);
   });
 });
 
@@ -42,9 +42,9 @@ app.get("/", (_req: Request, res: Response) => {
 
 httpServer.listen(port, () => console.log(`Websocket server running on port: ${port}`));
 
-const removeUserFromRoom = async (userId: number, roomId: number) => {
-  await db
-    .delete(userRoom)
-    .where(and(eq(userRoom.user_id, userId), eq(userRoom.room_id, roomId)))
-    .execute();
-};
+// const removeUserFromRoom = async (userId: number, roomId: number) => {
+//   await db
+//     .delete(userRoom)
+//     .where(and(eq(userRoom.user_id, userId), eq(userRoom.room_id, roomId)))
+//     .execute();
+// };

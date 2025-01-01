@@ -1,12 +1,12 @@
 import { eq, and } from "drizzle-orm";
 import { db } from ".";
-import { room, user, userRoom } from "./schema";
+import { room, User, user, userRoom, type Room, type UserRoom } from "./schema";
 
 // Add a new room
 export const getOrCreateRoom = async (
-  roomUUID: string,
-  name: string,
-  banner_url: string | null = null,
+  roomUUID: Room["uuid"],
+  name: Room["name"],
+  banner_url: Room["banner_url"] | null = null,
 ) => {
   // Check if a room with the given name exists
   const existingRoom = await db
@@ -23,6 +23,7 @@ export const getOrCreateRoom = async (
   const [newRoom] = await db
     .insert(room)
     .values({
+      uuid: roomUUID,
       name,
       banner_url,
     })
@@ -32,7 +33,10 @@ export const getOrCreateRoom = async (
 };
 
 // Add user to a room when joined
-export const addUserToRoomIfNotExists = async (userUUID: string, roomUUID: string) => {
+export const addUserToRoomIfNotExists = async (
+  userUUID: UserRoom["user_uuid"],
+  roomUUID: UserRoom["room_uuid"],
+) => {
   // Check if the relation already exists
   const existingRelation = await db
     .select()
@@ -51,7 +55,6 @@ export const addUserToRoomIfNotExists = async (userUUID: string, roomUUID: strin
     .values({
       room_uuid: roomUUID,
       user_uuid: userUUID,
-      joined_at: new Date(), // Optional: Drizzle should handle defaults
     })
     .returning();
 
@@ -59,7 +62,7 @@ export const addUserToRoomIfNotExists = async (userUUID: string, roomUUID: strin
 };
 
 // Fetch a room with its users using roomID
-export const fetchRoomDataFromID = async (roomUUID: string) => {
+export const fetchRoomDataFromID = async (roomUUID: Room["uuid"]) => {
   const roomWithUsers = await db
     .select({
       room: room,
@@ -91,7 +94,7 @@ export const fetchRoomDataFromID = async (roomUUID: string) => {
 };
 
 // Fetch a room with its users using roomName
-export const fetchRoomDataFromName = async (roomName: string) => {
+export const fetchRoomDataFromName = async (roomName: Room["name"]) => {
   const roomWithUsers = await db
     .select({
       room: room,
@@ -100,7 +103,7 @@ export const fetchRoomDataFromName = async (roomName: string) => {
     .from(userRoom)
     .innerJoin(user, eq(user.uuid, userRoom.user_uuid))
     .innerJoin(room, eq(room.uuid, userRoom.room_uuid))
-    .where(eq(room.name, roomName))
+    .where(eq(room.name, roomName as string))
     .execute();
 
   const result = {
@@ -121,59 +124,40 @@ export const fetchRoomDataFromName = async (roomName: string) => {
   return result;
 };
 
-// Fetch all current rooms with joined users
 export const fetchRooms = async () => {
   const roomsWithUsers = await db
     .select({
       room: room,
-      user: user,
+      users: user,
     })
-    .from(userRoom)
-    .innerJoin(user, eq(user.uuid, userRoom.user_uuid))
-    .innerJoin(room, eq(room.uuid, userRoom.room_uuid))
-    .execute();
+    .from(room)
+    .leftJoin(userRoom, eq(room.uuid, userRoom.room_uuid))
+    .leftJoin(user, eq(userRoom.user_uuid, user.uuid));
 
-  // Group users by room
-  const roomsMap = new Map<
-    number,
-    {
-      id: number;
-      uuid: string;
-      name: string | null;
-      banner_url: string | null;
-      created_at: Date;
-      updated_at: Date | null;
-      users: Array<{
-        id: number;
-        uuid: string;
-        name: string | null;
-        avatar_url: string | null;
-        email: string;
-      }>;
-    }
-  >();
+  // Group the users by room for easier consumption
+  const groupedRooms: { [key: number]: { room: Room; users: User[] } } =
+    roomsWithUsers.reduce(
+      (
+        acc: { [key: number]: { room: Room; users: User[] } },
+        { room: roomData, users: userData },
+      ) => {
+        const roomId = roomData.id;
 
-  for (const { room, user } of roomsWithUsers) {
-    if (!roomsMap.has(room.id)) {
-      roomsMap.set(room.id, {
-        id: room.id,
-        uuid: room.uuid,
-        name: room.name,
-        banner_url: room.banner_url,
-        created_at: room.created_at,
-        updated_at: room.updated_at,
-        users: [],
-      });
-    }
+        if (!acc[roomId]) {
+          acc[roomId] = {
+            room: roomData,
+            users: [],
+          };
+        }
 
-    roomsMap.get(room.id)?.users.push({
-      id: user.id,
-      uuid: user.uuid,
-      name: user.name,
-      avatar_url: user.avatar_url,
-      email: user.email,
-    });
-  }
+        if (userData) {
+          acc[roomId].users.push(userData);
+        }
 
-  return Array.from(roomsMap.values());
+        return acc;
+      },
+      {},
+    );
+
+  return Object.values(groupedRooms);
 };

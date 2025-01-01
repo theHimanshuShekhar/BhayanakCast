@@ -1,5 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router";
-import Navbar from "../../lib/components/ui/navbar";
 import { Input } from "~/lib/components/ui/input";
 import { Label } from "~/lib/components/ui/label";
 import { Button } from "~/lib/components/ui/button";
@@ -8,20 +7,26 @@ import { Plus } from "lucide-react";
 import { LoaderCircle } from "lucide-react";
 import { fetchRooms } from "~/lib/server/db/actions";
 import { RoomCard } from "~/lib/components/ui/room-card";
+import { createServerFn } from "@tanstack/start";
 
 export const Route = createFileRoute("/")({
   component: Home,
   loader: async () => {
-    return fetchRooms();
+    return getRooms();
   },
 });
 
+const getRooms = createServerFn({ method: "GET" }).handler(async () => {
+  return await fetchRooms();
+});
+
 function Home() {
-  const { user } = Route.useRouteContext();
   const [inputRoomName, setInputRoomName] = useState("");
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
   const roomList = Route.useLoaderData();
+
+  console.log(roomList);
 
   const handleClick = () => {
     setIsLoading(true);
@@ -33,7 +38,6 @@ function Home() {
 
   return (
     <>
-      <Navbar user={user} />
       <div className="py-4">
         <Label htmlFor="roomNameInput">Create or Search Room</Label>
         {inputRoomName}
@@ -80,9 +84,9 @@ function Home() {
         </div>
         <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
           {roomList.map((room) => (
-            <div key={room.name}>
-              <a href={`/room/${room.id}/${room.name}`}>
-                <RoomCard room={room} />
+            <div key={room.room.name}>
+              <a href={`/room/${room.room.uuid}/${room.room.name}`}>
+                <RoomCard room={room.room} />
               </a>
             </div>
           ))}

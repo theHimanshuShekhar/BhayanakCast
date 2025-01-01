@@ -8,6 +8,7 @@ import {
 } from "@tanstack/react-router";
 import { createServerFn, Meta, Scripts } from "@tanstack/start";
 import { lazy, Suspense } from "react";
+import Navbar from "~/lib/components/ui/navbar";
 
 import { getAuthSession } from "~/lib/server/auth";
 import appCss from "~/lib/styles/app.css?url";
@@ -59,6 +60,8 @@ function RootComponent() {
 }
 
 function RootDocument({ children }: { readonly children: React.ReactNode }) {
+  const { user } = Route.useRouteContext();
+
   return (
     // suppress since we're updating the "dark" class in a custom script below
     <html lang="en" suppressHydrationWarning>
@@ -67,6 +70,7 @@ function RootDocument({ children }: { readonly children: React.ReactNode }) {
       </head>
       <body>
         <div className="max-h-screen min-h-screen overflow-y-scroll bg-gray-900 p-6 text-purple-500">
+          <Navbar user={user} />
           {children}
         </div>
         <ScrollRestoration />
