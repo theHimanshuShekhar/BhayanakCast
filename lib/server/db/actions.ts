@@ -37,6 +37,7 @@ export const addUserToRoomIfNotExists = async (
   userUUID: UserRoom["user_uuid"],
   roomUUID: UserRoom["room_uuid"],
 ) => {
+  console.log(`Adding user ${userUUID} to room ${roomUUID}`);
   // Check if the relation already exists
   const existingRelation = await db
     .select()
@@ -46,6 +47,7 @@ export const addUserToRoomIfNotExists = async (
 
   if (existingRelation.length > 0) {
     // Relation already exists, return it
+    console.log("User already in room");
     return existingRelation[0];
   }
 
@@ -58,19 +60,18 @@ export const addUserToRoomIfNotExists = async (
     })
     .returning();
 
+  if (newRelation) console.log("User added to room");
+
   return newRelation;
 };
 
 // Fetch a room with its users using roomID
 export const fetchRoomDataFromID = async (roomUUID: Room["uuid"]) => {
   const roomWithUsers = await db
-    .select({
-      room: room,
-      users: user,
-    })
-    .from(userRoom)
-    .innerJoin(user, eq(user.uuid, userRoom.user_uuid))
-    .innerJoin(room, eq(room.uuid, userRoom.room_uuid))
+    .select({ room: room, users: user })
+    .from(room)
+    .leftJoin(userRoom, eq(userRoom.room_uuid, room.uuid))
+    .leftJoin(user, eq(user.uuid, userRoom.user_uuid))
     .where(eq(room.uuid, roomUUID))
     .execute();
 
@@ -81,13 +82,7 @@ export const fetchRoomDataFromID = async (roomUUID: Room["uuid"]) => {
     banner_url: roomWithUsers[0]?.room.banner_url,
     created_at: roomWithUsers[0]?.room.created_at,
     updated_at: roomWithUsers[0]?.room.updated_at,
-    users: roomWithUsers.map(({ users }) => ({
-      id: users.id,
-      name: users.name,
-      uuid: users.uuid,
-      avatar_url: users.avatar_url,
-      email: users.email,
-    })),
+    users: roomWithUsers.map(({ users }) => users),
   };
 
   return result;
@@ -162,6 +157,14 @@ export const fetchRooms = async () => {
   return Object.values(groupedRooms);
 };
 
-export const removeUserFromAllRooms = async (user_uuid: string) => {
-  await db.delete(userRoom).where(eq(userRoom.user_uuid, user_uuid));
+export const removeUserFromRoom = async (user_uuid: string, room_uuid: string) => {
+  return await db
+    .delete(userRoom)
+    .where(and(eq(userRoom.user_uuid, user_uuid), eq(userRoom.room_uuid, room_uuid)))
+    .execute();
+};
+
+export const removeUserFromAllRooms = (user_uuid: string) => {
+  console.log(`Delete user:${user_uuid} from room`);
+  return db.delete(userRoom).where(eq(userRoom.user_uuid, user_uuid)).execute();
 };

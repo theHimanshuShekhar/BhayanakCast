@@ -1,6 +1,6 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { createRoom, addUserToRoom, getRoom } from "~/lib/functions";
+import { createRoom, getRoom } from "~/lib/functions";
 
 import { socket } from "~/lib/sockets/socket";
 
@@ -14,8 +14,9 @@ export const Route = createFileRoute("/room/$roomid/$roomname")({
       });
     }
 
-    const Room = await createRoom({ data: params });
-    addUserToRoom({ data: { userUUID: context.user.uuid, roomUUID: Room.uuid } });
+    // const Room =
+    await createRoom({ data: params });
+    // addUserToRoom({ data: { userUUID: context.user.uuid, roomUUID: Room.uuid } });
   },
 
   loader: async ({ context, params }) => {
@@ -33,16 +34,18 @@ function RoomPageComponent() {
   const [isConnected, setIsConnected] = useState(socket.connected);
   const [roomData, setRoomData] = useState(initialRoomData);
 
+  console.log("initialRoomData", initialRoomData);
+
   useEffect(() => {
     if (!user) return;
     if (!socket.connected) socket.connect();
 
     function onConnect() {
       setIsConnected(true);
+      socket.emit("user_connected", user);
     }
 
     function onDisconnect() {
-      if (user) socket.emit("leave_room", user.uuid);
       setIsConnected(false);
     }
 
@@ -50,19 +53,29 @@ function RoomPageComponent() {
     socket.on("disconnect", onDisconnect);
 
     socket.on("room_update", (roomDetails) => {
-      console.log(roomDetails);
+      console.log("room_update", roomDetails);
       setRoomData(roomDetails);
     });
 
-    socket.emit("user_connected", user);
-    socket.emit("join_room", user.uuid, roomData.uuid);
-
     return () => {
+      socket.emit("user_disconnected", user);
       socket.off("room_update");
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
     };
   });
+
+  useEffect(() => {
+    if (!user) return;
+    // socket.emit("user_connected", user, (response: { response: { data: string } }) => {
+    //   console.log("user_connected ack", response);
+    // });
+    socket.emit("join_room", user.uuid, roomData.uuid);
+
+    return () => {
+      socket.emit("leave_room", socket.id, roomData.uuid);
+    };
+  }, [roomData.uuid, user]);
 
   return (
     <>
