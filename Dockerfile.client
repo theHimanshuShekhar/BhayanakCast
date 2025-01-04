@@ -1,0 +1,18 @@
+# use the official Bun image
+# see all versions at https://hub.docker.com/r/oven/bun/tags
+FROM oven/bun AS base
+WORKDIR /usr/src/app
+
+# [optional] tests & build
+ENV NODE_ENV=production
+
+COPY  . .
+
+# install with --production (exclude devDependencies)
+RUN  bun install --frozen-lockfile --production
+RUN bun run build --production
+
+# run the app
+USER bun
+EXPOSE 3000/tcp
+ENTRYPOINT [ "bun", "run", ".output/server/index.mjs" ]
