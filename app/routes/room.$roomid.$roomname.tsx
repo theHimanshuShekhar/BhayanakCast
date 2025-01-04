@@ -1,5 +1,5 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { type ChangeEvent, useEffect, useState } from "react";
 import { ConnectionState } from "~/lib/components/ui/connection-state";
 import { createRoom, getRoom } from "~/lib/functions";
 import BlurFade from "~/lib/components/ui/blur-fade";
@@ -31,10 +31,17 @@ export const Route = createFileRoute("/room/$roomid/$roomname")({
   },
 });
 
+interface Message {
+  content: string;
+  sender: User;
+}
+
 function RoomPageComponent() {
   const { user, initialRoomData } = Route.useLoaderData();
   const [isConnected, setIsConnected] = useState(false);
   const [roomData, setRoomData] = useState(initialRoomData);
+  const [inputText, setInputText] = useState("");
+  const [messageList, setMessageList] = useState<Message[]>([]);
 
   useEffect(() => {
     if (!user) return;
@@ -57,22 +64,33 @@ function RoomPageComponent() {
       setRoomData(roomDetails);
     });
 
+    socket.on("message_update", (message) => {
+      setMessageList((prev) => [...prev, message]);
+    });
+
     return () => {
       socket.off("room_update");
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
+      socket.off("message_update");
     };
   }, [user, roomData]);
+
+  const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    setInputText(e.target.value);
+  };
+
+  const sendMessage = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "Enter") return;
+    socket.emit("send_message", inputText, roomData.uuid);
+    setInputText("");
+  };
 
   return (
     <div className="max-w-screen mt-4 flex flex-col">
       <div className="order-1 grid grid-cols-5 gap-2">
-        <BlurFade
-          key={"socket.id"}
-          delay={0.25}
-          inView
-          className="col-span-full lg:col-span-4"
-        >
+        <BlurFade delay={0.25} inView className="col-span-full lg:col-span-4">
           <video
             className="rounded-lg"
             autoPlay
@@ -96,7 +114,6 @@ function RoomPageComponent() {
           </video>
         </BlurFade>
         <BlurFade
-          key={socket.id}
           delay={0.3}
           inView
           className="order-3 col-span-full rounded-lg bg-gray-800 p-2 lg:order-2 lg:col-span-1"
@@ -106,8 +123,16 @@ function RoomPageComponent() {
               <div className="text-wrap text-2xl font-bold">{roomData.name}</div>
               <ConnectionState isConnected={isConnected} />
             </div>
-            <div className="min-h-[300px] grow rounded-lg bg-gray-700 p-2">Test</div>
-            <ChatInput />
+            <div className="min-h-[300px] grow rounded-lg bg-gray-700 p-2">
+              {messageList?.map((message) => (
+                <div key={message}>{JSON.stringify(message)}</div>
+              ))}
+            </div>
+            <ChatInput
+              handleChange={handleChange}
+              inputText={inputText}
+              sendMessage={sendMessage}
+            />
           </div>
         </BlurFade>
         <div className="order-2 col-span-full flex flex-wrap gap-1 lg:order-3">

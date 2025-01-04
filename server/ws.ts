@@ -35,6 +35,14 @@ io.on("connection", (socket: Socket) => {
   connections[socket.id] = socket;
   logConnections();
 
+  socket.on("send_message", (message, room_uuid) => {
+    const user = Object.values(users).find((user) => user.socketId === socket.id);
+    io.to(room_uuid).emit("message_update", {
+      content: message,
+      sender: user,
+    });
+  });
+
   socket.on("user_connected", async (user: User, room_uuid: string) => {
     users[user.uuid] = {
       ...user,

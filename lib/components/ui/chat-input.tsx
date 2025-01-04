@@ -1,34 +1,15 @@
-import { useState, type ChangeEvent } from "react";
 import { Input } from "~/lib/components/ui/input";
 
-interface UseCharacterLimitProps {
-  maxLength: number;
+interface ChatInputProps {
+  inputText: string;
+  handleChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  sendMessage: (event: React.KeyboardEvent<HTMLInputElement>) => void;
 }
 
-export function useCharacterLimit({ maxLength }: UseCharacterLimitProps) {
-  const [value, setValue] = useState("");
-  const characterCount = value.length;
+export function ChatInput({ inputText, handleChange, sendMessage }: ChatInputProps) {
+  const characterCount = inputText.length;
 
-  const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
-    setValue(e.target.value);
-  };
-
-  return {
-    value,
-    characterCount,
-    handleChange,
-    maxLength,
-  };
-}
-
-export function ChatInput() {
   const maxLength = 50;
-  const {
-    value,
-    characterCount,
-    handleChange,
-    maxLength: limit,
-  } = useCharacterLimit({ maxLength });
 
   return (
     <div className="flex-none space-y-2">
@@ -37,9 +18,10 @@ export function ChatInput() {
           id="input-34"
           className="peer pe-14"
           type="text"
-          value={value}
+          value={inputText}
           maxLength={maxLength}
           onChange={handleChange}
+          onKeyDown={sendMessage}
           aria-describedby="character-count"
         />
         <output
@@ -48,7 +30,7 @@ export function ChatInput() {
           aria-live="polite"
           htmlFor="input-34"
         >
-          {characterCount}/{limit}
+          {characterCount}/{maxLength}
         </output>
       </div>
     </div>
