@@ -1,5 +1,6 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { ConnectionState } from "~/lib/components/ui/connection-state";
 import { createRoom, getRoom } from "~/lib/functions";
 
 import { socket } from "~/lib/sockets/socket";
@@ -58,7 +59,7 @@ function RoomPageComponent() {
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
     };
-  }, [roomData.uuid, user]);
+  }, [roomData, user]);
 
   return (
     <>
@@ -67,15 +68,5 @@ function RoomPageComponent() {
         <pre>{JSON.stringify(roomData, null, 2)}</pre>
       </div>
     </>
-  );
-}
-
-function ConnectionState({ isConnected }: { isConnected: boolean }) {
-  return (
-    <div
-      className={`my-2 inline-block rounded-md p-1 uppercase text-gray-100 ${isConnected ? "bg-green-600" : "bg-red-600"}`}
-    >
-      Connection: <span className="font-semibold">{`${isConnected}`}</span>
-    </div>
   );
 }

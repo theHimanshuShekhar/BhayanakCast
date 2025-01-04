@@ -1,7 +1,7 @@
 import express, { type Express, type Request, type Response } from "express";
 import { Server, type Socket } from "socket.io";
 import { createServer } from "node:http";
-import type { User, UserRoom } from "~/lib/server/db/schema";
+import type { Room, User, UserRoom } from "~/lib/server/db/schema";
 
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL environment variable is not set");
@@ -49,14 +49,16 @@ io.on("connection", (socket: Socket) => {
   socket.on(
     "join_room",
     async (user_uuid: UserRoom["user_uuid"], room_uuid: UserRoom["room_uuid"]) => {
-      await fetch(`${apiURL}/api/db/addUserToRoom/${user_uuid}/${room_uuid}`)
+      const user = Object.values(users).find((user) => user.socketId === socket.id);
+      if (!user) return;
+      await fetch(`${apiURL}/api/db/addUserToRoom/${user.uuid}/${user.room_uuid}`)
         .then((response) => {
           if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
           return response.json();
         })
         .then((newRelation) => {
           if (newRelation) {
-            console.log(`User: ${user_uuid} joined Room:${room_uuid}`);
+            console.log(`User: ${user.name} joined Room:${room_uuid}`);
             socket.join(room_uuid);
             updateRoomData(room_uuid);
           }
@@ -67,16 +69,13 @@ io.on("connection", (socket: Socket) => {
   socket.on("disconnect", async () => {
     console.log("websocket disconnected! ", socket.id);
     console.log("Number of connections: ", io.engine.clientsCount);
-
     const user = Object.values(users).find((user) => user.socketId === socket.id);
-
     if (!user) return;
-
     await fetch(
       `${apiURL}/api/db/removeUserFromRoom//${user.uuid}/${user.room_uuid}`,
     ).then((response) => {
-      console.log(`User: ${user.uuid} left Room:${user.room_uuid}`);
       if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+      console.log(`User: ${user.name} left Room:${user.room_uuid}`);
       updateRoomData(user.room_uuid);
       delete users[user.uuid];
       delete connections[socket.id];
@@ -85,14 +84,15 @@ io.on("connection", (socket: Socket) => {
 });
 
 const updateRoomData = async (room_uuid: string) => {
-  console.log(`Updating room: ${room_uuid}`);
-
   fetch(`${apiURL}/api/db/getRoomFromID/${room_uuid}`)
     .then((response) => {
       if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
       return response.json();
     })
-    .then((roomData) => io.to(room_uuid).emit("room_update", roomData));
+    .then((roomData: Room) => {
+      console.log(`Updating room: ${roomData.name} : ${roomData.uuid}`);
+      io.to(room_uuid).emit("room_update", roomData);
+    });
 };
 
 app.get("/", (_req: Request, res: Response) => {
