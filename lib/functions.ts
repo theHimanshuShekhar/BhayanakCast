@@ -3,6 +3,7 @@ import {
   getOrCreateRoom,
   fetchRoomDataFromID,
   addUserToRoomIfNotExists,
+  removeUserFromRoomByUUID,
 } from "./server/db/actions";
 
 export const createRoom = createServerFn({
@@ -47,4 +48,19 @@ export const addUserToRoom = createServerFn({
     // Get existing room or create new room
     const { userUUID, roomUUID } = ctx.data;
     await addUserToRoomIfNotExists(userUUID, roomUUID);
+  });
+
+export const removeUserFromRoom = createServerFn({
+  method: "POST",
+})
+  .validator(({ userUUID, roomUUID }: { userUUID: string; roomUUID: string }) => {
+    return {
+      userUUID: userUUID,
+      roomUUID: roomUUID,
+    };
+  })
+  .handler(async (ctx) => {
+    // Get existing room or create new room
+    const { userUUID, roomUUID } = ctx.data;
+    await removeUserFromRoomByUUID(userUUID, roomUUID);
   });

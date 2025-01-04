@@ -14,11 +14,8 @@ export const Route = createFileRoute("/room/$roomid/$roomname")({
       });
     }
 
-    // const Room =
     await createRoom({ data: params });
-    // addUserToRoom({ data: { userUUID: context.user.uuid, roomUUID: Room.uuid } });
   },
-
   loader: async ({ context, params }) => {
     return {
       user: context.user,
@@ -34,15 +31,15 @@ function RoomPageComponent() {
   const [isConnected, setIsConnected] = useState(socket.connected);
   const [roomData, setRoomData] = useState(initialRoomData);
 
-  console.log("initialRoomData", initialRoomData);
-
   useEffect(() => {
     if (!user) return;
     if (!socket.connected) socket.connect();
 
     function onConnect() {
       setIsConnected(true);
-      socket.emit("user_connected", user);
+      if (!user) return;
+      socket.emit("user_connected", user, roomData.uuid);
+      socket.emit("join_room", user.uuid, roomData.uuid);
     }
 
     function onDisconnect() {
@@ -58,7 +55,6 @@ function RoomPageComponent() {
     });
 
     return () => {
-      socket.emit("user_disconnected", user);
       socket.off("room_update");
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
@@ -67,14 +63,6 @@ function RoomPageComponent() {
 
   useEffect(() => {
     if (!user) return;
-    // socket.emit("user_connected", user, (response: { response: { data: string } }) => {
-    //   console.log("user_connected ack", response);
-    // });
-    socket.emit("join_room", user.uuid, roomData.uuid);
-
-    return () => {
-      socket.emit("leave_room", socket.id, roomData.uuid);
-    };
   }, [roomData.uuid, user]);
 
   return (

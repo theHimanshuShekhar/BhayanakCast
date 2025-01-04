@@ -157,14 +157,14 @@ export const fetchRooms = async () => {
   return Object.values(groupedRooms);
 };
 
-export const removeUserFromRoom = async (user_uuid: string, room_uuid: string) => {
+export const removeUserFromRoomByUUID = async (user_uuid: string, room_uuid: string) => {
   return await db
     .delete(userRoom)
     .where(and(eq(userRoom.user_uuid, user_uuid), eq(userRoom.room_uuid, room_uuid)))
     .execute();
 };
 
-export const removeUserFromAllRooms = (user_uuid: string) => {
+export const removeUserFromAllRooms = async (user_uuid: string) => {
   console.log(`Delete user:${user_uuid} from room`);
-  return db.delete(userRoom).where(eq(userRoom.user_uuid, user_uuid)).execute();
+  return await db.delete(userRoom).where(eq(userRoom.user_uuid, user_uuid)).execute();
 };
