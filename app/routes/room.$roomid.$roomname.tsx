@@ -7,6 +7,8 @@ import type { User } from "~/lib/server/db/schema";
 import { socket } from "~/lib/sockets/socket";
 import { UserList } from "~/lib/components/ui/user-list";
 
+import { ChatInput } from "~/lib/components/ui/chat-input";
+
 export const Route = createFileRoute("/room/$roomid/$roomname")({
   component: RoomPageComponent,
   beforeLoad: async ({ context, params }) => {
@@ -99,10 +101,13 @@ function RoomPageComponent() {
           inView
           className="order-3 col-span-full rounded-lg bg-gray-800 p-2 lg:order-2 lg:col-span-1"
         >
-          <div className="flex flex-col text-wrap">
-            <div className="text-wrap text-3xl font-bold">{roomData.name}</div>
-            <ConnectionState isConnected={isConnected} />
-            Test
+          <div className="flex h-full flex-col gap-2 text-wrap">
+            <div className="flex-none">
+              <div className="text-wrap text-2xl font-bold">{roomData.name}</div>
+              <ConnectionState isConnected={isConnected} />
+            </div>
+            <div className="min-h-[300px] grow rounded-lg bg-gray-700 p-2">Test</div>
+            <ChatInput />
           </div>
         </BlurFade>
         <div className="order-2 col-span-full flex flex-wrap gap-1 lg:order-3">
