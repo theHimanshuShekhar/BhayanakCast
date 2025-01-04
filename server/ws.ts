@@ -1,7 +1,8 @@
 import express, { type Express, type Request, type Response } from "express";
 import { Server, type Socket } from "socket.io";
 import { createServer } from "node:http";
-import type { Room, User, UserRoom } from "~/lib/server/db/schema";
+import type { Room, User } from "~/lib/server/db/schema";
+import { randomUUID } from "node:crypto";
 
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL environment variable is not set");
@@ -40,6 +41,7 @@ io.on("connection", (socket: Socket) => {
     io.to(room_uuid).emit("message_update", {
       content: message,
       sender: user,
+      id: randomUUID(),
     });
   });
 

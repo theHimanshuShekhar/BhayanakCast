@@ -8,6 +8,7 @@ import { socket } from "~/lib/sockets/socket";
 import { UserList } from "~/lib/components/ui/user-list";
 
 import { ChatInput } from "~/lib/components/ui/chat-input";
+import { Avatar, AvatarImage } from "~/lib/components/ui/avatar";
 
 export const Route = createFileRoute("/room/$roomid/$roomname")({
   component: RoomPageComponent,
@@ -34,6 +35,7 @@ export const Route = createFileRoute("/room/$roomid/$roomname")({
 interface Message {
   content: string;
   sender: User;
+  id: string;
 }
 
 function RoomPageComponent() {
@@ -123,9 +125,16 @@ function RoomPageComponent() {
               <div className="text-wrap text-2xl font-bold">{roomData.name}</div>
               <ConnectionState isConnected={isConnected} />
             </div>
-            <div className="min-h-[300px] grow rounded-lg bg-gray-700 p-2">
+            <div className="min-h-[300px] grow text-wrap rounded-lg bg-gray-700 p-2">
               {messageList?.map((message) => (
-                <div key={message}>{JSON.stringify(message)}</div>
+                <div key={message.id} className="flex max-h-full">
+                  <Avatar className="h-5 w-5">
+                    <AvatarImage
+                      src={message.sender.avatar_url ?? "https://github.com/shadcn.png"}
+                    />
+                  </Avatar>
+                  {message.content}
+                </div>
               ))}
             </div>
             <ChatInput
