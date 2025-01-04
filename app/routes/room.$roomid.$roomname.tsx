@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { ConnectionState } from "~/lib/components/ui/connection-state";
 import { createRoom, getRoom } from "~/lib/functions";
 import BlurFade from "~/lib/components/ui/blur-fade";
-import { Avatar, AvatarFallback, AvatarImage } from "~/lib/components/ui/avatar";
+import { Avatar, AvatarImage } from "~/lib/components/ui/avatar";
+import type { User } from "~/lib/server/db/schema";
 import { socket } from "~/lib/sockets/socket";
 
 export const Route = createFileRoute("/room/$roomid/$roomname")({
@@ -63,7 +64,7 @@ function RoomPageComponent() {
 
   return (
     <div className="max-w-screen mt-4 flex flex-col">
-      <div className="grid grid-flow-row grid-cols-5 gap-2 lg:grid-flow-col">
+      <div className="order-1 grid grid-cols-5 gap-2">
         <BlurFade
           key={"socket.id"}
           delay={0.25}
@@ -96,7 +97,7 @@ function RoomPageComponent() {
           key={socket.id}
           delay={0.3}
           inView
-          className="col-span-full rounded-lg bg-gray-800 p-2 lg:col-span-1"
+          className="order-3 col-span-full rounded-lg bg-gray-800 p-2 lg:order-2 lg:col-span-1"
         >
           <div className="flex flex-col text-wrap">
             <div className="text-wrap text-3xl font-bold">{roomData.name}</div>
@@ -104,25 +105,17 @@ function RoomPageComponent() {
             Test
           </div>
         </BlurFade>
-      </div>{" "}
-      <div className="my-2 flex gap-1">
-        <UserList userList={roomData.users} />
+        <div className="order-2 col-span-full my-2 flex gap-1 lg:order-3">
+          <UserList
+            userList={roomData.users.filter((user): user is User => user !== null)}
+          />
+        </div>
       </div>
     </div>
   );
 }
 
-interface User {
-  id: number;
-  uuid: string;
-  name: string | null;
-  avatar_url: string | null;
-  email: string;
-  updated_at: Date | null;
-  setup_at: Date | null;
-}
-
-function UserList({ userList }: { userList: (User | null)[] }) {
+function UserList({ userList }: { userList: User[] }) {
   return (
     <>
       {userList.map(
