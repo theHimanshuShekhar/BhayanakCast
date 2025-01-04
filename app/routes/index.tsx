@@ -26,8 +26,6 @@ function Home() {
 
   const roomList = Route.useLoaderData();
 
-  console.log(roomList);
-
   const handleClick = () => {
     setIsLoading(true);
     // Simulate an async operation

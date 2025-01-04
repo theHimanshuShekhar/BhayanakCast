@@ -50,7 +50,6 @@ function RoomPageComponent() {
     socket.on("disconnect", onDisconnect);
 
     socket.on("room_update", (roomDetails) => {
-      console.log("room_update", roomDetails);
       setRoomData(roomDetails);
     });
 
@@ -59,10 +58,6 @@ function RoomPageComponent() {
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
     };
-  });
-
-  useEffect(() => {
-    if (!user) return;
   }, [roomData.uuid, user]);
 
   return (
@@ -76,5 +71,11 @@ function RoomPageComponent() {
 }
 
 function ConnectionState({ isConnected }: { isConnected: boolean }) {
-  return <p>State: {`${isConnected}`}</p>;
+  return (
+    <div
+      className={`my-2 inline-block rounded-md p-1 uppercase text-gray-100 ${isConnected ? "bg-green-600" : "bg-red-600"}`}
+    >
+      Connection: <span className="font-semibold">{`${isConnected}`}</span>
+    </div>
+  );
 }
