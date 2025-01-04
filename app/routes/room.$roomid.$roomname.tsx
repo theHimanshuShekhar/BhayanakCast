@@ -6,6 +6,7 @@ import BlurFade from "~/lib/components/ui/blur-fade";
 import type { User } from "~/lib/server/db/schema";
 import { socket } from "~/lib/sockets/socket";
 import { UserList } from "~/lib/components/ui/user-list";
+import { formatDistanceToNow } from "date-fns";
 
 import { ChatInput } from "~/lib/components/ui/chat-input";
 import { Avatar, AvatarImage } from "~/lib/components/ui/avatar";
@@ -36,6 +37,7 @@ interface Message {
   content: string;
   sender: User;
   id: string;
+  timestamp: Date;
 }
 
 function RoomPageComponent() {
@@ -91,7 +93,7 @@ function RoomPageComponent() {
 
   return (
     <div className="max-w-screen mt-4 flex flex-col">
-      <div className="order-1 grid grid-cols-5 gap-2">
+      <div className="order-1 grid grid-cols-6 gap-2">
         <BlurFade delay={0.25} inView className="col-span-full lg:col-span-4">
           <video
             className="rounded-lg"
@@ -118,25 +120,52 @@ function RoomPageComponent() {
         <BlurFade
           delay={0.3}
           inView
-          className="order-3 col-span-full rounded-lg bg-gray-800 p-2 lg:order-2 lg:col-span-1"
+          className="order-3 col-span-full rounded-lg bg-gray-800 p-2 lg:order-2 lg:col-span-2"
         >
           <div className="flex h-full flex-col gap-2 text-wrap">
-            <div className="flex-none">
-              <div className="text-wrap text-2xl font-bold">{roomData.name}</div>
+            <div className="w-full">
+              <div className="text-pretty break-words text-2xl font-bold">
+                {roomData.name}
+              </div>
               <ConnectionState isConnected={isConnected} />
             </div>
-            <div className="min-h-[300px] grow text-wrap rounded-lg bg-gray-700 p-2">
+            <div className="min-h-[300px] w-full grow rounded-lg bg-gray-700 p-2 text-xs">
               {messageList?.map((message) => (
-                <div key={message.id} className="flex max-h-full">
-                  <Avatar className="h-5 w-5">
-                    <AvatarImage
-                      src={message.sender.avatar_url ?? "https://github.com/shadcn.png"}
-                    />
-                  </Avatar>
-                  {message.content}
-                </div>
+                <BlurFade
+                  key={message.id}
+                  delay={0.15}
+                  inView
+                  className="col-span-full lg:col-span-4"
+                >
+                  <div className="my-2 flex grow flex-col items-start">
+                    <div className="inline-flex gap-1">
+                      <Avatar className="inline-flex h-7 w-7">
+                        <AvatarImage
+                          src={
+                            message.sender.avatar_url ?? "https://github.com/shadcn.png"
+                          }
+                        />
+                      </Avatar>
+                      <div className="inline-flex items-center space-x-1">
+                        <span className="flex-wrap text-sm font-semibold text-gray-900 dark:text-white">
+                          {message.sender.name}
+                        </span>
+                        <span className="text-sm font-normal text-gray-500 dark:text-gray-400">
+                          {formatDistanceToNow(new Date(message.timestamp), {
+                            includeSeconds: true,
+                            addSuffix: true,
+                          })}
+                        </span>
+                      </div>
+                    </div>
+                    <p className="w-full flex-none flex-wrap text-pretty break-words text-sm font-normal text-gray-900 dark:text-white">
+                      {message.content}
+                    </p>
+                  </div>
+                </BlurFade>
               ))}
             </div>
+
             <ChatInput
               handleChange={handleChange}
               inputText={inputText}

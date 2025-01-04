@@ -9,7 +9,7 @@ interface ChatInputProps {
 export function ChatInput({ inputText, handleChange, sendMessage }: ChatInputProps) {
   const characterCount = inputText.length;
 
-  const maxLength = 50;
+  const maxLength = 150;
 
   return (
     <div className="flex-none space-y-2">

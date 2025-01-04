@@ -42,6 +42,7 @@ io.on("connection", (socket: Socket) => {
       content: message,
       sender: user,
       id: randomUUID(),
+      timestamp: new Date(),
     });
   });
 
