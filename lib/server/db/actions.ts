@@ -37,7 +37,6 @@ export const addUserToRoomIfNotExists = async (
   userUUID: UserRoom["user_uuid"],
   roomUUID: UserRoom["room_uuid"],
 ) => {
-  console.log(`Adding user ${userUUID} to room ${roomUUID}`);
   // Check if the relation already exists
   const existingRelation = await db
     .select()
@@ -47,7 +46,6 @@ export const addUserToRoomIfNotExists = async (
 
   if (existingRelation.length > 0) {
     // Relation already exists, return it
-    console.log("User already in room");
     return existingRelation[0];
   }
 
@@ -59,8 +57,6 @@ export const addUserToRoomIfNotExists = async (
       user_uuid: userUUID,
     })
     .returning();
-
-  if (newRelation) console.log("User added to room");
 
   return newRelation;
 };
@@ -165,6 +161,5 @@ export const removeUserFromRoomByUUID = async (user_uuid: string, room_uuid: str
 };
 
 export const removeUserFromAllRooms = async (user_uuid: string) => {
-  console.log(`Delete user:${user_uuid} from room`);
   return await db.delete(userRoom).where(eq(userRoom.user_uuid, user_uuid)).execute();
 };
