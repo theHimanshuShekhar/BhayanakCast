@@ -35,35 +35,30 @@ io.on("connection", (socket: Socket) => {
   connections[socket.id] = socket;
   logConnections();
 
-  socket.on("user_connected", (user: User, room_uuid: string) => {
+  socket.on("user_connected", async (user: User, room_uuid: string) => {
     users[user.uuid] = {
       ...user,
       socketId: socket.id,
       room_uuid: room_uuid,
     };
 
-    console.log(`${new Date().toTimeString()} user_connected`, users[user.uuid].name);
+    await fetch(`${apiURL}/api/db/addUserToRoom/${user.uuid}/${room_uuid}`)
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+        return response.json();
+      })
+      .then((newRelation) => {
+        if (newRelation) {
+          console.log(`User: ${user.name} joined Room:${room_uuid}`);
+          socket.join(room_uuid);
+          updateRoomData(room_uuid);
+          console.log(
+            `${new Date().toTimeString()} user_connected`,
+            users[user.uuid].name,
+          );
+        }
+      });
   });
-
-  socket.on(
-    "join_room",
-    async (user_uuid: UserRoom["user_uuid"], room_uuid: UserRoom["room_uuid"]) => {
-      const user = Object.values(users).find((user) => user.socketId === socket.id);
-      if (!user) return;
-      await fetch(`${apiURL}/api/db/addUserToRoom/${user_uuid}/${user.room_uuid}`)
-        .then((response) => {
-          if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
-          return response.json();
-        })
-        .then((newRelation) => {
-          if (newRelation) {
-            console.log(`User: ${user.name} joined Room:${room_uuid}`);
-            socket.join(room_uuid);
-            updateRoomData(room_uuid);
-          }
-        });
-    },
-  );
 
   socket.on("disconnecting", () => {
     const user = Object.values(users).find((user) => user.socketId === socket.id);

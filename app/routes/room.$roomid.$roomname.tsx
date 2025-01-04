@@ -41,7 +41,6 @@ function RoomPageComponent() {
       setIsConnected(socket.connected);
       if (!user) return;
       socket.emit("user_connected", user, roomData.uuid);
-      socket.emit("join_room", user.uuid, roomData.uuid);
     }
 
     function onDisconnect() {
@@ -60,7 +59,7 @@ function RoomPageComponent() {
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
     };
-  });
+  }, [user, roomData]);
 
   return (
     <div className="max-w-screen mt-4 flex flex-col">
