@@ -3,9 +3,9 @@ import { useEffect, useState } from "react";
 import { ConnectionState } from "~/lib/components/ui/connection-state";
 import { createRoom, getRoom } from "~/lib/functions";
 import BlurFade from "~/lib/components/ui/blur-fade";
-import { Avatar, AvatarImage } from "~/lib/components/ui/avatar";
 import type { User } from "~/lib/server/db/schema";
 import { socket } from "~/lib/sockets/socket";
+import { UserList } from "~/lib/components/ui/user-list";
 
 export const Route = createFileRoute("/room/$roomid/$roomname")({
   component: RoomPageComponent,
@@ -105,37 +105,12 @@ function RoomPageComponent() {
             Test
           </div>
         </BlurFade>
-        <div className="order-2 col-span-full my-2 flex gap-1 lg:order-3">
+        <div className="order-2 col-span-full flex flex-wrap gap-1 lg:order-3">
           <UserList
             userList={roomData.users.filter((user): user is User => user !== null)}
           />
         </div>
       </div>
     </div>
-  );
-}
-
-function UserList({ userList }: { userList: User[] }) {
-  return (
-    <>
-      {userList.map(
-        (user, idx) =>
-          user && (
-            <BlurFade
-              key={user.uuid}
-              delay={0.25 + idx * 0.05}
-              inView
-              className="flex justify-start gap-1 rounded-full bg-gray-800 p-1"
-            >
-              <Avatar>
-                <AvatarImage src={user?.avatar_url ?? "https://github.com/shadcn.png"} />
-              </Avatar>
-              <div className="h-full px-2 py-2 text-center text-lg font-bold">
-                {user.name}
-              </div>
-            </BlurFade>
-          ),
-      )}
-    </>
   );
 }
