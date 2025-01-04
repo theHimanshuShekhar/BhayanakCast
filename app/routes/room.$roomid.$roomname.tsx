@@ -34,17 +34,17 @@ function RoomPageComponent() {
 
   useEffect(() => {
     if (!user) return;
-    if (!socket.connected) socket.connect();
+    // if (!socket.connected) socket.connect();
 
     function onConnect() {
-      setIsConnected(true);
+      setIsConnected(socket.connected);
       if (!user) return;
       socket.emit("user_connected", user, roomData.uuid);
       socket.emit("join_room", user.uuid, roomData.uuid);
     }
 
     function onDisconnect() {
-      setIsConnected(false);
+      setIsConnected(socket.connected);
     }
 
     socket.on("connect", onConnect);
@@ -59,13 +59,15 @@ function RoomPageComponent() {
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
     };
-  }, [roomData, user]);
+  });
 
   return (
     <>
-      <ConnectionState isConnected={isConnected} />
-      <div className="font-bold">
-        <pre>{JSON.stringify(roomData, null, 2)}</pre>
+      <div className="grid max-w-screen-sm md:max-w-screen-xl">
+        <ConnectionState isConnected={isConnected} />
+        <div className="font-bold">
+          <pre>{JSON.stringify(roomData, null, 2)}</pre>
+        </div>
       </div>
     </>
   );

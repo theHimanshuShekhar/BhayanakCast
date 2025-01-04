@@ -33,8 +33,7 @@ const connections: Dictionary<Socket> = {};
 io.on("connection", (socket: Socket) => {
   console.log("websocket connected! ", socket.id);
   connections[socket.id] = socket;
-
-  console.log("Number of connections: ", io.engine.clientsCount);
+  logConnections();
 
   socket.on("user_connected", (user: User, room_uuid: string) => {
     users[user.uuid] = {
@@ -51,7 +50,7 @@ io.on("connection", (socket: Socket) => {
     async (user_uuid: UserRoom["user_uuid"], room_uuid: UserRoom["room_uuid"]) => {
       const user = Object.values(users).find((user) => user.socketId === socket.id);
       if (!user) return;
-      await fetch(`${apiURL}/api/db/addUserToRoom/${user.uuid}/${user.room_uuid}`)
+      await fetch(`${apiURL}/api/db/addUserToRoom/${user_uuid}/${user.room_uuid}`)
         .then((response) => {
           if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
           return response.json();
@@ -66,20 +65,23 @@ io.on("connection", (socket: Socket) => {
     },
   );
 
-  socket.on("disconnect", async () => {
-    console.log("websocket disconnected! ", socket.id);
-    console.log("Number of connections: ", io.engine.clientsCount);
+  socket.on("disconnecting", () => {
     const user = Object.values(users).find((user) => user.socketId === socket.id);
     if (!user) return;
-    await fetch(
-      `${apiURL}/api/db/removeUserFromRoom//${user.uuid}/${user.room_uuid}`,
-    ).then((response) => {
-      if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
-      console.log(`User: ${user.name} left Room:${user.room_uuid}`);
-      updateRoomData(user.room_uuid);
-      delete users[user.uuid];
-      delete connections[socket.id];
-    });
+    fetch(`${apiURL}/api/db/removeUserFromRoom//${user.uuid}/${user.room_uuid}`).then(
+      (response) => {
+        if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+        console.log(`User: ${user.name} left Room:${user.room_uuid}`);
+        updateRoomData(user.room_uuid);
+        delete users[user.uuid];
+        delete connections[socket.id];
+        logConnections();
+      },
+    );
+  });
+
+  socket.on("disconnect", () => {
+    console.log("websocket disconnected! ", socket.id);
   });
 });
 
@@ -95,10 +97,17 @@ const updateRoomData = async (room_uuid: string) => {
     });
 };
 
+const logConnections = () => {
+  console.log("Number of connections: ", io.engine.clientsCount);
+};
 app.get("/", (_req: Request, res: Response) => {
   console.log("received Request", io.httpServer.address());
   res.send(`<h1>BhayanakCast Websocket Server</h1>
   <h3>Please connect with a websocket client</h3>`);
 });
 
-httpServer.listen(port, () => console.log(`Websocket server running on port: ${port}`));
+httpServer.listen(port, () => {
+  console.log(`Websocket server running on port: ${port}`);
+  io.disconnectSockets();
+  logConnections();
+});
