@@ -16,14 +16,17 @@ services:
     volumes:
       - ./pgdata:/bitnami/postgresql
 
-  # server:
-  #   container_name: BhayanakCastClient
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile.client
-  #   ports:
-  #     - 3000:3000
-  #   depends_on:
-  #     - db
-  #   environment:
-  #     DATABASE_URL: postgresql://postgres:bhayanak@db:3232
+  server:
+    container_name: BhayanakCastClient
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    ports:
+      - 3000:3000
+    depends_on:
+      - db
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://postgres:bhayanak@db:3232
