@@ -4,7 +4,7 @@ services:
     container_name: BhayanakCastDB
     user: root
     image: bitnami/postgresql:latest
-    restart: always
+    restart: unless-stopped
     # set shared memory limit when using docker-compose
     shm_size: 128mb
     environment:
@@ -21,6 +21,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.client
+    restart: unless-stopped
     ports:
       - 3000:3000
     depends_on:
