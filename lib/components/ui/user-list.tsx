@@ -12,12 +12,12 @@ export function UserList({ userList }: { userList: User[] }) {
               key={user.uuid}
               delay={0.25 + idx * 0.05}
               inView
-              className="flex justify-start gap-1 rounded-full bg-gray-800 p-1"
+              className="flex items-center justify-center rounded-full bg-gray-700 p-1"
             >
               <Avatar>
                 <AvatarImage src={user?.avatar_url ?? "https://github.com/shadcn.png"} />
               </Avatar>
-              <div className="h-full px-2 py-2 text-center text-lg font-bold">
+              <div className="flex items-center px-2 text-center font-bold">
                 {user.name}
               </div>
             </BlurFade>

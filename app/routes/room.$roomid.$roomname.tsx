@@ -94,14 +94,18 @@ function RoomPageComponent() {
   return (
     <div className="max-w-screen mt-4 flex flex-col">
       <div className="order-1 grid grid-cols-6 gap-2">
-        <BlurFade delay={0.25} inView className="col-span-full lg:col-span-4">
+        <BlurFade
+          delay={0.25}
+          inView
+          className="col-span-full flex flex-col gap-2 lg:col-span-4"
+        >
           <video
-            className="rounded-lg"
+            className="min-w-full rounded-lg"
             autoPlay
             muted
             loop
             controls
-            src="https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4"
+            // src="https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4"
           >
             <track
               kind="captions"
@@ -116,6 +120,11 @@ function RoomPageComponent() {
               label="English"
             />
           </video>
+          <div className="order-2 col-span-full flex flex-wrap gap-1 lg:order-3">
+            <UserList
+              userList={roomData.users.filter((user): user is User => user !== null)}
+            />
+          </div>
         </BlurFade>
         <BlurFade
           delay={0.3}
@@ -173,11 +182,6 @@ function RoomPageComponent() {
             />
           </div>
         </BlurFade>
-        <div className="order-2 col-span-full flex flex-wrap gap-1 lg:order-3">
-          <UserList
-            userList={roomData.users.filter((user): user is User => user !== null)}
-          />
-        </div>
       </div>
     </div>
   );
