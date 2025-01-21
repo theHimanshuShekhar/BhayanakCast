@@ -23,15 +23,15 @@ services:
       dockerfile: Dockerfile.client
     restart: unless-stopped
     ports:
-      - 3000:3000
+      - 3434:3000
     depends_on:
       - db
-      - websocket_server
+      # - websocket_server
     # env_file:
     #   - .env
     environment:
-      - NODE_ENV=production
       - DATABASE_URL=postgresql://postgres:bhayanak@db:3232
+      - WEBSOCKETSERVER_URL=http://websocket_server:3333
 
   websocket_server:
     container_name: BhayanakCastWebSocketServer
@@ -40,11 +40,11 @@ services:
       dockerfile: Dockerfile.server
     restart: unless-stopped
     ports:
-      - 3000:3000
+      - 3333:8800
     depends_on:
       - db
     # env_file:
     #   - .env
     environment:
-      - NODE_ENV=production
       - DATABASE_URL=postgresql://postgres:bhayanak@db:3232
+      - TANSTACK_API_URL:http://server:3434

@@ -10,9 +10,9 @@ if (!process.env.DATABASE_URL) {
 
 type UserWithSocketAndRoom = User & { socketId: string; room_uuid: string };
 
-const apiURL = "http://localhost:3000";
+const apiURL = process.env.TANSTACK_API_URL || "http://localhost:3000";
 
-const port = process.env.WEBSOCKET_SERVER_PORT || 8800;
+const port = process.env.WEBSOCKET_SERVER_PORT || 3333;
 
 const app: Express = express();
 const httpServer = createServer(app);
