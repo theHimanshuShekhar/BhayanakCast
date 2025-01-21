@@ -20,6 +20,9 @@ FROM base AS prod-deps
 # Use a cache mount for pnpm store and install only production dependencies
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --prod --frozen-lockfile
 
+RUN pnpm drizzle-kit migrate
+RUN pnpm drizzle-kit push
+
 # Stage for building the application
 FROM base AS build
 
