@@ -69,14 +69,13 @@ function RootDocument({ children }: { readonly children: React.ReactNode }) {
         <Meta />
       </head>
       <body>
-        <div className="max-h-screen min-h-screen overflow-y-scroll bg-gray-900 p-6 text-purple-500">
-          <Navbar user={user} />
+        <div className="max-h-screen min-h-screen overflow-hidden bg-gray-900 text-purple-500">
           {children}
         </div>
         <ScrollRestoration />
-        <ReactQueryDevtools buttonPosition="bottom-left" />
         <Suspense>
-          <TanStackRouterDevtools position="bottom-right" />
+          {/* <ReactQueryDevtools buttonPosition="bottom-left" /> */}
+          <TanStackRouterDevtools position="bottom-left" />
         </Suspense>
 
         <ScriptOnce>
