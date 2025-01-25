@@ -19,6 +19,8 @@ const getSocketURL = async () => {
 
 const URL = await getSocketURL();
 
+console.log(`URL: ${URL}`);
+
 export const socket = io(URL, {
   autoConnect: false,
   reconnection: true,
