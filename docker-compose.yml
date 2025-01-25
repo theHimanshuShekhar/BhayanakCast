@@ -26,10 +26,6 @@ services:
       - server
     env_file:
       - .env
-    environment:
-      - DATABASE_URL=postgresql://postgres:bhayanak@db:3232
-      - WEBSOCKETSERVER_URL=http://server:3333
-      - PORT=3434
 
   server:
     container_name: BhayanakCastServer
