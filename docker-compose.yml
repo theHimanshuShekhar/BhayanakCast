@@ -14,7 +14,6 @@ services:
       - 3232:3232
     volumes:
       - ./postgres_data:/bitnami/postgresql
-    profiles: ["dev", "prod"]
 
   client:
     container_name: BhayanakCastClient
@@ -29,7 +28,6 @@ services:
       - DATABASE_URL=postgresql://postgres:bhayanak@db:3232
       - WEBSOCKETSERVER_URL=http://server:3333
       - PORT=3434
-    profiles: ["prod"]
 
   server:
     container_name: BhayanakCastServer
@@ -43,4 +41,3 @@ services:
       - DATABASE_URL=postgresql://postgres:bhayanak@db:3232
       - TANSTACK_API_URL=http://client:3434
       - WEBSOCKET_SERVER_PORT=3333
-    profiles: ["prod"]
