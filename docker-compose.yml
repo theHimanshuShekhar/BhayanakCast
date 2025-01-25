@@ -18,9 +18,7 @@ services:
 
   client:
     container_name: BhayanakCastClient
-    build:
-      context: .
-      dockerfile: Dockerfile.client
+    image: ghcr.io/thehimanshushekhar/bhayanakcast/client:latest
     restart: unless-stopped
     ports:
       - 3434:3434
@@ -35,9 +33,7 @@ services:
 
   server:
     container_name: BhayanakCastServer
-    build:
-      context: .
-      dockerfile: Dockerfile.server
+    image: ghcr.io/thehimanshushekhar/bhayanakcast/server:latest
     restart: unless-stopped
     ports:
       - 3333:3333
