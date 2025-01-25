@@ -1,42 +1,33 @@
-# Use the official Node.js image as the base image
+#--- Base Stage ---#
+# Alpine-based Node.js for minimal base image size
 FROM node:23.5-alpine AS base
 
-# Set environment variables for pnpm
+# Configure pnpm for package management
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-
-# Enable corepack to manage package managers
 RUN corepack enable
 
-# Copy the entire application code to the /app directory in the container
+# Setup application directory
 COPY . /app
-
-# Set the working directory to /app
 WORKDIR /app
 
-# Stage for installing production dependencies
+#--- Production Dependencies ---#
 FROM base AS prod-deps
+# Install and cache production dependencies
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+  pnpm install --prod --frozen-lockfile
 
-# Use a cache mount for pnpm store and install only production dependencies
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --prod --frozen-lockfile
-
-# Stage for building the application
+#--- Build Stage ---#
 FROM base AS build
+# Install all dependencies with build cache
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+  pnpm install --frozen-lockfile
 
-# Use a cache mount for pnpm store and install all dependencies
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
-
-# Build the application using the node-server preset
+# Build SSR application with node-server preset
 RUN pnpm run build --preset node-server
 
-# Final stage to create the runtime image
+#--- Production Stage ---#
 FROM node:23.5-alpine AS deploy
-
-# Copy the built output from the build stage
+# Copy only the optimized production build
 COPY --from=build app/.output .output
-
-# Expose port 3000 for the application
-EXPOSE 3000/tcp
-
-# Set the entry point to run the application
 ENTRYPOINT [ "node", ".output/server/index.mjs" ]

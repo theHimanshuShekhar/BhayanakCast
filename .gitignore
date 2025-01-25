@@ -17,3 +17,4 @@ dist
 /server/build
 /public/build
 pgdata
+postgres_data

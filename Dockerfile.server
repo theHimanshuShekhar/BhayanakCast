@@ -1,18 +1,25 @@
-# use the official Bun image
-# see all versions at https://hub.docker.com/r/oven/bun/tags
+#--- Base Image ---#
+# Using Bun for better TypeScript/JavaScript performance
 FROM oven/bun AS base
 WORKDIR /usr/src/app
 
-
-# [optional] tests & build
+#--- Environment Setup ---#
+# Production mode optimizes for performance and security
 ENV NODE_ENV=production
 
-COPY  . .
+#--- Application Files ---#
+# Copy source code and configuration files
+COPY . .
 
-# install with --production (exclude devDependencies)
-RUN  bun install --frozen-lockfile --production
+#--- Dependencies ---#
+# Install production deps with exact versions
+# Excludes dev tools to reduce image size
+RUN bun install --frozen-lockfile --production
 
-# run the app
+#--- Security & Runtime Config ---#
+# Run as non-root user for container security
 USER bun
-EXPOSE 8800/tcp
+
+# WebSocket server entry point with hot reload
+# Enables real-time code updates during development
 ENTRYPOINT [ "bun", "--hot", "server/ws.ts" ]
