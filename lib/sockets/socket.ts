@@ -1,13 +1,12 @@
 import { io } from "socket.io-client";
 
-const getSocketURL = async () => {
+const getSocketURL = () => {
   try {
     // Check if window is defined (client-side)
     if (typeof window !== "undefined") {
-      const response = await fetch("/api/util/getSocketServerURL");
-      const data = await response.json();
-      console.log(`getSocketURL: ${data.url}`);
-      return data.url;
+      return fetch("/api/util/getSocketServerURL")
+        .then((response) => response.json())
+        .then((data) => data.url);
     }
     // Server-side fallback
     return process.env.WEBSOCKETSERVER_URL || "http://localhost:3333";
@@ -17,9 +16,15 @@ const getSocketURL = async () => {
   }
 };
 
-const URL = await getSocketURL();
+export const getSocket = async () => {
+  const URL = await getSocketURL();
 
-export const socket = io(URL, {
-  autoConnect: false,
-  reconnection: true,
-});
+  const websocket_server_url = URL || "http://localhost:3333";
+
+  console.log(`connecting to Websocket server: ${websocket_server_url}`);
+
+  return io(websocket_server_url, {
+    autoConnect: false,
+    reconnection: true,
+  });
+};
