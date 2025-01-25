@@ -1,6 +1,25 @@
 import { io } from "socket.io-client";
 
-// "undefined" means the URL will be computed from the `window.location` object
-const URL = process.env.WEBSOCKETSERVER_URL || "http://localhost:3333";
+const getSocketURL = async () => {
+  try {
+    // Check if window is defined (client-side)
+    if (typeof window !== "undefined") {
+      const response = await fetch("/api/util/getSocketServerURL");
+      const data = await response.json();
+      console.log(`getSocketURL: ${data.url}`);
+      return data.url;
+    }
+    // Server-side fallback
+    return process.env.WEBSOCKETSERVER_URL || "http://localhost:3333";
+  } catch (error) {
+    console.error("Failed to get socket URL:", error);
+    return "http://localhost:3333"; // Fallback URL
+  }
+};
 
-export const socket = io(URL, { autoConnect: false, reconnection: true });
+const URL = await getSocketURL();
+
+export const socket = io(URL, {
+  autoConnect: false,
+  reconnection: true,
+});
