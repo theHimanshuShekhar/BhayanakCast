@@ -48,8 +48,11 @@ function RoomPageComponent() {
   const [messageList, setMessageList] = useState<Message[]>([]);
 
   useEffect(() => {
+    if (!socket.active && !socket.connected) socket.connect();
+  });
+
+  useEffect(() => {
     if (!user) return;
-    // if (!socket.connected) socket.connect();
 
     function onConnect() {
       setIsConnected(socket.connected);
@@ -92,11 +95,11 @@ function RoomPageComponent() {
   };
 
   return (
-    <div className="grid-row-auto flex max-h-screen min-h-screen flex-col justify-start gap-2 p-2 md:p-4 lg:grid lg:flex-none lg:grid-cols-7 lg:p-6 xl:grid-cols-8">
+    <div className="grid-row-auto flex max-h-screen min-h-screen flex-col justify-start gap-2 lg:grid lg:flex-none lg:grid-cols-7 xl:grid-cols-8">
       <BlurFade
         delay={0.25}
         inView
-        className="col-span-full flex max-h-fit flex-col gap-4 lg:col-span-4 xl:col-span-6"
+        className="col-span-full flex max-h-fit flex-col gap-4 p-2 lg:col-span-4 xl:col-span-6"
       >
         <Navbar user={user} />
         <video
@@ -129,7 +132,7 @@ function RoomPageComponent() {
       <BlurFade
         delay={0.3}
         inView
-        className="col-span-full max-h-screen min-h-full rounded-lg bg-gray-800 p-2 lg:col-span-3 xl:col-span-2"
+        className="col-span-full h-full max-h-screen rounded-lg bg-gray-800 p-2 lg:col-span-3 xl:col-span-2"
       >
         <ChatBox
           roomData={roomData}
@@ -140,7 +143,6 @@ function RoomPageComponent() {
           sendMessage={sendMessage}
         />
       </BlurFade>
-      <div className="max-h-px grow border">SPACER</div>
     </div>
   );
 }

@@ -1,16 +1,14 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import {
   createRootRouteWithContext,
   Outlet,
   ScriptOnce,
   ScrollRestoration,
 } from "@tanstack/react-router";
-import { createServerFn, Meta, Scripts } from "@tanstack/start";
+import { Meta, Scripts } from "@tanstack/start";
 import { lazy, Suspense } from "react";
-import Navbar from "~/lib/components/ui/navbar";
+import { getUser } from "~/lib/functions";
 
-import { getAuthSession } from "~/lib/server/auth";
 import appCss from "~/lib/styles/app.css?url";
 
 const TanStackRouterDevtools =
@@ -22,11 +20,6 @@ const TanStackRouterDevtools =
           default: res.TanStackRouterDevtools,
         })),
       );
-
-const getUser = createServerFn({ method: "GET" }).handler(async () => {
-  const { user } = await getAuthSession();
-  return user;
-});
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   beforeLoad: async () => {
@@ -60,8 +53,6 @@ function RootComponent() {
 }
 
 function RootDocument({ children }: { readonly children: React.ReactNode }) {
-  const { user } = Route.useRouteContext();
-
   return (
     // suppress since we're updating the "dark" class in a custom script below
     <html lang="en" suppressHydrationWarning>
@@ -69,7 +60,7 @@ function RootDocument({ children }: { readonly children: React.ReactNode }) {
         <Meta />
       </head>
       <body>
-        <div className="max-h-screen min-h-screen overflow-hidden bg-gray-900 text-purple-500">
+        <div className="max-h-screen min-h-screen bg-gray-900 text-purple-500">
           {children}
         </div>
         <ScrollRestoration />

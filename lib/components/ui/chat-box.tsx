@@ -62,12 +62,12 @@ export default function ChatBox({
   }, []);
 
   return (
-    <div className="flex min-h-[300px] flex-col gap-2 text-wrap lg:max-h-screen lg:min-h-full">
+    <div className="flex h-full max-h-[300px] min-h-[300px] flex-col gap-2 text-wrap md:max-h-full">
       <RoomDetails isConnected={isConnected} roomData={roomData} />
       <div
         id="chatbox"
         ref={chatBoxRef}
-        className="max-h-screen min-h-[300px] w-full flex-1 grow overflow-y-scroll rounded-lg bg-gray-700 p-2 text-xs"
+        className="min-h-[300px] w-full flex-1 grow overflow-x-hidden overflow-y-scroll rounded-lg bg-gray-700 p-2 text-xs [&::-webkit-scrollbar]:hidden"
       >
         {messageList?.map((message) => (
           <BlurFade

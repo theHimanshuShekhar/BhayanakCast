@@ -5,6 +5,12 @@ import {
   addUserToRoomIfNotExists,
   removeUserFromRoomByUUID,
 } from "./server/db/actions";
+import { getAuthSession } from "./server/auth";
+
+export const getUser = createServerFn({ method: "GET" }).handler(async () => {
+  const { user } = await getAuthSession();
+  return user;
+});
 
 export const createRoom = createServerFn({
   method: "GET",
