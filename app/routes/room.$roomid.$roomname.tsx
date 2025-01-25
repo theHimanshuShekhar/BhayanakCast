@@ -4,12 +4,13 @@ import { type ChangeEvent, useEffect, useState } from "react";
 import { createRoom, getRoom } from "~/lib/functions";
 import type { User } from "~/lib/server/db/schema";
 
-import { socket } from "~/lib/sockets/socket";
+import { getSocket } from "~/lib/sockets/socket";
 
 import BlurFade from "~/lib/components/ui/blur-fade";
 import { UserList } from "~/lib/components/ui/user-list";
 import ChatBox from "~/lib/components/ui/chat-box";
 import Navbar from "~/lib/components/ui/navbar";
+import { io, type Socket } from "socket.io-client";
 
 export const Route = createFileRoute("/room/$roomid/$roomname")({
   component: RoomPageComponent,
@@ -42,17 +43,27 @@ interface Message {
 
 function RoomPageComponent() {
   const { user, initialRoomData } = Route.useLoaderData();
+  const [socket, setSocket] = useState<Socket>(() => io());
   const [isConnected, setIsConnected] = useState(false);
   const [roomData, setRoomData] = useState(initialRoomData);
   const [inputText, setInputText] = useState("");
   const [messageList, setMessageList] = useState<Message[]>([]);
 
   useEffect(() => {
-    if (!socket.active && !socket.connected) socket.connect();
-  });
+    const initSocket = async () => {
+      const newSocket = await getSocket();
+      setSocket(newSocket);
+    };
+    initSocket();
+  }, []);
+
+  useEffect(() => {
+    if (socket && !socket.active && !socket.connected) socket.connect();
+  }, [socket]);
 
   useEffect(() => {
     if (!user) return;
+    if (socket && socket === undefined) return;
 
     function onConnect() {
       setIsConnected(socket.connected);
@@ -81,7 +92,7 @@ function RoomPageComponent() {
       socket.off("disconnect", onDisconnect);
       socket.off("message_update");
     };
-  }, [user, roomData]);
+  }, [socket, user, roomData]);
 
   const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
     e.preventDefault();
