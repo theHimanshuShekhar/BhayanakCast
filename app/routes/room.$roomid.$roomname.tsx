@@ -143,7 +143,7 @@ function RoomPageComponent() {
       <BlurFade
         delay={0.3}
         inView
-        className="col-span-full h-full max-h-screen rounded-lg bg-gray-800 p-2 lg:col-span-3 xl:col-span-2"
+        className="col-span-full max-h-screen min-h-full grow rounded-lg bg-gray-800 p-2 lg:col-span-3 xl:col-span-2"
       >
         <ChatBox
           roomData={roomData}
