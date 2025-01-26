@@ -1,5 +1,5 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { type ChangeEvent, useEffect, useState } from "react";
+import { type ChangeEvent, useEffect, useRef, useState } from "react";
 
 import { createRoom, getRoom } from "~/lib/functions";
 import type { User } from "~/lib/server/db/schema";
@@ -11,6 +11,7 @@ import { UserList } from "~/lib/components/ui/user-list";
 import ChatBox from "~/lib/components/ui/chat-box";
 import Navbar from "~/lib/components/ui/navbar";
 import { io, type Socket } from "socket.io-client";
+import Peer from "peerjs";
 
 export const Route = createFileRoute("/room/$roomid/$roomname")({
   component: RoomPageComponent,
@@ -48,6 +49,26 @@ function RoomPageComponent() {
   const [roomData, setRoomData] = useState(initialRoomData);
   const [inputText, setInputText] = useState("");
   const [messageList, setMessageList] = useState<Message[]>([]);
+
+  // const [userMediaStream] = useRef(null);
+  // const [remotePeerIdValue, setRemotePeerIdValue] = useState("");
+  // const peerInstance = useRef(null);
+  // const videoRef = useRef(null);
+
+  useEffect(() => {
+    if (!user) return;
+    if (socket && socket === undefined) return;
+
+    const uniquePeerId = `${user.name}-${user.uuid}`;
+    const peer = new Peer(uniquePeerId);
+
+    peer.on("open", (id) => {
+      console.log(`Peer connected with id: ${id}`);
+      peer.on("call", (call) => {
+        console.log("call received", call);
+      });
+    });
+  }, [user, socket]);
 
   useEffect(() => {
     const initSocket = async () => {

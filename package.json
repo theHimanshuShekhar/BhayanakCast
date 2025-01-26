@@ -36,6 +36,7 @@
     "framer-motion": "^11.15.0",
     "lucide-react": "^0.469.0",
     "motion": "^11.15.0",
+    "peerjs": "^1.5.4",
     "pg": "^8.13.1",
     "postgres": "^3.4.5",
     "react": "^19.0.0",
