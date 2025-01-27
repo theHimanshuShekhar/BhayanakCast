@@ -12,6 +12,7 @@ import ChatBox from "~/lib/components/ui/chat-box";
 import Navbar from "~/lib/components/ui/navbar";
 import { io, type Socket } from "socket.io-client";
 import Peer from "peerjs";
+import { Button } from "~/lib/components/ui/button";
 
 export const Route = createFileRoute("/room/$roomid/$roomname")({
   component: RoomPageComponent,
@@ -50,10 +51,9 @@ function RoomPageComponent() {
   const [inputText, setInputText] = useState("");
   const [messageList, setMessageList] = useState<Message[]>([]);
 
-  // const [userMediaStream] = useRef(null);
-  // const [remotePeerIdValue, setRemotePeerIdValue] = useState("");
-  // const peerInstance = useRef(null);
-  // const videoRef = useRef(null);
+  const userMediaStream = useRef<MediaStream>(null);
+  const peerInstance = useRef<Peer | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -62,10 +62,44 @@ function RoomPageComponent() {
     const uniquePeerId = `${user.name}-${user.uuid}`;
     const peer = new Peer(uniquePeerId);
 
+    // Connect to the peerjs server
     peer.on("open", (id) => {
+      peerInstance.current = peer;
       console.log(`Peer connected with id: ${id}`);
       peer.on("call", (call) => {
         console.log("call received", call);
+      });
+    });
+
+    // On connection with viewer, call with mediaStream
+    peer.on("connection", (conn) => {
+      conn.on("data", async (viewerPeerID) => {
+        console.log(`viewerPeerID: ${viewerPeerID}`);
+
+        if (!userMediaStream.current) {
+          userMediaStream.current = await navigator.mediaDevices.getDisplayMedia({
+            audio: false,
+            video: true,
+          });
+
+          if (videoRef.current) {
+            videoRef.current.srcObject = userMediaStream.current;
+          }
+        }
+        peer.call(conn.peer, userMediaStream.current);
+      });
+    });
+
+    // On call from streamer
+    peer.on("call", (call) => {
+      call.answer();
+      console.log("remoteStream", call.remoteStream);
+
+      call.on("stream", (mediaStream) => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = mediaStream;
+          videoRef.current.play();
+        }
       });
     });
   }, [user, socket]);
@@ -134,13 +168,27 @@ function RoomPageComponent() {
         className="col-span-full flex max-h-fit flex-col gap-4 p-2 lg:col-span-4 xl:col-span-6"
       >
         <Navbar user={user} />
+        <Button
+          className="bg-yellow-300"
+          onClick={() => {
+            if (!peerInstance.current) return;
+            console.log("call button clicked");
+            const conn = peerInstance.current.connect(
+              "Goti-5db9ee5f-17d1-4804-9470-73dc4db75419",
+            );
+            conn.on("open", () => conn.send(peerInstance.current?.id));
+          }}
+        >
+          Test
+        </Button>
         <video
+          ref={videoRef}
           className="min-w-full rounded-lg"
           autoPlay
           muted
           loop
           controls
-          src="https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4"
+          // src="https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4"
         >
           <track
             kind="captions"
