@@ -42,6 +42,7 @@ export const room = pgTable("room", {
   uuid: uuid().defaultRandom().unique().notNull(),
   name: text(),
   banner_url: text(),
+  streamer: text(),
 
   created_at: timestamp().defaultNow().notNull(),
   updated_at: timestamp()

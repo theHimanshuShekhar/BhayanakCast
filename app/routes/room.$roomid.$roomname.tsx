@@ -24,7 +24,7 @@ export const Route = createFileRoute("/room/$roomid/$roomname")({
       });
     }
 
-    await createRoom({ data: params });
+    await createRoom({ data: { ...params, user: context.user } });
   },
   loader: async ({ context, params }) => {
     return {
@@ -205,6 +205,7 @@ function RoomPageComponent() {
         </video>
         <div className="col-span-full flex flex-wrap gap-1">
           <UserList
+            streamerID={roomData.streamer}
             userList={roomData.users.filter((user): user is User => user !== null)}
           />
         </div>

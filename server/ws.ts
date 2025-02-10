@@ -71,10 +71,27 @@ io.on("connection", (socket: Socket) => {
       });
   });
 
+  socket.on("update_streamer", (new_streamer_uuid, room_uuid) => {
+    console.log(`Update user ${new_streamer_uuid} as new streamer of room ${room_uuid}`);
+
+    // Hit client api to update streamer in room
+    if (!new_streamer_uuid && !room_uuid) return;
+
+    fetch(`${apiURL}/api/db/setRoomStreamer/${new_streamer_uuid}/${room_uuid}`).then(
+      (response) => {
+        if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+
+        console.log(`new streamer ${new_streamer_uuid} set for room ${room_uuid}`);
+        // Update all room users with new streamer
+        updateRoomData(room_uuid);
+      },
+    );
+  });
+
   socket.on("disconnecting", () => {
     const user = Object.values(users).find((user) => user.socketId === socket.id);
     if (!user) return;
-    fetch(`${apiURL}/api/db/removeUserFromRoom//${user.uuid}/${user.room_uuid}`).then(
+    fetch(`${apiURL}/api/db/removeUserFromRoom/${user.uuid}/${user.room_uuid}`).then(
       (response) => {
         if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
         console.log(`User: ${user.name} left Room:${user.room_uuid}`);

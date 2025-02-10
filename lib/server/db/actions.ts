@@ -6,6 +6,7 @@ import { room, type User, user, userRoom, type Room, type UserRoom } from "./sch
 export const getOrCreateRoom = async (
   roomUUID: Room["uuid"],
   name: Room["name"],
+  user: User,
   banner_url: Room["banner_url"] | null = null,
 ) => {
   // Check if a room with the given name exists
@@ -26,10 +27,27 @@ export const getOrCreateRoom = async (
       uuid: roomUUID,
       name,
       banner_url,
+      streamer: user.uuid,
     })
     .returning();
 
   return newRoom;
+};
+
+export const setRoomStreamer = async (
+  userUUID: UserRoom["user_uuid"],
+  roomUUID: UserRoom["room_uuid"],
+) => {
+  console.log(`Adding user: ${userUUID} as streamer of room: ${roomUUID}`);
+
+  const [updatedRoom] = await db
+    .insert(room)
+    .values({
+      streamer: userUUID,
+    })
+    .returning();
+
+  return updatedRoom;
 };
 
 // Add user to a room when joined
@@ -79,6 +97,7 @@ export const fetchRoomDataFromID = async (roomUUID: Room["uuid"]) => {
     created_at: roomWithUsers[0]?.room.created_at,
     updated_at: roomWithUsers[0]?.room.updated_at,
     users: roomWithUsers.map(({ users }) => users),
+    streamer: roomWithUsers[0]?.room.streamer,
   };
 
   return result;
