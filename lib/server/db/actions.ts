@@ -142,7 +142,12 @@ export const fetchRooms = async () => {
     })
     .from(room)
     .leftJoin(userRoom, eq(room.uuid, userRoom.room_uuid))
-    .leftJoin(user, eq(userRoom.user_uuid, user.uuid));
+    .leftJoin(user, eq(userRoom.user_uuid, user.uuid))
+    .execute();
+
+  if (!Array.isArray(roomsWithUsers) || roomsWithUsers.length === 0) {
+    return [];
+  }
 
   // Group the users by room for easier consumption
   const groupedRooms: { [key: number]: { room: Room; users: User[] } } =
