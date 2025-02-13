@@ -21,6 +21,9 @@ const mockUser = {
   name: "Test User",
   email: "test@example.com",
   avatar_url: "https://example.com/avatar.jpg",
+  created_at: new Date(),
+  updated_at: new Date(),
+  setup_at: null,
 };
 
 const mockRoom = {
@@ -44,7 +47,7 @@ describe("Database Actions", () => {
         from: vi.fn().mockReturnThis(),
         where: vi.fn().mockReturnThis(),
         execute: vi.fn().mockResolvedValue([mockRoom]),
-      } as any);
+      } as never);
 
       const result = await getOrCreateRoom(mockRoom.uuid, mockRoom.name, mockUser);
       expect(result).toEqual(mockRoom);
@@ -55,12 +58,12 @@ describe("Database Actions", () => {
         from: vi.fn().mockReturnThis(),
         where: vi.fn().mockReturnThis(),
         execute: vi.fn().mockResolvedValue([]),
-      } as any);
+      } as never);
 
       vi.mocked(db.insert).mockReturnValue({
         values: vi.fn().mockReturnThis(),
         returning: vi.fn().mockResolvedValue([mockRoom]),
-      } as any);
+      } as never);
 
       const result = await getOrCreateRoom(mockRoom.uuid, mockRoom.name, mockUser);
       expect(result).toEqual(mockRoom);
@@ -72,7 +75,7 @@ describe("Database Actions", () => {
       vi.mocked(db.insert).mockReturnValue({
         values: vi.fn().mockReturnThis(),
         returning: vi.fn().mockResolvedValue([mockRoom]),
-      } as any);
+      } as never);
 
       const result = await setRoomStreamer(mockUser.uuid, mockRoom.uuid);
       expect(result).toEqual(mockRoom);
@@ -87,7 +90,7 @@ describe("Database Actions", () => {
         from: vi.fn().mockReturnThis(),
         where: vi.fn().mockReturnThis(),
         execute: vi.fn().mockResolvedValue([mockRelation]),
-      } as any);
+      } as never);
 
       const result = await addUserToRoomIfNotExists(mockUser.uuid, mockRoom.uuid);
       expect(result).toEqual(mockRelation);
@@ -100,12 +103,12 @@ describe("Database Actions", () => {
         from: vi.fn().mockReturnThis(),
         where: vi.fn().mockReturnThis(),
         execute: vi.fn().mockResolvedValue([]),
-      } as any);
+      } as never);
 
       vi.mocked(db.insert).mockReturnValue({
         values: vi.fn().mockReturnThis(),
         returning: vi.fn().mockResolvedValue([mockRelation]),
-      } as any);
+      } as never);
 
       const result = await addUserToRoomIfNotExists(mockUser.uuid, mockRoom.uuid);
       expect(result).toEqual(mockRelation);
@@ -126,7 +129,7 @@ describe("Database Actions", () => {
         leftJoin: vi.fn().mockReturnThis(),
         where: vi.fn().mockReturnThis(),
         execute: vi.fn().mockResolvedValue(mockRoomWithUsers),
-      } as any);
+      } as never);
 
       const result = await fetchRoomDataFromID(mockRoom.uuid);
       expect(result).toEqual({
@@ -150,7 +153,7 @@ describe("Database Actions", () => {
         innerJoin: vi.fn().mockReturnThis(),
         where: vi.fn().mockReturnThis(),
         execute: vi.fn().mockResolvedValue(mockRoomWithUsers),
-      } as any);
+      } as never);
 
       const result = await fetchRoomDataFromName(mockRoom.name);
       expect(result.name).toBe(mockRoom.name);
@@ -203,7 +206,7 @@ describe("Database Actions", () => {
         from: vi.fn().mockReturnThis(),
         leftJoin: vi.fn().mockReturnThis(),
         execute: vi.fn().mockResolvedValue(mockRoomsWithUsers),
-      } as any);
+      } as never);
 
       const result = await fetchRooms();
 
@@ -219,7 +222,7 @@ describe("Database Actions", () => {
         from: vi.fn().mockReturnThis(),
         leftJoin: vi.fn().mockReturnThis(),
         execute: vi.fn().mockResolvedValue([]),
-      } as any);
+      } as never);
 
       const result = await fetchRooms();
       expect(result).toEqual([]);
@@ -231,7 +234,7 @@ describe("Database Actions", () => {
       vi.mocked(db.delete).mockReturnValue({
         where: vi.fn().mockReturnThis(),
         execute: vi.fn().mockResolvedValue([{ affected: 1 }]),
-      } as any);
+      } as never);
 
       await removeUserFromRoomByUUID(mockUser.uuid, mockRoom.uuid);
       expect(db.delete).toHaveBeenCalledWith(UserRoom);
@@ -243,7 +246,7 @@ describe("Database Actions", () => {
       vi.mocked(db.delete).mockReturnValue({
         where: vi.fn().mockReturnThis(),
         execute: vi.fn().mockResolvedValue([{ affected: 1 }]),
-      } as any);
+      } as never);
 
       await removeUserFromAllRooms(mockUser.uuid);
       expect(db.delete).toHaveBeenCalledWith(UserRoom);
