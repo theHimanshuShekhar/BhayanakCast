@@ -18,3 +18,4 @@ dist
 /public/build
 pgdata
 postgres_data
+coverage
