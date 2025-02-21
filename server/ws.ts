@@ -15,7 +15,7 @@ const apiURL = process.env.TANSTACK_API_URL || "http://localhost:3000";
 const port = process.env.WEBSOCKET_SERVER_PORT || 3333;
 
 const app: Express = express();
-const httpServer = createServer(app);
+export const httpServer = createServer(app);
 
 const io = new Server(httpServer, {
   /* options */
