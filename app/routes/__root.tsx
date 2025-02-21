@@ -4,8 +4,9 @@ import {
   Outlet,
   ScriptOnce,
   ScrollRestoration,
+  Scripts,
+  HeadContent,
 } from "@tanstack/react-router";
-import { Meta, Scripts } from "@tanstack/start";
 import { lazy, Suspense } from "react";
 import { getUser } from "~/lib/functions";
 
@@ -57,7 +58,7 @@ function RootDocument({ children }: { readonly children: React.ReactNode }) {
     // suppress since we're updating the "dark" class in a custom script below
     <html lang="en" suppressHydrationWarning>
       <head>
-        <Meta />
+        <HeadContent />
       </head>
       <body>
         <div className="max-h-screen min-h-screen bg-gray-900 text-purple-500">
@@ -75,7 +76,6 @@ function RootDocument({ children }: { readonly children: React.ReactNode }) {
             localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)
             )`}
         </ScriptOnce>
-
         <Scripts />
       </body>
     </html>
