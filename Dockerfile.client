@@ -19,6 +19,15 @@ FROM base AS prod-deps
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
   pnpm install --prod --frozen-lockfile
 
+#--- Test Stage ---#
+FROM base AS test
+# Install all dependencies including dev dependencies
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+  pnpm install --frozen-lockfile
+
+# Run Vitest tests
+RUN pnpm run test
+
 #--- Build Stage ---#
 FROM base AS build
 # Install all dependencies with build cache
