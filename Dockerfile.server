@@ -20,6 +20,8 @@ RUN bun install --frozen-lockfile
 # Run Vitest tests
 RUN bun test
 
+#--- Deploy Stage ---#
+FROM base AS deploy
 #--- Dependencies ---#
 # Install production deps with exact versions
 # Excludes dev tools to reduce image size
