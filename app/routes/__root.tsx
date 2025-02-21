@@ -3,7 +3,6 @@ import {
   createRootRouteWithContext,
   Outlet,
   ScriptOnce,
-  ScrollRestoration,
   Scripts,
   HeadContent,
 } from "@tanstack/react-router";
@@ -64,7 +63,6 @@ function RootDocument({ children }: { readonly children: React.ReactNode }) {
         <div className="max-h-screen min-h-screen bg-gray-900 text-purple-500">
           {children}
         </div>
-        <ScrollRestoration />
         <Suspense>
           {/* <ReactQueryDevtools buttonPosition="bottom-left" /> */}
           <TanStackRouterDevtools position="bottom-left" />
