@@ -13,7 +13,7 @@ import { db } from ".";
 import { userRoom as UserRoom } from "./schema";
 
 // Mock the database client
-vi.mock("..");
+vi.mock(".");
 
 const mockUser = {
   id: 1,

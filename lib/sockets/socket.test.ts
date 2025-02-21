@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { getSocket, getSocketURL } from "./socket";
-import { io, Socket } from "socket.io-client";
+import { io } from "socket.io-client";
 
 // mock the socket.io-client module using vitest
 vi.mock("socket.io-client", () => {
