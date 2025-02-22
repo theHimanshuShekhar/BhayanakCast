@@ -169,7 +169,7 @@ function RoomPageComponent() {
       >
         <Navbar user={user} />
         <Button
-          className="bg-yellow-300"
+          className="bg-purple-500 text-white"
           onClick={() => {
             if (!peerInstance.current) return;
             console.log("call button clicked");
@@ -179,7 +179,7 @@ function RoomPageComponent() {
             conn.on("open", () => conn.send(peerInstance.current?.id));
           }}
         >
-          Test
+          Watch Stream
         </Button>
         <video
           ref={videoRef}
