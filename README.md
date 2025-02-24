@@ -28,12 +28,23 @@ Auth providers:
 4. Push the schema to your database with drizzle-kit:
 
    ```bash
-   pnpm db push # npm run db push
+   cp .env.example .env
    ```
 
-   https://orm.drizzle.team/docs/migrations
+   Required variables:
 
-5. Run the development server:
+   - `DATABASE_URL`: PostgreSQL connection string
+   - `WEBSOCKETSERVER_URL`: WebSocket server URL (default: http://localhost:3333)
+   - `WEBSOCKET_SERVER_PORT`: WebSocket server port
+   - `PORT`: Application server port
+
+   For Discord OAuth2 (optional):
+
+   - `DISCORD_CLIENT_ID`: Discord application client ID
+   - `DISCORD_CLIENT_SECRET`: Discord application secret
+   - `DISCORD_REDIRECT_URI`: OAuth2 callback URL
+
+5. Initialize the database:
 
    ```bash
    pnpm dev # npm run dev
@@ -48,11 +59,42 @@ Auth providers:
 2. Build the application:
 
    ```bash
-   pnpm build # npm run build
+   pnpm dev     # Start frontend development server
+   pnpm server  # Start WebSocket server
    ```
 
-3. If building for Node, you start the application via:
+Visit [http://localhost:3000](http://localhost:3000) to use the application.
 
-   ```bash
-   pnpm start # npm start
-   ```
+## Development Commands
+
+- `pnpm dev` - Start Vinxi development server
+- `pnpm server` - Start WebSocket server
+- `pnpm build` - Build for production
+- `pnpm start` - Start production server
+- `pnpm lint` - Run ESLint
+- `pnpm format` - Format code with Prettier
+- `pnpm db` - Run Drizzle Kit commands
+- `pnpm test` - Run Vitest tests
+- `pnpm coverage` - Run tests with coverage report
+- `pnpm ui` - Run shadcn/ui CLI
+
+## Room Features
+
+- Create private watch rooms
+- Share room links with friends
+- Stream video/audio to room participants
+- Real-time chat with room members
+- Video quality controls
+- Room permissions management
+
+## Contributing
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+## License
+
+[MIT License](LICENSE)
