@@ -60,9 +60,7 @@ function RootDocument({ children }: { readonly children: React.ReactNode }) {
         <HeadContent />
       </head>
       <body>
-        <div className="max-h-screen min-h-screen bg-gray-900 text-purple-500">
-          {children}
-        </div>
+        <div className="h-full min-h-screen bg-gray-900 text-purple-500">{children}</div>
         <Suspense>
           {/* <ReactQueryDevtools buttonPosition="bottom-left" /> */}
           <TanStackRouterDevtools position="bottom-left" />

@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Input } from "~/lib/components/ui/input";
 import { Label } from "~/lib/components/ui/label";
 import { Button } from "~/lib/components/ui/button";
@@ -25,15 +25,17 @@ function Home() {
   const { user } = Route.useRouteContext();
   const [inputRoomName, setInputRoomName] = useState("");
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const navigate = useNavigate();
 
   const roomList = Route.useLoaderData();
 
   const handleClick = () => {
     setIsLoading(true);
-    // Simulate an async operation
+    // Generate room ID when button is clicked
+    navigate({ to: `/room/${crypto.randomUUID().toString()}/${inputRoomName}` });
     setTimeout(() => {
       setIsLoading(false);
-    }, 1000); // Reset after 1 second
+    }, 1000);
   };
 
   return (
@@ -42,7 +44,6 @@ function Home() {
         <Navbar user={user} />
         <div className="py-2">
           <Label htmlFor="roomNameInput">Create or Search Room</Label>
-          {inputRoomName}
           <div className="flex justify-between gap-2 pb-4 align-middle">
             <Input
               id="roomNameInput"
