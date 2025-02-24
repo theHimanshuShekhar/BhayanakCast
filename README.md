@@ -1,31 +1,48 @@
-# [TanStarter](https://github.com/dotnize/tanstarter)
+# BhayanakCast 🎬
 
-A minimal starter template for 🏝️ TanStack Start.
+A cozy web application for hosting private watch parties with your friends. Stream videos and chat together in real-time using WebRTC and WebSocket technology.
 
-- TanStack [Start](https://tanstack.com/start/latest) + [Router](https://tanstack.com/router/latest) + [Query](https://tanstack.com/query/latest)
+## Features
+
+- 🎥 Live video/audio streaming via PeerJS (WebRTC)
+- 💬 Real-time room chat using Socket.IO
+- 🔐 Private room creation and management
+- 👥 Multiple viewer support
+- 🎮 Low-latency peer-to-peer streaming
+- 🎨 Modern UI with Tailwind CSS and shadcn/ui
+
+## Tech Stack
+
+### Frontend
+
+- [TanStack](https://tanstack.com/) (Router + Query)
 - [Tailwind CSS](https://tailwindcss.com/) + [shadcn/ui](https://ui.shadcn.com/)
+- [PeerJS](https://peerjs.com/) for WebRTC streaming
+- [Socket.IO Client](https://socket.io/docs/v4/client-api/) for real-time communication
+
+### Backend
+
 - [Drizzle ORM](https://orm.drizzle.team/) + PostgreSQL
-- Auth based on [Lucia](https://lucia-auth.com/)
-
-Auth providers:
-
-- [x] GitHub
-- [x] Google
-- [x] Discord
+- [Lucia](https://lucia-auth.com/) for authentication
+- [Socket.IO](https://socket.io/) for WebSocket server
+- [PeerJS Server](https://github.com/peers/peerjs-server) for WebRTC signaling
 
 ## Getting Started
 
-1. [Use this template](https://github.com/new?template_name=tanstarter&template_owner=dotnize) or clone this repository.
+1. Clone the repository:
+
+   ```bash
+   git clone https://github.com/yourusername/BhayanakCast.git
+   cd BhayanakCast
+   ```
 
 2. Install dependencies:
 
    ```bash
-   pnpm install # npm install
+   pnpm install
    ```
 
-3. Create a `.env` file based on [`.env.example`](./.env.example).
-
-4. Push the schema to your database with drizzle-kit:
+3. Configure environment variables:
 
    ```bash
    cp .env.example .env
@@ -44,20 +61,13 @@ Auth providers:
    - `DISCORD_CLIENT_SECRET`: Discord application secret
    - `DISCORD_REDIRECT_URI`: OAuth2 callback URL
 
-5. Initialize the database:
+4. Initialize the database:
 
    ```bash
-   pnpm dev # npm run dev
+   pnpm db push
    ```
 
-   The development server should be now running at [http://localhost:3000](http://localhost:3000).
-
-## Building for production
-
-1. Configure [`app.config.ts`](./app.config.ts#L15) for your preferred deployment target. Read the [hosting](https://tanstack.com/router/latest/docs/framework/react/start/hosting#deployment) docs for more information.
-
-2. Build the application:
-
+5. Start the development servers:
    ```bash
    pnpm dev     # Start frontend development server
    pnpm server  # Start WebSocket server
