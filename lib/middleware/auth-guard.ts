@@ -1,4 +1,4 @@
-import { createMiddleware } from "@tanstack/start";
+import { createMiddleware } from "@tanstack/react-start";
 import { setResponseStatus } from "vinxi/http";
 import { getAuthSession } from "~/lib/server/auth";
 

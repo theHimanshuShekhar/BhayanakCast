@@ -7,7 +7,7 @@ import { Plus } from "lucide-react";
 import { LoaderCircle } from "lucide-react";
 import { fetchRooms } from "~/lib/server/db/actions";
 import { RoomCard } from "~/lib/components/ui/room-card";
-import { createServerFn } from "@tanstack/start";
+import { createServerFn } from "@tanstack/react-start";
 import Navbar from "~/lib/components/ui/navbar";
 
 export const Route = createFileRoute("/")({

@@ -1,4 +1,4 @@
-import { createAPIFileRoute } from "@tanstack/start/api";
+import { createAPIFileRoute } from "@tanstack/react-start/api";
 import { generateState } from "arctic";
 import { setCookie, setHeader } from "vinxi/http";
 
