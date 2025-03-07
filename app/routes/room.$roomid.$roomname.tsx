@@ -205,7 +205,7 @@ function RoomPageComponent() {
         </video>
         <div className="col-span-full flex flex-wrap gap-1">
           <UserList
-            streamerID={roomData.streamer}
+            streamerID={roomData.streamer ?? ""}
             userList={roomData.users.filter((user): user is User => user !== null)}
           />
         </div>
