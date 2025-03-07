@@ -17,9 +17,14 @@ function Navbar({ user }: { user: User | null }) {
           <div className="text-center text-lg font-bold md:text-2xl">{user.name}</div>
         </div>
       ) : (
-        <Button asChild className="w-fit bg-gray-600">
-          <Link to="/signin">Login</Link>
-        </Button>
+        <form
+          method="GET"
+          className="flex flex-col gap-2 rounded-lg bg-purple-800 text-white"
+        >
+          <Button formAction="/api/auth/discord" type="submit" size="lg">
+            Sign in
+          </Button>
+        </form>
       )}
     </div>
   );
