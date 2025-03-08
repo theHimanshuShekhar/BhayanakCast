@@ -1,44 +1,40 @@
-#--- Base Stage ---#
-# Alpine-based Node.js for minimal base image size
-FROM node:23.5-alpine AS base
+#--- Base Image ---#
+# Using Bun for better TypeScript/JavaScript performance
+FROM oven/bun AS base
+WORKDIR /usr/src/app
 
-# Configure pnpm for package management
-ENV PNPM_HOME="/pnpm"
-ENV PATH="$PNPM_HOME:$PATH"
+#--- Environment Setup ---#
+# Production mode optimizes for performance and security
+ENV NODE_ENV=production
 
-RUN npm i -g corepack@latest
-RUN corepack enable
-
-# Setup application directory
-COPY . /app
-WORKDIR /app
-
-#--- Production Dependencies ---#
-FROM base AS prod-deps
-# Install and cache production dependencies
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-  pnpm install --prod --frozen-lockfile
+#--- Application Files ---#
+# Copy source code and configuration files
+COPY . .
 
 #--- Test Stage ---#
 FROM base AS test
-# Install all dependencies including dev dependencies
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-  pnpm install --frozen-lockfile
-
+# Set environment to development for tests
+ENV NODE_ENV=development
+# Install all dependencies including devDependencies
+RUN bun install --frozen-lockfile
 # Run Vitest tests
-RUN pnpm run test
+RUN bun test
 
-#--- Build Stage ---#
-FROM base AS build
-# Install all dependencies with build cache
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-  pnpm install --frozen-lockfile
+#--- Builder Stage ---#
+FROM base AS builder
+#--- Dependencies ---#
+# Install production deps with exact versions
+# Excludes dev tools to reduce image size
+RUN bun install --production --frozen-lockfile
 
 # Build SSR application with node-server preset
-RUN pnpm run build --preset node-server
+RUN bun run build
 
 #--- Production Stage ---#
-FROM node:23.5-alpine AS deploy
+FROM oven/bun AS deploy
 # Copy only the optimized production build
-COPY --from=build app/.output .output
-ENTRYPOINT [ "node", ".output/server/index.mjs" ]
+COPY --from=builder /usr/src/app/.output .output
+# Run as non-root user for container security
+USER bun
+# Start the server
+ENTRYPOINT [ "bun", "run", ".output/server/index.mjs" ]
