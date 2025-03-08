@@ -25,7 +25,7 @@ FROM base AS builder
 #--- Dependencies ---#
 # Install production deps with exact versions
 # Excludes dev tools to reduce image size
-RUN bun install --production --frozen-lockfile
+RUN bun install --frozen-lockfile
 
 # Build SSR application with node-server preset
 RUN bun run build
