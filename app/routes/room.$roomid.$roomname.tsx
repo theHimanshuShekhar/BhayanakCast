@@ -50,6 +50,7 @@ function RoomPageComponent() {
   const [roomData, setRoomData] = useState(initialRoomData);
   const [inputText, setInputText] = useState("");
   const [messageList, setMessageList] = useState<Message[]>([]);
+  const [streamer, setStreamer] = useState<string | null>(null);
 
   const userMediaStream = useRef<MediaStream>(null);
   const peerInstance = useRef<Peer | null>(null);
@@ -135,6 +136,10 @@ function RoomPageComponent() {
 
     socket.on("room_update", (roomDetails) => {
       setRoomData(roomDetails);
+      const streamerUser = roomData.users
+        .filter((user): user is User => user !== null && user.uuid === roomData.streamer)
+        .at(0);
+      if (streamerUser) setStreamer(`${streamerUser.name}-${streamerUser.uuid}`);
     });
 
     socket.on("message_update", (message) => {
@@ -168,19 +173,23 @@ function RoomPageComponent() {
         className="col-span-full flex max-h-fit flex-col gap-4 p-2 lg:col-span-4 xl:col-span-6"
       >
         <Navbar user={user} />
-        <Button
-          className="bg-purple-500 text-white"
-          onClick={() => {
-            if (!peerInstance.current) return;
-            console.log("call button clicked");
-            const conn = peerInstance.current.connect(
-              "Goti-5db9ee5f-17d1-4804-9470-73dc4db75419",
-            );
-            conn.on("open", () => conn.send(peerInstance.current?.id));
-          }}
-        >
-          Watch Stream
-        </Button>
+        {isConnected &&
+          streamer &&
+          streamer.split("-").splice(1).join("-") !== user?.uuid && (
+            <Button
+              className="bg-purple-500 text-white"
+              onClick={() => {
+                if (!peerInstance.current) return;
+                console.log("call button clicked");
+                const conn = peerInstance.current.connect(streamer, { reliable: true });
+                conn.on("open", () => conn.send(peerInstance.current?.id));
+              }}
+            >
+              Watch Stream{" "}
+              <span className="font-extrabold">{streamer.split("-").at(0)}</span>
+              <div>{}</div>
+            </Button>
+          )}
         <video
           ref={videoRef}
           className="min-w-full rounded-lg"
