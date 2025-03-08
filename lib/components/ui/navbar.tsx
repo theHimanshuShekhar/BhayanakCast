@@ -1,4 +1,3 @@
-import { Link } from "@tanstack/react-router";
 import { Button } from "~/lib/components/ui/button";
 import type { User } from "~/lib/server/db/schema";
 import { Avatar, AvatarImage } from "./avatar";

@@ -9,12 +9,22 @@ import { fetchRooms } from "~/lib/server/db/actions";
 import { RoomCard } from "~/lib/components/ui/room-card";
 import { createServerFn } from "@tanstack/react-start";
 import Navbar from "~/lib/components/ui/navbar";
+import { queryOptions, QueryClient, useSuspenseQuery } from "@tanstack/react-query";
+
+const roomsQueryOptions = queryOptions({
+  queryKey: ["rooms"],
+  queryFn: () => getRooms(),
+});
+
+const queryClient = new QueryClient();
 
 export const Route = createFileRoute("/")({
   component: Home,
   loader: async () => {
-    return getRooms();
+    return queryClient.ensureQueryData(roomsQueryOptions);
   },
+  preload: true,
+  shouldReload: true,
 });
 
 const getRooms = createServerFn({ method: "GET" }).handler(async () => {
@@ -27,7 +37,7 @@ function Home() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const navigate = useNavigate();
 
-  const roomList = Route.useLoaderData();
+  const { data: rooms } = useSuspenseQuery(roomsQueryOptions);
 
   const handleClick = () => {
     setIsLoading(true);
@@ -83,11 +93,9 @@ function Home() {
             </Button>
           </div>
         </div>
-        <div className="pb-4 text-2xl font-semibold">
-          Active - {roomList.length} Rooms
-        </div>
+        <div className="pb-4 text-2xl font-semibold">Active - {rooms.length} Rooms</div>
         <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-          {roomList.map((room) => (
+          {rooms.map((room) => (
             <div key={room.room.name}>
               <a href={`/room/${room.room.uuid}/${room.room.name}`}>
                 <RoomCard room={room.room} />
