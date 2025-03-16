@@ -1,4 +1,4 @@
-import type { QueryClient } from "@tanstack/react-query";
+import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import {
   createRootRouteWithContext,
   HeadContent,
@@ -12,11 +12,12 @@ import { getWebRequest } from "@tanstack/react-start/server";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 
+import { NavBar } from "~/lib/components/NavBar";
 import { auth } from "~/lib/server/auth";
 import appCss from "~/lib/styles/app.css?url";
 
 const getUser = createServerFn({ method: "GET" }).handler(async () => {
-  const { headers } = getWebRequest()!;
+  const headers = new Headers(getWebRequest()?.headers ?? {});
   const session = await auth.api.getSession({ headers });
 
   return session?.user || null;
@@ -32,6 +33,9 @@ export const Route = createRootRouteWithContext<{
       queryFn: ({ signal }) => getUser({ signal }),
     }); // we're using react-query for caching, see router.tsx
     return { user };
+  },
+  loader: ({ context }) => {
+    return { user: context.user };
   },
   head: () => ({
     meta: [
@@ -60,9 +64,11 @@ function RootComponent() {
 }
 
 function RootDocument({ children }: { readonly children: React.ReactNode }) {
+  const { queryClient } = Route.useRouteContext();
+  const { user } = Route.useLoaderData();
   return (
     // suppress since we're updating the "dark" class in a custom script below
-    <html suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning>
       <head>
         <HeadContent />
       </head>
@@ -74,7 +80,12 @@ function RootDocument({ children }: { readonly children: React.ReactNode }) {
             )`}
         </ScriptOnce>
 
-        {children}
+        <div className="flex flex-col gap-4 p-6">
+          <QueryClientProvider client={queryClient}>
+            <NavBar user={user} />
+          </QueryClientProvider>
+          {children}
+        </div>
 
         <ReactQueryDevtools buttonPosition="bottom-left" />
         <TanStackRouterDevtools position="bottom-right" />
