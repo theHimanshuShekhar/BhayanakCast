@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { SearchBar } from "~/lib/components/Search";
 
 export const Route = createFileRoute("/")({
   component: Home,
@@ -8,5 +9,9 @@ export const Route = createFileRoute("/")({
 });
 
 function Home() {
-  return <></>;
+  return (
+    <>
+      <SearchBar />
+    </>
+  );
 }

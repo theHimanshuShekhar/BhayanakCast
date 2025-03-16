@@ -23,7 +23,7 @@ export function NavBar({ user }: NavBarProps) {
   const router = useRouter();
 
   return (
-    <nav className="flex justify-between items-center p-2">
+    <nav className="flex justify-between items-center gap-2">
       <Link to={"/"}>
         <h1 className="text-4xl font-bold cursor-pointer">BhayanakCast</h1>
       </Link>
@@ -31,12 +31,12 @@ export function NavBar({ user }: NavBarProps) {
         <ThemeToggle />
         {user ? (
           <div className="flex justify-center align-middle gap-2 items-center">
-            <div className="cursor-pointer flex gap-2 items-center font-semibold dark:bg-purple-800 p-1 rounded-md">
+            <div className="cursor-pointer flex gap-2 items-center font-semibold hover:bg-accent p-1 rounded-md">
               <Avatar>
                 <AvatarImage src="https://github.com/shadcn.png" />
                 <AvatarFallback>{user.name.at(0)}</AvatarFallback>
               </Avatar>
-              <div>{user.name}</div>
+              <div className="hidden md:block">{user.name}</div>
             </div>
             <Button
               onClick={async () => {
@@ -47,7 +47,7 @@ export function NavBar({ user }: NavBarProps) {
               type="button"
               className="w-fit"
               variant="destructive"
-              size="lg"
+              size="sm"
             >
               Sign out
             </Button>

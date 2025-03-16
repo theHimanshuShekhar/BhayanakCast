@@ -1,6 +1,7 @@
 services:
   db:
     image: postgres:17.2-alpine
+    container_name: BhayanakCastDB
     ports:
       - 3232:3232
     volumes:
