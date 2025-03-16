@@ -1,5 +1,5 @@
 {
-  "name": "tanstarter",
+  "name": "bhayanakcast",
   "private": true,
   "type": "module",
   "scripts": {
@@ -14,6 +14,7 @@
     "auth:generate": "pnpm dlx @better-auth/cli@latest generate --y --output ./src/lib/server/schema/auth.schema.ts && prettier --write ./src/lib/server/schema/auth.schema.ts"
   },
   "dependencies": {
+    "@radix-ui/react-avatar": "^1.1.3",
     "@radix-ui/react-slot": "^1.1.2",
     "@tanstack/react-query": "^5.67.3",
     "@tanstack/react-query-devtools": "^5.67.3",

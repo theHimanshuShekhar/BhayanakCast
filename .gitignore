@@ -18,5 +18,7 @@ dist
 /server/build
 /public/build
 
+postgres_data
+
 # docker-compose db
 db

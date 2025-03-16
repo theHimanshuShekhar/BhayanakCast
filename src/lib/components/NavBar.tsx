@@ -1,8 +1,9 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "@tanstack/react-router";
+import { Link, useRouter } from "@tanstack/react-router";
 import authClient from "../auth-client";
 import { SignInButton } from "./SignInButton";
 import ThemeToggle from "./ThemeToggle";
+import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Button } from "./ui/button";
 
 interface NavBarProps {
@@ -23,12 +24,20 @@ export function NavBar({ user }: NavBarProps) {
 
   return (
     <nav className="flex justify-between items-center p-2">
-      <h1 className="text-4xl font-bold">BhayanakCast</h1>
-      <div className="flex gap-4 items-center">
+      <Link to={"/"}>
+        <h1 className="text-4xl font-bold cursor-pointer">BhayanakCast</h1>
+      </Link>
+      <div className="flex gap-2 items-center">
         <ThemeToggle />
         {user ? (
-          <div className="flex justify-center align-middle gap-4">
-            <div className="flex items-center font-semibold">{user.name}</div>
+          <div className="flex justify-center align-middle gap-2 items-center">
+            <div className="cursor-pointer flex gap-2 items-center font-semibold dark:bg-purple-800 p-1 rounded-md">
+              <Avatar>
+                <AvatarImage src="https://github.com/shadcn.png" />
+                <AvatarFallback>{user.name.at(0)}</AvatarFallback>
+              </Avatar>
+              <div>{user.name}</div>
+            </div>
             <Button
               onClick={async () => {
                 await authClient.signOut();
