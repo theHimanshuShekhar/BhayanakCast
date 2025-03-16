@@ -3,7 +3,7 @@ import { Button } from "./ui/button";
 
 export function NotFound() {
   return (
-    <div className="space-y-2 p-2">
+    <div className="space-y-2 p-2 flex flex-col h-full justify-center items-center">
       <p>The page you are looking for does not exist.</p>
       <p className="flex flex-wrap items-center gap-2">
         <Button type="button" onClick={() => window.history.back()}>
