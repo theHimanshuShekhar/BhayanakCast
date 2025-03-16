@@ -1,0 +1,11 @@
+services:
+  db:
+    image: postgres:17.2-alpine
+    ports:
+      - 3232:3232
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=bhayanak
+      - PGPORT=3232
