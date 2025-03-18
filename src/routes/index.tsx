@@ -3,13 +3,15 @@ import { createFileRoute } from "@tanstack/react-router";
 import { SearchBar } from "~/lib/components/Search";
 import { getRoomsFromDB } from "~/lib/server/functions";
 
-const cacheTime = 1000 * 2;
+const cacheTime = 1000 * 5;
 
 const roomsQueryOptions = queryOptions({
   queryKey: [],
   queryFn: () => getRoomsFromDB(),
   staleTime: cacheTime,
   gcTime: cacheTime,
+  refetchInterval: cacheTime,
+  refetchOnWindowFocus: true,
 });
 
 export const Route = createFileRoute("/")({

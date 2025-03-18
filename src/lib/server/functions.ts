@@ -37,13 +37,14 @@ export const getRoomFromDB = createServerFn({ method: "GET" })
     return room;
   });
 
-export const getOrCreateRoom = async ({
+const getOrCreateRoom = async ({
   roomid,
   userid,
 }: {
   roomid: string;
   userid: string;
 }) => {
+  console.log(roomid, userid);
   // Check if room exists
   const existingRoom = await db
     .select()
@@ -51,15 +52,12 @@ export const getOrCreateRoom = async ({
     .where(eq(room.id, roomid))
     .limit(1)
     .execute();
-
   if (existingRoom.length > 0) {
     console.info("Existing room found");
     await addUserToRoom({ roomid, userid });
     return existingRoom;
   }
-
   console.info("Creating new room");
-
   // Create new room with user as streamer
   const newRoom = await db
     .insert(room)
@@ -76,19 +74,11 @@ export const getOrCreateRoom = async ({
       console.error("Failed to create new room");
       return new Error("Failed to create new room");
     });
-
   await addUserToRoom({ roomid, userid });
-
   return newRoom;
 };
 
-export const addUserToRoom = async ({
-  roomid,
-  userid,
-}: {
-  roomid: string;
-  userid: string;
-}) => {
+const addUserToRoom = async ({ roomid, userid }: { roomid: string; userid: string }) => {
   // Add room to user
   db.update(user)
     .set({ joinedRoomId: roomid })
@@ -101,6 +91,6 @@ export const getRoomsFromDB = createServerFn({ method: "GET" }).handler(
   async () => await getRooms(),
 );
 
-export const getRooms = async () => {
+const getRooms = async () => {
   return await db.select().from(room).execute();
 };
