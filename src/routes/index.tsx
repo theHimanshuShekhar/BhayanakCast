@@ -1,9 +1,9 @@
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { SearchBar } from "~/lib/components/Search";
-import { getRoomsFromDB } from "~/lib/server/functions";
+import { getRoomsFromDB, removeUserFromRoomDB } from "~/lib/server/functions";
 
-const cacheTime = 1000 * 5;
+const cacheTime = 1000 * 15;
 
 const roomsQueryOptions = queryOptions({
   queryKey: [],
@@ -17,6 +17,8 @@ const roomsQueryOptions = queryOptions({
 export const Route = createFileRoute("/")({
   component: Home,
   loader: async ({ context }) => {
+    if (context.user)
+      removeUserFromRoomDB({ data: { roomid: "", userid: context.user.id } });
     const roomList = context.queryClient.ensureQueryData(roomsQueryOptions);
     return { user: context.user, roomList: roomList };
   },

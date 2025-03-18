@@ -33,7 +33,6 @@ export const getRoomFromDB = createServerFn({ method: "GET" })
   .handler(async (ctx) => {
     const { roomid, userid } = ctx.data;
     const room = await getOrCreateRoom({ roomid, userid });
-    console.log(room);
     return room;
   });
 
@@ -44,7 +43,6 @@ const getOrCreateRoom = async ({
   roomid: string;
   userid: string;
 }) => {
-  console.log(roomid, userid);
   // Check if room exists
   const existingRoom = await db
     .select()
@@ -53,11 +51,10 @@ const getOrCreateRoom = async ({
     .limit(1)
     .execute();
   if (existingRoom.length > 0) {
-    console.info("Existing room found");
     await addUserToRoom({ roomid, userid });
     return existingRoom;
   }
-  console.info("Creating new room");
+
   // Create new room with user as streamer
   const newRoom = await db
     .insert(room)
@@ -72,7 +69,6 @@ const getOrCreateRoom = async ({
     .execute()
     .catch(() => {
       console.error("Failed to create new room");
-      return new Error("Failed to create new room");
     });
   await addUserToRoom({ roomid, userid });
   return newRoom;
@@ -85,6 +81,30 @@ const addUserToRoom = async ({ roomid, userid }: { roomid: string; userid: strin
     .where(eq(user.id, userid))
     .execute()
     .catch(() => console.error("Failed to add room to user"));
+};
+
+export const removeUserFromRoomDB = createServerFn({
+  method: "GET",
+})
+  .validator(({ roomid, userid }: { roomid: string; userid: string }) => {
+    return { roomid, userid };
+  })
+  .handler(async (ctx) => {
+    const { roomid, userid } = ctx.data;
+    await removeUserFromRoom({ roomid, userid }).then(() => {
+      return {
+        message: "Removed user from room",
+      };
+    });
+  });
+
+const removeUserFromRoom = async ({ userid }: { roomid: string; userid: string }) => {
+  // Add room to user
+  db.update(user)
+    .set({ joinedRoomId: null })
+    .where(eq(user.id, userid))
+    .execute()
+    .catch(() => console.error("Failed to remove user from room"));
 };
 
 export const getRoomsFromDB = createServerFn({ method: "GET" }).handler(

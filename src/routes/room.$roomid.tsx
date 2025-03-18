@@ -1,12 +1,17 @@
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { getRoomFromDB, getUserFromDB } from "~/lib/server/functions";
+import {
+  getRoomFromDB,
+  getUserFromDB,
+  removeUserFromRoomDB,
+} from "~/lib/server/functions";
 
-const cacheTime = 1000 * 2;
+const cacheTime = 1000 * 10;
 
 export const Route = createFileRoute("/room/$roomid")({
   component: RouteComponent,
   beforeLoad: async ({ context, params }) => {
+    context.queryClient.invalidateQueries();
     // If user is not logged in, redirect to home page
     const userId = context.user?.id;
     if (!context.user) {
@@ -67,6 +72,10 @@ export const Route = createFileRoute("/room/$roomid")({
       userQueryOptions: context.userQueryOptions,
       roomQueryOptions: context.roomQUeryOptions,
     };
+  },
+  onLeave: async ({ context, params }) => {
+    if (!context.user) return;
+    removeUserFromRoomDB({ data: { roomid: params.roomid, userid: context.user.id } });
   },
   preload: true,
   shouldReload: true,
