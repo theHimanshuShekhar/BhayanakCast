@@ -38,7 +38,7 @@ export const Route = createRootRouteWithContext<{
         content: "width=device-width, initial-scale=1",
       },
       {
-        title: "Bhayanakcast",
+        title: "BhayanakCast",
       },
     ],
     links: [{ rel: "stylesheet", href: appCss }],
