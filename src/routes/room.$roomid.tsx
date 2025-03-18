@@ -2,7 +2,7 @@ import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { getRoomFromDB, getUserFromDB } from "~/lib/server/functions";
 
-const cacheTime = 1000 * 5;
+const cacheTime = 1000 * 2;
 
 export const Route = createFileRoute("/room/$roomid")({
   component: RouteComponent,
