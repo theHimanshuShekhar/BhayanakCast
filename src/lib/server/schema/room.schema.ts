@@ -15,7 +15,7 @@ export const room = pgTable("room", {
 });
 
 export const roomStreamer = relations(room, ({ one }) => ({
-  invitee: one(user, {
+  roomStreamer: one(user, {
     fields: [room.streamer],
     references: [user.id],
   }),
@@ -26,8 +26,8 @@ export const roomViewers = relations(room, ({ many }) => ({
 }));
 
 export const viewerRelations = relations(user, ({ one }) => ({
-  author: one(room, {
-    fields: [user.room],
+  joinedRoom: one(room, {
+    fields: [user.joinedRoomId],
     references: [room.id],
   }),
 }));

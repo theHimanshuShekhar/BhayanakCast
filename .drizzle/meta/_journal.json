@@ -29,6 +29,20 @@
       "when": 1742138242521,
       "tag": "0003_new_white_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1742184636896,
+      "tag": "0004_fast_mulholland_black",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1742184903902,
+      "tag": "0005_orange_black_tarantula",
+      "breakpoints": true
     }
   ]
 }
