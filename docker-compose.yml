@@ -10,3 +10,17 @@ services:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=bhayanak
       - PGPORT=3232
+<<<<<<< HEAD
+=======
+  server:
+    container_name: BhayanakCastServer
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - 3434:3000
+    depends_on:
+      - db
+    environment:
+      - DATABASE_URL=postgresql://postgres:bhayanak@db:3232
