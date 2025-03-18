@@ -10,8 +10,6 @@ services:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=bhayanak
       - PGPORT=3232
-<<<<<<< HEAD
-=======
   server:
     container_name: BhayanakCastServer
     build:
