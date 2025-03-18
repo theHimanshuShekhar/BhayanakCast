@@ -96,3 +96,11 @@ export const addUserToRoom = async ({
     .execute()
     .catch(() => console.error("Failed to add room to user"));
 };
+
+export const getRoomsFromDB = createServerFn({ method: "GET" }).handler(
+  async () => await getRooms(),
+);
+
+export const getRooms = async () => {
+  return await db.select().from(room).execute();
+};
