@@ -1,15 +1,19 @@
 services:
+  # PostgreSQL database service configuration
   db:
     image: postgres:17.2-alpine
     container_name: BhayanakCastDB
     ports:
       - 3232:3232
     volumes:
+      # Persist database data to local directory
       - ./postgres_data:/var/lib/postgresql/data
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=bhayanak
       - PGPORT=3232
+
+  # Tanstack/start application server service
   server:
     container_name: BhayanakCastServer
     build:
@@ -18,9 +22,12 @@ services:
     restart: unless-stopped
     ports:
       - 3434:3434
+    # Ensure database is started before server
     depends_on:
       - db
     env_file:
-      - .env
+      - .env.prod
     environment:
+      # Database connection string for server to connect to PostgreSQL
       - DATABASE_URL=postgresql://postgres:bhayanak@db:3232
+      - PORT:3434

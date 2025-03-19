@@ -5,6 +5,7 @@ yarn.lock
 .DS_Store
 .cache
 .env
+.env.prod
 
 .data
 .vercel
@@ -19,6 +20,12 @@ dist
 /public/build
 
 postgres_data
-
-# docker-compose db
-db
+*.log
+*.sql
+*.sqlite
+*.sqlite3
+*.db
+*.db3
+*.db-journal
+*.db-shm
+*.db-wal

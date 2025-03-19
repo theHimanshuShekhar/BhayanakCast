@@ -9,6 +9,13 @@ export const auth = betterAuth({
     provider: "pg",
   }),
 
+  trustedOrigins: [
+    process.env.VITE_BASE_URL ?? "",
+    process.env.VITE_BASE_URL?.replace("http", "ws") ?? "",
+    process.env.LOCALNETWORK_URL ?? "",
+    process.env.LOCALNETWORK_URL?.replace("http", "ws") ?? "",
+  ],
+
   // https://www.better-auth.com/docs/concepts/session-management#session-caching
   session: {
     cookieCache: {
