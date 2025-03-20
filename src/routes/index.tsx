@@ -55,6 +55,7 @@ function Home() {
             params={{
               roomid: room.id,
             }}
+            preload={false}
             key={room.id}
             className="cursor-pointer"
           >

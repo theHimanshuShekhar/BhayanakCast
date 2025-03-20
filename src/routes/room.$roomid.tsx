@@ -7,7 +7,7 @@ import {
   removeUserFromRoomDB,
 } from "~/lib/server/functions";
 
-const cacheTime = 1000 * 10;
+const cacheTime = 1000 * 5;
 
 export const Route = createFileRoute("/room/$roomid")({
   component: RouteComponent,
@@ -37,11 +37,16 @@ export const Route = createFileRoute("/room/$roomid")({
 
     const roomQueryOptions = queryOptions({
       queryKey: [roomID, context.user.id],
-      queryFn: ({ signal, queryKey }) =>
-        getRoomFromDB({
+      queryFn: ({ signal, queryKey }) => {
+        const [roomid, userid] = queryKey;
+        if (!roomid || !userid) {
+          throw new Error("Invalid room or user ID");
+        }
+        return getRoomFromDB({
           signal,
-          data: { roomid: queryKey[0], userid: queryKey[1] },
-        }),
+          data: { roomid, userid },
+        });
+      },
       staleTime: cacheTime,
       gcTime: cacheTime,
       refetchInterval: cacheTime,
@@ -60,17 +65,10 @@ export const Route = createFileRoute("/room/$roomid")({
       roomQueryOptions: context.roomQueryOptions,
     };
   },
-  onLeave: async ({ context, params }) => {
+  onLeave: ({ context, params }) => {
     if (!context.user) return;
-    await removeUserFromRoomDB({
+    removeUserFromRoomDB({
       data: { roomid: params.roomid, userid: context.user.id },
-    });
-
-    context.queryClient.invalidateQueries({
-      queryKey: [params.roomid, context.user.id],
-    });
-    context.queryClient.invalidateQueries({
-      queryKey: [context.user.id],
     });
   },
   preload: true,

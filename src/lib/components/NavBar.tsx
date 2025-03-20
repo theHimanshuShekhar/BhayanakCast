@@ -31,7 +31,7 @@ export function NavBar({ user }: NavBarProps) {
         <ThemeToggle />
         {user ? (
           <div className="flex justify-center align-middle gap-2 items-center">
-            <UserDisplay id={user.id} name={user.name} image={user.image} />
+            <UserDisplay id={user.id} name={user.name} image={user.image ?? null} />
             <Button
               onClick={async () => {
                 await authClient.signOut();
