@@ -12,15 +12,13 @@ const cacheTime = 1000 * 5;
 export const Route = createFileRoute("/room/$roomid")({
   component: RouteComponent,
   beforeLoad: async ({ context, params }) => {
-    context.queryClient.invalidateQueries();
-
-    if (!context.user?.id) {
+    if (!context.user) {
       throw redirect({ to: "/" });
     }
 
     const userQueryOptions = queryOptions({
-      queryKey: [context.user.id],
-      queryFn: ({ signal, queryKey }) => getUserFromDB({ signal, data: queryKey[0] }),
+      queryKey: ["user", context.user.id],
+      queryFn: ({ signal, queryKey }) => getUserFromDB({ signal, data: queryKey[1] }),
       staleTime: cacheTime,
       gcTime: cacheTime,
       refetchInterval: cacheTime,
@@ -34,17 +32,19 @@ export const Route = createFileRoute("/room/$roomid")({
     }
 
     const roomID = params.roomid;
-
+    if (!roomID) {
+      throw redirect({ to: "/" });
+    }
+    if (!context.user) {
+      throw redirect({ to: "/" });
+    }
     const roomQueryOptions = queryOptions({
-      queryKey: [roomID, context.user.id],
-      queryFn: ({ signal, queryKey }) => {
-        const [roomid, userid] = queryKey;
-        if (!roomid || !userid) {
-          throw new Error("Invalid room or user ID");
-        }
+      queryKey: ["room", roomID, context.user.id, context.user],
+      queryFn: ({ signal }) => {
+        if (!context.user) return;
         return getRoomFromDB({
           signal,
-          data: { roomid, userid },
+          data: { roomid: roomID, userid: context.user.id },
         });
       },
       staleTime: cacheTime,
@@ -78,8 +78,20 @@ export const Route = createFileRoute("/room/$roomid")({
 function RouteComponent() {
   const { userQueryOptions, roomQueryOptions } = Route.useLoaderData();
 
-  const { data: userFromDB } = useSuspenseQuery(userQueryOptions);
-  const { data: roomFromDB } = useSuspenseQuery(roomQueryOptions);
+  const { data: userFromDB } = useSuspenseQuery({
+    ...userQueryOptions,
+    queryFn: () => getUserFromDB({ data: userQueryOptions.queryKey[1] }),
+  });
+  const { data: roomFromDB } = useSuspenseQuery({
+    ...roomQueryOptions,
+    queryFn: () =>
+      getRoomFromDB({
+        data: {
+          roomid: roomQueryOptions.queryKey[1] as string,
+          userid: roomQueryOptions.queryKey[2] as string,
+        },
+      }),
+  });
 
   useEffect(() => {
     if (!userFromDB) {
