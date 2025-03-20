@@ -3,7 +3,7 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { getRoomFromDB, getUserFromDB } from "~/lib/server/functions";
 
-const cacheTime = 1000 * 2;
+const cacheTime = 1000 * 5;
 
 export const Route = createFileRoute("/room/$roomid")({
   component: RouteComponent,
@@ -16,9 +16,12 @@ export const Route = createFileRoute("/room/$roomid")({
       queryKey: ["user", context.user.id],
       queryFn: ({ signal, queryKey }) => getUserFromDB({ signal, data: queryKey[1] }),
       staleTime: cacheTime,
-      gcTime: cacheTime,
-      refetchInterval: cacheTime,
+      refetchInterval: cacheTime + 1,
       refetchOnWindowFocus: true,
+      refetchOnMount: true,
+      refetchOnReconnect: true,
+      retry: 1,
+      retryDelay: 1000,
     });
 
     const userFromDB = await context.queryClient.ensureQueryData(userQueryOptions);
@@ -44,9 +47,12 @@ export const Route = createFileRoute("/room/$roomid")({
         });
       },
       staleTime: cacheTime,
-      gcTime: cacheTime,
-      refetchInterval: cacheTime,
+      refetchInterval: cacheTime + 1,
       refetchOnWindowFocus: true,
+      refetchOnMount: true,
+      refetchOnReconnect: true,
+      retry: 1,
+      retryDelay: 1000,
     });
 
     const roomFromDB = await context.queryClient.ensureQueryData(roomQueryOptions);
