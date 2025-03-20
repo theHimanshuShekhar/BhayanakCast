@@ -112,5 +112,21 @@ export const getRoomsFromDB = createServerFn({ method: "GET" }).handler(
 );
 
 const getRooms = async () => {
-  return await db.select().from(room).execute();
+  return await db
+    .select({
+      id: room.id,
+      name: room.name,
+      description: room.description,
+      image: room.image,
+      createdAt: room.createdAt,
+      updatedAt: room.updatedAt,
+      streamer: {
+        id: user.id,
+        name: user.name,
+        image: user.image,
+      },
+    })
+    .from(room)
+    .leftJoin(user, eq(room.streamer, user.id))
+    .execute();
 };

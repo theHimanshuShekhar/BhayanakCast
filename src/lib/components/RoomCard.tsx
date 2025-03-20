@@ -6,7 +6,11 @@ interface RoomCardProps {
     name: string;
     description: string | null;
     image: string | null;
-    streamer: string;
+    streamer: {
+      id: string;
+      name: string;
+      image: string | null;
+    } | null;
     createdAt: Date;
     updatedAt: Date | null;
   };
@@ -22,12 +26,14 @@ export function RoomCard({ room }: RoomCardProps) {
         style={{ backgroundImage: `url(${image})` }}
       >
         <div className="absolute w-full h-full top-0 left-0 transition duration-300 group-hover/card:bg-gray-300 dark:group-hover/card:bg-black opacity-60" />
-        <div className="flex flex-row items-center space-x-4 z-10">
-          <div className="flex justify-center align-middle gap-2 items-center">
-            <UserDisplay id={streamer} name={streamer.slice(0, 12)} image={null} />
-            <p className="text-sm text-gray-400">{room.createdAt.toDateString()}</p>
+        {streamer && (
+          <div className="flex flex-row items-center space-x-4 z-10">
+            <div className="flex justify-center align-middle gap-2 items-center">
+              <UserDisplay id={streamer.id} name={streamer.name} image={streamer.image} />
+              <p className="text-sm text-gray-400">{room.createdAt.toDateString()}</p>
+            </div>
           </div>
-        </div>
+        )}
         <div className="text content">
           <h1 className="font-bold text-xl md:text-2xl lg:text-4xl dark:text-gray-50 relative z-10">
             {name}
