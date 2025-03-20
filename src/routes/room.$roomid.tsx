@@ -40,7 +40,6 @@ export const Route = createFileRoute("/room/$roomid")({
       queryFn: ({ signal, queryKey }) =>
         getRoomFromDB({
           signal,
-
           data: { roomid: queryKey[0], userid: queryKey[1] },
         }),
       staleTime: cacheTime,
@@ -81,24 +80,24 @@ export const Route = createFileRoute("/room/$roomid")({
 function RouteComponent() {
   const { userQueryOptions, roomQueryOptions } = Route.useLoaderData();
 
-  const { data: user } = useSuspenseQuery(userQueryOptions);
-  const { data: room } = useSuspenseQuery(roomQueryOptions);
+  const { data: userFromDB } = useSuspenseQuery(userQueryOptions);
+  const { data: roomFromDB } = useSuspenseQuery(roomQueryOptions);
 
   useEffect(() => {
-    if (!user) {
+    if (!userFromDB) {
       console.error("User not found");
       return;
     }
-    console.info("Current user", user);
-  }, [user]);
+    console.info("Current user", userFromDB);
+  }, [userFromDB]);
 
-  if (!room) {
+  if (!roomFromDB) {
     return <div>Room not found</div>;
   }
 
   return (
     <div className="room-container">
-      <pre>{JSON.stringify(room, null, 2)}</pre>
+      <pre>{JSON.stringify(roomFromDB, null, 2)}</pre>
     </div>
   );
 }
