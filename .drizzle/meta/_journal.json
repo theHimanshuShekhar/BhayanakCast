@@ -43,6 +43,13 @@
       "when": 1742184903902,
       "tag": "0005_orange_black_tarantula",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1742455724958,
+      "tag": "0006_numerous_praxagora",
+      "breakpoints": true
     }
   ]
 }

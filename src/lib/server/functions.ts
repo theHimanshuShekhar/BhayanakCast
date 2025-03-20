@@ -43,36 +43,82 @@ const getOrCreateRoom = async ({
   roomid: string;
   userid: string;
 }) => {
+  let requestedRoom:
+    | {
+        id: string;
+        name: string;
+        description: string | null;
+        image: string | null;
+        createdAt: Date;
+        updatedAt: Date;
+        streamer: {
+          id: string;
+          name: string;
+          image: string | null;
+        } | null;
+      }
+    | undefined;
+
   // Check if room exists
   const existingRoom = await db
-    .select()
+    .select({
+      id: room.id,
+      name: room.name,
+      description: room.description,
+      image: room.image,
+      createdAt: room.createdAt,
+      updatedAt: room.updatedAt,
+      streamer: user,
+    })
     .from(room)
     .leftJoin(user, eq(room.streamer, user.id))
     .where(eq(room.id, roomid))
     .limit(1)
     .execute();
+
   if (existingRoom.length > 0) {
     await addUserToRoom({ roomid, userid });
-    return existingRoom;
+    requestedRoom = existingRoom[0];
+  } else {
+    // Create new room with user as streamer
+    await db
+      .insert(room)
+      .values({
+        id: roomid,
+        name: roomid,
+        description: "Some Description",
+        image: null,
+        streamer: userid,
+      })
+      .execute()
+      .catch(() => {
+        console.error("Failed to create new room");
+      });
   }
 
-  // Create new room with user as streamer
-  const newRoom = await db
-    .insert(room)
-    .values({
-      id: roomid,
-      name: roomid,
-      description: "Some Description",
-      image: null,
-      streamer: userid,
+  await db
+    .select({
+      id: room.id,
+      name: room.name,
+      description: room.description,
+      image: room.image,
+      createdAt: room.createdAt,
+      updatedAt: room.updatedAt,
+      streamer: {
+        id: user.id,
+        name: user.name,
+        image: user.image,
+      },
     })
-    .returning()
-    .execute()
-    .catch(() => {
-      console.error("Failed to create new room");
-    });
+    .from(room)
+    .leftJoin(user, eq(room.streamer, user.id))
+    .where(eq(room.id, roomid))
+    .limit(1)
+    .execute();
+
   await addUserToRoom({ roomid, userid });
-  return newRoom;
+
+  return requestedRoom;
 };
 
 const addUserToRoom = async ({ roomid, userid }: { roomid: string; userid: string }) => {
@@ -121,11 +167,7 @@ const getRooms = async () => {
       image: room.image,
       createdAt: room.createdAt,
       updatedAt: room.updatedAt,
-      streamer: {
-        id: user.id,
-        name: user.name,
-        image: user.image,
-      },
+      streamer: user,
     })
     .from(room)
     .leftJoin(user, eq(room.streamer, user.id))
