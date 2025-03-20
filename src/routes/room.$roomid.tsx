@@ -1,5 +1,6 @@
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
+import { useEffect } from "react";
 import {
   getRoomFromDB,
   getUserFromDB,
@@ -12,48 +13,35 @@ export const Route = createFileRoute("/room/$roomid")({
   component: RouteComponent,
   beforeLoad: async ({ context, params }) => {
     context.queryClient.invalidateQueries();
-    // If user is not logged in, redirect to home page
-    const userId = context.user?.id;
-    if (!context.user) {
-      throw redirect({
-        to: "/",
-      });
-    }
-    if (!userId) {
-      throw redirect({
-        to: "/",
-      });
+
+    if (!context.user?.id) {
+      throw redirect({ to: "/" });
     }
 
     const userQueryOptions = queryOptions({
-      queryKey: [userId],
-      queryFn: ({ signal }) =>
-        getUserFromDB({
-          signal,
-          data: userId,
-        }),
-
+      queryKey: [context.user.id],
+      queryFn: ({ signal, queryKey }) => getUserFromDB({ signal, data: queryKey[0] }),
       staleTime: cacheTime,
       gcTime: cacheTime,
       refetchInterval: cacheTime,
       refetchOnWindowFocus: true,
     });
 
-    // Get currently logged in user
     const userFromDB = await context.queryClient.ensureQueryData(userQueryOptions);
-    if (!userFromDB)
-      throw redirect({
-        to: "/",
-      });
+
+    if (!userFromDB || userFromDB.length < 1) {
+      throw redirect({ to: "/" });
+    }
 
     const roomID = params.roomid;
 
-    const roomQUeryOptions = queryOptions({
-      queryKey: [roomID, userId],
-      queryFn: ({ signal }) =>
+    const roomQueryOptions = queryOptions({
+      queryKey: [roomID, context.user.id],
+      queryFn: ({ signal, queryKey }) =>
         getRoomFromDB({
           signal,
-          data: { roomid: roomID, userid: userId },
+
+          data: { roomid: queryKey[0], userid: queryKey[1] },
         }),
       staleTime: cacheTime,
       gcTime: cacheTime,
@@ -61,21 +49,23 @@ export const Route = createFileRoute("/room/$roomid")({
       refetchOnWindowFocus: true,
     });
 
-    const roomFromDB = await context.queryClient.ensureQueryData(roomQUeryOptions);
+    const roomFromDB = await context.queryClient.ensureQueryData(roomQueryOptions);
 
-    return { userFromDB, roomFromDB, userQueryOptions, roomQUeryOptions };
+    return { userFromDB, roomFromDB, userQueryOptions, roomQueryOptions };
   },
   loader: ({ context }) => {
     return {
-      user: context.userFromDB,
-      room: context.roomFromDB,
+      userFromDB: context.userFromDB,
+      roomFromDB: context.roomFromDB,
       userQueryOptions: context.userQueryOptions,
-      roomQueryOptions: context.roomQUeryOptions,
+      roomQueryOptions: context.roomQueryOptions,
     };
   },
   onLeave: async ({ context, params }) => {
     if (!context.user) return;
-    removeUserFromRoomDB({ data: { roomid: params.roomid, userid: context.user.id } });
+    await removeUserFromRoomDB({
+      data: { roomid: params.roomid, userid: context.user.id },
+    });
   },
   preload: true,
   shouldReload: true,
@@ -87,14 +77,21 @@ function RouteComponent() {
   const { data: user } = useSuspenseQuery(userQueryOptions);
   const { data: room } = useSuspenseQuery(roomQueryOptions);
 
+  useEffect(() => {
+    if (!user) {
+      console.error("User not found");
+      return;
+    }
+    console.info("Current user", user);
+  }, [user]);
+
+  if (!room) {
+    return <div>Room not found</div>;
+  }
+
   return (
-    <>
-      <div>
-        <pre>{JSON.stringify(user, null, 2)}</pre>
-      </div>
-      <div>
-        <pre>{JSON.stringify(room, null, 2)}</pre>
-      </div>
-    </>
+    <div className="room-container">
+      <pre>{JSON.stringify(room, null, 2)}</pre>
+    </div>
   );
 }
