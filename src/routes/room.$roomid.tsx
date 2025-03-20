@@ -7,7 +7,7 @@ import {
   removeUserFromRoomDB,
 } from "~/lib/server/functions";
 
-const cacheTime = 1000 * 5;
+const cacheTime = 1000 * 2;
 
 export const Route = createFileRoute("/room/$roomid")({
   component: RouteComponent,

@@ -23,7 +23,7 @@ export const roomStreamer = relations(room, ({ one }) => ({
 }));
 
 export const roomViewers = relations(room, ({ many }) => ({
-  user: many(user),
+  viewers: many(user),
 }));
 
 export const viewerRelations = relations(user, ({ one }) => ({
