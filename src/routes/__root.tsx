@@ -71,7 +71,7 @@ function RootDocument({ children }: { readonly children: React.ReactNode }) {
             )`}
         </ScriptOnce>
 
-        <div className="flex flex-col gap-4 p-6">
+        <div className="flex flex-col gap-4 p-6 font-jetbrains-mono">
           <QueryClientProvider client={queryClient}>
             <NavBar user={user} />
           </QueryClientProvider>
