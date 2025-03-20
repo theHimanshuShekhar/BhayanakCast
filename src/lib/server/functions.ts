@@ -123,12 +123,22 @@ const getOrCreateRoom = async ({
 };
 
 const addUserToRoom = async ({ roomid, userid }: { roomid: string; userid: string }) => {
-  // Add room to user
-  db.update(user)
-    .set({ joinedRoomId: roomid })
+  // Add room to user only if not already in a room
+  await db
+    .select()
+    .from(user)
     .where(eq(user.id, userid))
-    .execute()
-    .catch(() => console.error("Failed to add room to user"));
+    .limit(1)
+    .then((users) => {
+      const userdata = users[0];
+      if (userdata.joinedRoomId !== roomid) {
+        db.update(user)
+          .set({ joinedRoomId: roomid })
+          .where(eq(user.id, userdata.id))
+          .execute()
+          .catch(() => console.error("Failed to add room to user"));
+      }
+    });
 };
 
 export const removeUserFromRoomDB = createServerFn({
