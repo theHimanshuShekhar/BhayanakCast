@@ -66,6 +66,13 @@ export const Route = createFileRoute("/room/$roomid")({
     await removeUserFromRoomDB({
       data: { roomid: params.roomid, userid: context.user.id },
     });
+
+    context.queryClient.invalidateQueries({
+      queryKey: [params.roomid, context.user.id],
+    });
+    context.queryClient.invalidateQueries({
+      queryKey: [context.user.id],
+    });
   },
   preload: true,
   shouldReload: true,
