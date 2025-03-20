@@ -77,7 +77,6 @@ const getOrCreateRoom = async ({
     .execute();
 
   if (existingRoom.length > 0) {
-    await addUserToRoom({ roomid, userid });
     requestedRoom = existingRoom[0];
   } else {
     // Create new room with user as streamer
@@ -94,31 +93,33 @@ const getOrCreateRoom = async ({
       .catch(() => {
         console.error("Failed to create new room");
       });
-  }
 
-  await db
-    .select({
-      id: room.id,
-      name: room.name,
-      description: room.description,
-      image: room.image,
-      createdAt: room.createdAt,
-      updatedAt: room.updatedAt,
-      streamer: {
-        id: user.id,
-        name: user.name,
-        image: user.image,
-      },
-    })
-    .from(room)
-    .leftJoin(user, eq(room.streamer, user.id))
-    .where(eq(room.id, roomid))
-    .limit(1)
-    .execute();
+    requestedRoom = (
+      await db
+        .select({
+          id: room.id,
+          name: room.name,
+          description: room.description,
+          image: room.image,
+          createdAt: room.createdAt,
+          updatedAt: room.updatedAt,
+          streamer: {
+            id: user.id,
+            name: user.name,
+            image: user.image,
+          },
+        })
+        .from(room)
+        .leftJoin(user, eq(room.streamer, user.id))
+        .where(eq(room.id, roomid))
+        .limit(1)
+        .execute()
+    )[0];
+  }
 
   await addUserToRoom({ roomid, userid });
 
-  return requestedRoom;
+  return { requestedRoom };
 };
 
 const addUserToRoom = async ({ roomid, userid }: { roomid: string; userid: string }) => {
