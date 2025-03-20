@@ -25,7 +25,7 @@ export function RoomCard({ room }: RoomCardProps) {
         <div className="flex flex-row items-center space-x-4 z-10">
           <div className="flex justify-center align-middle gap-2 items-center">
             <UserDisplay id={streamer} name={streamer.slice(0, 12)} image={null} />
-            <p className="text-sm text-gray-400">{room.createdAt.toLocaleString()}</p>
+            <p className="text-sm text-gray-400">{room.createdAt.toDateString()}</p>
           </div>
         </div>
         <div className="text content">
