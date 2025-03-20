@@ -1,11 +1,7 @@
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect } from "react";
-import {
-  getRoomFromDB,
-  getUserFromDB,
-  removeUserFromRoomDB,
-} from "~/lib/server/functions";
+import { getRoomFromDB, getUserFromDB } from "~/lib/server/functions";
 
 const cacheTime = 1000 * 2;
 
@@ -64,12 +60,6 @@ export const Route = createFileRoute("/room/$roomid")({
       userQueryOptions: context.userQueryOptions,
       roomQueryOptions: context.roomQueryOptions,
     };
-  },
-  onLeave: ({ context, params }) => {
-    if (!context.user) return;
-    removeUserFromRoomDB({
-      data: { roomid: params.roomid, userid: context.user.id },
-    });
   },
   preload: true,
   shouldReload: true,
