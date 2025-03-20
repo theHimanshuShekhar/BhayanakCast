@@ -3,8 +3,8 @@ import { Link, useRouter } from "@tanstack/react-router";
 import authClient from "../auth-client";
 import { SignInButton } from "./SignInButton";
 import ThemeToggle from "./ThemeToggle";
-import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Button } from "./ui/button";
+import UserDisplay from "./UserDisplay";
 
 interface NavBarProps {
   user: {
@@ -31,13 +31,7 @@ export function NavBar({ user }: NavBarProps) {
         <ThemeToggle />
         {user ? (
           <div className="flex justify-center align-middle gap-2 items-center">
-            <div className="cursor-pointer flex gap-2 items-center font-semibold hover:bg-accent p-1 rounded-md">
-              <Avatar>
-                <AvatarImage src="https://github.com/shadcn.png" />
-                <AvatarFallback>{user.name.at(0)}</AvatarFallback>
-              </Avatar>
-              <div className="hidden md:block">{user.name}</div>
-            </div>
+            <UserDisplay id={user.id} name={user.name} image={user.image} />
             <Button
               onClick={async () => {
                 await authClient.signOut();
