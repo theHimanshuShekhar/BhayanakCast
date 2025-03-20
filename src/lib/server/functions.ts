@@ -51,11 +51,7 @@ const getOrCreateRoom = async ({
         image: string | null;
         createdAt: Date;
         updatedAt: Date;
-        streamer: {
-          id: string;
-          name: string;
-          image: string | null;
-        } | null;
+        streamer: typeof user.$inferSelect | null;
       }
     | undefined;
 
@@ -103,11 +99,7 @@ const getOrCreateRoom = async ({
           image: room.image,
           createdAt: room.createdAt,
           updatedAt: room.updatedAt,
-          streamer: {
-            id: user.id,
-            name: user.name,
-            image: user.image,
-          },
+          streamer: user,
         })
         .from(room)
         .leftJoin(user, eq(room.streamer, user.id))
@@ -119,7 +111,19 @@ const getOrCreateRoom = async ({
 
   await addUserToRoom({ roomid, userid });
 
-  return { requestedRoom };
+  // Get all viewers of room
+  const viewers = await db
+    .select()
+    .from(user)
+    .where(eq(user.joinedRoomId, roomid))
+    .execute();
+
+  const returnedRoom = {
+    ...requestedRoom,
+    viewers,
+  };
+
+  return returnedRoom;
 };
 
 const addUserToRoom = async ({ roomid, userid }: { roomid: string; userid: string }) => {
