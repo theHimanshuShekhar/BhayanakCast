@@ -1,5 +1,6 @@
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { RoomCard } from "~/lib/components/RoomCard";
 import { SearchBar } from "~/lib/components/Search";
 import { getRoomsFromDB, removeUserFromRoomDB } from "~/lib/server/functions";
 
@@ -31,7 +32,7 @@ function Home() {
   return (
     <>
       <SearchBar />
-      <div className="grid grid-cols-3 gap-4 border ">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {roomList.map((room) => (
           <Link
             to="/room/$roomid"
@@ -41,11 +42,7 @@ function Home() {
             key={room.id}
             className="cursor-pointer"
           >
-            <div className="flex flex-col text-sm items-center text-center p-2 border-4 border-purple-500">
-              <div className="font-semibold text-xl">{room.name}</div>
-              <div>{room.description}</div>
-              <div>{room.createdAt.toDateString()}</div>
-            </div>
+            <RoomCard room={room} />
           </Link>
         ))}
       </div>
