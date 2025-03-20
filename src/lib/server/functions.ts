@@ -47,6 +47,7 @@ const getOrCreateRoom = async ({
   const existingRoom = await db
     .select()
     .from(room)
+    .leftJoin(user, eq(room.streamer, user.id))
     .where(eq(room.id, roomid))
     .limit(1)
     .execute();
