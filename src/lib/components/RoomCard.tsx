@@ -23,7 +23,7 @@ export function RoomCard({ room }: RoomCardProps) {
     <div className="w-full group/card">
       <div
         className="cursor-pointer border overflow-hidden relative card h-96 rounded-md shadow-xl backgroundImage flex flex-col justify-between p-4 dark:bg-gray-900 bg-cover"
-        style={{ backgroundImage: `url(${image})` }}
+        style={{ backgroundImage: image ? `url(${image})` : "none" }}
       >
         <div className="absolute w-full h-full top-0 left-0 transition duration-300 group-hover/card:bg-gray-300 dark:group-hover/card:bg-black opacity-60" />
         {streamer && (
