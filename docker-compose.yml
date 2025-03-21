@@ -15,7 +15,7 @@ services:
 
   # Tanstack/start application server service
   server:
-    image: http://ghcr.io/thehimanshushekhar/bhayanakcast/client:latest
+    image: ghcr.io/thehimanshushekhar/bhayanakcast/client:latest
     container_name: BhayanakCastServer
     # build:
     #   context: .
