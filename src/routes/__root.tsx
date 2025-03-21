@@ -1,4 +1,4 @@
-import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
+import { type QueryClient } from "@tanstack/react-query";
 import {
   createRootRouteWithContext,
   HeadContent,
@@ -71,10 +71,8 @@ function RootDocument({ children }: { readonly children: React.ReactNode }) {
             )`}
         </ScriptOnce>
 
-        <div className="flex flex-col gap-4 p-6 font-jetbrains-mono">
-          <QueryClientProvider client={queryClient}>
-            <NavBar user={user} />
-          </QueryClientProvider>
+        <div className="flex flex-col gap-4 p-6 font-jetbrains-mono min-h-screen border-4 border-yellow-500">
+          <NavBar user={user} />
           {children}
         </div>
 

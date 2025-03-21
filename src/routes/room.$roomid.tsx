@@ -105,9 +105,15 @@ function RouteComponent() {
   }
 
   return (
-    <div className="room-container">
-      <div>{serverURL}</div>
-      <pre>{JSON.stringify(roomFromDB, null, 2)}</pre>
+    <div className="grow grid grid-cols-3 gap-2 border-2 border-red-500">
+      <div className="border-2 border-blue-300 col-span-full md:col-span-2 flex flex-col gap-2">
+        <div className="grow border min-h-[240px]">Stream Player</div>
+        <div>Streamer and Viewers</div>
+      </div>
+      <div className="border-2 border-blue-300 flex flex-col col-span-full md:col-span-1 gap-2">
+        <div>Stream Info</div>
+        <div className="border grow min-h-[300px]">Stream Chat</div>
+      </div>
     </div>
   );
 }
