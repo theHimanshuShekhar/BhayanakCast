@@ -71,7 +71,7 @@ function RootDocument({ children }: { readonly children: React.ReactNode }) {
             )`}
         </ScriptOnce>
 
-        <div className="flex flex-col gap-4 p-6 font-jetbrains-mono min-h-screen border-4 border-yellow-500">
+        <div className="flex flex-col gap-4 p-6 font-jetbrains-mono min-h-screen">
           <NavBar user={user} />
           {children}
         </div>

@@ -1,6 +1,7 @@
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect } from "react";
+import ViewerDisplay from "~/lib/components/ViewerDisplay";
 import { getRoomFromDB, getServerURL, getUserFromDB } from "~/lib/server/functions";
 
 const cacheTime = 1000 * 5;
@@ -105,14 +106,29 @@ function RouteComponent() {
   }
 
   return (
-    <div className="grow grid grid-cols-3 gap-2 border-2 border-red-500">
-      <div className="border-2 border-blue-300 col-span-full md:col-span-2 flex flex-col gap-2">
+    <div className="grow grid grid-cols-3 gap-2">
+      <div className="border-2 border-blue-300 col-span-full md:col-span-2 flex flex-col">
         <div className="grow border min-h-[240px]">Stream Player</div>
-        <div>Streamer and Viewers</div>
+        <div className="flex gap-1 p-2">
+          {roomFromDB.viewers.map((viewer) => (
+            <ViewerDisplay
+              id={viewer.id}
+              image={viewer.image}
+              name={viewer.name}
+              key={viewer.id}
+            />
+          ))}
+        </div>
       </div>
-      <div className="border-2 border-blue-300 flex flex-col col-span-full md:col-span-1 gap-2">
-        <div>Stream Info</div>
-        <div className="border grow min-h-[300px]">Stream Chat</div>
+      <div className="border-2 border-blue-300 flex flex-col col-span-full md:col-span-1 gap-2 p-2">
+        <div className="flex flex-col gap-1">
+          <div className="text-xl font-bold">{roomFromDB.name}</div>
+          <div className="text-sm">{roomFromDB.description}</div>
+        </div>
+        <div className="border grow min-h-[300px] flex flex-col gap-1">
+          <div className="border grow">Stream Chat</div>
+          <div className="border">Input Box</div>
+        </div>
       </div>
     </div>
   );
