@@ -7,10 +7,13 @@ import { room, user } from "./schema";
 
 export const getServerURL = createServerFn({ method: "GET" }).handler(() => {
   const request = getWebRequest();
+  // get if the request is secure
+  const isSecure = request?.headers.get("x-forwarded-proto") === "https";
+  const protocol = isSecure ? "https" : "http";
   const host = request?.headers.get("x-forwarded-host") || request?.headers.get("host");
   const port = request?.headers.get("x-forwarded-port") || request?.headers.get("port");
   const serverURL = `${host}${port ? `:${port}` : ""}`;
-  return serverURL;
+  return { serverURL, protocol };
 });
 
 export const getUser = createServerFn({ method: "GET" }).handler(async () => {
