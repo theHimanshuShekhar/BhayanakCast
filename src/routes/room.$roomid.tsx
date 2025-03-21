@@ -1,6 +1,6 @@
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { useEffect } from "react";
+import useWebSocket, { ReadyState } from "react-use-websocket";
 import ViewerDisplay from "~/lib/components/ViewerDisplay";
 import { getRoomFromDB, getServerURL, getUserFromDB } from "~/lib/server/functions";
 
@@ -13,7 +13,7 @@ export const Route = createFileRoute("/room/$roomid")({
       throw redirect({ to: "/" });
     }
 
-    const serverURL = await getServerURL();
+    const serverInfo = await getServerURL();
 
     const userQueryOptions = queryOptions({
       queryKey: ["user", context.user.id],
@@ -60,7 +60,7 @@ export const Route = createFileRoute("/room/$roomid")({
 
     const roomFromDB = await context.queryClient.ensureQueryData(roomQueryOptions);
 
-    return { userFromDB, roomFromDB, userQueryOptions, roomQueryOptions, serverURL };
+    return { userFromDB, roomFromDB, userQueryOptions, roomQueryOptions, serverInfo };
   },
   loader: ({ context }) => {
     return {
@@ -68,7 +68,7 @@ export const Route = createFileRoute("/room/$roomid")({
       roomFromDB: context.roomFromDB,
       userQueryOptions: context.userQueryOptions,
       roomQueryOptions: context.roomQueryOptions,
-      serverURL: context.serverURL,
+      serverInfo: context.serverInfo,
     };
   },
   preload: true,
@@ -76,7 +76,7 @@ export const Route = createFileRoute("/room/$roomid")({
 });
 
 function RouteComponent() {
-  const { userQueryOptions, roomQueryOptions, serverURL } = Route.useLoaderData();
+  const { userQueryOptions, roomQueryOptions, serverInfo } = Route.useLoaderData();
 
   const { data: userFromDB } = useSuspenseQuery({
     ...userQueryOptions,
@@ -93,13 +93,31 @@ function RouteComponent() {
       }),
   });
 
-  useEffect(() => {
-    if (!userFromDB) {
-      console.error("User not found");
-      return;
-    }
-    console.info("Current user", userFromDB);
-  }, [userFromDB]);
+  const { readyState } = useWebSocket(
+    `${serverInfo.protocol === "https" ? "wss" : "ws"}://${serverInfo.serverURL}/_ws`,
+    {
+      shouldReconnect: () => typeof window !== "undefined",
+      onOpen: () => {
+        console.log("WebSocket connection opened");
+      },
+      onClose: () => {
+        console.log("WebSocket connection closed");
+      },
+      onError: (error) => {
+        console.error("WebSocket error", error);
+      },
+    },
+  );
+
+  const connectionStatus = {
+    [ReadyState.CONNECTING]: "Connecting",
+    [ReadyState.OPEN]: "Connected",
+    [ReadyState.CLOSING]: "Closing",
+    [ReadyState.CLOSED]: "Closed",
+    [ReadyState.UNINSTANTIATED]: "Uninstantiated",
+  }[readyState];
+
+  console.info("userFromDB", userFromDB);
 
   if (!roomFromDB) {
     return <div>Room not found</div>;
@@ -124,6 +142,7 @@ function RouteComponent() {
         <div className="flex flex-col gap-1">
           <div className="text-xl font-bold">{roomFromDB.name}</div>
           <div className="text-sm">{roomFromDB.description}</div>
+          <div>{connectionStatus}</div>
         </div>
         <div className="border grow min-h-[300px] flex flex-col gap-1">
           <div className="border grow">Stream Chat</div>
