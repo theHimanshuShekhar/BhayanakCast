@@ -15,10 +15,11 @@ services:
 
   # Tanstack/start application server service
   server:
+    image: http://ghcr.io/thehimanshushekhar/bhayanakcast/client:latest
     container_name: BhayanakCastServer
-    build:
-      context: .
-      dockerfile: Dockerfile
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
     restart: unless-stopped
     ports:
       - 3434:3434
