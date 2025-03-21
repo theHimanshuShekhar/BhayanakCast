@@ -5,6 +5,14 @@ import { auth } from "./auth";
 import { db } from "./db";
 import { room, user } from "./schema";
 
+export const getServerURL = createServerFn({ method: "GET" }).handler(() => {
+  const request = getWebRequest();
+  const host = request?.headers.get("x-forwarded-host") || request?.headers.get("host");
+  const port = request?.headers.get("x-forwarded-port") || request?.headers.get("port");
+  const serverURL = `${host}${port ? `:${port}` : ""}`;
+  return serverURL;
+});
+
 export const getUser = createServerFn({ method: "GET" }).handler(async () => {
   const headers = new Headers(getWebRequest()?.headers ?? {});
   const session = await auth.api.getSession({ headers });

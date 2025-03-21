@@ -1,7 +1,7 @@
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect } from "react";
-import { getRoomFromDB, getUserFromDB } from "~/lib/server/functions";
+import { getRoomFromDB, getServerURL, getUserFromDB } from "~/lib/server/functions";
 
 const cacheTime = 1000 * 5;
 
@@ -11,6 +11,8 @@ export const Route = createFileRoute("/room/$roomid")({
     if (!context.user) {
       throw redirect({ to: "/" });
     }
+
+    const serverURL = await getServerURL();
 
     const userQueryOptions = queryOptions({
       queryKey: ["user", context.user.id],
@@ -57,7 +59,7 @@ export const Route = createFileRoute("/room/$roomid")({
 
     const roomFromDB = await context.queryClient.ensureQueryData(roomQueryOptions);
 
-    return { userFromDB, roomFromDB, userQueryOptions, roomQueryOptions };
+    return { userFromDB, roomFromDB, userQueryOptions, roomQueryOptions, serverURL };
   },
   loader: ({ context }) => {
     return {
@@ -65,6 +67,7 @@ export const Route = createFileRoute("/room/$roomid")({
       roomFromDB: context.roomFromDB,
       userQueryOptions: context.userQueryOptions,
       roomQueryOptions: context.roomQueryOptions,
+      serverURL: context.serverURL,
     };
   },
   preload: true,
@@ -72,7 +75,7 @@ export const Route = createFileRoute("/room/$roomid")({
 });
 
 function RouteComponent() {
-  const { userQueryOptions, roomQueryOptions } = Route.useLoaderData();
+  const { userQueryOptions, roomQueryOptions, serverURL } = Route.useLoaderData();
 
   const { data: userFromDB } = useSuspenseQuery({
     ...userQueryOptions,
@@ -103,6 +106,7 @@ function RouteComponent() {
 
   return (
     <div className="room-container">
+      <div>{serverURL}</div>
       <pre>{JSON.stringify(roomFromDB, null, 2)}</pre>
     </div>
   );
