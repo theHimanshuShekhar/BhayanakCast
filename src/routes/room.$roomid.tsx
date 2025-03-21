@@ -1,6 +1,7 @@
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect } from "react";
+import useWebSocket, { ReadyState } from "react-use-websocket";
 import ViewerDisplay from "~/lib/components/ViewerDisplay";
 import { getRoomFromDB, getServerURL, getUserFromDB } from "~/lib/server/functions";
 
@@ -93,6 +94,27 @@ function RouteComponent() {
       }),
   });
 
+  const { readyState } = useWebSocket(`ws://${serverURL}/_ws`, {
+    shouldReconnect: () => typeof window !== "undefined",
+    onOpen: () => {
+      console.log("WebSocket connection opened");
+    },
+    onClose: () => {
+      console.log("WebSocket connection closed");
+    },
+    onError: (error) => {
+      console.error("WebSocket error", error);
+    },
+  });
+
+  const connectionStatus = {
+    [ReadyState.CONNECTING]: "Connecting",
+    [ReadyState.OPEN]: "Connected",
+    [ReadyState.CLOSING]: "Closing",
+    [ReadyState.CLOSED]: "Closed",
+    [ReadyState.UNINSTANTIATED]: "Uninstantiated",
+  }[readyState];
+
   useEffect(() => {
     if (!userFromDB) {
       console.error("User not found");
@@ -124,6 +146,7 @@ function RouteComponent() {
         <div className="flex flex-col gap-1">
           <div className="text-xl font-bold">{roomFromDB.name}</div>
           <div className="text-sm">{roomFromDB.description}</div>
+          <div>{connectionStatus}</div>
         </div>
         <div className="border grow min-h-[300px] flex flex-col gap-1">
           <div className="border grow">Stream Chat</div>
