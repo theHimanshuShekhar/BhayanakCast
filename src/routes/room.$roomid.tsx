@@ -4,17 +4,26 @@ import useWebSocket, { ReadyState } from "react-use-websocket";
 import ViewerDisplay from "~/lib/components/ViewerDisplay";
 import { getRoomFromDB, getServerURL, getUserFromDB } from "~/lib/server/functions";
 
+// Cache time for query data (5 seconds)
 const cacheTime = 1000 * 5;
 
+// Create a route for /room/$roomid
 export const Route = createFileRoute("/room/$roomid")({
+  // Define the component to render for this route
   component: RouteComponent,
+  ssr: false,
+
+  // Function to run before the component loads
   beforeLoad: async ({ context, params }) => {
+    // Redirect to home if the user is not authenticated
     if (!context.user) {
       throw redirect({ to: "/" });
     }
 
+    // Fetch server URL
     const serverInfo = await getServerURL();
 
+    // Configure query options for fetching user data
     const userQueryOptions = queryOptions({
       queryKey: ["user", context.user.id],
       queryFn: ({ signal, queryKey }) => getUserFromDB({ signal, data: queryKey[1] }),
@@ -93,21 +102,22 @@ function RouteComponent() {
       }),
   });
 
-  const { readyState } = useWebSocket(
-    `${serverInfo.protocol === "https" ? "wss" : "ws"}://${serverInfo.serverURL}/_ws`,
-    {
-      shouldReconnect: () => typeof window !== "undefined",
-      onOpen: () => {
-        console.log("WebSocket connection opened");
-      },
-      onClose: () => {
-        console.log("WebSocket connection closed");
-      },
-      onError: (error) => {
-        console.error("WebSocket error", error);
-      },
+  // Construct WebSocket URL
+  const wsURL = `${serverInfo.protocol === "https" ? "wss" : "ws"}://${serverInfo.serverURL}/_ws`;
+
+  // Use WebSocket hook
+  const { readyState } = useWebSocket(wsURL, {
+    shouldReconnect: () => typeof window !== "undefined",
+    onOpen: () => {
+      console.log("WebSocket connection opened");
     },
-  );
+    onClose: () => {
+      console.log("WebSocket connection closed");
+    },
+    onError: (error) => {
+      console.error("WebSocket error", error);
+    },
+  });
 
   const connectionStatus = {
     [ReadyState.CONNECTING]: "Connecting",
