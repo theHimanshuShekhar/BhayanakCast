@@ -1,5 +1,6 @@
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
+import ReactPlayer from "react-player";
 import useWebSocket, { ReadyState } from "react-use-websocket";
 import ViewerDisplay from "~/lib/components/ViewerDisplay";
 import { getRoomFromDB, getServerURL, getUserFromDB } from "~/lib/server/functions";
@@ -107,6 +108,7 @@ function RouteComponent() {
 
   // Use WebSocket hook
   const { readyState } = useWebSocket(wsURL, {
+    retryOnError: true,
     shouldReconnect: () => typeof window !== "undefined",
     onOpen: () => {
       console.log("WebSocket connection opened");
@@ -135,8 +137,13 @@ function RouteComponent() {
 
   return (
     <div className="grow grid grid-cols-3 gap-2">
-      <div className="border-2 border-blue-300 col-span-full md:col-span-2 flex flex-col">
-        <div className="grow border min-h-[240px]">Stream Player</div>
+      <div className="border col-span-full md:col-span-2 flex flex-col dark:bg-gray-900 rounded-md shadow-xl">
+        <div className="min-w-full min-h-[500px] rounded-md overflow-hidden dark:bg-gray-900">
+          <ReactPlayer
+            className="min-w-full min-h-full rounded-md overflow-hidden border-none max-h-full max-w-full"
+            url="https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4"
+          />
+        </div>
         <div className="flex gap-1 p-2">
           {roomFromDB.viewers.map((viewer) => (
             <ViewerDisplay
@@ -148,13 +155,19 @@ function RouteComponent() {
           ))}
         </div>
       </div>
-      <div className="border-2 border-blue-300 flex flex-col col-span-full md:col-span-1 gap-2 p-2">
+      <div className="flex flex-col col-span-full md:col-span-1 gap-2 p-2 border dark:bg-gray-900 rounded-md shadow-xl">
         <div className="flex flex-col gap-1">
-          <div className="text-xl font-bold">{roomFromDB.name}</div>
+          <div className="flex justify-between gap-1 items-center">
+            <div className="font-bold text-xl">{roomFromDB.name}</div>
+            <div
+              className={`inline-block p-2 rounded-md text-white text-sm ${connectionStatus === "Connected" ? "bg-green-500 dark:bg-green-900" : "bg-red-500 dark:bg-red-900"}`}
+            >
+              {connectionStatus}
+            </div>
+          </div>
           <div className="text-sm">{roomFromDB.description}</div>
-          <div>{connectionStatus}</div>
         </div>
-        <div className="border grow min-h-[300px] flex flex-col gap-1">
+        <div className="grow min-h-[300px] flex flex-col gap-1 ">
           <div className="border grow">Stream Chat</div>
           <div className="border">Input Box</div>
         </div>

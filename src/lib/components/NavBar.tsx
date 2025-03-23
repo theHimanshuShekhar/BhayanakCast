@@ -24,8 +24,12 @@ export function NavBar({ user }: NavBarProps) {
 
   return (
     <nav className="flex justify-between items-center gap-2">
-      <Link to={"/"}>
-        <h1 className="text-4xl font-bold cursor-pointer">BhayanakCast</h1>
+      <Link to={"/"} className="flex gap-1 items-center">
+        {/* <Avatar className="border-2 dark:border-gray-100 border-gray-900 shadow-xl h-12 w-12">
+          <AvatarImage src="/public/gman.png" alt="BCLogo" />
+          <AvatarFallback className="bg-gray-500 text-white">BC</AvatarFallback>
+        </Avatar> */}
+        <h1 className="text-2xl md:text-4xl font-bold cursor-pointer">BhayanakCast</h1>
       </Link>
       <div className="flex gap-2 items-center">
         <ThemeToggle />
@@ -39,7 +43,7 @@ export function NavBar({ user }: NavBarProps) {
                 await router.invalidate();
               }}
               type="button"
-              className="w-fit"
+              className="w-fit hidden"
               variant="destructive"
               size="sm"
             >
