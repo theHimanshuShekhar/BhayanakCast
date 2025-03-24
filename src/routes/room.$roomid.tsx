@@ -148,29 +148,28 @@ function RouteComponent() {
   return (
     <div className="grow grid grid-cols-3 gap-2">
       <div className="col-span-full lg:col-span-2 flex flex-col rounded-md gap-2">
-        <div className="min-w-full rounded-md overflow-hidden dark:bg-gray-900">
+        <div className="min-w-full rounded-md overflow-hidden bg-black grow">
           <ErrorBoundary FallbackComponent={VideoErrorFallback}>
-            <div className="rounded-md overflow-hidden">
-              <ReactPlayer
-                className="min-w-full min-h-full rounded-md overflow-hidden border-none max-h-full max-w-full"
-                url={
-                  "https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4"
-                }
-                controls
-                muted
-                width="100%"
-                height="100%"
-                config={{
-                  file: {
-                    attributes: {
-                      controlsList: "nodownload",
-                      disablePictureInPicture: true,
-                    },
+            <ReactPlayer
+              className="min-w-full min-h-full rounded-md overflow-hidden border-none max-h-full max-w-full border-3 border-yellow-500"
+              url={
+                "https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4"
+                // "https://www.youtube.com/watch?v=wjQ-8YEi7-k"
+              }
+              controls
+              muted
+              width="100%"
+              height="100%"
+              config={{
+                file: {
+                  attributes: {
+                    controlsList: "nodownload",
+                    disablePictureInPicture: true,
                   },
-                }}
-                key={typeof window === "undefined" ? "server" : "client"}
-              />
-            </div>
+                },
+              }}
+              key={typeof window === "undefined" ? "server" : "client"}
+            />
           </ErrorBoundary>
         </div>
         <div className="flex gap-1">
