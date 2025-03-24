@@ -147,10 +147,10 @@ function RouteComponent() {
 
   return (
     <div className="grow grid grid-cols-3 gap-2">
-      <div className="p-2 border col-span-full lg:col-span-2 flex flex-col bg-white dark:bg-gray-800 rounded-md shadow-xl">
-        <div className="min-w-full min-h-[400px] xl:min-h-[600px] rounded-md overflow-hidden dark:bg-gray-900">
+      <div className="col-span-full lg:col-span-2 flex flex-col rounded-md gap-2">
+        <div className="min-w-full rounded-md overflow-hidden dark:bg-gray-900">
           <ErrorBoundary FallbackComponent={VideoErrorFallback}>
-            <div className="w-full h-full rounded-md overflow-hidden">
+            <div className="rounded-md overflow-hidden">
               <ReactPlayer
                 className="min-w-full min-h-full rounded-md overflow-hidden border-none max-h-full max-w-full"
                 url={
@@ -173,7 +173,7 @@ function RouteComponent() {
             </div>
           </ErrorBoundary>
         </div>
-        <div className="flex gap-1 p-2">
+        <div className="flex gap-1">
           {roomFromDB.viewers.map((viewer) => (
             <ViewerDisplay
               id={viewer.id}
