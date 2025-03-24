@@ -109,7 +109,7 @@ function RouteComponent() {
   // Use WebSocket hook
   const { readyState } = useWebSocket(wsURL, {
     retryOnError: true,
-    shouldReconnect: () => typeof window !== "undefined",
+    shouldReconnect: () => true,
     onOpen: () => {
       console.log("WebSocket connection opened");
     },
