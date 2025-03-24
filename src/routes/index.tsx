@@ -1,15 +1,20 @@
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import debounce from "lodash/debounce";
+import { useCallback, useState } from "react";
 import { RoomCard } from "~/lib/components/RoomCard";
 import { SearchBar } from "~/lib/components/Search";
 import { getRoomsFromDB, removeUserFromRoomDB } from "~/lib/server/functions";
+import type { RoomBase } from "~/lib/types";
 
 const cacheTime = 1000 * 15;
 
 const roomsQueryOptions = queryOptions({
-  queryKey: [],
-  queryFn: () => getRoomsFromDB(),
+  queryKey: ["rooms"],
+  queryFn: async () => {
+    const rooms = await getRoomsFromDB();
+    return rooms;
+  },
   staleTime: cacheTime,
   gcTime: cacheTime,
   refetchInterval: cacheTime,
@@ -19,9 +24,12 @@ const roomsQueryOptions = queryOptions({
 export const Route = createFileRoute("/")({
   component: Home,
   loader: async ({ context }) => {
-    if (context.user)
-      removeUserFromRoomDB({ data: { roomid: "", userid: context.user.id } });
-    const roomList = context.queryClient.ensureQueryData(roomsQueryOptions);
+    // Only remove user from room if they were previously in one
+    const user = context.user;
+    if (user?.id) {
+      await removeUserFromRoomDB({ data: { roomid: "", userid: user.id } });
+    }
+    const roomList = await context.queryClient.ensureQueryData(roomsQueryOptions);
     return { user: context.user, roomList: roomList };
   },
   preload: true,
@@ -32,22 +40,22 @@ function Home() {
   const { data: roomList } = useSuspenseQuery(roomsQueryOptions);
   const [searchString, setSearchString] = useState<string | null>(null);
 
-  const getFilteredRooms = (rooms: typeof roomList, search: string | null) => {
-    if (search && search.length > 0) {
-      // Filter rooms based on the search string
-      // Assuming rooms is an array of objects with a 'name' property
-      return rooms.filter((room) =>
-        room.name.toLowerCase().includes(search.toLowerCase()),
-      );
-    }
-    return rooms;
+  const debouncedSetSearch = useCallback((value: string | null) => {
+    const fn = debounce((v: string | null) => setSearchString(v), 300);
+    fn(value);
+  }, []);
+
+  const getFilteredRooms = (rooms: RoomBase[], search: string | null) => {
+    if (!search) return rooms;
+    const searchLower = search.toLowerCase();
+    return rooms.filter((room) => room.name.toLowerCase().includes(searchLower));
   };
 
   const filteredRooms = getFilteredRooms(roomList, searchString);
 
   return (
     <>
-      <SearchBar setSearchString={setSearchString} />
+      <SearchBar setSearchString={debouncedSetSearch} />
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {filteredRooms.map((room) => (
           <Link

@@ -1,5 +1,6 @@
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
+import { ErrorBoundary } from "react-error-boundary";
 import ReactPlayer from "react-player";
 import useWebSocket, { ReadyState } from "react-use-websocket";
 import ViewerDisplay from "~/lib/components/ViewerDisplay";
@@ -8,57 +9,42 @@ import { getRoomFromDB, getServerURL, getUserFromDB } from "~/lib/server/functio
 // Cache time for query data (5 seconds)
 const cacheTime = 1000 * 5;
 
+// Error fallback component for ReactPlayer
+function VideoErrorFallback({ error }: { error: Error }) {
+  return (
+    <div className="flex items-center justify-center h-full bg-red-100 dark:bg-red-900">
+      <div className="text-center">
+        <h3 className="text-lg font-semibold text-red-800 dark:text-red-200">
+          Error loading video
+        </h3>
+        <p className="text-sm text-red-600 dark:text-red-300">{error.message}</p>
+      </div>
+    </div>
+  );
+}
+
 // Create a route for /room/$roomid
 export const Route = createFileRoute("/room/$roomid")({
-  // Define the component to render for this route
   component: RouteComponent,
   ssr: false,
 
-  // Function to run before the component loads
   beforeLoad: async ({ context, params }) => {
-    // Redirect to home if the user is not authenticated
     if (!context.user) {
       throw redirect({ to: "/" });
     }
 
-    // Fetch server URL
     const serverInfo = await getServerURL();
-
-    // Configure query options for fetching user data
-    const userQueryOptions = queryOptions({
-      queryKey: ["user", context.user.id],
-      queryFn: ({ signal, queryKey }) => getUserFromDB({ signal, data: queryKey[1] }),
-      staleTime: cacheTime,
-      refetchInterval: cacheTime + 1,
-      refetchOnWindowFocus: true,
-      refetchOnMount: true,
-      refetchOnReconnect: true,
-      retry: 1,
-      retryDelay: 1000,
-    });
-
-    const userFromDB = await context.queryClient.ensureQueryData(userQueryOptions);
-
-    if (!userFromDB || userFromDB.length < 1) {
-      throw redirect({ to: "/" });
-    }
-
     const roomID = params.roomid;
+    const userId = context.user.id;
+
     if (!roomID) {
       throw redirect({ to: "/" });
     }
-    if (!context.user) {
-      throw redirect({ to: "/" });
-    }
-    const roomQueryOptions = queryOptions({
-      queryKey: ["room", roomID, context.user.id, context.user],
-      queryFn: ({ signal }) => {
-        if (!context.user) return;
-        return getRoomFromDB({
-          signal,
-          data: { roomid: roomID, userid: context.user.id },
-        });
-      },
+
+    // Configure query options for fetching user and room data
+    const userQueryOptions = queryOptions({
+      queryKey: ["user", userId],
+      queryFn: ({ signal }) => getUserFromDB({ signal, data: userId }),
       staleTime: cacheTime,
       refetchInterval: cacheTime + 1,
       refetchOnWindowFocus: true,
@@ -68,7 +54,30 @@ export const Route = createFileRoute("/room/$roomid")({
       retryDelay: 1000,
     });
 
-    const roomFromDB = await context.queryClient.ensureQueryData(roomQueryOptions);
+    const roomQueryOptions = queryOptions({
+      queryKey: ["room", roomID, userId],
+      queryFn: ({ signal }) =>
+        getRoomFromDB({
+          signal,
+          data: { roomid: roomID, userid: userId },
+        }),
+      staleTime: cacheTime,
+      refetchInterval: cacheTime + 1,
+      refetchOnWindowFocus: true,
+      refetchOnMount: true,
+      refetchOnReconnect: true,
+      retry: 1,
+      retryDelay: 1000,
+    });
+
+    const [userFromDB, roomFromDB] = await Promise.all([
+      context.queryClient.ensureQueryData(userQueryOptions),
+      context.queryClient.ensureQueryData(roomQueryOptions),
+    ]);
+
+    if (!userFromDB || userFromDB.length < 1 || !roomFromDB) {
+      throw redirect({ to: "/" });
+    }
 
     return { userFromDB, roomFromDB, userQueryOptions, roomQueryOptions, serverInfo };
   },
@@ -86,12 +95,8 @@ export const Route = createFileRoute("/room/$roomid")({
 });
 
 function RouteComponent() {
-  const { userQueryOptions, roomQueryOptions, serverInfo } = Route.useLoaderData();
+  const { roomQueryOptions, serverInfo } = Route.useLoaderData();
 
-  const { data: userFromDB } = useSuspenseQuery({
-    ...userQueryOptions,
-    queryFn: () => getUserFromDB({ data: userQueryOptions.queryKey[1] }),
-  });
   const { data: roomFromDB } = useSuspenseQuery({
     ...roomQueryOptions,
     queryFn: () =>
@@ -106,12 +111,19 @@ function RouteComponent() {
   // Construct WebSocket URL
   const wsURL = `${serverInfo.protocol === "https" ? "wss" : "ws"}://${serverInfo.serverURL}/_ws`;
 
-  // Use WebSocket hook
-  const { readyState } = useWebSocket(wsURL, {
+  // Use WebSocket hook with improved reconnection logic
+  const { readyState, sendMessage } = useWebSocket(wsURL, {
     retryOnError: true,
-    shouldReconnect: () => true,
+    shouldReconnect: (closeEvent) => {
+      // Don't reconnect on 1000 (normal closure) or 1001 (going away)
+      return closeEvent.code !== 1000 && closeEvent.code !== 1001;
+    },
+    reconnectInterval: 3000,
+    reconnectAttempts: 5,
     onOpen: () => {
       console.log("WebSocket connection opened");
+      // Send initial connection message
+      sendMessage(JSON.stringify({ type: "join", roomId: roomFromDB.id }));
     },
     onClose: () => {
       console.log("WebSocket connection closed");
@@ -129,8 +141,6 @@ function RouteComponent() {
     [ReadyState.UNINSTANTIATED]: "Uninstantiated",
   }[readyState];
 
-  console.info("userFromDB", userFromDB);
-
   if (!roomFromDB) {
     return <div>Room not found</div>;
   }
@@ -139,10 +149,27 @@ function RouteComponent() {
     <div className="grow grid grid-cols-3 gap-2">
       <div className="p-2 border col-span-full lg:col-span-2 flex flex-col bg-white dark:bg-gray-800 rounded-md shadow-xl">
         <div className="min-w-full min-h-[400px] xl:min-h-[600px] rounded-md overflow-hidden dark:bg-gray-900">
-          <ReactPlayer
-            className="min-w-full min-h-full rounded-md overflow-hidden border-none max-h-full max-w-full"
-            url="https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4"
-          />
+          <ErrorBoundary FallbackComponent={VideoErrorFallback}>
+            <ReactPlayer
+              className="min-w-full min-h-full rounded-md overflow-hidden border-none max-h-full max-w-full"
+              url={
+                "https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4"
+              }
+              controls
+              // playing
+              muted
+              width="100%"
+              height="100%"
+              config={{
+                file: {
+                  attributes: {
+                    controlsList: "nodownload",
+                    disablePictureInPicture: true,
+                  },
+                },
+              }}
+            />
+          </ErrorBoundary>
         </div>
         <div className="flex gap-1 p-2">
           {roomFromDB.viewers.map((viewer) => (
@@ -162,18 +189,32 @@ function RouteComponent() {
               {roomFromDB.name}
             </div>
             <div
-              className={`inline-block p-2 rounded-md text-white text-sm shrink-0 ${connectionStatus === "Connected" ? "bg-green-500 dark:bg-green-900" : "bg-red-500 dark:bg-red-900"}`}
+              className={`inline-block p-2 rounded-md text-white text-sm shrink-0 ${
+                connectionStatus === "Connected"
+                  ? "bg-green-500 dark:bg-green-900"
+                  : "bg-red-500 dark:bg-red-900"
+              }`}
             >
               {connectionStatus}
             </div>
           </div>
           <div className="text-sm break-words">{roomFromDB.description}</div>
         </div>
-        <div className="grow min-h-[300px] flex flex-col gap-1 ">
-          <div className="border grow bg-white dark:bg-gray-700 p-2 rounded-md">
-            Stream Chat
+        <div className="grow min-h-[300px] flex flex-col gap-1">
+          <div className="border grow bg-white dark:bg-gray-700 p-2 rounded-md overflow-y-auto">
+            {/* Chat messages will be rendered here */}
+            <div className="text-sm text-gray-500 dark:text-gray-400">
+              Chat coming soon...
+            </div>
           </div>
-          <div className="border bg-white dark:bg-gray-700 p-2 rounded-md">Input Box</div>
+          <div className="border bg-white dark:bg-gray-700 p-2 rounded-md">
+            <input
+              type="text"
+              placeholder="Type a message..."
+              className="w-full p-2 rounded-md bg-gray-100 dark:bg-gray-800 border-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+              disabled
+            />
+          </div>
         </div>
       </div>
     </div>
