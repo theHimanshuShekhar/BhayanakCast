@@ -1,4 +1,11 @@
+import TimeAgo from "javascript-time-ago";
+import en from "javascript-time-ago/locale/en";
 import UserDisplay from "./UserDisplay";
+
+TimeAgo.addDefaultLocale(en);
+
+// Create formatter (English).
+const timeAgo = new TimeAgo("en-US");
 
 interface RoomCardProps {
   room: {
@@ -28,9 +35,9 @@ export function RoomCard({ room }: RoomCardProps) {
         <div className="absolute w-full h-full top-0 left-0 transition duration-300 group-hover/card:bg-gray-200 dark:group-hover/card:bg-gray-700 opacity-60" />
         {streamer && (
           <div className="flex flex-row items-center space-x-4 z-10">
-            <div className="flex justify-center align-middle gap-2 items-center">
+            <div className="flex justify-start align-middle gap-2 items-center w-full ">
               <UserDisplay id={streamer.id} name={streamer.name} image={streamer.image} />
-              <p className="text-sm text-gray-400">{room.createdAt.toDateString()}</p>
+              <p className="text-sm text-gray-400">{timeAgo.format(room.createdAt)}</p>
             </div>
           </div>
         )}
