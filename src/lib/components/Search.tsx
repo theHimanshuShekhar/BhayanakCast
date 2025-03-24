@@ -12,13 +12,13 @@ export function SearchBar({ setSearchString }: SearchBarProps) {
   return (
     <div className="space-y-2 flex flex-col min-w-[300px]">
       <Label htmlFor={id}>Search or Create a room</Label>
-      <div className="relative">
+      <div className="relative bg-white dark:bg-gray-800 rounded-md">
         <Input
           onChange={(event) => {
             setSearchString(event.currentTarget.value);
           }}
           id={id}
-          className="peer pe-9 ps-9"
+          className="peer pe-9 ps-9 dark:bg-gray-800"
           placeholder="Search..."
           type="search"
         />

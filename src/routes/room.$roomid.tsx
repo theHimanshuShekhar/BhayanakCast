@@ -137,8 +137,8 @@ function RouteComponent() {
 
   return (
     <div className="grow grid grid-cols-3 gap-2">
-      <div className="border col-span-full md:col-span-2 flex flex-col dark:bg-gray-900 rounded-md shadow-xl">
-        <div className="min-w-full min-h-[500px] rounded-md overflow-hidden dark:bg-gray-900">
+      <div className="p-2 border col-span-full lg:col-span-2 flex flex-col bg-white dark:bg-gray-800 rounded-md shadow-xl">
+        <div className="grow min-w-full min-h-[400px] rounded-md overflow-hidden dark:bg-gray-900">
           <ReactPlayer
             className="min-w-full min-h-full rounded-md overflow-hidden border-none max-h-full max-w-full"
             url="https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4"
@@ -155,21 +155,25 @@ function RouteComponent() {
           ))}
         </div>
       </div>
-      <div className="flex flex-col col-span-full md:col-span-1 gap-2 p-2 border dark:bg-gray-900 rounded-md shadow-xl">
-        <div className="flex flex-col gap-1">
-          <div className="flex justify-between gap-1 items-center">
-            <div className="font-bold text-xl">{roomFromDB.name}</div>
+      <div className="bg-white dark:bg-gray-800 flex flex-col col-span-full lg:col-span-1 gap-2 p-2 border rounded-md shadow-xl">
+        <div className="flex flex-col gap-1 p-2">
+          <div className="flex flex-wrap justify-between gap-1 items-start">
+            <div className="font-bold text-xl break-words flex-1 min-w-0">
+              {roomFromDB.name}
+            </div>
             <div
-              className={`inline-block p-2 rounded-md text-white text-sm ${connectionStatus === "Connected" ? "bg-green-500 dark:bg-green-900" : "bg-red-500 dark:bg-red-900"}`}
+              className={`inline-block p-2 rounded-md text-white text-sm shrink-0 ${connectionStatus === "Connected" ? "bg-green-500 dark:bg-green-900" : "bg-red-500 dark:bg-red-900"}`}
             >
               {connectionStatus}
             </div>
           </div>
-          <div className="text-sm">{roomFromDB.description}</div>
+          <div className="text-sm break-words">{roomFromDB.description}</div>
         </div>
         <div className="grow min-h-[300px] flex flex-col gap-1 ">
-          <div className="border grow">Stream Chat</div>
-          <div className="border">Input Box</div>
+          <div className="border grow bg-white dark:bg-gray-700 p-2 rounded-md">
+            Stream Chat
+          </div>
+          <div className="border bg-white dark:bg-gray-700 p-2 rounded-md">Input Box</div>
         </div>
       </div>
     </div>
