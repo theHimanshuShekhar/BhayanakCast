@@ -51,7 +51,7 @@ export const getUserFromDB = createServerFn({ method: "GET" })
       .limit(1)
       .execute();
 
-    return userFromDb;
+    return userFromDb[0];
   });
 
 export const getRoomFromDB = createServerFn({ method: "GET" })

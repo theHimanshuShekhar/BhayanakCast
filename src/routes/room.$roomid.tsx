@@ -5,6 +5,7 @@ import ReactPlayer from "react-player";
 import useWebSocket, { ReadyState } from "react-use-websocket";
 import ViewerDisplay from "~/lib/components/ViewerDisplay";
 import { getRoomFromDB, getServerURL, getUserFromDB } from "~/lib/server/functions";
+import { MessageType } from "~/lib/types";
 
 // Cache time for query data (5 seconds)
 const cacheTime = 1000 * 5;
@@ -75,7 +76,7 @@ export const Route = createFileRoute("/room/$roomid")({
       context.queryClient.ensureQueryData(roomQueryOptions),
     ]);
 
-    if (!userFromDB || userFromDB.length < 1 || !roomFromDB) {
+    if (!userFromDB || !roomFromDB) {
       throw redirect({ to: "/" });
     }
 
@@ -95,7 +96,12 @@ export const Route = createFileRoute("/room/$roomid")({
 });
 
 function RouteComponent() {
-  const { roomQueryOptions, serverInfo } = Route.useLoaderData();
+  const { roomQueryOptions, userQueryOptions, serverInfo } = Route.useLoaderData();
+
+  const { data: userFromDB } = useSuspenseQuery({
+    ...userQueryOptions,
+    queryFn: () => getUserFromDB({ data: userQueryOptions.queryKey[1] as string }),
+  });
 
   const { data: roomFromDB } = useSuspenseQuery({
     ...roomQueryOptions,
@@ -118,12 +124,17 @@ function RouteComponent() {
       // Don't reconnect on 1000 (normal closure) or 1001 (going away)
       return closeEvent.code !== 1000 && closeEvent.code !== 1001;
     },
-    reconnectInterval: 3000,
+    reconnectInterval: 2000,
     reconnectAttempts: 5,
     onOpen: () => {
       console.log("WebSocket connection opened");
-      // Send initial connection message
-      sendMessage(JSON.stringify({ type: "join", roomId: roomFromDB.id }));
+      sendMessage(
+        JSON.stringify({
+          type: MessageType.JOIN,
+          userID: userFromDB.id,
+          roomID: roomFromDB.id,
+        }),
+      );
     },
     onClose: () => {
       console.log("WebSocket connection closed");

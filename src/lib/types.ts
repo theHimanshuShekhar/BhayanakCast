@@ -1,3 +1,10 @@
+export enum MessageType {
+  JOIN = "JOIN",
+  LEAVE = "LEAVE",
+  CHATMESSAGE = "CHATMESSAGE",
+  SETSTREAMER = "SETSTREAMER",
+}
+
 export interface User {
   id: string;
   name: string;
