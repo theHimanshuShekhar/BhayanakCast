@@ -9,9 +9,11 @@ import {
 
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
+import { posthog } from "posthog-js";
 
+import { useEffect } from "react";
 import { NavBar } from "~/lib/components/NavBar";
-import { getUser } from "~/lib/server/functions";
+import { getPostHogData, getUser } from "~/lib/server/functions";
 import appCss from "~/lib/styles/app.css?url";
 
 export const Route = createRootRouteWithContext<{
@@ -23,10 +25,13 @@ export const Route = createRootRouteWithContext<{
       queryKey: ["user"],
       queryFn: ({ signal }) => getUser({ signal }),
     }); // we're using react-query for caching, see router.tsx
-    return { user };
+
+    // Get PostHog data from the server
+    const posthog_data = await getPostHogData();
+    return { user, posthog_data };
   },
   loader: ({ context }) => {
-    return { user: context.user };
+    return { user: context.user, posthog_data: context.posthog_data };
   },
   head: () => ({
     meta: [
@@ -55,7 +60,14 @@ function RootComponent() {
 }
 
 function RootDocument({ children }: { readonly children: React.ReactNode }) {
-  const { user } = Route.useLoaderData();
+  const { user, posthog_data } = Route.useLoaderData();
+
+  useEffect(() => {
+    posthog.init(posthog_data.apiKey, {
+      api_host: posthog_data.api_host,
+    });
+  }, [posthog_data]);
+
   return (
     // suppress since we're updating the "dark" class in a custom script below
     <html lang="en" suppressHydrationWarning>

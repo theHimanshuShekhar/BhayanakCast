@@ -5,6 +5,23 @@ import { auth } from "./auth";
 import { db } from "./db";
 import { room, user } from "./schema";
 
+export const getPostHogData = createServerFn({ method: "GET" }).handler(async () => {
+  // Check if the environment variables are set
+  if (
+    !process.env.REACT_APP_PUBLIC_POSTHOG_KEY ||
+    !process.env.REACT_APP_PUBLIC_POSTHOG_HOST
+  ) {
+    throw new Error("PostHog environment variables are not set");
+  }
+  // Check if the environment variables are valid
+  const posthogData = {
+    apiKey: process.env.REACT_APP_PUBLIC_POSTHOG_KEY,
+    api_host: process.env.REACT_APP_PUBLIC_POSTHOG_HOST,
+  };
+
+  return posthogData;
+});
+
 export const getServerURL = createServerFn({ method: "GET" }).handler(() => {
   const request = getWebRequest();
   // get if the request is secure
