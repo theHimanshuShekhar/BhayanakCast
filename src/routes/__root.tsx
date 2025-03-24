@@ -1,4 +1,4 @@
-import { type QueryClient } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 import {
   createRootRouteWithContext,
   HeadContent,
@@ -55,7 +55,6 @@ function RootComponent() {
 }
 
 function RootDocument({ children }: { readonly children: React.ReactNode }) {
-  const { queryClient } = Route.useRouteContext();
   const { user } = Route.useLoaderData();
   return (
     // suppress since we're updating the "dark" class in a custom script below
@@ -63,7 +62,7 @@ function RootDocument({ children }: { readonly children: React.ReactNode }) {
       <head>
         <HeadContent />
       </head>
-      <body>
+      <body className="bg-gray-100 dark:bg-gray-900">
         <ScriptOnce>
           {`document.documentElement.classList.toggle(
             'dark',
@@ -71,7 +70,7 @@ function RootDocument({ children }: { readonly children: React.ReactNode }) {
             )`}
         </ScriptOnce>
 
-        <div className="flex flex-col gap-4 py-4 px-2 font-jetbrains-mono min-h-screen container mx-auto">
+        <div className="min-h-screen flex flex-col gap-4 py-4 px-2 font-jetbrains-mono container mx-auto">
           <NavBar user={user} />
           {children}
         </div>
