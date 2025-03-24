@@ -66,7 +66,24 @@ function RootDocument({ children }: { readonly children: React.ReactNode }) {
     posthog.init(posthog_data.apiKey, {
       api_host: posthog_data.api_host,
     });
-  }, [posthog_data]);
+
+    if (user) {
+      posthog.register({
+        email: user.email,
+        name: user.name,
+        createdAt: new Date(user.createdAt).toISOString(),
+        updatedAt: new Date(user.updatedAt).toISOString(),
+        image: user.image,
+      });
+      posthog.identify(user.id, {
+        email: user.email,
+        name: user.name,
+        createdAt: new Date(user.createdAt).toISOString(),
+        updatedAt: new Date(user.updatedAt).toISOString(),
+        image: user.image,
+      });
+    }
+  }, [posthog_data, user]);
 
   return (
     // suppress since we're updating the "dark" class in a custom script below
