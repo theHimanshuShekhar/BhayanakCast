@@ -12,7 +12,7 @@ export default function UserDisplay(user: UserDisplay) {
     <div className="cursor-pointer flex gap-2 items-center font-semibold hover:bg-accent p-1 rounded-md">
       <Avatar>
         <AvatarImage src={user.image || "https://github.com/shadcn.png"} />
-        <AvatarFallback>{user.name}</AvatarFallback>
+        <AvatarFallback>{user.name.at(0)}</AvatarFallback>
       </Avatar>
       <div className="hidden md:block">{user.name}</div>
     </div>

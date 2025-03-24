@@ -3,7 +3,13 @@ import { Link, useRouter } from "@tanstack/react-router";
 import authClient from "../auth-client";
 import { SignInButton } from "./SignInButton";
 import ThemeToggle from "./ThemeToggle";
-import { Button } from "./ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 import UserDisplay from "./UserDisplay";
 
 interface NavBarProps {
@@ -18,10 +24,15 @@ interface NavBarProps {
   } | null;
 }
 
+interface NavBarUserProps {
+  user: NonNullable<NavBarProps["user"]>;
+  queryClient: ReturnType<typeof useQueryClient>;
+  router: ReturnType<typeof useRouter>;
+}
+
 export function NavBar({ user }: NavBarProps) {
   const queryClient = useQueryClient();
   const router = useRouter();
-
   return (
     <nav className="flex justify-between items-center gap-2">
       <Link to={"/"} className="flex gap-1 items-center">
@@ -34,22 +45,7 @@ export function NavBar({ user }: NavBarProps) {
       <div className="flex gap-2 items-center">
         <ThemeToggle />
         {user ? (
-          <div className="flex justify-center align-middle gap-2 items-center">
-            <UserDisplay id={user.id} name={user.name} image={user.image ?? null} />
-            <Button
-              onClick={async () => {
-                await authClient.signOut();
-                await queryClient.invalidateQueries({ queryKey: ["user"] });
-                await router.invalidate();
-              }}
-              type="button"
-              className="w-fit hidden"
-              variant="destructive"
-              size="sm"
-            >
-              Sign out
-            </Button>
-          </div>
+          <NavBarUser user={user} queryClient={queryClient} router={router} />
         ) : (
           <div className="flex flex-col gap-2">
             <SignInButton
@@ -61,5 +57,30 @@ export function NavBar({ user }: NavBarProps) {
         )}
       </div>
     </nav>
+  );
+}
+
+function NavBarUser({ user, queryClient, router }: NavBarUserProps) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger>
+        <div className="flex justify-center align-middle gap-2 items-center">
+          <UserDisplay id={user.id} name={user.name} image={user.image ?? null} />
+        </div>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent>
+        <DropdownMenuItem>Profile</DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onClick={async () => {
+            await authClient.signOut();
+            await queryClient.invalidateQueries({ queryKey: ["user"] });
+            await router.invalidate();
+          }}
+        >
+          Signout
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
