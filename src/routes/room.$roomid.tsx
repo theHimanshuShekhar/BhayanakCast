@@ -138,7 +138,7 @@ function RouteComponent() {
   return (
     <div className="grow grid grid-cols-3 gap-2">
       <div className="p-2 border col-span-full lg:col-span-2 flex flex-col bg-white dark:bg-gray-800 rounded-md shadow-xl">
-        <div className="grow min-w-full min-h-[400px] rounded-md overflow-hidden dark:bg-gray-900">
+        <div className="min-w-full min-h-[400px] xl:min-h-[600px] rounded-md overflow-hidden dark:bg-gray-900">
           <ReactPlayer
             className="min-w-full min-h-full rounded-md overflow-hidden border-none max-h-full max-w-full"
             url="https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4"
