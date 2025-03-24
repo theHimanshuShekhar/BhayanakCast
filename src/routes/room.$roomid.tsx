@@ -150,25 +150,27 @@ function RouteComponent() {
       <div className="p-2 border col-span-full lg:col-span-2 flex flex-col bg-white dark:bg-gray-800 rounded-md shadow-xl">
         <div className="min-w-full min-h-[400px] xl:min-h-[600px] rounded-md overflow-hidden dark:bg-gray-900">
           <ErrorBoundary FallbackComponent={VideoErrorFallback}>
-            <ReactPlayer
-              className="min-w-full min-h-full rounded-md overflow-hidden border-none max-h-full max-w-full"
-              url={
-                "https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4"
-              }
-              controls
-              // playing
-              muted
-              width="100%"
-              height="100%"
-              config={{
-                file: {
-                  attributes: {
-                    controlsList: "nodownload",
-                    disablePictureInPicture: true,
+            <div className="w-full h-full rounded-md overflow-hidden">
+              <ReactPlayer
+                className="min-w-full min-h-full rounded-md overflow-hidden border-none max-h-full max-w-full"
+                url={
+                  "https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4"
+                }
+                controls
+                muted
+                width="100%"
+                height="100%"
+                config={{
+                  file: {
+                    attributes: {
+                      controlsList: "nodownload",
+                      disablePictureInPicture: true,
+                    },
                   },
-                },
-              }}
-            />
+                }}
+                key={typeof window === "undefined" ? "server" : "client"}
+              />
+            </div>
           </ErrorBoundary>
         </div>
         <div className="flex gap-1 p-2">
@@ -201,20 +203,17 @@ function RouteComponent() {
           <div className="text-sm break-words">{roomFromDB.description}</div>
         </div>
         <div className="grow min-h-[300px] flex flex-col gap-1">
-          <div className="border grow bg-white dark:bg-gray-700 p-2 rounded-md overflow-y-auto">
+          <div className="border grow bg-gray-100 dark:bg-gray-700 p-2 rounded-md overflow-y-auto">
             {/* Chat messages will be rendered here */}
             <div className="text-sm text-gray-500 dark:text-gray-400">
               Chat coming soon...
             </div>
           </div>
-          <div className="border bg-white dark:bg-gray-700 p-2 rounded-md">
-            <input
-              type="text"
-              placeholder="Type a message..."
-              className="w-full p-2 rounded-md bg-gray-100 dark:bg-gray-800 border-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-              disabled
-            />
-          </div>
+          <input
+            type="text"
+            placeholder="Type a message..."
+            className="border bg-gray-100 dark:bg-gray-700 w-full p-2 rounded-md bg-gray-100 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
         </div>
       </div>
     </div>
