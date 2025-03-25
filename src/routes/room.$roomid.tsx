@@ -1,10 +1,10 @@
-import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
+import { queryOptions } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { ErrorBoundary } from "react-error-boundary";
 import ReactPlayer from "react-player";
 import useWebSocket, { ReadyState } from "react-use-websocket";
 import ViewerDisplay from "~/lib/components/ViewerDisplay";
-import { getRoomFromDB, getServerURL, getUserFromDB } from "~/lib/server/functions";
+import { getServerURL, getUserById, roomById } from "~/lib/server/functions";
 import { MessageType } from "~/lib/types";
 
 // Cache time for query data (5 seconds)
@@ -36,7 +36,7 @@ export const Route = createFileRoute("/room/$roomid")({
 
     const serverInfo = await getServerURL();
     const roomID = params.roomid;
-    const userId = context.user.id;
+    const userID = context.user.id;
 
     if (!roomID) {
       throw redirect({ to: "/" });
@@ -44,8 +44,8 @@ export const Route = createFileRoute("/room/$roomid")({
 
     // Configure query options for fetching user and room data
     const userQueryOptions = queryOptions({
-      queryKey: ["user", userId],
-      queryFn: ({ signal }) => getUserFromDB({ signal, data: userId }),
+      queryKey: ["user", userID],
+      queryFn: ({ signal }) => getUserById({ signal, data: userID }),
       staleTime: cacheTime,
       refetchInterval: cacheTime + 1,
       refetchOnWindowFocus: true,
@@ -56,11 +56,11 @@ export const Route = createFileRoute("/room/$roomid")({
     });
 
     const roomQueryOptions = queryOptions({
-      queryKey: ["room", roomID, userId],
+      queryKey: ["room", roomID],
       queryFn: ({ signal }) =>
-        getRoomFromDB({
+        roomById({
           signal,
-          data: { roomid: roomID, userid: userId },
+          data: roomID,
         }),
       staleTime: cacheTime,
       refetchInterval: cacheTime + 1,
@@ -71,23 +71,21 @@ export const Route = createFileRoute("/room/$roomid")({
       retryDelay: 1000,
     });
 
-    const [userFromDB, roomFromDB] = await Promise.all([
+    const [userData, roomData] = await Promise.all([
       context.queryClient.ensureQueryData(userQueryOptions),
       context.queryClient.ensureQueryData(roomQueryOptions),
     ]);
 
-    if (!userFromDB || !roomFromDB) {
+    if (!roomData || !userData) {
       throw redirect({ to: "/" });
     }
 
-    return { userFromDB, roomFromDB, userQueryOptions, roomQueryOptions, serverInfo };
+    return { roomData, userData, serverInfo };
   },
   loader: ({ context }) => {
     return {
-      userFromDB: context.userFromDB,
-      roomFromDB: context.roomFromDB,
-      userQueryOptions: context.userQueryOptions,
-      roomQueryOptions: context.roomQueryOptions,
+      roomData: context.roomData,
+      userData: context.userData,
       serverInfo: context.serverInfo,
     };
   },
@@ -96,23 +94,7 @@ export const Route = createFileRoute("/room/$roomid")({
 });
 
 function RouteComponent() {
-  const { roomQueryOptions, userQueryOptions, serverInfo } = Route.useLoaderData();
-
-  const { data: userFromDB } = useSuspenseQuery({
-    ...userQueryOptions,
-    queryFn: () => getUserFromDB({ data: userQueryOptions.queryKey[1] as string }),
-  });
-
-  const { data: roomFromDB } = useSuspenseQuery({
-    ...roomQueryOptions,
-    queryFn: () =>
-      getRoomFromDB({
-        data: {
-          roomid: roomQueryOptions.queryKey[1] as string,
-          userid: roomQueryOptions.queryKey[2] as string,
-        },
-      }),
-  });
+  const { roomData, userData, serverInfo } = Route.useLoaderData();
 
   // Construct WebSocket URL
   const wsURL = `${serverInfo.protocol === "https" ? "wss" : "ws"}://${serverInfo.serverURL}/_ws`;
@@ -131,8 +113,8 @@ function RouteComponent() {
       sendMessage(
         JSON.stringify({
           type: MessageType.JOIN,
-          userID: userFromDB.id,
-          roomID: roomFromDB.id,
+          userID: userData,
+          roomID: roomData.id,
         }),
       );
     },
@@ -151,10 +133,6 @@ function RouteComponent() {
     [ReadyState.CLOSED]: "Closed",
     [ReadyState.UNINSTANTIATED]: "Uninstantiated",
   }[readyState];
-
-  if (!roomFromDB) {
-    return <div>Room not found</div>;
-  }
 
   return (
     <div className="grow grid grid-cols-3 gap-2">
@@ -183,22 +161,24 @@ function RouteComponent() {
             />
           </ErrorBoundary>
         </div>
-        <div className="flex gap-1">
-          {roomFromDB.viewers.map((viewer) => (
-            <ViewerDisplay
-              id={viewer.id}
-              image={viewer.image}
-              name={viewer.name}
-              key={viewer.id}
-            />
-          ))}
-        </div>
+        {roomData.viewers.length > 0 && (
+          <div className="flex gap-1">
+            {roomData.viewers.map((viewer) => (
+              <ViewerDisplay
+                id={viewer.id}
+                image={viewer.image}
+                name={viewer.name}
+                key={viewer.id}
+              />
+            ))}
+          </div>
+        )}
       </div>
       <div className="bg-white dark:bg-gray-800 flex flex-col col-span-full lg:col-span-1 gap-2 p-2 border rounded-md shadow-xl">
         <div className="flex flex-col gap-1 p-2">
           <div className="flex flex-wrap justify-between gap-1 items-start">
             <div className="font-bold text-xl break-words flex-1 min-w-0">
-              {roomFromDB.name}
+              {roomData.name}
             </div>
             <div
               className={`inline-block p-2 rounded-md text-white text-sm shrink-0 ${
@@ -210,11 +190,10 @@ function RouteComponent() {
               {connectionStatus}
             </div>
           </div>
-          <div className="text-sm break-words">{roomFromDB.description}</div>
+          <div className="text-sm break-words">{roomData.description}</div>
         </div>
         <div className="grow min-h-[300px] flex flex-col gap-1">
           <div className="border grow bg-gray-100 dark:bg-gray-700 p-2 rounded-md overflow-y-auto">
-            {/* Chat messages will be rendered here */}
             <div className="text-sm text-gray-500 dark:text-gray-400">
               Chat coming soon...
             </div>
