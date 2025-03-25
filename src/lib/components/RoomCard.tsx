@@ -1,5 +1,6 @@
 import TimeAgo from "javascript-time-ago";
 import en from "javascript-time-ago/locale/en";
+import type { RoomWithViewers } from "../types";
 import UserDisplay from "./UserDisplay";
 
 TimeAgo.addDefaultLocale(en);
@@ -8,19 +9,7 @@ TimeAgo.addDefaultLocale(en);
 const timeAgo = new TimeAgo("en-US");
 
 interface RoomCardProps {
-  room: {
-    id: string;
-    name: string;
-    description: string | null;
-    image: string | null;
-    streamer: {
-      id: string;
-      name: string;
-      image: string | null;
-    } | null;
-    createdAt: Date;
-    updatedAt: Date | null;
-  };
+  room: RoomWithViewers;
 }
 
 export function RoomCard({ room }: RoomCardProps) {

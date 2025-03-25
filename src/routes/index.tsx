@@ -4,8 +4,8 @@ import debounce from "lodash/debounce";
 import { useCallback, useState } from "react";
 import { RoomCard } from "~/lib/components/RoomCard";
 import { SearchBar } from "~/lib/components/Search";
-import { getRoomsFromDB, removeUserFromRoomDB } from "~/lib/server/functions";
-import type { RoomBase } from "~/lib/types";
+import { getRoomsFromDB } from "~/lib/server/functions";
+import type { RoomWithViewers } from "~/lib/types";
 
 const cacheTime = 1000 * 15;
 
@@ -24,11 +24,6 @@ const roomsQueryOptions = queryOptions({
 export const Route = createFileRoute("/")({
   component: Home,
   loader: async ({ context }) => {
-    // Only remove user from room if they were previously in one
-    const user = context.user;
-    if (user?.id) {
-      await removeUserFromRoomDB({ data: { roomid: "", userid: user.id } });
-    }
     const roomList = await context.queryClient.ensureQueryData(roomsQueryOptions);
     return { user: context.user, roomList: roomList };
   },
@@ -45,7 +40,7 @@ function Home() {
     fn(value);
   }, []);
 
-  const getFilteredRooms = (rooms: RoomBase[], search: string | null) => {
+  const getFilteredRooms = (rooms: RoomWithViewers[], search: string | null) => {
     if (!search) return rooms;
     const searchLower = search.toLowerCase();
     return rooms.filter((room) => room.name.toLowerCase().includes(searchLower));

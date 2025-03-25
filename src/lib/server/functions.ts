@@ -5,6 +5,7 @@ import { auth } from "./auth";
 import { db } from "./db";
 import { room, user } from "./schema";
 
+// get posthog data
 export const getPostHogData = createServerFn({ method: "GET" }).handler(async () => {
   // Check if the environment variables are set
   if (
@@ -22,6 +23,7 @@ export const getPostHogData = createServerFn({ method: "GET" }).handler(async ()
   return posthogData;
 });
 
+// get server url
 export const getServerURL = createServerFn({ method: "GET" }).handler(() => {
   const request = getWebRequest();
   // get if the request is secure
@@ -33,6 +35,7 @@ export const getServerURL = createServerFn({ method: "GET" }).handler(() => {
   return { serverURL, protocol };
 });
 
+// get user from session
 export const getUser = createServerFn({ method: "GET" }).handler(async () => {
   const headers = new Headers(getWebRequest()?.headers ?? {});
   const session = await auth.api.getSession({ headers });
@@ -40,179 +43,97 @@ export const getUser = createServerFn({ method: "GET" }).handler(async () => {
   return session?.user || null;
 });
 
-export const getUserFromDB = createServerFn({ method: "GET" })
-  .validator((userid: string) => userid)
-  .handler(async (ctx) => {
-    const userid = ctx.data;
-    const userFromDb = await db
-      .select()
-      .from(user)
-      .where(eq(user.id, userid))
-      .limit(1)
-      .execute();
+// get rooms with viewers and streamer
+export const getRoomsFromDB = createServerFn({ method: "GET" }).handler(
+  async () => await getRoomsWithViewers(),
+);
 
-    return userFromDb[0];
-  });
+async function getRoomsWithViewers() {
+  const rooms = await db.select().from(room);
 
-export const getRoomFromDB = createServerFn({ method: "GET" })
-  .validator(({ roomid, userid }: { roomid: string; userid: string }) => {
-    return { roomid, userid };
-  })
+  // get streamer for each room
+  const roomsWithViewers = await Promise.all(
+    rooms.map(async (singleRoom) => {
+      const viewers = await db.select().from(user).where(eq(user.roomId, singleRoom.id));
+      const streamer = await db
+        .select()
+        .from(user)
+        .where(eq(user.id, singleRoom.streamer))
+        .limit(1);
+      return {
+        ...singleRoom,
+        viewers: viewers,
+        streamer: streamer[0],
+      };
+    }),
+  );
+
+  return roomsWithViewers;
+}
+
+// get room with viewers and streamer by id
+export const roomById = createServerFn({ method: "GET" })
+  .validator((roomid: string) => roomid)
   .handler(async (ctx) => {
-    const { roomid, userid } = ctx.data;
-    const room = await getOrCreateRoom({ roomid, userid });
+    const roomid = ctx.data;
+    const room = await getRoomWithViewers(roomid);
     return room;
   });
 
-const getOrCreateRoom = async ({
-  roomid,
-  userid,
-}: {
-  roomid: string;
-  userid: string;
-}) => {
-  let requestedRoom:
-    | {
-        id: string;
-        name: string;
-        description: string | null;
-        image: string | null;
-        createdAt: Date;
-        updatedAt: Date;
-        streamer: typeof user.$inferSelect | null;
-      }
-    | undefined;
-
-  // Check if room exists
-  const existingRoom = await db
-    .select({
-      id: room.id,
-      name: room.name,
-      description: room.description,
-      image: room.image,
-      createdAt: room.createdAt,
-      updatedAt: room.updatedAt,
-      streamer: user,
-    })
-    .from(room)
-    .leftJoin(user, eq(room.streamer, user.id))
-    .where(eq(room.id, roomid))
-    .limit(1)
-    .execute();
-
-  if (existingRoom.length > 0) {
-    requestedRoom = existingRoom[0];
-  } else {
-    // Create new room with user as streamer
-    await db
-      .insert(room)
-      .values({
-        id: roomid,
-        name: roomid,
-        description: "Some Description",
-        image: null,
-        streamer: userid,
-      })
-      .execute()
-      .catch(() => {
-        console.error("Failed to create new room");
-      });
-
-    requestedRoom = (
-      await db
-        .select({
-          id: room.id,
-          name: room.name,
-          description: room.description,
-          image: room.image,
-          createdAt: room.createdAt,
-          updatedAt: room.updatedAt,
-          streamer: user,
-        })
-        .from(room)
-        .leftJoin(user, eq(room.streamer, user.id))
-        .where(eq(room.id, roomid))
-        .limit(1)
-        .execute()
-    )[0];
-  }
-
-  await addUserToRoom({ roomid, userid });
-
-  // Get all viewers of room
-  const viewers = await db
+async function getRoomWithViewers(roomid: string) {
+  const requestedRoom = await db.select().from(room).where(eq(room.id, roomid));
+  const viewers = await db.select().from(user).where(eq(user.roomId, roomid));
+  const streamer = await db
     .select()
     .from(user)
-    .where(eq(user.joinedRoomId, roomid))
-    .execute();
+    .where(eq(user.id, requestedRoom[0].streamer));
+  return { ...requestedRoom[0], viewers, streamer };
+}
 
-  const returnedRoom = {
-    ...requestedRoom,
-    viewers,
-  };
-
-  return returnedRoom;
-};
-
-const addUserToRoom = async ({ roomid, userid }: { roomid: string; userid: string }) => {
-  // Add room to user only if not already in a room
-  await db
-    .select()
-    .from(user)
-    .where(eq(user.id, userid))
-    .limit(1)
-    .then((users) => {
-      const userdata = users[0];
-      if (userdata.joinedRoomId !== roomid) {
-        db.update(user)
-          .set({ joinedRoomId: roomid })
-          .where(eq(user.id, userdata.id))
-          .execute()
-          .catch(() => console.error("Failed to add room to user"));
-      }
-    });
-};
-
-export const removeUserFromRoomDB = createServerFn({
-  method: "GET",
-})
-  .validator(({ roomid, userid }: { roomid: string; userid: string }) => {
-    return { roomid, userid };
-  })
+// get user by id
+export const getUserById = createServerFn({ method: "GET" })
+  .validator((userid: string) => userid)
   .handler(async (ctx) => {
-    const { roomid, userid } = ctx.data;
-    await removeUserFromRoom({ roomid, userid }).then(() => {
-      return {
-        message: "Removed user from room",
-      };
-    });
+    const userid = ctx.data;
+    const user = await getUserData(userid);
+    return user;
   });
 
-const removeUserFromRoom = async ({ userid }: { roomid: string; userid: string }) => {
-  // Add room to user
-  db.update(user)
-    .set({ joinedRoomId: null })
-    .where(eq(user.id, userid))
-    .execute()
-    .catch(() => console.error("Failed to remove user from room"));
-};
+async function getUserData(userid: string) {
+  const userData = await db.select().from(user).where(eq(user.id, userid)).limit(1);
+  return userData[0];
+}
 
-export const getRoomsFromDB = createServerFn({ method: "GET" }).handler(
-  async () => await getRooms(),
-);
+// add viewer to room
+export const addViewerToRoom = createServerFn({ method: "POST" })
+  .validator((data: { roomId: string; userId: string }) => data)
+  .handler(async (ctx) => {
+    const { roomId, userId } = ctx.data;
+    await db.update(user).set({ roomId }).where(eq(user.id, userId));
+    return { success: true };
+  });
 
-const getRooms = async () => {
-  return await db
-    .select({
-      id: room.id,
-      name: room.name,
-      description: room.description,
-      image: room.image,
-      createdAt: room.createdAt,
-      updatedAt: room.updatedAt,
-      streamer: user,
-    })
-    .from(room)
-    .leftJoin(user, eq(room.streamer, user.id))
-    .execute();
-};
+// remove viewer from room
+export const removeViewerFromRoom = createServerFn({ method: "POST" })
+  .validator((userId: string) => userId)
+  .handler(async (ctx) => {
+    const userId = ctx.data;
+    const userFromDB = await db.select().from(user).where(eq(user.id, userId)).limit(1);
+    if (!userFromDB[0].roomId) {
+      return { success: false, message: "User is not in a room" };
+    }
+    const leavingRoomID = userFromDB[0].roomId;
+    await db.update(user).set({ roomId: null }).where(eq(user.id, userId));
+
+    return {
+      status: "success",
+      message: "User removed from room",
+      roomId: leavingRoomID,
+    };
+  });
+
+// get users from db
+export const getUsersFromDB = createServerFn({ method: "GET" }).handler(async () => {
+  const users = await db.select().from(user);
+  return users;
+});

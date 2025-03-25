@@ -12,7 +12,7 @@ export const user = pgTable("user", {
     .defaultNow()
     .notNull()
     .$onUpdate(() => new Date()),
-  joinedRoomId: text("joined_room_id").references(() => room.id, {
+  roomId: text("room_id").references(() => room.id, {
     onDelete: "set null",
   }),
 });

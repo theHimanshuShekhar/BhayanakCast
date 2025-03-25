@@ -1,8 +1,8 @@
 export enum MessageType {
   JOIN = "JOIN",
-  LEAVE = "LEAVE",
   CHATMESSAGE = "CHATMESSAGE",
   SETSTREAMER = "SETSTREAMER",
+  LEAVE = "LEAVE",
 }
 
 export interface User {
@@ -13,23 +13,27 @@ export interface User {
   image: string | null;
   createdAt: Date;
   updatedAt: Date;
-  joinedRoomId: string | null;
+  roomId: string | null;
 }
 
-export interface Streamer extends User {
-  streamUrl?: string;
-}
-
-export interface RoomBase {
+export interface Room {
   id: string;
   name: string;
   description: string | null;
   image: string | null;
+  streamer: User;
   createdAt: Date;
   updatedAt: Date;
-  streamer: User | null;
 }
 
-export interface Room extends RoomBase {
+export interface RoomWithViewers extends Room {
   viewers: User[];
+}
+
+export interface ChatMessage {
+  id: string;
+  type: MessageType;
+  content: string;
+  user?: User;
+  timestamp: Date;
 }
