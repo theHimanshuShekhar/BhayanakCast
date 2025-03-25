@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { ErrorBoundary } from "react-error-boundary";
 import ReactPlayer from "react-player";
@@ -46,13 +46,6 @@ export const Route = createFileRoute("/room/$roomid")({
     const userQueryOptions = queryOptions({
       queryKey: ["user", userID],
       queryFn: ({ signal }) => getUserById({ signal, data: userID }),
-      staleTime: cacheTime,
-      refetchInterval: cacheTime + 1,
-      refetchOnWindowFocus: true,
-      refetchOnMount: true,
-      refetchOnReconnect: true,
-      retry: 1,
-      retryDelay: 1000,
     });
 
     const roomQueryOptions = queryOptions({
@@ -94,12 +87,39 @@ export const Route = createFileRoute("/room/$roomid")({
 });
 
 function RouteComponent() {
-  const { roomData, userData, serverInfo } = Route.useLoaderData();
+  const {
+    roomData: initialRoomData,
+    userData: initialUserData,
+    serverInfo,
+  } = Route.useLoaderData();
 
-  // Construct WebSocket URL
+  const { data: liveRoomData } = useSuspenseQuery({
+    queryKey: ["room", initialRoomData.id],
+    queryFn: () => roomById({ data: initialRoomData.id }),
+    staleTime: cacheTime,
+    refetchInterval: cacheTime + 1,
+    refetchOnWindowFocus: true,
+    refetchOnMount: true,
+    refetchOnReconnect: true,
+    retry: 1,
+    retryDelay: 1000,
+  });
+
+  const { data: liveUserData } = useSuspenseQuery({
+    queryKey: ["user", initialUserData.id],
+    queryFn: () => getUserById({ data: initialUserData.id }),
+    staleTime: cacheTime,
+    refetchInterval: cacheTime + 1,
+    refetchOnWindowFocus: true,
+    refetchOnMount: true,
+    refetchOnReconnect: true,
+    retry: 1,
+    retryDelay: 1000,
+  });
+
+  // Use live data in the component
   const wsURL = `${serverInfo.protocol === "https" ? "wss" : "ws"}://${serverInfo.serverURL}/_ws`;
 
-  // Use WebSocket hook with improved reconnection logic
   const { readyState, sendMessage } = useWebSocket(wsURL, {
     retryOnError: true,
     shouldReconnect: (closeEvent) => {
@@ -113,8 +133,8 @@ function RouteComponent() {
       sendMessage(
         JSON.stringify({
           type: MessageType.JOIN,
-          userID: userData,
-          roomID: roomData.id,
+          userID: liveUserData,
+          roomID: liveRoomData.id,
         }),
       );
     },
@@ -161,9 +181,9 @@ function RouteComponent() {
             />
           </ErrorBoundary>
         </div>
-        {roomData.viewers.length > 0 && (
+        {liveRoomData.viewers.length > 0 && (
           <div className="flex gap-1">
-            {roomData.viewers.map((viewer) => (
+            {liveRoomData.viewers.map((viewer) => (
               <ViewerDisplay
                 id={viewer.id}
                 image={viewer.image}
@@ -178,7 +198,7 @@ function RouteComponent() {
         <div className="flex flex-col gap-1 p-2">
           <div className="flex flex-wrap justify-between gap-1 items-start">
             <div className="font-bold text-xl break-words flex-1 min-w-0">
-              {roomData.name}
+              {liveRoomData.name}
             </div>
             <div
               className={`inline-block p-2 rounded-md text-white text-sm shrink-0 ${
@@ -190,7 +210,7 @@ function RouteComponent() {
               {connectionStatus}
             </div>
           </div>
-          <div className="text-sm break-words">{roomData.description}</div>
+          <div className="text-sm break-words">{liveRoomData.description}</div>
         </div>
         <div className="grow min-h-[300px] flex flex-col gap-1">
           <div className="border grow bg-gray-100 dark:bg-gray-700 p-2 rounded-md overflow-y-auto">
