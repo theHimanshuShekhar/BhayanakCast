@@ -1,8 +1,8 @@
 export enum MessageType {
   JOIN = "JOIN",
-  LEAVE = "LEAVE",
   CHATMESSAGE = "CHATMESSAGE",
   SETSTREAMER = "SETSTREAMER",
+  LEAVE = "LEAVE",
 }
 
 export interface User {
@@ -28,4 +28,12 @@ export interface Room {
 
 export interface RoomWithViewers extends Room {
   viewers: User[];
+}
+
+export interface ChatMessage {
+  id: string;
+  type: MessageType;
+  content: string;
+  user?: User;
+  timestamp: Date;
 }

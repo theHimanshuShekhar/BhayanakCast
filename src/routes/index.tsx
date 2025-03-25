@@ -25,7 +25,6 @@ export const Route = createFileRoute("/")({
   component: Home,
   loader: async ({ context }) => {
     const roomList = await context.queryClient.ensureQueryData(roomsQueryOptions);
-    console.log("roomList", roomList);
     return { user: context.user, roomList: roomList };
   },
   preload: true,

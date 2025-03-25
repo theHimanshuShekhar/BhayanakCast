@@ -24,10 +24,12 @@
     "@tanstack/react-router-with-query": "^1.114.17",
     "@tanstack/react-start": "^1.114.17",
     "@types/lodash": "^4.17.16",
+    "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^4.3.4",
     "better-auth": "^1.2.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "crossws": "^0.3.4",
     "drizzle-orm": "^0.40.0",
     "javascript-time-ago": "^2.5.11",
     "lodash": "^4.17.21",
@@ -41,6 +43,7 @@
     "react-use-websocket": "^4.13.0",
     "tailwind-merge": "^3.0.2",
     "tailwindcss-animate": "^1.0.7",
+    "uuid": "^11.1.0",
     "vinxi": "^0.5.3"
   },
   "devDependencies": {

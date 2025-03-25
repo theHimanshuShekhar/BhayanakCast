@@ -45,5 +45,6 @@ export default await defineConfig({
     handler: "./src/ws.ts",
     target: "server",
     base: "/_ws",
+    ssr: false,
   }),
 );

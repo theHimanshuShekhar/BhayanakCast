@@ -103,3 +103,37 @@ async function getUserData(userid: string) {
   const userData = await db.select().from(user).where(eq(user.id, userid)).limit(1);
   return userData[0];
 }
+
+// add viewer to room
+export const addViewerToRoom = createServerFn({ method: "POST" })
+  .validator((data: { roomId: string; userId: string }) => data)
+  .handler(async (ctx) => {
+    const { roomId, userId } = ctx.data;
+    await db.update(user).set({ roomId }).where(eq(user.id, userId));
+    return { success: true };
+  });
+
+// remove viewer from room
+export const removeViewerFromRoom = createServerFn({ method: "POST" })
+  .validator((userId: string) => userId)
+  .handler(async (ctx) => {
+    const userId = ctx.data;
+    const userFromDB = await db.select().from(user).where(eq(user.id, userId)).limit(1);
+    if (!userFromDB[0].roomId) {
+      return { success: false, message: "User is not in a room" };
+    }
+    const leavingRoomID = userFromDB[0].roomId;
+    await db.update(user).set({ roomId: null }).where(eq(user.id, userId));
+
+    return {
+      status: "success",
+      message: "User removed from room",
+      roomId: leavingRoomID,
+    };
+  });
+
+// get users from db
+export const getUsersFromDB = createServerFn({ method: "GET" }).handler(async () => {
+  const users = await db.select().from(user);
+  return users;
+});

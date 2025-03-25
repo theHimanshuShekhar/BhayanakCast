@@ -1,14 +1,15 @@
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
+import { useState } from "react";
 import { ErrorBoundary } from "react-error-boundary";
 import ReactPlayer from "react-player";
 import useWebSocket, { ReadyState } from "react-use-websocket";
 import ViewerDisplay from "~/lib/components/ViewerDisplay";
 import { getServerURL, getUserById, roomById } from "~/lib/server/functions";
-import { MessageType } from "~/lib/types";
+import { MessageType, type ChatMessage } from "~/lib/types";
 
 // Cache time for query data (5 seconds)
-const cacheTime = 1000 * 5;
+const cacheTime = 1000 * 2;
 
 // Error fallback component for ReactPlayer
 function VideoErrorFallback({ error }: { error: Error }) {
@@ -87,6 +88,8 @@ export const Route = createFileRoute("/room/$roomid")({
 });
 
 function RouteComponent() {
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+
   const {
     roomData: initialRoomData,
     userData: initialUserData,
@@ -133,10 +136,18 @@ function RouteComponent() {
       sendMessage(
         JSON.stringify({
           type: MessageType.JOIN,
-          userID: liveUserData,
+          user: liveUserData,
           roomID: liveRoomData.id,
         }),
       );
+    },
+    onMessage: (event) => {
+      console.log("WebSocket message", event.data);
+      const message = JSON.parse(event.data);
+      if (message.type === MessageType.CHATMESSAGE) {
+        console.log("Chat message", message.content);
+        setChatMessages((prev) => [...prev, message]);
+      }
     },
     onClose: () => {
       console.log("WebSocket connection closed");
@@ -215,7 +226,10 @@ function RouteComponent() {
         <div className="grow min-h-[300px] flex flex-col gap-1">
           <div className="border grow bg-gray-100 dark:bg-gray-700 p-2 rounded-md overflow-y-auto">
             <div className="text-sm text-gray-500 dark:text-gray-400">
-              Chat coming soon...
+              {chatMessages.length > 0 &&
+                chatMessages.map((message) => (
+                  <div key={message.id}>{message.content}</div>
+                ))}
             </div>
           </div>
           <input
