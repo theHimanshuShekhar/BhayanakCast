@@ -1,74 +1,110 @@
-# [TanStarter](https://github.com/dotnize/tanstarter)
+# 🎭 BhayanakCast
 
-A minimal starter template for 🏝️ TanStack Start.
+> A real-time streaming and chat platform that enables users to create rooms, join conversations, and interact in a seamless virtual environment.
 
-- [React 19](https://react.dev) + [React Compiler](https://react.dev/learn/react-compiler)
-- TanStack [Start](https://tanstack.com/start/latest) + [Router](https://tanstack.com/router/latest) + [Query](https://tanstack.com/query/latest)
-- [Tailwind CSS v4](https://tailwindcss.com/) + [shadcn/ui](https://ui.shadcn.com/)
-- [Drizzle ORM](https://orm.drizzle.team/) + PostgreSQL
-- [Better Auth](https://www.better-auth.com/)
+![Project Status](https://img.shields.io/badge/status-in%20development-yellow)
+![License](https://img.shields.io/badge/license-MIT-blue)
 
-## Getting Started
+## ✨ Features
 
-1. [Use this template](https://github.com/new?template_name=tanstarter&template_owner=dotnize) or clone this repository.
+- **🔴 Live Streaming**: Create and host streaming rooms with real-time video sharing
+- **💬 Live Chat**: Real-time messaging between room participants
+- **👥 Room Management**: Create, join, and leave rooms with real-time participant updates
+- **🔒 User Authentication**: Secure account creation and authentication flow
+- **📱 Responsive Design**: Seamless experience across desktop and mobile devices
 
-2. Install dependencies:
+## 🏗️ Architecture
+
+BhayanakCast uses a WebSocket-based architecture for real-time communication:
+
+```
+┌─────────────┐       ┌───────────────┐       ┌──────────────┐
+│  React UI   │◄─────►│   WebSocket   │◄─────►│  PostgreSQL  │
+│  Components │       │    Server     │       │   Database   │
+└─────────────┘       └───────────────┘       └──────────────┘
+                             │
+                      ┌──────┴──────┐
+                      │ Room & User │
+                      │ Management  │
+                      └─────────────┘
+```
+
+- **WebSocket Server**: Handles all real-time events using crossws
+- **Room System**: Manages rooms, participants, and messages
+- **Authentication**: Secure user identity verification
+- **Database**: Stores user data, room information, and message history
+
+## 🛠️ Technology Stack
+
+- [React 19](https://react.dev) with [React Compiler](https://react.dev/learn/react-compiler)
+- TanStack [Start](https://tanstack.com/start/latest), [Router](https://tanstack.com/router/latest), and [Query](https://tanstack.com/query/latest)
+- [Tailwind CSS v4](https://tailwindcss.com/) with [shadcn/ui](https://ui.shadcn.com/) components
+- [Drizzle ORM](https://orm.drizzle.team/) with PostgreSQL for data persistence
+- [Better Auth](https://www.better-auth.com/) for authentication
+- [crossws](https://github.com/crossws) for WebSocket implementation
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+- Node.js 18+ and pnpm/npm
+- PostgreSQL database
+
+### Installation
+
+1. **Clone the repository:**
 
    ```bash
-   pnpm install # npm install
+   git clone https://github.com/theHimanshuShekhar/BhayanakCast.git
+   cd BhayanakCast
    ```
 
-3. Create a `.env` file based on [`.env.example`](./.env.example).
-
-4. Push the schema to your database with drizzle-kit:
+2. **Install dependencies:**
 
    ```bash
-   pnpm db push # npm run db push
+   pnpm install
    ```
 
-   https://orm.drizzle.team/docs/migrations
+3. **Set up environment variables:**
 
-5. Run the development server:
+   Create a `.env` file based on [`.env.example`](./.env.example).
+
+4. **Initialize the database:**
 
    ```bash
-   pnpm dev # npm run dev
+   pnpm db push
    ```
 
-   The development server should be now running at [http://localhost:3000](http://localhost:3000).
+5. **Start the development server:**
 
-## Issue watchlist
+   ```bash
+   pnpm dev
+   ```
 
-- [React Compiler docs](https://react.dev/learn/react-compiler), [Working Group](https://github.com/reactwg/react-compiler/discussions) - React Compiler is still in beta. You can disable it in [app.config.ts](./app.config.ts#L15) if you prefer.
-- https://github.com/TanStack/router/discussions/2863 - TanStack Start is currently in beta and may still undergo major changes.
-- https://github.com/shadcn-ui/ui/discussions/6714 - We're using the `canary` version of shadcn/ui for Tailwind v4 support.
+   Your application will be available at [http://localhost:3000](http://localhost:3000)
 
-## Auth
+## 🔧 Development Notes
 
-Better Auth is currently configured for OAuth with GitHub, Google, and Discord, but can be easily modified to use other providers.
+### Authentication
 
-If you want to use email/password authentication or change providers, update the [auth config](./src/lib/server/auth.ts#L36) and [signin page](./src/routes/signin.tsx) with your own UI. You can use [shadcn/ui login blocks](https://ui.shadcn.com/blocks/login) or [@daveyplate/better-auth-ui](https://better-auth-ui.com/) as a starting point.
+BhayanakCast uses Better Auth with Discord OAuth, which can be customized to use other providers:
 
-## Goodies
+- To modify authentication providers, update the [auth config](./src/lib/server/auth.ts)
+- For custom sign-in UI, modify the [signin page](./src/routes/signin.tsx)
+- Available UI resources: [shadcn/ui login blocks](https://ui.shadcn.com/blocks/login) or [@daveyplate/better-auth-ui](https://better-auth-ui.com/)
 
-#### Scripts
+### Useful Commands
 
-These scripts in [package.json](./package.json#L5) use **pnpm** by default, but you can modify them to use your preferred package manager.
+- **`pnpm auth:generate`** - Regenerate auth database schema
+- **`pnpm db`** - Run drizzle-kit commands (e.g. `pnpm db generate`)
+- **`pnpm ui`** - Run the shadcn/ui CLI
+- **`pnpm format`** - Format code with Prettier
+- **`pnpm lint`** - Lint code with ESLint
 
-- **`auth:generate`** - Regenerate the [auth db schema](./src/lib/server/schema/auth.schema.ts) if you've made changes to your Better Auth [config](./src/lib/server/auth.ts).
-- **`db`** - Run drizzle-kit commands. (e.g. `pnpm db generate` to generate a migration)
-- **`ui`** - The shadcn/ui CLI. (e.g. `pnpm ui add button` to add the button component)
-- **`format`** and **`lint`** - Run Prettier and ESLint.
+## 📝 License
 
-#### Utilities
+[MIT](./LICENSE)
 
-- [`auth-guard.ts`](./src/lib/middleware/auth-guard.ts) - Sample middleware for forcing authentication on server functions. ([see #5](https://github.com/dotnize/tanstarter/issues/5))
-- [`ThemeToggle.tsx`](./src/lib/components/ThemeToggle.tsx) - A simple component to toggle between light and dark mode. ([#7](https://github.com/dotnize/tanstarter/issues/7))
+---
 
-## Building for production
-
-Read the [hosting docs](https://tanstack.com/start/latest/docs/framework/react/hosting) for information on how to deploy your TanStack Start app.
-
-## Acknowledgements
-
-- [nekochan0122/tanstack-boilerplate](https://github.com/nekochan0122/tanstack-boilerplate) - A batteries-included TanStack Start boilerplate that inspired some patterns in this template. If you're looking for a more feature-rich starter, check it out!
-- [AlexGaudon/tanstarter-better-auth](https://github.com/AlexGaudon/tanstarter-better-auth) for his own better-auth implementation.
+Made with ❤️ by the BhayanakCast Team
