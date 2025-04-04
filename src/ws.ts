@@ -2,7 +2,8 @@ import { defineEventHandler, defineWebSocket } from "@tanstack/react-start/serve
 import type { Peer } from "crossws";
 import { v4 as uuidv4 } from "uuid";
 import { MessageType, type User } from "./lib/types";
-const peers: Map<Peer, { userId: string; roomID: string }> = new Map();
+
+const peers: Map<Peer, { roomID: string; user: User }> = new Map();
 
 let serverURL: string | null = null;
 
@@ -31,10 +32,6 @@ export default defineEventHandler({
           joinRoom(peer, message.roomID, message.user);
           break;
         }
-        // case MessageType.LEAVE: {
-        //   leaveRoom(peer, message.roomID, message.user);
-        //   break;
-        // }
         case MessageType.CHATMESSAGE: {
           chatMessage(peer, message.roomID, message.user, message.content);
           break;
@@ -47,8 +44,7 @@ export default defineEventHandler({
       console.log("close", peer.id);
       const peerData = peers.get(peer);
       if (peerData) {
-        leaveRoom(peer, peerData.userId);
-        peers.delete(peer);
+        leaveRoom(peer, peerData.user, peerData.roomID);
       }
     },
     async error(peer, error) {
@@ -68,7 +64,7 @@ const joinRoom = async (peer: Peer, roomID: string, user: User) => {
     return;
   }
 
-  peers.set(peer, { userId: user.id, roomID });
+  peers.set(peer, { user, roomID });
   peer.subscribe(roomID);
   peer.publish(
     roomID,
@@ -81,32 +77,30 @@ const joinRoom = async (peer: Peer, roomID: string, user: User) => {
   );
 };
 
-const leaveRoom = async (peer: Peer, userId: string) => {
-  console.log("leave", userId);
+const leaveRoom = async (peer: Peer, user: User, roomId: string) => {
+  console.log("leave", user.id);
 
-  const response = await fetch(`${serverURL}/api/room/leave/${userId}`);
+  const response = await fetch(`${serverURL}/api/room/leave/${user.id}`);
   const data = await response.json();
 
-  console.log("leaveRoom", data);
-
   if (data.status !== "success") {
-    console.log("Failed to add viewer to room", data);
+    console.log("Failed to remove viewer from room", data);
     return;
   }
 
-  if (data.leavingRoomID) {
-    peer.unsubscribe(data.leavingRoomID);
-    peer.publish(
-      data.leavingRoomID,
-      JSON.stringify({
-        type: MessageType.CHATMESSAGE,
-        id: uuidv4(),
-        content: `${data.leavingRoomName} left the room`,
-        timestamp: new Date(),
-      }),
-    );
-    peer.close();
-  }
+  // Unsubscribe from the room
+  peer.publish(
+    roomId || "",
+    JSON.stringify({
+      type: MessageType.CHATMESSAGE,
+      id: uuidv4(),
+      content: `${user.name} left the room`,
+      timestamp: new Date(),
+    }),
+  );
+  peer.unsubscribe(roomId || "");
+
+  peers.delete(peer);
 };
 
 const chatMessage = (peer: Peer, roomID: string, user: User, content: string) => {
