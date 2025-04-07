@@ -2,6 +2,7 @@ import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import debounce from "lodash/debounce";
 import { useCallback, useState } from "react";
+import { CreateRoom } from "~/lib/components/CreateRoom";
 import { RoomCard } from "~/lib/components/RoomCard";
 import { SearchBar } from "~/lib/components/Search";
 import { getRoomsFromDB } from "~/lib/server/functions";
@@ -51,6 +52,7 @@ function Home() {
   return (
     <>
       <SearchBar setSearchString={debouncedSetSearch} />
+      <CreateRoom />
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {filteredRooms.map((room) => (
           <Link
