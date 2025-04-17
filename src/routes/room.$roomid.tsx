@@ -9,7 +9,7 @@ import { getServerURL, getUserById, roomById } from "~/lib/server/functions";
 import { MessageType, type ChatMessage } from "~/lib/types";
 
 // Cache time for query data (5 seconds)
-const cacheTime = 1000 * 2;
+const cacheTime = 1000 * 5;
 
 // Error fallback component for ReactPlayer
 function VideoErrorFallback({ error }: { error: Error }) {
@@ -83,7 +83,13 @@ export const Route = createFileRoute("/room/$roomid")({
       serverInfo: context.serverInfo,
     };
   },
-  preload: true,
+  onLeave: ({ context, params }) => {
+    // Cleanup function to cancel queries when leaving the route
+    if (context.user) {
+      context.queryClient.cancelQueries({ queryKey: ["user", context.user.id] });
+    }
+    context.queryClient.cancelQueries({ queryKey: ["room", params.roomid] });
+  },
   shouldReload: true,
 });
 
@@ -235,7 +241,7 @@ function RouteComponent() {
           <input
             type="text"
             placeholder="Type a message..."
-            className="border bg-gray-100 dark:bg-gray-700 w-full p-2 rounded-md bg-gray-100 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="border bg-gray-100 dark:bg-gray-700 w-full p-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
       </div>

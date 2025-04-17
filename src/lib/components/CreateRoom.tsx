@@ -20,7 +20,9 @@ export function CreateRoom() {
 
   return (
     <>
-      <Button onClick={handleOpen}>Open with State</Button>
+      <Button onClick={handleOpen} className="text-xl p-8">
+        Create New Room
+      </Button>
 
       <Credenza open={open} onOpenChange={setOpen}>
         <CredenzaContent className="bg-white border rounded-md shadow-xl flex flex-col justify-between p-4 dark:bg-gray-800">

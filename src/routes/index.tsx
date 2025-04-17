@@ -52,8 +52,13 @@ function Home() {
   return (
     <>
       <SearchBar setSearchString={debouncedSetSearch} />
-      <CreateRoom />
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        {filteredRooms.length === 0 && (
+          <div className="col-span-1 md:col-span-2 lg:col-span-3 xl:col-span-4 flex flex-col items-center justify-center p-4 rounded-lg gap-4">
+            <p className="text-center text-gray-500">No rooms found</p>
+            <CreateRoom />
+          </div>
+        )}
         {filteredRooms.map((room) => (
           <Link
             to="/room/$roomid"
