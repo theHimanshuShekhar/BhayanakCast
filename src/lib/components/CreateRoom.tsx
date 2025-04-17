@@ -11,7 +11,11 @@ import {
 } from "./ui/credenza";
 import { Input } from "./ui/input";
 
-export function CreateRoom() {
+interface CreateRoomProps {
+  initialRoomName?: string | null;
+}
+
+export function CreateRoom({ initialRoomName }: CreateRoomProps) {
   const [open, setOpen] = useState(false);
 
   const handleOpen = () => {
@@ -35,6 +39,11 @@ export function CreateRoom() {
                 className="peer pe-9 ps-9 dark:bg-gray-800"
                 placeholder="Room name..."
                 type="input"
+                defaultValue={initialRoomName || ""}
+                autoFocus
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck="false"
               />
               <Input
                 className="peer pe-9 ps-9 dark:bg-gray-800"
