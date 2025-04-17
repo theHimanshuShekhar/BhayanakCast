@@ -7,6 +7,7 @@ import {
   CredenzaBody,
   CredenzaClose,
   CredenzaContent,
+  CredenzaDescription,
   CredenzaFooter,
   CredenzaHeader,
   CredenzaTitle,
@@ -19,6 +20,8 @@ interface CreateRoomProps {
 }
 export function CreateRoom({ initialRoomName, userId }: CreateRoomProps) {
   const [open, setOpen] = useState(false);
+  const [roomName, setRoomName] = useState(initialRoomName || "");
+  const [roomDescription, setRoomDescription] = useState("");
   const router = useRouter();
 
   if (userId === null) {
@@ -42,6 +45,9 @@ export function CreateRoom({ initialRoomName, userId }: CreateRoomProps) {
         <CredenzaContent className="bg-white border rounded-md shadow-xl flex flex-col justify-between p-4 dark:bg-gray-800">
           <CredenzaHeader>
             <CredenzaTitle>Create New Room</CredenzaTitle>
+            <CredenzaDescription>
+              Enter a name and optional description for your room.
+            </CredenzaDescription>
           </CredenzaHeader>
           <CredenzaBody>
             <div className="relative flex flex-col gap-2 bg-white dark:bg-gray-800 rounded-md">
@@ -49,16 +55,22 @@ export function CreateRoom({ initialRoomName, userId }: CreateRoomProps) {
                 className="peer pe-9 ps-9 dark:bg-gray-800"
                 placeholder="Room name..."
                 type="input"
-                defaultValue={initialRoomName || ""}
                 autoFocus
                 autoCorrect="off"
                 autoCapitalize="off"
                 spellCheck="false"
+                onChange={(e) => setRoomName(e.target.value)}
+                value={roomName}
               />
               <Input
                 className="peer pe-9 ps-9 dark:bg-gray-800"
                 placeholder="Room description..."
                 type="input"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck="false"
+                onChange={(e) => setRoomDescription(e.target.value)}
+                value={roomDescription}
               />
             </div>
           </CredenzaBody>
@@ -69,9 +81,9 @@ export function CreateRoom({ initialRoomName, userId }: CreateRoomProps) {
                   // Handle room creation logic here
                   createRoom({
                     data: {
-                      name: initialRoomName || "",
-                      description: "",
-                      userId: userId || "",
+                      name: roomName || "",
+                      description: roomDescription || "",
+                      userId: userId,
                     },
                   }).then((roomID) => {
                     console.log("Room created:", roomID);
@@ -80,6 +92,8 @@ export function CreateRoom({ initialRoomName, userId }: CreateRoomProps) {
                     // Route to the new room
                     router.navigate({ to: "/room/$roomid", params: { roomid: roomID } });
                   });
+
+                  setOpen(false);
                 }}
               >
                 Create Room
