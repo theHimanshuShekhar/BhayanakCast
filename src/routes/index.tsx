@@ -58,7 +58,7 @@ function Home() {
         {filteredRooms.length === 0 && (
           <div className="col-span-1 md:col-span-2 lg:col-span-3 xl:col-span-4 flex flex-col items-center justify-center p-4 rounded-lg gap-4">
             <p className="text-center text-gray-500">No rooms found</p>
-            {user && <CreateRoom initialRoomName={searchString} />}
+            {user && <CreateRoom initialRoomName={searchString} userId={user.id} />}
           </div>
         )}
         {filteredRooms.map((room) => (

@@ -1,4 +1,6 @@
+import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
+import { createRoom } from "../server/functions";
 import { Button } from "./ui/button";
 import {
   Credenza,
@@ -13,10 +15,18 @@ import { Input } from "./ui/input";
 
 interface CreateRoomProps {
   initialRoomName?: string | null;
+  userId?: string | null;
 }
-
-export function CreateRoom({ initialRoomName }: CreateRoomProps) {
+export function CreateRoom({ initialRoomName, userId }: CreateRoomProps) {
   const [open, setOpen] = useState(false);
+  const router = useRouter();
+
+  if (userId === null) {
+    return null;
+  }
+  if (userId === undefined) {
+    return null;
+  }
 
   const handleOpen = () => {
     setOpen(true);
@@ -54,7 +64,26 @@ export function CreateRoom({ initialRoomName }: CreateRoomProps) {
           </CredenzaBody>
           <CredenzaFooter>
             <CredenzaClose asChild>
-              <Button>Create Room</Button>
+              <Button
+                onClick={() => {
+                  // Handle room creation logic here
+                  createRoom({
+                    data: {
+                      name: initialRoomName || "",
+                      description: "",
+                      userId: userId || "",
+                    },
+                  }).then((roomID) => {
+                    console.log("Room created:", roomID);
+                    // Close the modal after room creation
+                    setOpen(false);
+                    // Route to the new room
+                    router.navigate({ to: "/room/$roomid", params: { roomid: roomID } });
+                  });
+                }}
+              >
+                Create Room
+              </Button>
             </CredenzaClose>
           </CredenzaFooter>
         </CredenzaContent>

@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getWebRequest } from "@tanstack/react-start/server";
 import { eq } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { auth } from "./auth";
 import { db } from "./db";
 import { room, user } from "./schema";
@@ -82,6 +83,9 @@ export const roomById = createServerFn({ method: "GET" })
 
 async function getRoomWithViewers(roomid: string) {
   const requestedRoom = await db.select().from(room).where(eq(room.id, roomid));
+  if (requestedRoom === undefined || requestedRoom.length === 0) {
+    return null;
+  }
   const viewers = await db.select().from(user).where(eq(user.roomId, roomid));
   const streamer = await db
     .select()
@@ -137,3 +141,22 @@ export const getUsersFromDB = createServerFn({ method: "GET" }).handler(async ()
   const users = await db.select().from(user);
   return users;
 });
+
+export const createRoom = createServerFn({ method: "POST" })
+  .validator((data: { name: string; description: string; userId: string }) => data)
+  .handler(async (ctx) => {
+    const { name, description, userId } = ctx.data;
+    const id = randomUUID();
+    const roomData = {
+      id,
+      name,
+      description,
+      streamer: userId,
+    };
+    const roomId = await db
+      .insert(room)
+      .values(roomData)
+      .returning()
+      .then((data) => data[0].id);
+    return roomId;
+  });

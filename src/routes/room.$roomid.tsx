@@ -70,6 +70,8 @@ export const Route = createFileRoute("/room/$roomid")({
       context.queryClient.ensureQueryData(roomQueryOptions),
     ]);
 
+    console.log("Room data:", roomData);
+
     if (!roomData || !userData) {
       throw redirect({ to: "/" });
     }
@@ -143,7 +145,7 @@ function RouteComponent() {
         JSON.stringify({
           type: MessageType.JOIN,
           user: liveUserData,
-          roomID: liveRoomData.id,
+          roomID: liveRoomData?.id,
         }),
       );
     },
