@@ -70,8 +70,6 @@ export const Route = createFileRoute("/room/$roomid")({
       context.queryClient.ensureQueryData(roomQueryOptions),
     ]);
 
-    console.log("Room data:", roomData);
-
     if (!roomData || !userData) {
       throw redirect({ to: "/" });
     }
@@ -88,8 +86,10 @@ export const Route = createFileRoute("/room/$roomid")({
   onLeave: ({ context, params }) => {
     // Cleanup function to cancel queries when leaving the route
     if (context.user) {
+      context.queryClient.removeQueries({ queryKey: ["user", context.user.id] });
       context.queryClient.cancelQueries({ queryKey: ["user", context.user.id] });
     }
+    context.queryClient.removeQueries({ queryKey: ["room", params.roomid] });
     context.queryClient.cancelQueries({ queryKey: ["room", params.roomid] });
   },
   shouldReload: true,
@@ -200,7 +200,7 @@ function RouteComponent() {
             />
           </ErrorBoundary>
         </div>
-        {liveRoomData.viewers.length > 0 && (
+        {liveRoomData && liveRoomData.viewers.length > 0 && (
           <div className="flex gap-1">
             {liveRoomData.viewers.map((viewer) => (
               <ViewerDisplay
@@ -214,23 +214,25 @@ function RouteComponent() {
         )}
       </div>
       <div className="bg-white dark:bg-gray-800 flex flex-col col-span-full lg:col-span-1 gap-2 p-2 border rounded-md shadow-xl">
-        <div className="flex flex-col gap-1 p-2">
-          <div className="flex flex-wrap justify-between gap-1 items-start">
-            <div className="font-bold text-xl break-words flex-1 min-w-0">
-              {liveRoomData.name}
+        {liveRoomData && (
+          <div className="flex flex-col gap-1 p-2">
+            <div className="flex flex-wrap justify-between gap-1 items-start">
+              <div className="font-bold text-xl break-words flex-1 min-w-0">
+                {liveRoomData.name}
+              </div>
+              <div
+                className={`inline-block p-2 rounded-md text-white text-sm shrink-0 ${
+                  connectionStatus === "Connected"
+                    ? "bg-green-500 dark:bg-green-900"
+                    : "bg-red-500 dark:bg-red-900"
+                }`}
+              >
+                {connectionStatus}
+              </div>
             </div>
-            <div
-              className={`inline-block p-2 rounded-md text-white text-sm shrink-0 ${
-                connectionStatus === "Connected"
-                  ? "bg-green-500 dark:bg-green-900"
-                  : "bg-red-500 dark:bg-red-900"
-              }`}
-            >
-              {connectionStatus}
-            </div>
+            <div className="text-sm break-words">{liveRoomData.description}</div>
           </div>
-          <div className="text-sm break-words">{liveRoomData.description}</div>
-        </div>
+        )}
         <div className="grow min-h-[300px] flex flex-col gap-1">
           <div className="border grow bg-gray-100 dark:bg-gray-700 p-2 rounded-md overflow-y-auto">
             <div className="text-sm text-gray-500 dark:text-gray-400">

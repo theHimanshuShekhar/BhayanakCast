@@ -15,12 +15,12 @@ import {
 import { Input } from "./ui/input";
 
 interface CreateRoomProps {
-  initialRoomName?: string | null;
-  userId?: string | null;
+  roomName?: string | null;
+  userId?: string;
+  setRoomName?: React.Dispatch<React.SetStateAction<string | null>>;
 }
-export function CreateRoom({ initialRoomName, userId }: CreateRoomProps) {
+export function CreateRoom({ roomName, userId, setRoomName }: CreateRoomProps) {
   const [open, setOpen] = useState(false);
-  const [roomName, setRoomName] = useState(initialRoomName || "");
   const [roomDescription, setRoomDescription] = useState("");
   const router = useRouter();
 
@@ -52,18 +52,18 @@ export function CreateRoom({ initialRoomName, userId }: CreateRoomProps) {
           <CredenzaBody>
             <div className="relative flex flex-col gap-2 bg-white dark:bg-gray-800 rounded-md">
               <Input
-                className="peer pe-9 ps-9 dark:bg-gray-800"
+                className="dark:bg-gray-800"
                 placeholder="Room name..."
                 type="input"
                 autoFocus
                 autoCorrect="off"
                 autoCapitalize="off"
                 spellCheck="false"
-                onChange={(e) => setRoomName(e.target.value)}
-                value={roomName}
+                onChange={(e) => setRoomName?.(e.target.value)}
+                value={roomName ?? ""}
               />
               <Input
-                className="peer pe-9 ps-9 dark:bg-gray-800"
+                className="dark:bg-gray-800"
                 placeholder="Room description..."
                 type="input"
                 autoCapitalize="off"
