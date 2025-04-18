@@ -34,7 +34,7 @@ export function RoomCard({ room }: RoomCardProps) {
           <div className="text-wrap break-words font-bold text-xl md:text-2xl lg:text-4xl dark:text-gray-50 relative z-10">
             {name}
           </div>
-          <div className="font-normal text-sm dark:text-gray-50 relative z-10 my-4">
+          <div className="font-normal text-sm dark:text-gray-50 relative z-10 my-2">
             {description}
           </div>
         </div>
