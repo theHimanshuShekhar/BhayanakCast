@@ -129,12 +129,57 @@ export const removeViewerFromRoom = createServerFn({ method: "POST" })
     const leavingRoomID = userFromDB[0].roomId;
     await db.update(user).set({ roomId: null }).where(eq(user.id, userId));
 
+    isRoomEmpty(leavingRoomID).then(async (isEmpty) => {
+      if (isEmpty) {
+        console.log("Room is empty, deleting room in 5 minutes");
+        // delete room after 5 minutes
+        setTimeout(
+          async () => {
+            const isEmptyNow = await isRoomEmpty(leavingRoomID);
+            if (!isEmptyNow) return;
+            await db
+              .delete(room)
+              .where(eq(room.id, leavingRoomID))
+              .then(() => {
+                console.log("Room deleted");
+              });
+          },
+          5 * 60 * 1000, // 5 minutes
+        );
+      } else {
+        const streamer = await db
+          .select()
+          .from(room)
+          .where(eq(room.id, leavingRoomID))
+          .then((data) => data[0].streamer);
+        if (streamer === userId) {
+          console.log("Streamer left the room, updating streamer");
+          updateRoomStreamer(leavingRoomID);
+        }
+      }
+    });
+
     return {
       status: "success",
       message: "User removed from room",
       roomId: leavingRoomID,
     };
   });
+
+// check if room empty
+async function isRoomEmpty(roomId: string) {
+  // get room user count
+  const userCount = await db
+    .select()
+    .from(user)
+    .where(eq(user.roomId, roomId))
+    .then((data) => data.length);
+
+  if (userCount === 0) {
+    return true;
+  }
+  return false;
+}
 
 // get users from db
 export const getUsersFromDB = createServerFn({ method: "GET" }).handler(async () => {
@@ -160,3 +205,24 @@ export const createRoom = createServerFn({ method: "POST" })
       .then((data) => data[0].id);
     return roomId;
   });
+
+async function updateRoomStreamer(leavingRoomID: string) {
+  console.log("Updating room streamer");
+
+  // Find remaining viewers in the room
+  const viewers = await db.select().from(user).where(eq(user.roomId, leavingRoomID));
+
+  if (viewers.length === 0) {
+    // Nothing to do if no viewers remain
+    return;
+  }
+
+  // Choose a new streamer (e.g. the first one)
+  const newStreamerId = viewers[0].id;
+
+  // Update the room's streamer field
+  await db
+    .update(room)
+    .set({ streamer: newStreamerId })
+    .where(eq(room.id, leavingRoomID));
+}
