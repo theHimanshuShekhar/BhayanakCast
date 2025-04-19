@@ -83,6 +83,28 @@ BhayanakCast uses a WebSocket-based architecture for real-time communication:
 
    Your application will be available at [http://localhost:3000](http://localhost:3000)
 
+## 🚢 Docker Setup
+
+### Requirements
+
+- Docker
+- Docker Compose
+
+### Build and Run
+
+```bash
+docker-compose up --build
+```
+
+This command builds the Docker image and starts the services for the application and the PostgreSQL database.
+
+## 🎮 Usage
+
+1. Open [http://localhost:3000](http://localhost:3000) in your browser.
+2. Sign in via Discord authentication.
+3. Create a new room or join an existing room using its link.
+4. Start streaming and chatting in real-time.
+
 ## 🔧 Development Notes
 
 ### Authentication
