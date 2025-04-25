@@ -219,14 +219,18 @@ function RouteComponent() {
         </div>
         {liveRoomData && liveRoomData.viewers.length > 0 && (
           <div className="flex gap-1">
-            {liveRoomData.viewers.map((viewer) => (
-              <ViewerDisplay
-                id={viewer.id}
-                image={viewer.image}
-                name={viewer.name}
-                key={viewer.id}
-              />
-            ))}
+            {liveRoomData.viewers
+              .flat()
+              .sort((a) => (a.id === liveRoomData.streamer.id ? -1 : 1))
+              .map((viewer) => (
+                <ViewerDisplay
+                  id={viewer.id}
+                  image={viewer.image}
+                  name={viewer.name}
+                  key={viewer.id}
+                  isStreamer={viewer.id === liveRoomData.streamer.id}
+                />
+              ))}
           </div>
         )}
       </div>
