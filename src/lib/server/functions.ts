@@ -91,7 +91,7 @@ async function getRoomWithViewers(roomid: string) {
     .select()
     .from(user)
     .where(eq(user.id, requestedRoom[0].streamer));
-  return { ...requestedRoom[0], viewers, streamer };
+  return { ...requestedRoom[0], viewers, streamer: streamer[0] };
 }
 
 // get user by id
