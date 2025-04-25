@@ -5,7 +5,7 @@ import { ErrorBoundary } from "react-error-boundary";
 import ReactPlayer from "react-player";
 import useWebSocket, { ReadyState } from "react-use-websocket";
 import ViewerDisplay from "~/lib/components/ViewerDisplay";
-import { getServerURL, getUserById, roomById } from "~/lib/server/functions";
+import { createRoom, getServerURL, getUserById, roomById } from "~/lib/server/functions";
 import { MessageType, type ChatMessage } from "~/lib/types";
 
 // Cache time for query data (5 seconds)
@@ -70,8 +70,25 @@ export const Route = createFileRoute("/room/$roomid")({
       context.queryClient.ensureQueryData(roomQueryOptions),
     ]);
 
-    if (!roomData || !userData) {
+    if (!userData) {
       throw redirect({ to: "/" });
+    }
+
+    if (!roomData) {
+      const newRoomId = await createRoom({
+        data: {
+          name: params.roomid,
+          userId: userData.id,
+          description: params.roomid,
+        },
+      });
+      if (!newRoomId) {
+        throw redirect({ to: "/" });
+      }
+      throw redirect({
+        to: "/room/$roomid",
+        params: { roomid: newRoomId },
+      });
     }
 
     return { roomData, userData, serverInfo };
