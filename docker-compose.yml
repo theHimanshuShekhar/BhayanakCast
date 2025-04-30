@@ -1,34 +1,31 @@
 services:
-  # PostgreSQL database service configuration
   db:
     image: postgres:17.2-alpine
     container_name: BhayanakCastDB
+    # No need to override to root—the image handles permissions as 'postgres'
     ports:
       - 3232:3232
-    volumes:
-      # Persist database data to local directory
-      - ./postgres_data:/var/lib/postgresql/data
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=bhayanak
-      - PGPORT=3232
-
-  # Tanstack/start application server service
-  server:
-    image: ghcr.io/thehimanshushekhar/bhayanakcast/client:latest
-    container_name: BhayanakCastServer
-    # build:
-    #   context: .
-    #   dockerfile: Dockerfile
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: bhayanak
+      PGPORT: "3232"
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - dbdata:/var/lib/postgresql/data/pgdata
     restart: unless-stopped
-    ports:
-      - 3434:3434
-    # Ensure database is started before server
+  server:
+    image: ghcr.io/thehimanshushekhar/bhayanakcast:latest
+    container_name: BhayanakCastServer
     depends_on:
       - db
+    ports:
+      - 3434:3434
     env_file:
-      - .env.prod
+      - .env
     environment:
-      # Database connection string for server to connect to PostgreSQL
-      - DATABASE_URL=postgresql://postgres:bhayanak@db:3232
-      - PORT:3434
+      DATABASE_URL: postgresql://postgres:bhayanak@db:3232
+      PORT: "3434"
+    restart: unless-stopped
+volumes:
+  # Named volume avoids host-FS permission issues
+  dbdata: null
