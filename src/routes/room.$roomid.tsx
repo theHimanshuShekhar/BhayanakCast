@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ErrorBoundary } from "react-error-boundary";
 import ReactPlayer from "react-player";
 import useWebSocket, { ReadyState } from "react-use-websocket";
+import ChatMessageDisplay from "~/lib/components/ChatMessageDisplay";
 import ViewerDisplay from "~/lib/components/ViewerDisplay";
 import { createRoom, getServerURL, getUserById, roomById } from "~/lib/server/functions";
 import { MessageType, type ChatMessage } from "~/lib/types";
@@ -259,13 +260,31 @@ function RouteComponent() {
             <div className="text-sm text-gray-500 dark:text-gray-400">
               {chatMessages.length > 0 &&
                 chatMessages.map((message) => (
-                  <div key={message.id}>{message.content}</div>
+                  <ChatMessageDisplay message={message} key={message.id} />
                 ))}
             </div>
           </div>
           <input
             type="text"
             placeholder="Type a message..."
+            disabled={readyState !== ReadyState.OPEN}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                const input = e.target as HTMLInputElement;
+                const message = input.value;
+                if (message.trim() !== "") {
+                  sendMessage(
+                    JSON.stringify({
+                      type: MessageType.CHATMESSAGE,
+                      content: message,
+                      user: liveUserData,
+                      roomID: liveRoomData?.id,
+                    }),
+                  );
+                  input.value = "";
+                }
+              }
+            }}
             className="border bg-gray-100 dark:bg-gray-700 w-full p-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
