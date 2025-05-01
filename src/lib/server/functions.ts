@@ -6,6 +6,8 @@ import { auth } from "./auth";
 import { db } from "./db";
 import { room, user } from "./schema";
 
+const PermanentlyAvailable = ["Bhayanak", "SnapeGang", "Movie Time", "Chill Zone"];
+
 // get posthog data
 export const getPostHogData = createServerFn({ method: "GET" }).handler(async () => {
   // Check if the environment variables are set
@@ -77,8 +79,8 @@ export const roomById = createServerFn({ method: "GET" })
   .validator((roomid: string) => roomid)
   .handler(async (ctx) => {
     const roomid = ctx.data;
-    const room = await getRoomWithViewers(roomid);
-    return room;
+    const roomData = await getRoomWithViewers(roomid); // renamed variable
+    return roomData;
   });
 
 async function getRoomWithViewers(roomid: string) {
@@ -91,7 +93,7 @@ async function getRoomWithViewers(roomid: string) {
     .select()
     .from(user)
     .where(eq(user.id, requestedRoom[0].streamer));
-  return { ...requestedRoom[0], viewers, streamer: streamer[0] };
+  return { ...requestedRoom[0], viewers, streamer: streamer[0] ?? null };
 }
 
 // get user by id
@@ -131,6 +133,10 @@ export const removeViewerFromRoom = createServerFn({ method: "POST" })
 
     isRoomEmpty(leavingRoomID).then(async (isEmpty) => {
       if (isEmpty) {
+        if (PermanentlyAvailable.includes(leavingRoomID)) {
+          console.log(`Room ${leavingRoomID} is permanently available, not deleting`);
+          return;
+        }
         console.log("Room is empty, deleting room in 5 minutes");
         // delete room after 5 minutes
         setTimeout(

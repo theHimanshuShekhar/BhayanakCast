@@ -1,18 +1,34 @@
 import { MoonIcon, SunIcon } from "lucide-react";
+import { useEffect } from "react";
 import { Button } from "./ui/button";
 
 export default function ThemeToggle() {
+  // Sync theme on mount
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const theme = localStorage.getItem("theme");
+    if (
+      theme === "dark" ||
+      (!theme && window.matchMedia("(prefers-color-scheme: dark)").matches)
+    ) {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+  }, []);
+
   function toggleTheme() {
+    if (typeof window === "undefined") return;
     if (
       document.documentElement.classList.contains("dark") ||
-      (!("theme" in localStorage) &&
+      (!localStorage.getItem("theme") &&
         window.matchMedia("(prefers-color-scheme: dark)").matches)
     ) {
       document.documentElement.classList.remove("dark");
-      localStorage.theme = "light";
+      localStorage.setItem("theme", "light");
     } else {
       document.documentElement.classList.add("dark");
-      localStorage.theme = "dark";
+      localStorage.setItem("theme", "dark");
     }
   }
 
