@@ -1,6 +1,6 @@
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ErrorBoundary } from "react-error-boundary";
 import ReactPlayer from "react-player";
 import useWebSocket, { ReadyState } from "react-use-websocket";
@@ -115,6 +115,7 @@ export const Route = createFileRoute("/room/$roomid")({
 
 function RouteComponent() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   const {
     roomData: initialRoomData,
@@ -191,6 +192,13 @@ function RouteComponent() {
     [ReadyState.UNINSTANTIATED]: "Uninstantiated",
   }[readyState];
 
+  // Scroll to bottom of chat window on every message received
+  useEffect(() => {
+    if (chatMessages.length === 0) return;
+    // Scroll to the bottom of the chat window
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages]);
+
   return (
     <div className="grow grid grid-cols-3 gap-2">
       <div className="col-span-full lg:col-span-2 flex flex-col rounded-md gap-2">
@@ -256,7 +264,7 @@ function RouteComponent() {
         )}
         <div className="flex flex-col gap-1 flex-1 min-h-0">
           <div
-            className="border bg-gray-100 dark:bg-gray-700 p-2 rounded-md overflow-y-auto flex-1 min-h-0"
+            className="border bg-gray-100 dark:bg-gray-700 p-2 rounded-md overflow-y-auto flex-1 min-h-0 no-scrollbar"
             role="log"
             aria-label="Chat messages"
           >
@@ -265,6 +273,7 @@ function RouteComponent() {
                 chatMessages.map((message) => (
                   <ChatMessageDisplay message={message} key={message.id} />
                 ))}
+              <div ref={chatEndRef} />
             </div>
           </div>
           <input

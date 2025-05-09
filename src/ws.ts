@@ -104,8 +104,6 @@ const leaveRoom = async (peer: Peer, user: User, roomId: string) => {
 };
 
 const chatMessage = (peer: Peer, roomID: string, user: User, content: string) => {
-  console.log("message", roomID, user, content);
-
   const msgContent = {
     type: MessageType.CHATMESSAGE,
     id: uuidv4(),
