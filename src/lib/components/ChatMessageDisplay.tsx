@@ -8,7 +8,6 @@ TimeAgo.addDefaultLocale(en);
 const timeAgo = new TimeAgo("en-US");
 
 export default function ChatMessageDisplay({ message }: { message: ChatMessage }) {
-  console.log("MessageContent", message);
   return (
     <div className="flex items-center gap-1 p-1">
       {message.user?.image && (

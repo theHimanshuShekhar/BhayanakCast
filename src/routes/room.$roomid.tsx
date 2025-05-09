@@ -221,7 +221,6 @@ function RouteComponent() {
         {liveRoomData && liveRoomData.viewers.length > 0 && (
           <div className="flex gap-1">
             {liveRoomData.viewers
-              .flat()
               .sort((a) => (a.id === liveRoomData.streamer.id ? -1 : 1))
               .map((viewer) => (
                 <ViewerDisplay
@@ -235,7 +234,7 @@ function RouteComponent() {
           </div>
         )}
       </div>
-      <div className="bg-white dark:bg-gray-800 flex flex-col col-span-full lg:col-span-1 gap-2 p-2 border rounded-md shadow-xl">
+      <div className="bg-white dark:bg-gray-800 flex flex-col col-span-full lg:col-span-1 gap-2 p-2 border rounded-md shadow-xl lg:max-h-[calc(100vh-80px)]">
         {liveRoomData && (
           <div className="flex flex-col gap-1 p-2">
             <div className="flex flex-wrap justify-between gap-1 items-start">
@@ -255,8 +254,12 @@ function RouteComponent() {
             <div className="text-sm break-words">{liveRoomData.description}</div>
           </div>
         )}
-        <div className="grow min-h-[300px] flex flex-col gap-1">
-          <div className="border grow bg-gray-100 dark:bg-gray-700 p-2 rounded-md overflow-y-auto">
+        <div className="flex flex-col gap-1 flex-1 min-h-0">
+          <div
+            className="border bg-gray-100 dark:bg-gray-700 p-2 rounded-md overflow-y-auto flex-1 min-h-0"
+            role="log"
+            aria-label="Chat messages"
+          >
             <div className="text-sm text-gray-500 dark:text-gray-400">
               {chatMessages.length > 0 &&
                 chatMessages.map((message) => (
