@@ -242,7 +242,7 @@ function RouteComponent() {
           </div>
         )}
       </div>
-      <div className="bg-white dark:bg-gray-800 flex flex-col col-span-full lg:col-span-1 gap-2 p-2 border rounded-md shadow-xl lg:max-h-[calc(100vh-80px)]">
+      <div className="bg-white dark:bg-gray-800 flex flex-col col-span-full lg:col-span-1 gap-2 p-2 border rounded-md shadow-xl min-h-full max-h-[500px] lg:max-h-[calc(100vh-80px)]">
         {liveRoomData && (
           <div className="flex flex-col gap-1 p-2">
             <div className="flex flex-wrap justify-between gap-1 items-start">
@@ -268,7 +268,7 @@ function RouteComponent() {
             role="log"
             aria-label="Chat messages"
           >
-            <div className="text-sm text-gray-500 dark:text-gray-400">
+            <div className="text-sm text-gray-500 overflow-x-hidden dark:text-gray-400 max-w-full">
               {chatMessages.length > 0 &&
                 chatMessages.map((message) => (
                   <ChatMessageDisplay message={message} key={message.id} />
