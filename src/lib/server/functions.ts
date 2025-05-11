@@ -52,7 +52,7 @@ export const getRoomsFromDB = createServerFn({ method: "GET" }).handler(
 );
 
 async function getRoomsWithViewers() {
-  const rooms = await db.select().from(room);
+  const rooms = await db.select().from(room).orderBy(room.createdAt);
 
   // get streamer for each room
   const roomsWithViewers = await Promise.all(
