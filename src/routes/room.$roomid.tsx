@@ -113,9 +113,12 @@ export const Route = createFileRoute("/room/$roomid")({
   shouldReload: true,
 });
 
+const maxChatLength = 200; // Maximum length of chat messages
+
 function RouteComponent() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const [chatInput, setChatInput] = useState(""); // Track chat input value
 
   const {
     roomData: initialRoomData,
@@ -276,29 +279,44 @@ function RouteComponent() {
               <div ref={chatEndRef} />
             </div>
           </div>
-          <input
-            type="text"
-            placeholder="Type a message..."
-            disabled={readyState !== ReadyState.OPEN}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                const input = e.target as HTMLInputElement;
-                const message = input.value;
-                if (message.trim() !== "") {
-                  sendMessage(
-                    JSON.stringify({
-                      type: MessageType.CHATMESSAGE,
-                      content: message,
-                      user: liveUserData,
-                      roomID: liveRoomData?.id,
-                    }),
-                  );
-                  input.value = "";
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="Type a message..."
+              disabled={readyState !== ReadyState.OPEN}
+              maxLength={maxChatLength}
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  const input = e.target as HTMLInputElement;
+                  const message = input.value;
+                  if (message.trim() !== "") {
+                    sendMessage(
+                      JSON.stringify({
+                        type: MessageType.CHATMESSAGE,
+                        content: message,
+                        user: liveUserData,
+                        roomID: liveRoomData?.id,
+                      }),
+                    );
+                    setChatInput(""); // Clear input state
+                    input.value = ""; // For safety, though value is controlled
+                  }
                 }
-              }
-            }}
-            className="border bg-gray-100 dark:bg-gray-700 w-full p-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
+              }}
+              className="border bg-gray-100 dark:bg-gray-700 w-full p-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 pr-16"
+            />
+            <span
+              className={`absolute right-2 top-1/2 -translate-y-1/2 text-xs pointer-events-none ${
+                chatInput.length >= maxChatLength
+                  ? "text-red-500 dark:text-red-400"
+                  : "text-gray-500 dark:text-gray-400"
+              }`}
+            >
+              {chatInput.length}/{maxChatLength}
+            </span>
+          </div>
         </div>
       </div>
     </div>
