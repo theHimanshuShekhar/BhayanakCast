@@ -1,11 +1,9 @@
 import TimeAgo from "javascript-time-ago";
 import en from "javascript-time-ago/locale/en";
+import ReactTimeAgo from "react-time-ago";
 import type { ChatMessage } from "../types";
 
 TimeAgo.addDefaultLocale(en);
-
-// Create formatter (English).
-const timeAgo = new TimeAgo("en-US");
 
 export default function ChatMessageDisplay({ message }: { message: ChatMessage }) {
   return (
@@ -24,9 +22,12 @@ export default function ChatMessageDisplay({ message }: { message: ChatMessage }
             <span className="font-bold truncate">
               {message.user?.name || "Unknown User"}
             </span>
-            <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
-              {timeAgo.format(new Date(message.timestamp))}
-            </span>
+            <ReactTimeAgo
+              date={new Date(message.timestamp)}
+              timeStyle="twitter"
+              component="span"
+              className="text-gray-500 dark:text-gray-400"
+            />
           </div>
         </div>
       )}
