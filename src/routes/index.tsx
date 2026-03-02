@@ -1,6 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { publicRoute } from "#/lib/auth-guard";
 
-export const Route = createFileRoute("/")({ component: App });
+// Public route - accessible to all users including logged out
+export const Route = createFileRoute("/")({
+	component: App,
+	beforeLoad: publicRoute,
+});
 
 function App() {
 	return (
@@ -9,9 +14,6 @@ function App() {
 				<h1 className="text-4xl font-bold text-text-primary">
 					Welcome to BhayanakCast
 				</h1>
-				<p className="mt-4 text-text-secondary">
-					Your dark-themed podcast platform
-				</p>
 			</div>
 		</div>
 	);

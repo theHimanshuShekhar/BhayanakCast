@@ -1,25 +1,31 @@
-// Example queries for user relationships
-// These show how to get the top 5 users someone spent time with
-
 import { desc, eq, or, sql } from "drizzle-orm";
 import { db } from "./index";
 import { userRelationships, users } from "./schema";
 
-interface RelationshipResult {
+export interface RelationshipResult {
 	otherUserId: string;
 	totalTimeSeconds: number;
 	roomsCount: number;
 	lastInteractionAt: Date | null;
 }
 
-interface UserResult {
+export interface UserResult {
 	id: string;
 	name: string;
+	email: string;
 	image: string | null;
+	emailVerified: boolean;
+	createdAt: Date;
+	updatedAt: Date;
 }
 
-interface RelationshipWithUser extends RelationshipResult {
+export interface RelationshipWithUser extends RelationshipResult {
 	user: UserResult | undefined;
+}
+
+export interface UserProfileData {
+	user: UserResult;
+	topRelationships: RelationshipWithUser[];
 }
 
 /**
@@ -66,7 +72,11 @@ export async function getTopRelationships(
 		.select({
 			id: users.id,
 			name: users.name,
+			email: users.email,
 			image: users.image,
+			emailVerified: users.emailVerified,
+			createdAt: users.createdAt,
+			updatedAt: users.updatedAt,
 		})
 		.from(users)
 		.where(sql`${users.id} IN (${sql.join(otherUserIds)})`);
@@ -81,50 +91,34 @@ export async function getTopRelationships(
 /**
  * Get full profile data including top relationships
  */
-export async function getUserProfileWithRelationships(userId: string) {
-	const [user, topRelationships] = await Promise.all([
-		db.select().from(users).where(eq(users.id, userId)).limit(1),
+export async function getUserProfileWithRelationships(
+	userId: string,
+): Promise<UserProfileData | null> {
+	const [userRows, topRelationships] = await Promise.all([
+		db
+			.select({
+				id: users.id,
+				name: users.name,
+				email: users.email,
+				image: users.image,
+				emailVerified: users.emailVerified,
+				createdAt: users.createdAt,
+				updatedAt: users.updatedAt,
+			})
+			.from(users)
+			.where(eq(users.id, userId))
+			.limit(1),
 		getTopRelationships(userId, 5),
 	]);
 
-	if (!user[0]) {
+	const user = userRows[0];
+
+	if (!user) {
 		return null;
 	}
 
 	return {
-		user: user[0],
+		user,
 		topRelationships,
 	};
 }
-
-// Example usage in a React component:
-/*
-const ProfilePage = () => {
-  const { userId } = useParams();
-
-  const { data: profile } = useQuery({
-    queryKey: ["profile", userId],
-    queryFn: () => getUserProfileWithRelationships(userId),
-  });
-
-  return (
-    <div>
-      <h1>{profile?.user.name}</h1>
-
-      <h2>Top People You've Spent Time With:</h2>
-      <ul>
-        {profile?.topRelationships.map((rel, index) => (
-          <li key={rel.otherUserId}>
-            #{index + 1} {rel.user?.name}
-            <span>
-              {Math.floor(rel.totalTimeSeconds / 3600)}h{" "}
-              {Math.floor((rel.totalTimeSeconds % 3600) / 60)}m
-            </span>
-            <span>in {rel.roomsCount} rooms</span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-};
-*/
