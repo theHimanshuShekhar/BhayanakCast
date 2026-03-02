@@ -1,0 +1,6 @@
+onlyBuiltDependencies:
+  - '@prisma/engines'
+  - core-js
+  - esbuild
+  - prisma
+  - protobufjs
