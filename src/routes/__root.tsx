@@ -11,6 +11,7 @@ import { AuthProviders } from "../integrations/better-auth/providers";
 import PostHogProvider from "../integrations/posthog/provider";
 import TanStackQueryDevtools from "../integrations/tanstack-query/devtools";
 import TanStackQueryProvider from "../integrations/tanstack-query/root-provider";
+import { WebSocketProvider } from "../lib/websocket-context";
 import appCss from "../styles.css?url";
 
 interface MyRouterContext {
@@ -55,20 +56,22 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 				<TanStackQueryProvider>
 					<AuthProviders>
 						<PostHogProvider>
-							<Header />
-							<div className="flex-1 overflow-auto">{children}</div>
-							<TanStackDevtools
-								config={{
-									position: "bottom-right",
-								}}
-								plugins={[
-									{
-										name: "Tanstack Router",
-										render: <TanStackRouterDevtoolsPanel />,
-									},
-									TanStackQueryDevtools,
-								]}
-							/>
+							<WebSocketProvider>
+								<Header />
+								<div className="flex-1 overflow-auto">{children}</div>
+								<TanStackDevtools
+									config={{
+										position: "bottom-right",
+									}}
+									plugins={[
+										{
+											name: "Tanstack Router",
+											render: <TanStackRouterDevtoolsPanel />,
+										},
+										TanStackQueryDevtools,
+									]}
+								/>
+							</WebSocketProvider>
 						</PostHogProvider>
 					</AuthProviders>
 				</TanStackQueryProvider>

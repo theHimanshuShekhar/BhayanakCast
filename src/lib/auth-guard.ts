@@ -1,5 +1,16 @@
 import { redirect } from "@tanstack/react-router";
-import { auth } from "#/lib/auth";
+import { createServerFn } from "@tanstack/react-start";
+
+const getSessionOnServer = createServerFn({ method: "GET" }).handler(
+	async () => {
+		// Dynamic import to avoid bundling for client
+		const { auth } = await import("#/lib/auth");
+		const session = await auth.api.getSession({
+			headers: new Headers(),
+		});
+		return session;
+	},
+);
 
 /**
  * Use this in route definitions to protect routes that require authentication.
@@ -11,9 +22,7 @@ import { auth } from "#/lib/auth";
  * });
  */
 export async function requireAuth() {
-	const session = await auth.api.getSession({
-		headers: new Headers(),
-	});
+	const session = await getSessionOnServer();
 
 	if (!session) {
 		throw redirect({
