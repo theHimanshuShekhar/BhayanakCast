@@ -5,53 +5,53 @@
 
 /* Discord-inspired Blue-Gray Dark Theme - Default */
 :root {
-  /* Depth scale: background (darkest) to surface-3 (lightest) */
-  --bg-primary: #1a1b1e;       /* Deepest background */
-  --bg-secondary: #1e1f22;     /* Elevated background */
-  --surface-1: #2b2d31;        /* Cards, sidebar */
-  --surface-2: #313338;        /* Components, inputs */
-  --surface-3: #383a40;        /* Elevated components, hover states */
-  
+  /* Depth scale: background (darkest) to surface-3 (lightest) - LIGHTER VARIANT */
+  --bg-primary: #252629;       /* Deepest background - was #1a1b1e */
+  --bg-secondary: #2a2b2e;     /* Elevated background - was #1e1f22 */
+  --surface-1: #3a3c42;        /* Cards, sidebar - was #2b2d31 */
+  --surface-2: #42444a;        /* Components, inputs - was #313338 */
+  --surface-3: #4a4c54;        /* Elevated components, hover states - was #383a40 */
+
   /* Accent colors - Discord blurple */
   --accent: #5865f2;
   --accent-hover: #4752c4;
   --accent-light: #949cf8;
-  
-  /* Text colors */
+
+  /* Text colors - slightly softer for lighter bg */
   --text-primary: #f2f3f5;     /* Bright white */
-  --text-secondary: #b5bac1;   /* Muted text */
-  --text-tertiary: #949ba4;    /* Very muted */
-  
+  --text-secondary: #c5cad1;   /* Muted text - was #b5bac1 */
+  --text-tertiary: #a5acb6;    /* Very muted - was #949ba4 */
+
   /* Status colors */
   --success: #3ba55d;
   --warning: #faa81a;
   --danger: #ed4245;
   --info: #5865f2;
-  
-  /* Border colors */
-  --border-subtle: #232428;
-  --border-default: #3f4147;
-  --border-hover: #5a5c66;
-  
-  /* Shadcn/ui theme mapping */
-  --background: oklch(0.22 0.02 270);
+
+  /* Border colors - adjusted for lighter bg */
+  --border-subtle: #323439;    /* was #232428 */
+  --border-default: #4f5159;   /* was #3f4147 */
+  --border-hover: #6a6c78;     /* was #5a5c66 */
+
+  /* Shadcn/ui theme mapping - LIGHTER */
+  --background: oklch(0.28 0.02 270);      /* was 0.22 */
   --foreground: oklch(0.95 0 0);
-  --card: oklch(0.28 0.02 270);
+  --card: oklch(0.34 0.02 270);            /* was 0.28 */
   --card-foreground: oklch(0.95 0 0);
-  --popover: oklch(0.30 0.02 270);
+  --popover: oklch(0.36 0.02 270);         /* was 0.30 */
   --popover-foreground: oklch(0.95 0 0);
   --primary: oklch(0.55 0.18 270);
   --primary-foreground: oklch(0.98 0 0);
-  --secondary: oklch(0.35 0.02 270);
+  --secondary: oklch(0.40 0.02 270);       /* was 0.35 */
   --secondary-foreground: oklch(0.95 0 0);
-  --muted: oklch(0.32 0.02 270);
-  --muted-foreground: oklch(0.70 0 0);
+  --muted: oklch(0.38 0.02 270);           /* was 0.32 */
+  --muted-foreground: oklch(0.72 0 0);     /* was 0.70 */
   --accent: oklch(0.55 0.18 270);
   --accent-foreground: oklch(0.98 0 0);
   --destructive: oklch(0.55 0.20 25);
   --destructive-foreground: oklch(0.98 0 0);
-  --border: oklch(0.30 0.02 270);
-  --input: oklch(0.32 0.02 270);
+  --border: oklch(0.36 0.02 270);          /* was 0.30 */
+  --input: oklch(0.38 0.02 270);           /* was 0.32 */
   --ring: oklch(0.55 0.18 270);
   --radius: 0.5rem;
 }

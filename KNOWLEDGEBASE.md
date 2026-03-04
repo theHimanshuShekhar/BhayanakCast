@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**BhayanakCast** is a TanStack Start application with a Discord-inspired dark theme, featuring user authentication, streaming rooms, and user relationship tracking.
+**BhayanakCast** is a TanStack Start application with a Discord-inspired dark theme, featuring user authentication, streaming rooms, real-time user tracking via WebSocket, and user relationship tracking.
 
 ## Architecture
 
@@ -12,14 +12,17 @@
 - **Query**: TanStack Query v5
 - **Auth**: Better Auth v1.4.12 with email/password
 - **Database**: PostgreSQL 15 + Drizzle ORM
+- **Real-time**: Socket.io WebSocket server
 - **Styling**: Tailwind CSS v4 with custom theme
 - **UI Components**: shadcn/ui + better-auth-ui
+- **Debouncing**: @tanstack/pacer
 
 ### File Structure
 ```
 src/
 ├── components/          # Reusable UI components
-├── db/                  # Database layer
+│   └── Header.tsx       # Shows real-time user count
+├── db/                  # Database layer (server-only)
 │   ├── index.ts         # Database connection (Pool)
 │   ├── schema.ts        # Drizzle ORM schema
 │   └── queries.ts       # Database query utilities
@@ -31,16 +34,57 @@ src/
 │   ├── auth.ts         # Better-auth server config
 │   ├── auth-client.ts  # Better-auth client
 │   ├── auth-guard.ts   # Route protection utilities
-│   └── db.ts           # (Removed - use db/index.ts)
+│   └── websocket-context.tsx  # Global WebSocket connection
 ├── routes/             # TanStack Router file-based routes
-│   ├── __root.tsx      # Root layout
+│   ├── __root.tsx      # Root layout (with WebSocketProvider)
 │   ├── index.tsx       # Home page (public)
 │   ├── profile.$userId.tsx  # Profile page (public)
 │   └── auth/$authView.tsx   # Auth pages
-└── styles.css          # Global styles with theme
+├── utils/              # Server utility functions
+│   └── profile.ts      # Profile data fetching (server functions)
+├── styles.css          # Global styles with theme
+websocket-server.ts     # Socket.io server (port 3001)
 ```
 
 ## Key Implementation Details
+
+### WebSocket Server
+
+**Socket.io Server** (runs separately on port 3001):
+```typescript
+// websocket-server.ts
+import { Server } from "socket.io";
+
+const io = new Server(httpServer, {
+  cors: { origin: "http://localhost:3000" }
+});
+
+io.on("connection", (socket) => {
+  // Track connections and broadcast user count
+  io.emit("userCount", { count: io.engine.clientsCount });
+});
+```
+
+**WebSocket Client** (global context):
+```typescript
+// src/lib/websocket-context.tsx
+import { io } from "socket.io-client";
+import { debounce } from "@tanstack/pacer";
+
+// Debounced user count updates (300ms)
+const debouncedUpdate = debounce(setUserCount, 300);
+
+socket.on("userCount", (data) => {
+  debouncedUpdate(data.count);
+});
+```
+
+### Real-time User Count
+
+The Header component displays live user count:
+- Shows `...` while connecting
+- Shows actual count with green pulse when connected
+- Updates are debounced to prevent rapid re-renders
 
 ### Database Setup
 
@@ -54,11 +98,17 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 export const db = drizzle(pool, { schema });
 ```
 
-**Important**: The non-null assertion `!` is forbidden by Biome. Always validate env vars:
+**⚠️ CRITICAL**: Database imports must ONLY be used in server functions:
 ```typescript
-if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL is not set");
-}
+// ✅ CORRECT - Inside createServerFn
+const getData = createServerFn({ method: "GET" })
+  .handler(async () => {
+    const { db } = await import("#/db/index");
+    return db.query...;
+  });
+
+// ❌ WRONG - Will cause Buffer errors in browser
+import { db } from "#/db/index"; // At top of route file
 ```
 
 ### Better Auth Configuration
@@ -71,7 +121,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 export const auth = betterAuth({
   database: drizzleAdapter(db, {
     provider: "pg",
-    usePlural: true,  // REQUIRED - looks for "users" not "user"
+    usePlural: true,  // REQUIRED
     schema,
   }),
   emailAndPassword: { enabled: true },
@@ -89,13 +139,13 @@ import { requireAuth, publicRoute } from "#/lib/auth-guard";
 // Protected route
 export const Route = createFileRoute("/dashboard")({
   component: DashboardPage,
-  beforeLoad: requireAuth,  // Redirects to sign-in if not authenticated
+  beforeLoad: requireAuth,
 });
 
-// Public route (explicit)
+// Public route
 export const Route = createFileRoute("/")({
   component: HomePage,
-  beforeLoad: publicRoute,  // Explicitly public
+  beforeLoad: publicRoute,
 });
 ```
 
@@ -106,15 +156,16 @@ export const Route = createFileRoute("/")({
 
 ### Server Functions
 
-Always use `inputValidator` (not `validator`):
+Always use `inputValidator` (not `validator`) and import db dynamically:
 ```typescript
 import { createServerFn } from "@tanstack/react-start";
 
 const myServerFn = createServerFn({ method: "GET" })
   .inputValidator((data: { userId: string }) => data)
   .handler(async ({ data }) => {
-    // Server-side logic
-    return result;
+    // Dynamic import prevents client bundling
+    const { db } = await import("#/db/index");
+    return db.query...;
   });
 ```
 
@@ -126,14 +177,12 @@ import { User } from "lucide-react";
 
 <UserButton
   size="sm"
-  disableDefaultLinks  // Remove default settings/sign out links
-  additionalLinks={[   // Add custom links
-    {
-      label: "Profile",
-      href: `/profile/${userId}`,
-      icon: <User className="h-4 w-4" />,
-    },
-  ]}
+  disableDefaultLinks
+  additionalLinks={[{
+    label: "Profile",
+    href: `/profile/${userId}`,
+    icon: <User className="h-4 w-4" />,
+  }]}
 />
 ```
 
@@ -148,35 +197,31 @@ Custom Discord-inspired dark theme with depth levels:
 
 Required in `.env.local`:
 ```bash
+# Database
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/postgres"
+
+# Better Auth
 BETTER_AUTH_URL=http://localhost:3000
 BETTER_AUTH_SECRET=<generate with pnpm dlx @better-auth/cli secret>
+
+# WebSocket Server
+WS_PORT=3001
+CLIENT_URL=http://localhost:3000
+VITE_WS_URL=http://localhost:3001
+
+# PostHog (optional)
 VITE_POSTHOG_KEY=<optional>
 ```
-
-## Common Issues & Solutions
-
-### 422 Error on Sign-up
-**Cause**: Missing database adapter configuration
-**Solution**: Ensure `drizzleAdapter` is properly configured with `usePlural: true`
-
-### "Model 'user' not found" Error
-**Cause**: Better Auth looking for singular table names
-**Solution**: Add `usePlural: true` to adapter config
-
-### Type Errors with Server Functions
-**Cause**: Using `.validator()` instead of `.inputValidator()`
-**Solution**: Use `.inputValidator()` method
-
-### Database Import Errors
-**Cause**: Using wrong import path
-**Solution**: Import from `#/db/index` not `#/lib/db`
 
 ## Development Commands
 
 ```bash
-# Development server
+# Development (runs both web app and WebSocket server)
 pnpm dev
+
+# Run individually
+pnpm dev:web    # Web app only (port 3000)
+pnpm dev:ws     # WebSocket server only (port 3001)
 
 # Build for production
 pnpm build
@@ -194,6 +239,10 @@ pnpm db:generate    # Generate drizzle migrations
 pnpm db:migrate     # Run migrations
 pnpm db:push        # Push schema changes
 pnpm db:studio      # Open drizzle studio
+
+# Docker
+pnpm docker:up      # Start PostgreSQL
+pnpm docker:down    # Stop PostgreSQL
 ```
 
 ## Database Schema
@@ -210,6 +259,28 @@ pnpm db:studio      # Open drizzle studio
 - `user_relationships` - Aggregated time between users
 - `user_room_overlaps` - Detailed overlap logs
 
+## Common Issues & Solutions
+
+### Buffer is not defined Error
+**Cause**: Database imports being bundled for client side
+**Solution**: Use dynamic imports inside server functions only
+
+### 422 Error on Sign-up
+**Cause**: Missing database adapter configuration
+**Solution**: Ensure `drizzleAdapter` has `usePlural: true`
+
+### "Model 'user' not found" Error
+**Cause**: Better Auth looking for singular table names
+**Solution**: Add `usePlural: true` to adapter config
+
+### Type Errors with Server Functions
+**Cause**: Using `.validator()` instead of `.inputValidator()`
+**Solution**: Use `.inputValidator()` method
+
+### Database Import Errors
+**Cause**: Using wrong import path or importing at top level
+**Solution**: Use dynamic imports inside `createServerFn` handlers
+
 ## Code Style Guidelines
 
 ### Formatting
@@ -220,8 +291,8 @@ pnpm db:studio      # Open drizzle studio
 
 ### Imports
 - Use path alias `#/` for src imports
+- Dynamic import database modules in server functions
 - Organize imports automatically (Biome handles this)
-- Group: React/External → Internal modules → Types
 
 ### TypeScript
 - Strict mode enabled
@@ -232,24 +303,29 @@ pnpm db:studio      # Open drizzle studio
 ## Future Enhancements
 
 Potential features to implement:
-- [ ] Room creation and management
-- [ ] Real-time streaming integration
+- [ ] Room creation and management UI
+- [ ] Real-time chat in streaming rooms
+- [ ] WebRTC integration for video/audio
 - [ ] User search functionality
 - [ ] Friend request system
-- [ ] Notifications
+- [ ] Notifications system
 - [ ] User settings page
 - [ ] Admin dashboard
 
 ## Important Notes
 
 1. **Never commit secrets** - `.env.local` contains sensitive data
-2. **Route files** - Must match TanStack Router's file-based routing conventions
-3. **Server functions** - Always validate input data
-4. **Theme** - Hardcoded to dark mode in `__root.tsx` (THEME_INIT_SCRIPT)
-5. **Auth redirects** - Use `beforeLoad` for SSR-safe redirects
+2. **Database imports** - Only use inside server functions with dynamic imports
+3. **Route files** - Must match TanStack Router's file-based routing conventions
+4. **Server functions** - Always validate input data
+5. **Theme** - Hardcoded to dark mode in `__root.tsx`
+6. **Auth redirects** - Use `beforeLoad` for SSR-safe redirects
+7. **WebSocket** - Runs on port 3001, separate from web app (port 3000)
 
 ## References
 
+- [Socket.io Docs](https://socket.io/docs/)
+- [TanStack Pacer Docs](https://tanstack.com/pacer/latest)
 - [Better Auth UI Docs](https://better-auth-ui.com)
 - [TanStack Router Docs](https://tanstack.com/router/latest)
 - [TanStack Start Docs](https://tanstack.com/start/latest)

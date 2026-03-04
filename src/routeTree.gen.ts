@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as RoomRoomIdRouteImport } from './routes/room.$roomId'
 import { Route as ProfileUserIdRouteImport } from './routes/profile.$userId'
 import { Route as AuthAuthViewRouteImport } from './routes/auth/$authView'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
@@ -17,6 +18,11 @@ import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RoomRoomIdRoute = RoomRoomIdRouteImport.update({
+  id: '/room/$roomId',
+  path: '/room/$roomId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProfileUserIdRoute = ProfileUserIdRouteImport.update({
@@ -39,12 +45,14 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth/$authView': typeof AuthAuthViewRoute
   '/profile/$userId': typeof ProfileUserIdRoute
+  '/room/$roomId': typeof RoomRoomIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth/$authView': typeof AuthAuthViewRoute
   '/profile/$userId': typeof ProfileUserIdRoute
+  '/room/$roomId': typeof RoomRoomIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRoutesById {
@@ -52,20 +60,38 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/auth/$authView': typeof AuthAuthViewRoute
   '/profile/$userId': typeof ProfileUserIdRoute
+  '/room/$roomId': typeof RoomRoomIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth/$authView' | '/profile/$userId' | '/api/auth/$'
+  fullPaths:
+    | '/'
+    | '/auth/$authView'
+    | '/profile/$userId'
+    | '/room/$roomId'
+    | '/api/auth/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth/$authView' | '/profile/$userId' | '/api/auth/$'
-  id: '__root__' | '/' | '/auth/$authView' | '/profile/$userId' | '/api/auth/$'
+  to:
+    | '/'
+    | '/auth/$authView'
+    | '/profile/$userId'
+    | '/room/$roomId'
+    | '/api/auth/$'
+  id:
+    | '__root__'
+    | '/'
+    | '/auth/$authView'
+    | '/profile/$userId'
+    | '/room/$roomId'
+    | '/api/auth/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthAuthViewRoute: typeof AuthAuthViewRoute
   ProfileUserIdRoute: typeof ProfileUserIdRoute
+  RoomRoomIdRoute: typeof RoomRoomIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
 }
 
@@ -76,6 +102,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/room/$roomId': {
+      id: '/room/$roomId'
+      path: '/room/$roomId'
+      fullPath: '/room/$roomId'
+      preLoaderRoute: typeof RoomRoomIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/profile/$userId': {
@@ -106,6 +139,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthAuthViewRoute: AuthAuthViewRoute,
   ProfileUserIdRoute: ProfileUserIdRoute,
+  RoomRoomIdRoute: RoomRoomIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
 }
 export const routeTree = rootRouteImport

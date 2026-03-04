@@ -35,9 +35,12 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 		}
 
 		// Create debounced update function
-		debouncedUpdateRef.current = debounce((count: number) => {
-			setUserCount(count);
-		}, 300);
+		debouncedUpdateRef.current = debounce(
+			(count: number) => {
+				setUserCount(count);
+			},
+			{ wait: 300 },
+		);
 
 		const socket = io(WS_URL, {
 			transports: ["websocket", "polling"],
