@@ -77,14 +77,17 @@ export default function Sidebar() {
 					</div>
 				) : (
 					<div
-						className="flex items-center justify-center w-10 h-10 rounded-lg bg-depth-3 border border-border-subtle"
+						className="flex flex-col items-center justify-center w-10 h-10 rounded-lg bg-depth-3 border border-border-subtle gap-0.5"
 						title={isConnected ? `${userCount} users online` : "Connecting..."}
 					>
 						<Users
-							className={`h-4 w-4 ${
+							className={`h-3 w-3 ${
 								isConnected ? "text-green-400" : "text-gray-400"
 							}`}
 						/>
+						<span className="text-xs font-medium text-text-secondary leading-none">
+							{isConnected ? userCount : "..."}
+						</span>
 					</div>
 				)}
 			</div>
