@@ -4,6 +4,7 @@ import { PanelLeft, User, Users } from "lucide-react";
 import { useState } from "react";
 import { authClient } from "#/lib/auth-client";
 import { useWebSocket } from "#/lib/websocket-context";
+import { ThemeSwitcher } from "./ThemeSwitcher";
 
 function formatCompactNumber(num: number): string {
 	if (num >= 1000000) {
@@ -38,7 +39,7 @@ export default function Sidebar() {
 						className="flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-depth-2 transition-colors"
 					>
 						<div className="flex items-center justify-center w-10 h-10 rounded-xl bg-accent/10 text-accent font-bold text-xl">
-							B
+							BC
 						</div>
 						<div className="flex flex-col">
 							<span className="font-bold text-text-primary text-lg leading-tight">
@@ -55,7 +56,7 @@ export default function Sidebar() {
 						className="flex items-center justify-center w-12 h-12 rounded-xl bg-accent/10 text-accent font-bold text-xl hover:bg-accent/20 transition-colors"
 						title="BhayanakCast"
 					>
-						B
+						BC
 					</Link>
 				)}
 			</div>
@@ -111,6 +112,11 @@ export default function Sidebar() {
 						</span>
 					</div>
 				)}
+			</div>
+
+			{/* Theme Switcher */}
+			<div className={`p-4 ${isExpanded ? "" : "flex justify-center"}`}>
+				<ThemeSwitcher isExpanded={isExpanded} />
 			</div>
 
 			{/* Spacer */}

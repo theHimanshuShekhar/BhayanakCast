@@ -11,6 +11,7 @@ import { AuthProviders } from "../integrations/better-auth/providers";
 import PostHogProvider from "../integrations/posthog/provider";
 import TanStackQueryDevtools from "../integrations/tanstack-query/devtools";
 import TanStackQueryProvider from "../integrations/tanstack-query/root-provider";
+import { ThemeProvider } from "../lib/theme-context";
 import { WebSocketProvider } from "../lib/websocket-context";
 import appCss from "../styles.css?url";
 
@@ -18,7 +19,7 @@ interface MyRouterContext {
 	queryClient: QueryClient;
 }
 
-const THEME_INIT_SCRIPT = `(function(){try{var root=document.documentElement;root.classList.add('dark');root.style.colorScheme='dark';}catch(e){}})();`;
+const THEME_INIT_SCRIPT = `(function(){try{var root=document.documentElement;var theme=localStorage.getItem('bhayanakcast-theme')||'purple-blue';root.setAttribute('data-theme',theme);}catch(e){}})();`;
 
 export const Route = createRootRouteWithContext<MyRouterContext>()({
 	head: () => ({
@@ -53,30 +54,32 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 				<HeadContent />
 			</head>
 			<body className="flex h-screen w-screen overflow-hidden font-sans antialiased">
-				<TanStackQueryProvider>
-					<AuthProviders>
-						<PostHogProvider>
-							<WebSocketProvider>
-								<Header />
-								<div className="flex-1 overflow-auto bg-depth-0">
-									{children}
-								</div>
-								<TanStackDevtools
-									config={{
-										position: "bottom-right",
-									}}
-									plugins={[
-										{
-											name: "Tanstack Router",
-											render: <TanStackRouterDevtoolsPanel />,
-										},
-										TanStackQueryDevtools,
-									]}
-								/>
-							</WebSocketProvider>
-						</PostHogProvider>
-					</AuthProviders>
-				</TanStackQueryProvider>
+				<ThemeProvider>
+					<TanStackQueryProvider>
+						<AuthProviders>
+							<PostHogProvider>
+								<WebSocketProvider>
+									<Header />
+									<div className="flex-1 overflow-auto bg-depth-0">
+										{children}
+									</div>
+									<TanStackDevtools
+										config={{
+											position: "bottom-right",
+										}}
+										plugins={[
+											{
+												name: "Tanstack Router",
+												render: <TanStackRouterDevtoolsPanel />,
+											},
+											TanStackQueryDevtools,
+										]}
+									/>
+								</WebSocketProvider>
+							</PostHogProvider>
+						</AuthProviders>
+					</TanStackQueryProvider>
+				</ThemeProvider>
 				<Scripts />
 			</body>
 		</html>

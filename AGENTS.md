@@ -65,11 +65,13 @@ pnpm db:studio      # Open drizzle studio
 
 ### Styling
 - **Tailwind CSS v4** with custom Discord-inspired dark theme
+- **Font**: JetBrains Mono (monospace) loaded from Google Fonts CDN
 - Use theme CSS variables (e.g., `text-text-primary`, `bg-depth-2`)
 - Components should use the depth system:
   - `bg-depth-0`: Deepest background (#1a1b1e)
   - `bg-depth-1` to `bg-depth-4`: Increasing elevation
 - Never use arbitrary Tailwind values
+- Prefer rounded-xl for interactive elements
 
 ### Testing
 - Framework: Vitest with jsdom environment
@@ -81,6 +83,15 @@ pnpm db:studio      # Open drizzle studio
 ```
 src/
 ├── components/          # Reusable UI components
+│   ├── Header.tsx       # Toggleable left sidebar (was top header)
+│   ├── RoomCard.tsx     # Room display card component
+│   ├── RoomList.tsx     # Room listing with debounced search
+│   └── ui/              # shadcn/ui components
+│       └── input.tsx    # Input component
+├── db/                  # Database layer (server-only)
+│   ├── index.ts         # Database connection (Pool)
+│   ├── schema.ts        # Drizzle ORM schema
+│   └── queries.ts       # Database query utilities
 ├── integrations/        # Third-party service integrations
 │   ├── better-auth/    # Auth providers and UI
 │   ├── posthog/        # Analytics
@@ -88,11 +99,17 @@ src/
 ├── lib/                # Utilities and core logic
 │   ├── auth.ts         # Better-auth server config
 │   ├── auth-client.ts  # Better-auth client
-│   └── utils.ts        # Helper functions
+│   ├── auth-guard.ts   # Route protection utilities
+│   ├── site.ts         # Site configuration
+│   └── websocket-context.tsx  # Global WebSocket connection
 ├── routes/             # TanStack Router file-based routes
-│   ├── __root.tsx      # Root layout
-│   ├── index.tsx       # Home page
+│   ├── __root.tsx      # Root layout (with WebSocketProvider)
+│   ├── index.tsx       # Home page (room discovery)
+│   ├── room.$roomId.tsx # Room detail page
+│   ├── profile.$userId.tsx # User profile page
 │   └── auth/           # Auth pages
+├── utils/              # Server utility functions
+│   └── profile.ts      # Profile data fetching
 └── styles.css          # Global styles with theme
 ```
 

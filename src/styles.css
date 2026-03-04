@@ -4,99 +4,232 @@
 
 @plugin '@tailwindcss/typography';
 
-/* Discord-inspired Blue-Gray Dark Theme - Default */
-:root {
-  /* Depth scale: background (darkest) to surface-3 (lightest) - LIGHTER VARIANT */
-  --bg-primary: #252629;       /* Deepest background - was #1a1b1e */
-  --bg-secondary: #2a2b2e;     /* Elevated background - was #1e1f22 */
-  --surface-1: #3a3c42;        /* Cards, sidebar - was #2b2d31 */
-  --surface-2: #42444a;        /* Components, inputs - was #313338 */
-  --surface-3: #4a4c54;        /* Elevated components, hover states - was #383a40 */
+/* ============================================
+   THEME SYSTEM
+   Use data-theme attribute on html element
+   Themes: purple-blue (default), misty-blue
+   ============================================ */
 
-  /* Accent colors - Discord blurple */
-  --accent: #5865f2;
-  --accent-hover: #4752c4;
-  --accent-light: #949cf8;
+/* Purple-Blue Theme (Default) */
+:root,
+[data-theme="purple-blue"] {
+  /* Depth scale: background (darkest) to surface-3 (lightest) */
+  --bg-primary: #1a1a2e;
+  --bg-secondary: #16213e;
+  --surface-1: #252545;
+  --surface-2: #2f2f5a;
+  --surface-3: #3a3a6e;
 
-  /* Text colors - slightly softer for lighter bg */
-  --text-primary: #f2f3f5;     /* Bright white */
-  --text-secondary: #c5cad1;   /* Muted text - was #b5bac1 */
-  --text-tertiary: #a5acb6;    /* Very muted - was #949ba4 */
+  /* Accent colors - Purple-Blue #6A5ACD */
+  --accent: #6A5ACD;
+  --accent-hover: #5341C5;
+  --accent-light: #8479D9;
+
+  /* Text colors */
+  --text-primary: #E8E8F0;
+  --text-secondary: #B8B8D0;
+  --text-tertiary: #8888A8;
 
   /* Status colors */
-  --success: #3ba55d;
-  --warning: #faa81a;
-  --danger: #ed4245;
-  --info: #5865f2;
+  --success: #5ACD8A;
+  --warning: #CDA35A;
+  --danger: #CD5A6A;
+  --info: #6A5ACD;
 
-  /* Border colors - adjusted for lighter bg */
-  --border-subtle: #323439;    /* was #232428 */
-  --border-default: #4f5159;   /* was #3f4147 */
-  --border-hover: #6a6c78;     /* was #5a5c66 */
+  /* Border colors */
+  --border-subtle: #2a2a4a;
+  --border-default: #3a3a6e;
+  --border-hover: #4B3B8B;
 
-  /* Shadcn/ui theme mapping - LIGHTER */
-  --background: oklch(0.28 0.02 270);      /* was 0.22 */
-  --foreground: oklch(0.95 0 0);
-  --card: oklch(0.34 0.02 270);            /* was 0.28 */
-  --card-foreground: oklch(0.95 0 0);
-  --popover: oklch(0.36 0.02 270);         /* was 0.30 */
-  --popover-foreground: oklch(0.95 0 0);
-  --primary: oklch(0.55 0.18 270);
-  --primary-foreground: oklch(0.98 0 0);
-  --secondary: oklch(0.40 0.02 270);       /* was 0.35 */
-  --secondary-foreground: oklch(0.95 0 0);
-  --muted: oklch(0.38 0.02 270);           /* was 0.32 */
-  --muted-foreground: oklch(0.72 0 0);     /* was 0.70 */
-  --accent: oklch(0.55 0.18 270);
-  --accent-foreground: oklch(0.98 0 0);
-  --destructive: oklch(0.55 0.20 25);
-  --destructive-foreground: oklch(0.98 0 0);
-  --border: oklch(0.36 0.02 270);          /* was 0.30 */
-  --input: oklch(0.38 0.02 270);           /* was 0.32 */
-  --ring: oklch(0.55 0.18 270);
+  /* Shadcn/ui theme mapping */
+  --background: oklch(0.18 0.05 280);
+  --foreground: oklch(0.95 0.02 280);
+  --card: oklch(0.22 0.06 280);
+  --card-foreground: oklch(0.95 0.02 280);
+  --popover: oklch(0.24 0.07 280);
+  --popover-foreground: oklch(0.95 0.02 280);
+  --primary: oklch(0.55 0.20 270);
+  --primary-foreground: oklch(0.98 0.02 280);
+  --secondary: oklch(0.30 0.08 280);
+  --secondary-foreground: oklch(0.95 0.02 280);
+  --muted: oklch(0.28 0.06 280);
+  --muted-foreground: oklch(0.70 0.05 280);
+  --accent: oklch(0.55 0.20 270);
+  --accent-foreground: oklch(0.98 0.02 280);
+  --destructive: oklch(0.55 0.20 15);
+  --destructive-foreground: oklch(0.98 0.02 280);
+  --border: oklch(0.28 0.06 280);
+  --input: oklch(0.32 0.07 280);
+  --ring: oklch(0.55 0.20 270);
   --radius: 0.5rem;
 }
 
-/* Light theme (optional, rarely used) */
-.light {
-  --bg-primary: #ffffff;
-  --bg-secondary: #f2f3f5;
-  --surface-1: #e3e5e8;
-  --surface-2: #dbdee1;
-  --surface-3: #c4c9ce;
-  
-  --text-primary: #060607;
-  --text-secondary: #4f5660;
-  --text-tertiary: #747f8d;
-  
-  --background: oklch(0.98 0 0);
-  --foreground: oklch(0.20 0 0);
-  --card: oklch(0.95 0 0);
-  --card-foreground: oklch(0.20 0 0);
-  --popover: oklch(0.98 0 0);
-  --popover-foreground: oklch(0.20 0 0);
-  --primary: oklch(0.55 0.18 270);
-  --primary-foreground: oklch(0.98 0 0);
-  --secondary: oklch(0.94 0 0);
-  --secondary-foreground: oklch(0.20 0 0);
-  --muted: oklch(0.94 0 0);
-  --muted-foreground: oklch(0.55 0 0);
-  --accent: oklch(0.55 0.18 270);
-  --accent-foreground: oklch(0.98 0 0);
-  --destructive: oklch(0.55 0.20 25);
-  --destructive-foreground: oklch(0.98 0 0);
-  --border: oklch(0.88 0 0);
-  --input: oklch(0.88 0 0);
-  --ring: oklch(0.55 0.18 270);
+/* Misty-Blue Theme - Based on Figma #B5C7EB Palette */
+[data-theme="misty-blue"] {
+  /* Depth scale: Cool blue-gray backgrounds */
+  --bg-primary: #1a2332;
+  --bg-secondary: #1e293b;
+  --surface-1: #27354d;
+  --surface-2: #314260;
+  --surface-3: #3b4f73;
+
+  /* Accent colors - Misty Blue #B5C7EB */
+  --accent: #B5C7EB;
+  --accent-hover: #94AEE3;
+  --accent-light: #D3DEF3;
+
+  /* Text colors */
+  --text-primary: #E8EDF5;
+  --text-secondary: #B5C7EB;
+  --text-tertiary: #94A3C0;
+
+  /* Status colors */
+  --success: #8AB5C7;
+  --warning: #C7B594;
+  --danger: #C78A94;
+  --info: #B5C7EB;
+
+  /* Border colors */
+  --border-subtle: #27354d;
+  --border-default: #3b4f73;
+  --border-hover: #60697C;
+
+  /* Shadcn/ui theme mapping */
+  --background: oklch(0.20 0.04 260);
+  --foreground: oklch(0.95 0.02 260);
+  --card: oklch(0.24 0.05 260);
+  --card-foreground: oklch(0.95 0.02 260);
+  --popover: oklch(0.26 0.06 260);
+  --popover-foreground: oklch(0.95 0.02 260);
+  --primary: oklch(0.78 0.08 260);
+  --primary-foreground: oklch(0.20 0.05 260);
+  --secondary: oklch(0.32 0.05 260);
+  --secondary-foreground: oklch(0.95 0.02 260);
+  --muted: oklch(0.30 0.04 260);
+  --muted-foreground: oklch(0.70 0.04 260);
+  --accent: oklch(0.78 0.08 260);
+  --accent-foreground: oklch(0.20 0.05 260);
+  --destructive: oklch(0.55 0.20 15);
+  --destructive-foreground: oklch(0.98 0.02 260);
+  --border: oklch(0.30 0.04 260);
+  --input: oklch(0.34 0.05 260);
+  --ring: oklch(0.78 0.08 260);
+  --radius: 0.5rem;
+}
+
+/* Onyx-Black Theme - Based on Figma #353839 Palette */
+[data-theme="onyx-black"] {
+  /* Depth scale: Near-black with subtle blue-gray */
+  --bg-primary: #0c0c0d;
+  --bg-secondary: #121313;
+  --surface-1: #181919;
+  --surface-2: #1d1f20;
+  --surface-3: #232526;
+
+  /* Accent colors - Onyx #353839 as light accent on dark bg */
+  --accent: #5d6264;
+  --accent-hover: #71787a;
+  --accent-light: #868c8e;
+
+  /* Text colors */
+  --text-primary: #e8e9e9;
+  --text-secondary: #b1b5b7;
+  --text-tertiary: #868c8e;
+
+  /* Status colors */
+  --success: #5a8a7a;
+  --warning: #8a7a5a;
+  --danger: #8a5a5a;
+  --info: #5a6a8a;
+
+  /* Border colors */
+  --border-subtle: #1d1f20;
+  --border-default: #292c2c;
+  --border-hover: #353839;
+
+  /* Shadcn/ui theme mapping */
+  --background: oklch(0.08 0.01 220);
+  --foreground: oklch(0.95 0.01 220);
+  --card: oklch(0.12 0.01 220);
+  --card-foreground: oklch(0.95 0.01 220);
+  --popover: oklch(0.14 0.01 220);
+  --popover-foreground: oklch(0.95 0.01 220);
+  --primary: oklch(0.45 0.02 220);
+  --primary-foreground: oklch(0.98 0.01 220);
+  --secondary: oklch(0.20 0.01 220);
+  --secondary-foreground: oklch(0.95 0.01 220);
+  --muted: oklch(0.18 0.01 220);
+  --muted-foreground: oklch(0.60 0.01 220);
+  --accent: oklch(0.45 0.02 220);
+  --accent-foreground: oklch(0.98 0.01 220);
+  --destructive: oklch(0.50 0.15 15);
+  --destructive-foreground: oklch(0.98 0.01 220);
+  --border: oklch(0.18 0.01 220);
+  --input: oklch(0.22 0.01 220);
+  --ring: oklch(0.45 0.02 220);
+  --radius: 0.5rem;
+}
+
+/* Blue-Gray Theme - Based on Figma #6A89A7 Palette */
+[data-theme="blue-gray"] {
+  /* Depth scale: Slate blue backgrounds */
+  --bg-primary: #171e26;
+  --bg-secondary: #1e2832;
+  --surface-1: #263543;
+  --surface-2: #2f4254;
+  --surface-3: #384c60;
+
+  /* Accent colors - Blue-Gray #6A89A7 */
+  --accent: #6A89A7;
+  --accent-hover: #88a0b8;
+  --accent-light: #a5b8ca;
+
+  /* Text colors */
+  --text-primary: #e3eaf2;
+  --text-secondary: #96acc1;
+  --text-tertiary: #6a89a7;
+
+  /* Status colors */
+  --success: #5aa78a;
+  --warning: #a7a76a;
+  --danger: #a76a6a;
+  --info: #6a89a7;
+
+  /* Border colors */
+  --border-subtle: #222e39;
+  --border-default: #384c5f;
+  --border-hover: #4f6b85;
+
+  /* Shadcn/ui theme mapping */
+  --background: oklch(0.18 0.03 240);
+  --foreground: oklch(0.95 0.02 240);
+  --card: oklch(0.22 0.04 240);
+  --card-foreground: oklch(0.95 0.02 240);
+  --popover: oklch(0.24 0.05 240);
+  --popover-foreground: oklch(0.95 0.02 240);
+  --primary: oklch(0.60 0.08 240);
+  --primary-foreground: oklch(0.15 0.05 240);
+  --secondary: oklch(0.30 0.05 240);
+  --secondary-foreground: oklch(0.95 0.02 240);
+  --muted: oklch(0.28 0.04 240);
+  --muted-foreground: oklch(0.65 0.04 240);
+  --accent: oklch(0.60 0.08 240);
+  --accent-foreground: oklch(0.15 0.05 240);
+  --destructive: oklch(0.55 0.20 15);
+  --destructive-foreground: oklch(0.98 0.02 240);
+  --border: oklch(0.28 0.04 240);
+  --input: oklch(0.32 0.05 240);
+  --ring: oklch(0.60 0.08 240);
+  --radius: 0.5rem;
 }
 
 @theme inline {
   --font-sans: 'JetBrains Mono', ui-monospace, monospace;
-  
+
   /* Core semantic colors */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  
+
   /* Component colors */
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
@@ -115,30 +248,30 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  
+
   /* Custom depth palette */
   --color-bg-primary: var(--bg-primary);
   --color-bg-secondary: var(--bg-secondary);
   --color-surface-1: var(--surface-1);
   --color-surface-2: var(--surface-2);
   --color-surface-3: var(--surface-3);
-  
+
   /* Text colors */
   --color-text-primary: var(--text-primary);
   --color-text-secondary: var(--text-secondary);
   --color-text-tertiary: var(--text-tertiary);
-  
+
   /* Status colors */
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
   --color-info: var(--info);
-  
+
   /* Border colors */
   --color-border-subtle: var(--border-subtle);
   --color-border-default: var(--border-default);
   --color-border-hover: var(--border-hover);
-  
+
   /* Radius */
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -202,7 +335,6 @@ a {
 
 a:hover {
   color: var(--accent);
-  text-decoration: underline;
 }
 
 button {
