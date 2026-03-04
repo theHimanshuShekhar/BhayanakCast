@@ -95,9 +95,9 @@ export default function Sidebar() {
 			{/* Auth */}
 			<div className="p-3 border-t border-border-subtle">
 				{session?.user?.id ? (
-					isExpanded ? (
+					<div className={`flex ${isExpanded ? "" : "justify-center"}`}>
 						<UserButton
-							size="sm"
+							size={isExpanded ? "sm" : "icon"}
 							disableDefaultLinks
 							additionalLinks={[
 								{
@@ -107,11 +107,7 @@ export default function Sidebar() {
 								},
 							]}
 						/>
-					) : (
-						<div className="flex justify-center">
-							<UserButton size="sm" disableDefaultLinks />
-						</div>
-					)
+					</div>
 				) : isExpanded ? (
 					<Link
 						to="/auth/$authView"
