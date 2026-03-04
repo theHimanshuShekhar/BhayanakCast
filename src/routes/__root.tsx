@@ -52,13 +52,15 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 				<script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
 				<HeadContent />
 			</head>
-			<body className="flex flex-col h-screen w-screen overflow-hidden font-sans antialiased">
+			<body className="flex h-screen w-screen overflow-hidden font-sans antialiased">
 				<TanStackQueryProvider>
 					<AuthProviders>
 						<PostHogProvider>
 							<WebSocketProvider>
 								<Header />
-								<div className="flex-1 overflow-auto">{children}</div>
+								<div className="flex-1 overflow-auto bg-depth-0">
+									{children}
+								</div>
 								<TanStackDevtools
 									config={{
 										position: "bottom-right",
