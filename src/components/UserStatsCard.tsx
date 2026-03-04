@@ -137,8 +137,10 @@ export function UserStatsCard() {
 				{/* Top Connections */}
 				<TopConnectionsCard />
 
-				{/* Community Stats */}
-				<CommunityStatsCard stats={communityStats} isLoading={isLoading} />
+				{/* Community Stats - Show if has data */}
+				{communityStats && communityStats.totalRegisteredUsers > 0 && (
+					<CommunityStatsCard stats={communityStats} isLoading={isLoading} />
+				)}
 			</div>
 		</div>
 	);

@@ -66,8 +66,13 @@ export function TopConnectionsCard() {
 		staleTime: 30 * 60 * 1000, // 30 minutes
 	});
 
-	// Don't render if user is not logged in
+	// Don't render if user is not logged in or no connections
 	if (!session?.user) {
+		return null;
+	}
+
+	// Don't render the entire card if not loading and no connections
+	if (!isLoading && (!relationships || relationships.length === 0)) {
 		return null;
 	}
 
@@ -80,11 +85,7 @@ export function TopConnectionsCard() {
 
 			{isLoading ? (
 				<ConnectionsSkeleton />
-			) : !relationships || relationships.length === 0 ? (
-				<p className="text-sm text-text-tertiary text-center py-4">
-					No connections yet. Join rooms to meet people!
-				</p>
-			) : (
+			) : relationships && relationships.length > 0 ? (
 				<div className="space-y-3">
 					{relationships.map((rel, index) => (
 						<Link
@@ -125,7 +126,7 @@ export function TopConnectionsCard() {
 						</Link>
 					))}
 				</div>
-			)}
+			) : null}
 		</div>
 	);
 }
