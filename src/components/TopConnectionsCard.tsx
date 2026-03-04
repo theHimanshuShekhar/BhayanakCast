@@ -1,8 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Users } from "lucide-react";
-import { getTopRelationships } from "#/db/queries";
 import { authClient } from "#/lib/auth-client";
+import { getUserTopRelationships } from "#/utils/home";
 
 interface Relationship {
 	otherUserId: string;
@@ -42,14 +42,16 @@ function ConnectionsSkeleton() {
 export function TopConnectionsCard() {
 	const { data: session } = authClient.useSession();
 
-	// Fetch top relationships using the existing query
+	// Fetch top relationships using server function
 	const { data: relationships, isLoading } = useQuery({
 		queryKey: ["topConnections", session?.user?.id],
 		queryFn: async () => {
 			if (!session?.user?.id) return [];
-			const result = await getTopRelationships(session.user.id, 5);
+			const result = await getUserTopRelationships({
+				data: { userId: session.user.id, limit: 5 },
+			});
 			// Transform to match our interface
-			return result.map((rel) => ({
+			return result.map((rel: (typeof result)[0]) => ({
 				otherUserId: rel.otherUserId,
 				totalTimeSeconds: rel.totalTimeSeconds,
 				roomsCount: rel.roomsCount,

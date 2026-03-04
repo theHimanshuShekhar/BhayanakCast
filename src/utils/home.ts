@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { getTopRelationships } from "#/db/queries";
 import {
 	getActiveRooms,
 	getCommunityStats,
@@ -65,4 +66,17 @@ export const getPastRooms = createServerFn({ method: "GET" })
 	.handler(async ({ data }) => {
 		const rooms = await getEndedRooms(data.limit);
 		return rooms;
+	});
+
+/**
+ * Get top relationships for a user
+ */
+export const getUserTopRelationships = createServerFn({ method: "GET" })
+	.inputValidator((data: { userId: string; limit?: number }) => data)
+	.handler(async ({ data }) => {
+		const relationships = await getTopRelationships(
+			data.userId,
+			data.limit ?? 5,
+		);
+		return relationships;
 	});
