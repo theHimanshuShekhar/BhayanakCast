@@ -23,6 +23,32 @@ const WebSocketContext = createContext<WebSocketContextType | undefined>(
 );
 
 const WS_URL = import.meta.env.VITE_WS_URL || "http://localhost:3001";
+const ANONYMOUS_USER_KEY = "bhayanak_anonymous_user_id";
+
+/**
+ * Get or create a persistent anonymous user ID from localStorage.
+ * This allows tracking unique anonymous users across tabs.
+ */
+function getAnonymousUserId(): string {
+	if (typeof window === "undefined") return "";
+
+	let anonymousId = localStorage.getItem(ANONYMOUS_USER_KEY);
+	if (!anonymousId) {
+		// Generate a UUID-like string
+		anonymousId = `anon_${crypto.randomUUID()}`;
+		localStorage.setItem(ANONYMOUS_USER_KEY, anonymousId);
+	}
+	return anonymousId;
+}
+
+/**
+ * Get the effective user ID for WebSocket identification.
+ * Returns the logged-in user ID if available, otherwise the anonymous ID.
+ */
+function getEffectiveUserId(sessionUserId: string | undefined): string {
+	if (sessionUserId) return sessionUserId;
+	return getAnonymousUserId();
+}
 
 export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 	const [isConnected, setIsConnected] = useState(false);
@@ -57,7 +83,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 		socket.on("connect", () => {
 			setIsConnected(true);
 			// Identify the user after connection
-			const userId = session?.user?.id;
+			const userId = getEffectiveUserId(session?.user?.id);
 			socket.emit("identify", { userId });
 		});
 
@@ -78,7 +104,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 	useEffect(() => {
 		const socket = socketRef.current;
 		if (socket?.connected) {
-			const userId = session?.user?.id;
+			const userId = getEffectiveUserId(session?.user?.id);
 			socket.emit("identify", { userId });
 		}
 	}, [session?.user?.id]);
