@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { Activity, Clock, Flame, Radio, TrendingUp, Users } from "lucide-react";
 import { useWebSocket } from "#/lib/websocket-context";
+import { CommunityStatsCard } from "./CommunityStatsCard";
 
 interface AnonymousStatsColumnProps {
 	trendingRooms: Array<{
@@ -106,42 +107,7 @@ export function AnonymousStatsColumn({
 			</div>
 
 			{/* Card 3: Community Stats */}
-			<div className="bg-depth-1 rounded-xl border border-border-subtle p-5">
-				<div className="flex items-center gap-2 mb-4">
-					<Users className="h-5 w-5 text-accent" />
-					<h3 className="font-semibold text-text-primary">Community</h3>
-				</div>
-				<div className="space-y-3">
-					<div className="flex items-center justify-between p-2.5 rounded-lg bg-depth-2">
-						<span className="text-sm text-text-secondary">Total Users</span>
-						<span className="text-lg font-bold text-accent">
-							{communityStats.totalRegisteredUsers.toLocaleString()}
-						</span>
-					</div>
-					<div className="flex items-center justify-between p-2.5 rounded-lg bg-depth-2">
-						<span className="text-sm text-text-secondary">
-							Watch Hours (Week)
-						</span>
-						<span className="text-lg font-bold text-accent">
-							{communityStats.totalWatchHoursThisWeek.toLocaleString()}h
-						</span>
-					</div>
-					<div className="flex items-center justify-between p-2.5 rounded-lg bg-depth-2">
-						<span className="text-sm text-text-secondary">
-							Active Streamers
-						</span>
-						<span className="text-lg font-bold text-accent">
-							{communityStats.mostActiveStreamers}
-						</span>
-					</div>
-					<div className="flex items-center justify-between p-2.5 rounded-lg bg-depth-2">
-						<span className="text-sm text-text-secondary">New This Week</span>
-						<span className="text-lg font-bold text-success">
-							+{communityStats.newUsersThisWeek}
-						</span>
-					</div>
-				</div>
-			</div>
+			<CommunityStatsCard stats={communityStats} />
 
 			{/* Call to Action */}
 			<div className="bg-accent/10 rounded-xl border border-accent/20 p-5">
