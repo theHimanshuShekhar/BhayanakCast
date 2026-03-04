@@ -71,7 +71,21 @@ export function RoomList({ initialRooms }: RoomListProps) {
 
 	// Transform database rooms to component format
 	const rooms: Room[] = useMemo(() => {
-		const sourceData = searchedRooms || initialRooms;
+		const sourceData = (searchedRooms || initialRooms) as Array<{
+			room: {
+				id: string;
+				name: string;
+				description: string | null;
+				status: string;
+				createdAt: Date;
+			};
+			streamer: {
+				id: string;
+				name: string;
+				image: string | null;
+			};
+			participantCount: number;
+		}>;
 		if (!sourceData) return [];
 
 		return sourceData.map((roomData) => ({

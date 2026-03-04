@@ -17,24 +17,87 @@ const CACHE_TTL = 30 * 60 * 1000;
  */
 const cache = new Map<string, { data: unknown; timestamp: number }>();
 
-function getCached<T>(key: string): T | null {
+function getCached<T>(key: string): T | undefined {
 	const cached = cache.get(key);
 	if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
 		return cached.data as T;
 	}
-	return null;
+	return undefined;
 }
 
 function setCached<T>(key: string, data: T): void {
 	cache.set(key, { data, timestamp: Date.now() });
 }
 
+interface UserStats {
+	totalWatchTime: number;
+	totalRoomsJoined: number;
+	totalConnections: number;
+}
+
+interface CommunityStats {
+	totalRegisteredUsers: number;
+	totalWatchHoursThisWeek: number;
+	mostActiveStreamers: number;
+	newUsersThisWeek: number;
+}
+
+interface GlobalStats {
+	totalRoomsCreated: number;
+	totalHoursStreamedToday: number;
+	peakConcurrentUsers: number;
+}
+
+interface ActiveRoom {
+	room: {
+		id: string;
+		name: string;
+		description: string | null;
+		streamerId: string;
+		status: string;
+		createdAt: Date;
+		endedAt: Date | null;
+	};
+	streamer: {
+		id: string;
+		name: string;
+		image: string | null;
+	};
+	participantCount: number;
+}
+
+interface TrendingRoom {
+	id: string;
+	name: string;
+	streamerName: string;
+	viewerCount: number;
+	trendingScore: number;
+}
+
+interface EndedRoom {
+	room: {
+		id: string;
+		name: string;
+		description: string | null;
+		streamerId: string;
+		status: string;
+		createdAt: Date;
+		endedAt: Date | null;
+	};
+	streamer: {
+		id: string;
+		name: string;
+		image: string | null;
+	};
+	maxUsersJoined: number;
+}
+
 /**
  * Get user's personal stats
  */
-export async function getUserStats(userId: string) {
+export async function getUserStats(userId: string): Promise<UserStats> {
 	const cacheKey = `userStats:${userId}`;
-	const cached = getCached(cacheKey);
+	const cached = getCached<UserStats>(cacheKey);
 	if (cached) return cached;
 
 	const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -75,9 +138,9 @@ export async function getUserStats(userId: string) {
 /**
  * Get global community stats (30-day rolling window)
  */
-export async function getCommunityStats() {
+export async function getCommunityStats(): Promise<CommunityStats> {
 	const cacheKey = "communityStats";
-	const cached = getCached(cacheKey);
+	const cached = getCached<CommunityStats>(cacheKey);
 	if (cached) return cached;
 
 	const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -124,9 +187,9 @@ export async function getCommunityStats() {
 /**
  * Get global site stats (30-day rolling window)
  */
-export async function getGlobalStats() {
+export async function getGlobalStats(): Promise<GlobalStats> {
 	const cacheKey = "globalStats";
-	const cached = getCached(cacheKey);
+	const cached = getCached<GlobalStats>(cacheKey);
 	if (cached) return cached;
 
 	const today = new Date();
@@ -177,13 +240,24 @@ export async function getGlobalStats() {
 /**
  * Get active rooms with streamer details and participant counts
  */
-export async function getActiveRooms(searchQuery?: string) {
+export async function getActiveRooms(
+	searchQuery?: string,
+): Promise<ActiveRoom[]> {
 	const cacheKey = `activeRooms:${searchQuery || "all"}`;
-	const cached = getCached(cacheKey);
+	const cached = getCached<ActiveRoom[]>(cacheKey);
 	if (cached) return cached;
 
-	// Base query for active rooms
-	let query = db
+	// Build where conditions
+	const conditions = [eq(streamingRooms.status, "active")];
+
+	if (searchQuery) {
+		conditions.push(
+			sql`(${streamingRooms.name} ILIKE ${`%${searchQuery}%`} OR ${streamingRooms.description} ILIKE ${`%${searchQuery}%`} OR ${users.name} ILIKE ${`%${searchQuery}%`})`,
+		);
+	}
+
+	// Execute query with all conditions
+	const rooms = await db
 		.select({
 			room: streamingRooms,
 			streamer: {
@@ -194,16 +268,8 @@ export async function getActiveRooms(searchQuery?: string) {
 		})
 		.from(streamingRooms)
 		.innerJoin(users, eq(streamingRooms.streamerId, users.id))
-		.where(eq(streamingRooms.status, "active"));
-
-	// Add search filter if provided
-	if (searchQuery) {
-		query = query.where(
-			sql`(${streamingRooms.name} ILIKE ${`%${searchQuery}%`} OR ${streamingRooms.description} ILIKE ${`%${searchQuery}%`} OR ${users.name} ILIKE ${`%${searchQuery}%`})`,
-		) as typeof query;
-	}
-
-	const rooms = await query.orderBy(desc(streamingRooms.createdAt));
+		.where(and(...conditions))
+		.orderBy(desc(streamingRooms.createdAt));
 
 	// Get participant counts for each room
 	const roomIds = rooms.map((r) => r.room.id);
@@ -235,9 +301,11 @@ export async function getActiveRooms(searchQuery?: string) {
  * Formula: (viewerCount * 0.6) + (recencyScore * 0.4)
  * where recencyScore = max(100 - hoursSinceStart, 0)
  */
-export async function getTrendingRooms(limit: number = 5) {
+export async function getTrendingRooms(
+	limit: number = 5,
+): Promise<TrendingRoom[]> {
 	const cacheKey = `trendingRooms:${limit}`;
-	const cached = getCached(cacheKey);
+	const cached = getCached<TrendingRoom[]>(cacheKey);
 	if (cached) return cached;
 
 	const now = new Date();
@@ -302,9 +370,9 @@ export async function getTrendingRooms(limit: number = 5) {
 /**
  * Get ended rooms with max participant counts
  */
-export async function getEndedRooms(limit: number = 10) {
+export async function getEndedRooms(limit: number = 10): Promise<EndedRoom[]> {
 	const cacheKey = `endedRooms:${limit}`;
-	const cached = getCached(cacheKey);
+	const cached = getCached<EndedRoom[]>(cacheKey);
 	if (cached) return cached;
 
 	const rooms = await db

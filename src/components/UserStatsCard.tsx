@@ -35,7 +35,19 @@ export function UserStatsCard() {
 	const { data: session } = authClient.useSession();
 
 	// Fetch user stats and community stats
-	const { data: statsData, isLoading } = useQuery({
+	const { data: statsData, isLoading } = useQuery<{
+		userStats: {
+			totalWatchTime: number;
+			totalRoomsJoined: number;
+			totalConnections: number;
+		};
+		communityStats: {
+			totalRegisteredUsers: number;
+			totalWatchHoursThisWeek: number;
+			mostActiveStreamers: number;
+			newUsersThisWeek: number;
+		};
+	} | null>({
 		queryKey: ["userHomeStats", session?.user?.id],
 		queryFn: async () => {
 			if (!session?.user?.id) return null;

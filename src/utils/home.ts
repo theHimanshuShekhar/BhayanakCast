@@ -41,12 +41,26 @@ export const searchRooms = createServerFn({ method: "GET" })
 		return rooms;
 	});
 
+interface UserHomeStats {
+	userStats: {
+		totalWatchTime: number;
+		totalRoomsJoined: number;
+		totalConnections: number;
+	};
+	communityStats: {
+		totalRegisteredUsers: number;
+		totalWatchHoursThisWeek: number;
+		mostActiveStreamers: number;
+		newUsersThisWeek: number;
+	};
+}
+
 /**
  * Get user stats
  */
 export const getUserHomeStats = createServerFn({ method: "GET" })
 	.inputValidator((data: { userId: string }) => data)
-	.handler(async ({ data }) => {
+	.handler(async ({ data }): Promise<UserHomeStats> => {
 		const [userStats, communityStats] = await Promise.all([
 			getUserStats(data.userId),
 			getCommunityStats(),
