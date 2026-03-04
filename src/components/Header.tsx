@@ -154,18 +154,34 @@ export default function Sidebar() {
 				{/* Auth */}
 				<div>
 					{session?.user?.id ? (
-						<div className={`flex ${isExpanded ? "" : "justify-center"}`}>
-							<UserButton
-								size={isExpanded ? "sm" : "icon"}
-								disableDefaultLinks
-								additionalLinks={[
-									{
-										label: "Profile",
-										href: `/profile/${session.user.id}`,
-										icon: <User className="h-4 w-4" />,
-									},
-								]}
-							/>
+						<div className={isExpanded ? "" : "flex justify-center"}>
+							{isExpanded ? (
+								<UserButton
+									size="sm"
+									disableDefaultLinks
+									additionalLinks={[
+										{
+											label: "Profile",
+											href: `/profile/${session.user.id}`,
+											icon: <User className="h-4 w-4" />,
+										},
+									]}
+								/>
+							) : (
+								<div className="w-12 h-12">
+									<UserButton
+										size="icon"
+										disableDefaultLinks
+										additionalLinks={[
+											{
+												label: "Profile",
+												href: `/profile/${session.user.id}`,
+												icon: <User className="h-4 w-4" />,
+											},
+										]}
+									/>
+								</div>
+							)}
 						</div>
 					) : isExpanded ? (
 						<Link
@@ -177,15 +193,17 @@ export default function Sidebar() {
 							<span>Sign In</span>
 						</Link>
 					) : (
-						<div className="flex justify-center">
-							<Link
-								to="/auth/$authView"
-								params={{ authView: "sign-in" }}
-								className="flex items-center justify-center w-12 h-12 rounded-xl bg-accent hover:bg-accent-hover text-bg-primary font-bold transition-all hover:scale-[1.05] active:scale-[0.95] shadow-lg shadow-accent/20"
-								title="Sign In"
-							>
-								<User className="h-5 w-5" />
-							</Link>
+						<div className={isExpanded ? "" : "flex justify-center"}>
+							<div className="w-12 h-12">
+								<Link
+									to="/auth/$authView"
+									params={{ authView: "sign-in" }}
+									className="flex items-center justify-center w-12 h-12 rounded-xl bg-accent hover:bg-accent-hover text-bg-primary font-bold transition-all hover:scale-[1.05] active:scale-[0.95] shadow-lg shadow-accent/20"
+									title="Sign In"
+								>
+									<User className="h-5 w-5" />
+								</Link>
+							</div>
 						</div>
 					)}
 				</div>
