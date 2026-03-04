@@ -24,6 +24,9 @@ export default function Sidebar() {
 	const toggleSidebar = () => setIsExpanded(!isExpanded);
 
 	const displayCount = isConnected ? formatCompactNumber(userCount) : "...";
+	const displayCountWithLabel = isConnected
+		? `${formatCompactNumber(userCount)} ${userCount === 1 ? "User" : "Users"}`
+		: "...";
 
 	return (
 		<aside
@@ -82,18 +85,18 @@ export default function Sidebar() {
 							<div className="relative shrink-0">
 								<Users
 									className={`h-5 w-5 ${
-										isConnected ? "text-green-400" : "text-text-tertiary"
+										isConnected ? "text-success" : "text-text-tertiary"
 									}`}
 								/>
 								<span
 									className={`absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full border-2 border-depth-2 ${
-										isConnected ? "bg-green-500" : "bg-gray-500"
+										isConnected ? "bg-success" : "bg-text-tertiary"
 									}`}
 								/>
 							</div>
 							<div className="flex flex-col min-w-0">
 								<span className="text-sm font-semibold text-text-primary">
-									{displayCount}
+									{displayCountWithLabel}
 								</span>
 								<span className="text-xs text-text-tertiary truncate">
 									online
@@ -111,12 +114,12 @@ export default function Sidebar() {
 								<div className="relative">
 									<Users
 										className={`h-5 w-5 ${
-											isConnected ? "text-green-400" : "text-text-tertiary"
+											isConnected ? "text-success" : "text-text-tertiary"
 										}`}
 									/>
 									<span
 										className={`absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full border-2 border-depth-2 ${
-											isConnected ? "bg-green-500" : "bg-gray-500"
+											isConnected ? "bg-success" : "bg-text-tertiary"
 										}`}
 									/>
 								</div>
@@ -168,20 +171,22 @@ export default function Sidebar() {
 						<Link
 							to="/auth/$authView"
 							params={{ authView: "sign-in" }}
-							className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all hover:scale-[1.02] active:scale-[0.98]"
+							className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl bg-accent hover:bg-accent-hover text-bg-primary font-bold transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-accent/20"
 						>
 							<User className="h-4 w-4" />
 							<span>Sign In</span>
 						</Link>
 					) : (
-						<Link
-							to="/auth/$authView"
-							params={{ authView: "sign-in" }}
-							className="flex items-center justify-center w-12 h-12 rounded-xl bg-accent hover:bg-accent-hover text-white transition-all hover:scale-[1.05] active:scale-[0.95]"
-							title="Sign In"
-						>
-							<User className="h-5 w-5" />
-						</Link>
+						<div className="flex justify-center">
+							<Link
+								to="/auth/$authView"
+								params={{ authView: "sign-in" }}
+								className="flex items-center justify-center w-12 h-12 rounded-xl bg-accent hover:bg-accent-hover text-bg-primary font-bold transition-all hover:scale-[1.05] active:scale-[0.95] shadow-lg shadow-accent/20"
+								title="Sign In"
+							>
+								<User className="h-5 w-5" />
+							</Link>
+						</div>
 					)}
 				</div>
 

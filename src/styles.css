@@ -309,6 +309,7 @@ body {
 .text-primary { color: var(--text-primary); }
 .text-secondary { color: var(--text-secondary); }
 .text-tertiary { color: var(--text-tertiary); }
+.text-bg-primary { color: var(--bg-primary); }
 
 /* Border utilities */
 .border-subtle { border-color: var(--border-subtle); }
