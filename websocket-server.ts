@@ -18,23 +18,46 @@ const io = new Server(httpServer, {
 	pingInterval: 25000,
 });
 
+// Track unique users: userId -> Set of socket ids
+// For anonymous users, we use the socket.id as the userId
+const userSockets = new Map<string, Set<string>>();
+
+// Get unique user count
+function getUniqueUserCount(): number {
+	return userSockets.size;
+}
+
 // Broadcast user count to all connected clients
 function broadcastUserCount() {
-	const count = io.engine.clientsCount;
+	const count = getUniqueUserCount();
 	io.emit("userCount", { count });
-	console.log(`[Socket.io] User count updated: ${count} connected clients`);
+	console.log(`[Socket.io] User count updated: ${count} unique users`);
 }
 
 io.on("connection", (socket) => {
 	console.log(
-		`[Socket.io] Client connected: ${socket.id}. Total: ${io.engine.clientsCount}`,
+		`[Socket.io] Client connected: ${socket.id}. Total connections: ${io.engine.clientsCount}`,
 	);
 
-	// Send current user count to the new client
-	socket.emit("userCount", { count: io.engine.clientsCount });
+	// Handle user identification (called by client after connection)
+	socket.on("identify", (data: { userId?: string }) => {
+		const userId = data.userId || `anonymous:${socket.id}`;
+		
+		// Store user identification on the socket
+		socket.data.userId = userId;
+		
+		// Add socket to user's set
+		if (!userSockets.has(userId)) {
+			userSockets.set(userId, new Set());
+		}
+		userSockets.get(userId)?.add(socket.id);
+		
+		console.log(`[Socket.io] User identified: ${userId} (socket: ${socket.id})`);
+		broadcastUserCount();
+	});
 
-	// Broadcast updated count to all clients
-	broadcastUserCount();
+	// Send current user count to the new client
+	socket.emit("userCount", { count: getUniqueUserCount() });
 
 	// Handle custom events here in the future
 	socket.on("message", (data) => {
@@ -48,8 +71,22 @@ io.on("connection", (socket) => {
 
 	// Handle disconnect
 	socket.on("disconnect", (reason) => {
+		const userId = socket.data.userId;
+		
+		if (userId) {
+			// Remove socket from user's set
+			const sockets = userSockets.get(userId);
+			if (sockets) {
+				sockets.delete(socket.id);
+				// If user has no more sockets, remove them entirely
+				if (sockets.size === 0) {
+					userSockets.delete(userId);
+				}
+			}
+		}
+		
 		console.log(
-			`[Socket.io] Client disconnected: ${socket.id}. Reason: ${reason}. Total: ${io.engine.clientsCount}`,
+			`[Socket.io] Client disconnected: ${socket.id}. Reason: ${reason}. User: ${userId || 'unknown'}`,
 		);
 		broadcastUserCount();
 	});

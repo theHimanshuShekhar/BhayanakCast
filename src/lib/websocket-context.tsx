@@ -9,6 +9,7 @@ import {
 	useState,
 } from "react";
 import { io, type Socket } from "socket.io-client";
+import { authClient } from "#/lib/auth-client";
 
 interface WebSocketContextType {
 	socket: Socket | null;
@@ -28,6 +29,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 	const [userCount, setUserCount] = useState(0);
 	const socketRef = useRef<Socket | null>(null);
 	const debouncedUpdateRef = useRef<((count: number) => void) | null>(null);
+	const { data: session } = authClient.useSession();
 
 	useEffect(() => {
 		if (typeof window === "undefined") {
@@ -54,6 +56,9 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 
 		socket.on("connect", () => {
 			setIsConnected(true);
+			// Identify the user after connection
+			const userId = session?.user?.id;
+			socket.emit("identify", { userId });
 		});
 
 		socket.on("disconnect", () => {
@@ -67,7 +72,16 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 		return () => {
 			socket.disconnect();
 		};
-	}, []);
+	}, [session?.user?.id]);
+
+	// Re-identify when session changes (user logs in/out)
+	useEffect(() => {
+		const socket = socketRef.current;
+		if (socket?.connected) {
+			const userId = session?.user?.id;
+			socket.emit("identify", { userId });
+		}
+	}, [session?.user?.id]);
 
 	const sendMessage = useCallback((message: unknown) => {
 		if (socketRef.current?.connected) {
