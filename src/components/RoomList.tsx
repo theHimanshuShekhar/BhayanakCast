@@ -1,7 +1,9 @@
 import { debounce } from "@tanstack/pacer";
+import { useQuery } from "@tanstack/react-query";
 import { Plus, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Input } from "#/components/ui/input";
+import { searchRooms } from "#/utils/home";
 import { RoomCard } from "./RoomCard";
 
 interface Room {
@@ -16,93 +18,25 @@ interface Room {
 	createdAt: Date;
 }
 
-// Mock data for rooms
-const mockRooms: Room[] = [
-	{
-		id: "1",
-		name: "Coding & Chill",
-		description:
-			"Building a full-stack app with React and Node.js. Come hang out and code together!",
-		streamerName: "Alice Chen",
-		participantCount: 42,
-		status: "active",
-		createdAt: new Date(Date.now() - 1000 * 60 * 30),
-	},
-	{
-		id: "2",
-		name: "Gaming Night - Elden Ring",
-		description: "First playthrough, trying not to die too much. Tips welcome!",
-		streamerName: "Marcus Gaming",
-		streamerImage: "https://api.dicebear.com/7.x/avataaars/svg?seed=Marcus",
-		participantCount: 128,
-		status: "active",
-		createdAt: new Date(Date.now() - 1000 * 60 * 120),
-	},
-	{
-		id: "3",
-		name: "Music Production Live",
-		description:
-			"Creating beats and answering questions about music production.",
-		streamerName: "DJ Synth",
-		participantCount: 67,
-		status: "active",
-		createdAt: new Date(Date.now() - 1000 * 60 * 45),
-	},
-	{
-		id: "4",
-		name: "Study With Me",
-		description:
-			"Pomodoro sessions, let's be productive together! 25 min work, 5 min break.",
-		streamerName: "Study Buddy",
-		streamerImage: "https://api.dicebear.com/7.x/avataaars/svg?seed=Study",
-		participantCount: 23,
-		status: "active",
-		createdAt: new Date(Date.now() - 1000 * 60 * 15),
-	},
-	{
-		id: "5",
-		name: "Digital Art Stream",
-		description:
-			"Creating concept art for a new game project. Feedback appreciated!",
-		streamerName: "ArtBySarah",
-		participantCount: 89,
-		status: "active",
-		createdAt: new Date(Date.now() - 1000 * 60 * 60),
-	},
-	{
-		id: "6",
-		name: "Tech Talk: AI & Future",
-		description:
-			"Discussing the latest in AI technology and what it means for developers.",
-		streamerName: "Tech Tom",
-		streamerImage: "https://api.dicebear.com/7.x/avataaars/svg?seed=Tom",
-		participantCount: 156,
-		status: "active",
-		createdAt: new Date(Date.now() - 1000 * 60 * 10),
-	},
-	{
-		id: "7",
-		name: "Cooking Show: Italian",
-		description: "Making homemade pasta from scratch. Join me in the kitchen!",
-		streamerName: "Chef Maria",
-		participantCount: 34,
-		maxUsersJoined: 156,
-		status: "ended",
-		createdAt: new Date(Date.now() - 1000 * 60 * 60 * 2),
-	},
-	{
-		id: "8",
-		name: "React Learning Session",
-		description:
-			"Teaching React hooks and patterns to beginners. Ask anything!",
-		streamerName: "Code Mentor",
-		participantCount: 78,
-		status: "active",
-		createdAt: new Date(Date.now() - 1000 * 60 * 25),
-	},
-];
+interface RoomListProps {
+	initialRooms: Array<{
+		room: {
+			id: string;
+			name: string;
+			description: string | null;
+			status: string;
+			createdAt: Date;
+		};
+		streamer: {
+			id: string;
+			name: string;
+			image: string | null;
+		};
+		participantCount: number;
+	}>;
+}
 
-export function RoomList() {
+export function RoomList({ initialRooms }: RoomListProps) {
 	const [searchQuery, setSearchQuery] = useState("");
 	const [debouncedQuery, setDebouncedQuery] = useState("");
 
@@ -124,22 +58,37 @@ export function RoomList() {
 		debouncedSetQuery(value);
 	};
 
-	// Filter rooms based on debounced query
-	const filteredRooms = useMemo(() => {
-		if (!debouncedQuery.trim()) {
-			return mockRooms;
-		}
-		const query = debouncedQuery.toLowerCase();
-		return mockRooms.filter(
-			(room) =>
-				room.name.toLowerCase().includes(query) ||
-				room.description.toLowerCase().includes(query) ||
-				room.streamerName.toLowerCase().includes(query),
-		);
-	}, [debouncedQuery]);
+	// Fetch rooms from server when searching
+	const { data: searchedRooms } = useQuery({
+		queryKey: ["rooms", "search", debouncedQuery],
+		queryFn: async () => {
+			if (!debouncedQuery.trim()) return null;
+			return searchRooms({ data: { query: debouncedQuery } });
+		},
+		enabled: !!debouncedQuery.trim(),
+		staleTime: 30 * 60 * 1000, // 30 minutes
+	});
 
-	const activeRooms = filteredRooms.filter((room) => room.status === "active");
-	const endedRooms = filteredRooms.filter((room) => room.status === "ended");
+	// Transform database rooms to component format
+	const rooms: Room[] = useMemo(() => {
+		const sourceData = searchedRooms || initialRooms;
+		if (!sourceData) return [];
+
+		return sourceData.map((roomData) => ({
+			id: roomData.room.id,
+			name: roomData.room.name,
+			description: roomData.room.description || "",
+			streamerName: roomData.streamer.name,
+			streamerImage: roomData.streamer.image || undefined,
+			participantCount: roomData.participantCount || 0,
+			maxUsersJoined: undefined,
+			status: roomData.room.status as "active" | "ended",
+			createdAt: new Date(roomData.room.createdAt),
+		}));
+	}, [searchedRooms, initialRooms]);
+
+	const activeRooms = rooms.filter((room) => room.status === "active");
+	const endedRooms = rooms.filter((room) => room.status === "ended");
 
 	return (
 		<div className="space-y-6">
@@ -167,9 +116,9 @@ export function RoomList() {
 
 			{/* Results count */}
 			<div className="text-sm text-text-secondary">
-				{filteredRooms.length === 0
+				{rooms.length === 0
 					? "No rooms found"
-					: `Showing ${filteredRooms.length} room${filteredRooms.length === 1 ? "" : "s"}`}
+					: `Showing ${rooms.length} room${rooms.length === 1 ? "" : "s"}`}
 				{debouncedQuery && (
 					<span className="text-text-tertiary ml-1">
 						for &quot;{debouncedQuery}&quot;
@@ -216,7 +165,7 @@ export function RoomList() {
 			)}
 
 			{/* Empty state */}
-			{filteredRooms.length === 0 && (
+			{rooms.length === 0 && (
 				<div className="text-center py-12">
 					<div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-depth-2 mb-4">
 						<Search className="h-8 w-8 text-text-tertiary" />

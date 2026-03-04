@@ -1,0 +1,68 @@
+import { createServerFn } from "@tanstack/react-start";
+import {
+	getActiveRooms,
+	getCommunityStats,
+	getEndedRooms,
+	getGlobalStats,
+	getTrendingRooms,
+	getUserStats,
+} from "#/db/queries/stats";
+
+/**
+ * Get all data needed for the home page
+ */
+export const getHomeData = createServerFn({ method: "GET" }).handler(
+	async () => {
+		const [activeRooms, trendingRooms, communityStats, globalStats] =
+			await Promise.all([
+				getActiveRooms(),
+				getTrendingRooms(5),
+				getCommunityStats(),
+				getGlobalStats(),
+			]);
+
+		return {
+			activeRooms,
+			trendingRooms,
+			communityStats,
+			globalStats,
+		};
+	},
+);
+
+/**
+ * Search rooms
+ */
+export const searchRooms = createServerFn({ method: "GET" })
+	.inputValidator((data: { query: string }) => data)
+	.handler(async ({ data }) => {
+		const rooms = await getActiveRooms(data.query);
+		return rooms;
+	});
+
+/**
+ * Get user stats
+ */
+export const getUserHomeStats = createServerFn({ method: "GET" })
+	.inputValidator((data: { userId: string }) => data)
+	.handler(async ({ data }) => {
+		const [userStats, communityStats] = await Promise.all([
+			getUserStats(data.userId),
+			getCommunityStats(),
+		]);
+
+		return {
+			userStats,
+			communityStats,
+		};
+	});
+
+/**
+ * Get ended rooms
+ */
+export const getPastRooms = createServerFn({ method: "GET" })
+	.inputValidator((data: { limit: number }) => data)
+	.handler(async ({ data }) => {
+		const rooms = await getEndedRooms(data.limit);
+		return rooms;
+	});

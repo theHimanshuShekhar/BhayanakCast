@@ -1,43 +1,33 @@
 import { Link } from "@tanstack/react-router";
 import { Activity, Clock, Flame, Radio, TrendingUp, Users } from "lucide-react";
+import { useWebSocket } from "#/lib/websocket-context";
 
-// Mock data for demonstration
-const mockGlobalStats = {
-	totalUsersOnline: 1247,
-	totalRoomsCreated: 342,
-	totalHoursStreamedToday: 186,
-	peakConcurrentUsers: 89,
-};
+interface AnonymousStatsColumnProps {
+	trendingRooms: Array<{
+		id: string;
+		name: string;
+		streamerName: string;
+		viewerCount: number;
+	}>;
+	communityStats: {
+		totalRegisteredUsers: number;
+		totalWatchHoursThisWeek: number;
+		mostActiveStreamers: number;
+		newUsersThisWeek: number;
+	};
+	globalStats: {
+		totalRoomsCreated: number;
+		totalHoursStreamedToday: number;
+		peakConcurrentUsers: number;
+	};
+}
 
-const mockTrendingRooms = [
-	{
-		id: "2",
-		name: "Gaming Night - Elden Ring",
-		streamerName: "Marcus Gaming",
-		viewerCount: 128,
-	},
-	{
-		id: "6",
-		name: "Tech Talk: AI & Future",
-		streamerName: "Tech Tom",
-		viewerCount: 156,
-	},
-	{
-		id: "5",
-		name: "Digital Art Stream",
-		streamerName: "ArtBySarah",
-		viewerCount: 89,
-	},
-];
-
-const mockCommunityStats = {
-	totalRegisteredUsers: 15234,
-	totalWatchHoursThisWeek: 8420,
-	mostActiveStreamers: 142,
-	newUsersThisWeek: 328,
-};
-
-export function AnonymousStatsColumn() {
+export function AnonymousStatsColumn({
+	trendingRooms,
+	communityStats,
+	globalStats,
+}: AnonymousStatsColumnProps) {
+	const { userCount } = useWebSocket();
 	return (
 		<div className="hidden xl:block w-72 shrink-0 space-y-4">
 			{/* Card 1: Global Site Stats */}
@@ -53,7 +43,7 @@ export function AnonymousStatsColumn() {
 							<span className="text-xs text-text-tertiary">Online</span>
 						</div>
 						<span className="text-lg font-bold text-text-primary">
-							{mockGlobalStats.totalUsersOnline.toLocaleString()}
+							{userCount.toLocaleString()}
 						</span>
 					</div>
 					<div className="p-2.5 rounded-lg bg-depth-2">
@@ -62,7 +52,7 @@ export function AnonymousStatsColumn() {
 							<span className="text-xs text-text-tertiary">Rooms</span>
 						</div>
 						<span className="text-lg font-bold text-text-primary">
-							{mockGlobalStats.totalRoomsCreated}
+							{globalStats.totalRoomsCreated}
 						</span>
 					</div>
 					<div className="p-2.5 rounded-lg bg-depth-2">
@@ -71,7 +61,7 @@ export function AnonymousStatsColumn() {
 							<span className="text-xs text-text-tertiary">Hours Today</span>
 						</div>
 						<span className="text-lg font-bold text-text-primary">
-							{mockGlobalStats.totalHoursStreamedToday}h
+							{globalStats.totalHoursStreamedToday}h
 						</span>
 					</div>
 					<div className="p-2.5 rounded-lg bg-depth-2">
@@ -80,7 +70,7 @@ export function AnonymousStatsColumn() {
 							<span className="text-xs text-text-tertiary">Peak Users</span>
 						</div>
 						<span className="text-lg font-bold text-text-primary">
-							{mockGlobalStats.peakConcurrentUsers}
+							{globalStats.peakConcurrentUsers}
 						</span>
 					</div>
 				</div>
@@ -93,7 +83,7 @@ export function AnonymousStatsColumn() {
 					<h3 className="font-semibold text-text-primary">Trending Now</h3>
 				</div>
 				<div className="space-y-2">
-					{mockTrendingRooms.map((room) => (
+					{trendingRooms.map((room) => (
 						<div
 							key={room.id}
 							className="flex items-center gap-3 p-2.5 rounded-lg bg-depth-2 hover:bg-depth-3 transition-colors"
@@ -125,7 +115,7 @@ export function AnonymousStatsColumn() {
 					<div className="flex items-center justify-between p-2.5 rounded-lg bg-depth-2">
 						<span className="text-sm text-text-secondary">Total Users</span>
 						<span className="text-lg font-bold text-accent">
-							{mockCommunityStats.totalRegisteredUsers.toLocaleString()}
+							{communityStats.totalRegisteredUsers.toLocaleString()}
 						</span>
 					</div>
 					<div className="flex items-center justify-between p-2.5 rounded-lg bg-depth-2">
@@ -133,7 +123,7 @@ export function AnonymousStatsColumn() {
 							Watch Hours (Week)
 						</span>
 						<span className="text-lg font-bold text-accent">
-							{mockCommunityStats.totalWatchHoursThisWeek.toLocaleString()}h
+							{communityStats.totalWatchHoursThisWeek.toLocaleString()}h
 						</span>
 					</div>
 					<div className="flex items-center justify-between p-2.5 rounded-lg bg-depth-2">
@@ -141,13 +131,13 @@ export function AnonymousStatsColumn() {
 							Active Streamers
 						</span>
 						<span className="text-lg font-bold text-accent">
-							{mockCommunityStats.mostActiveStreamers}
+							{communityStats.mostActiveStreamers}
 						</span>
 					</div>
 					<div className="flex items-center justify-between p-2.5 rounded-lg bg-depth-2">
 						<span className="text-sm text-text-secondary">New This Week</span>
 						<span className="text-lg font-bold text-success">
-							+{mockCommunityStats.newUsersThisWeek}
+							+{communityStats.newUsersThisWeek}
 						</span>
 					</div>
 				</div>
