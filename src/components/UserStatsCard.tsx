@@ -2,6 +2,14 @@ import { Clock, Plus, Users } from "lucide-react";
 import { authClient } from "#/lib/auth-client";
 import { TopConnectionsCard } from "./TopConnectionsCard";
 
+// Mock community stats - shared with AnonymousStatsColumn
+const mockCommunityStats = {
+	totalRegisteredUsers: 15234,
+	totalWatchHoursThisWeek: 8420,
+	mostActiveStreamers: 142,
+	newUsersThisWeek: 328,
+};
+
 function formatDuration(seconds: number): string {
 	const hours = Math.floor(seconds / 3600);
 	const minutes = Math.floor((seconds % 3600) / 60);
@@ -104,6 +112,44 @@ export function UserStatsCard() {
 
 				{/* Top Connections */}
 				<TopConnectionsCard />
+
+				{/* Community Stats */}
+				<div className="bg-depth-1 rounded-xl border border-border-subtle p-5">
+					<div className="flex items-center gap-2 mb-4">
+						<Users className="h-5 w-5 text-accent" />
+						<h3 className="font-semibold text-text-primary">Community</h3>
+					</div>
+					<div className="space-y-3">
+						<div className="flex items-center justify-between p-2.5 rounded-lg bg-depth-2">
+							<span className="text-sm text-text-secondary">Total Users</span>
+							<span className="text-lg font-bold text-accent">
+								{mockCommunityStats.totalRegisteredUsers.toLocaleString()}
+							</span>
+						</div>
+						<div className="flex items-center justify-between p-2.5 rounded-lg bg-depth-2">
+							<span className="text-sm text-text-secondary">
+								Watch Hours (Week)
+							</span>
+							<span className="text-lg font-bold text-accent">
+								{mockCommunityStats.totalWatchHoursThisWeek.toLocaleString()}h
+							</span>
+						</div>
+						<div className="flex items-center justify-between p-2.5 rounded-lg bg-depth-2">
+							<span className="text-sm text-text-secondary">
+								Active Streamers
+							</span>
+							<span className="text-lg font-bold text-accent">
+								{mockCommunityStats.mostActiveStreamers}
+							</span>
+						</div>
+						<div className="flex items-center justify-between p-2.5 rounded-lg bg-depth-2">
+							<span className="text-sm text-text-secondary">New This Week</span>
+							<span className="text-lg font-bold text-success">
+								+{mockCommunityStats.newUsersThisWeek}
+							</span>
+						</div>
+					</div>
+				</div>
 			</div>
 		</div>
 	);
