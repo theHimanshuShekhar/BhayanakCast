@@ -1,14 +1,8 @@
+import { useQuery } from "@tanstack/react-query";
 import { Clock, Plus, Users } from "lucide-react";
 import { authClient } from "#/lib/auth-client";
+import { getUserHomeStats } from "#/utils/home";
 import { TopConnectionsCard } from "./TopConnectionsCard";
-
-// Mock community stats - shared with AnonymousStatsColumn
-const mockCommunityStats = {
-	totalRegisteredUsers: 15234,
-	totalWatchHoursThisWeek: 8420,
-	mostActiveStreamers: 142,
-	newUsersThisWeek: 328,
-};
 
 function formatDuration(seconds: number): string {
 	const hours = Math.floor(seconds / 3600);
@@ -17,15 +11,54 @@ function formatDuration(seconds: number): string {
 	return `${minutes}m`;
 }
 
-// Mock stats for now - can be replaced with real data later
-const mockStats = {
-	totalWatchTime: 86400, // 24 hours in seconds
-	totalRoomsJoined: 12,
-	totalConnections: 8,
-};
+function StatsSkeleton() {
+	return (
+		<div className="grid grid-cols-1 gap-3">
+			{[1, 2, 3].map((i) => (
+				<div
+					key={i}
+					className="flex items-center gap-3 p-3 rounded-lg bg-depth-2"
+				>
+					<div className="h-10 w-10 rounded-lg bg-depth-3 animate-pulse" />
+					<div className="flex-1 space-y-2">
+						<div className="h-5 w-16 bg-depth-3 rounded animate-pulse" />
+						<div className="h-3 w-24 bg-depth-3 rounded animate-pulse" />
+					</div>
+				</div>
+			))}
+		</div>
+	);
+}
+
+function CommunityStatsSkeleton() {
+	return (
+		<div className="space-y-3">
+			{[1, 2, 3, 4].map((i) => (
+				<div
+					key={i}
+					className="flex items-center justify-between p-2.5 rounded-lg bg-depth-2"
+				>
+					<div className="h-4 w-32 bg-depth-3 rounded animate-pulse" />
+					<div className="h-5 w-16 bg-depth-3 rounded animate-pulse" />
+				</div>
+			))}
+		</div>
+	);
+}
 
 export function UserStatsCard() {
 	const { data: session } = authClient.useSession();
+
+	// Fetch user stats and community stats
+	const { data: statsData, isLoading } = useQuery({
+		queryKey: ["userHomeStats", session?.user?.id],
+		queryFn: async () => {
+			if (!session?.user?.id) return null;
+			return getUserHomeStats({ data: { userId: session.user.id } });
+		},
+		enabled: !!session?.user?.id,
+		staleTime: 30 * 60 * 1000, // 30 minutes
+	});
 
 	// Don't render if user is not logged in
 	if (!session?.user) {
@@ -33,6 +66,8 @@ export function UserStatsCard() {
 	}
 
 	const user = session.user;
+	const userStats = statsData?.userStats;
+	const communityStats = statsData?.communityStats;
 
 	return (
 		<div className="hidden xl:block w-72 shrink-0">
@@ -61,43 +96,47 @@ export function UserStatsCard() {
 					</div>
 
 					{/* Stats Grid */}
-					<div className="grid grid-cols-1 gap-3">
-						<div className="flex items-center gap-3 p-3 rounded-lg bg-depth-2">
-							<div className="flex items-center justify-center w-10 h-10 rounded-lg bg-accent/10">
-								<Clock className="h-5 w-5 text-accent" />
+					{isLoading || !userStats ? (
+						<StatsSkeleton />
+					) : (
+						<div className="grid grid-cols-1 gap-3">
+							<div className="flex items-center gap-3 p-3 rounded-lg bg-depth-2">
+								<div className="flex items-center justify-center w-10 h-10 rounded-lg bg-accent/10">
+									<Clock className="h-5 w-5 text-accent" />
+								</div>
+								<div>
+									<p className="text-lg font-bold text-text-primary">
+										{formatDuration(userStats.totalWatchTime)}
+									</p>
+									<p className="text-xs text-text-tertiary">Total watch time</p>
+								</div>
 							</div>
-							<div>
-								<p className="text-lg font-bold text-text-primary">
-									{formatDuration(mockStats.totalWatchTime)}
-								</p>
-								<p className="text-xs text-text-tertiary">Total watch time</p>
-							</div>
-						</div>
 
-						<div className="flex items-center gap-3 p-3 rounded-lg bg-depth-2">
-							<div className="flex items-center justify-center w-10 h-10 rounded-lg bg-accent/10">
-								<Users className="h-5 w-5 text-accent" />
+							<div className="flex items-center gap-3 p-3 rounded-lg bg-depth-2">
+								<div className="flex items-center justify-center w-10 h-10 rounded-lg bg-accent/10">
+									<Users className="h-5 w-5 text-accent" />
+								</div>
+								<div>
+									<p className="text-lg font-bold text-text-primary">
+										{userStats.totalRoomsJoined}
+									</p>
+									<p className="text-xs text-text-tertiary">Rooms joined</p>
+								</div>
 							</div>
-							<div>
-								<p className="text-lg font-bold text-text-primary">
-									{mockStats.totalRoomsJoined}
-								</p>
-								<p className="text-xs text-text-tertiary">Rooms joined</p>
-							</div>
-						</div>
 
-						<div className="flex items-center gap-3 p-3 rounded-lg bg-depth-2">
-							<div className="flex items-center justify-center w-10 h-10 rounded-lg bg-accent/10">
-								<Users className="h-5 w-5 text-accent" />
-							</div>
-							<div>
-								<p className="text-lg font-bold text-text-primary">
-									{mockStats.totalConnections}
-								</p>
-								<p className="text-xs text-text-tertiary">Connections</p>
+							<div className="flex items-center gap-3 p-3 rounded-lg bg-depth-2">
+								<div className="flex items-center justify-center w-10 h-10 rounded-lg bg-accent/10">
+									<Users className="h-5 w-5 text-accent" />
+								</div>
+								<div>
+									<p className="text-lg font-bold text-text-primary">
+										{userStats.totalConnections}
+									</p>
+									<p className="text-xs text-text-tertiary">Connections</p>
+								</div>
 							</div>
 						</div>
-					</div>
+					)}
 				</div>
 
 				{/* Create Room Button - Wide screens only */}
@@ -119,36 +158,42 @@ export function UserStatsCard() {
 						<Users className="h-5 w-5 text-accent" />
 						<h3 className="font-semibold text-text-primary">Community</h3>
 					</div>
-					<div className="space-y-3">
-						<div className="flex items-center justify-between p-2.5 rounded-lg bg-depth-2">
-							<span className="text-sm text-text-secondary">Total Users</span>
-							<span className="text-lg font-bold text-accent">
-								{mockCommunityStats.totalRegisteredUsers.toLocaleString()}
-							</span>
+					{isLoading || !communityStats ? (
+						<CommunityStatsSkeleton />
+					) : (
+						<div className="space-y-3">
+							<div className="flex items-center justify-between p-2.5 rounded-lg bg-depth-2">
+								<span className="text-sm text-text-secondary">Total Users</span>
+								<span className="text-lg font-bold text-accent">
+									{communityStats.totalRegisteredUsers.toLocaleString()}
+								</span>
+							</div>
+							<div className="flex items-center justify-between p-2.5 rounded-lg bg-depth-2">
+								<span className="text-sm text-text-secondary">
+									Watch Hours (Week)
+								</span>
+								<span className="text-lg font-bold text-accent">
+									{communityStats.totalWatchHoursThisWeek.toLocaleString()}h
+								</span>
+							</div>
+							<div className="flex items-center justify-between p-2.5 rounded-lg bg-depth-2">
+								<span className="text-sm text-text-secondary">
+									Active Streamers
+								</span>
+								<span className="text-lg font-bold text-accent">
+									{communityStats.mostActiveStreamers}
+								</span>
+							</div>
+							<div className="flex items-center justify-between p-2.5 rounded-lg bg-depth-2">
+								<span className="text-sm text-text-secondary">
+									New This Week
+								</span>
+								<span className="text-lg font-bold text-success">
+									+{communityStats.newUsersThisWeek}
+								</span>
+							</div>
 						</div>
-						<div className="flex items-center justify-between p-2.5 rounded-lg bg-depth-2">
-							<span className="text-sm text-text-secondary">
-								Watch Hours (Week)
-							</span>
-							<span className="text-lg font-bold text-accent">
-								{mockCommunityStats.totalWatchHoursThisWeek.toLocaleString()}h
-							</span>
-						</div>
-						<div className="flex items-center justify-between p-2.5 rounded-lg bg-depth-2">
-							<span className="text-sm text-text-secondary">
-								Active Streamers
-							</span>
-							<span className="text-lg font-bold text-accent">
-								{mockCommunityStats.mostActiveStreamers}
-							</span>
-						</div>
-						<div className="flex items-center justify-between p-2.5 rounded-lg bg-depth-2">
-							<span className="text-sm text-text-secondary">New This Week</span>
-							<span className="text-lg font-bold text-success">
-								+{mockCommunityStats.newUsersThisWeek}
-							</span>
-						</div>
-					</div>
+					)}
 				</div>
 			</div>
 		</div>

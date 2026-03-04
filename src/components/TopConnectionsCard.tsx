@@ -1,6 +1,7 @@
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Users } from "lucide-react";
-import { useEffect, useState } from "react";
+import { getTopRelationships } from "#/db/queries";
 import { authClient } from "#/lib/auth-client";
 
 interface Relationship {
@@ -21,80 +22,49 @@ function formatDuration(seconds: number): string {
 	return `${minutes}m`;
 }
 
-// Mock data for demonstration
-const mockRelationships: Relationship[] = [
-	{
-		otherUserId: "user-1",
-		totalTimeSeconds: 32400,
-		roomsCount: 5,
-		user: {
-			id: "user-1",
-			name: "Alice Chen",
-			image: "https://api.dicebear.com/7.x/avataaars/svg?seed=Alice",
-		},
-	},
-	{
-		otherUserId: "user-2",
-		totalTimeSeconds: 21600,
-		roomsCount: 3,
-		user: {
-			id: "user-2",
-			name: "Marcus Gaming",
-			image: "https://api.dicebear.com/7.x/avataaars/svg?seed=Marcus",
-		},
-	},
-	{
-		otherUserId: "user-3",
-		totalTimeSeconds: 14400,
-		roomsCount: 4,
-		user: {
-			id: "user-3",
-			name: "DJ Synth",
-			image: null,
-		},
-	},
-	{
-		otherUserId: "user-4",
-		totalTimeSeconds: 7200,
-		roomsCount: 2,
-		user: {
-			id: "user-4",
-			name: "Study Buddy",
-			image: "https://api.dicebear.com/7.x/avataaars/svg?seed=Study",
-		},
-	},
-	{
-		otherUserId: "user-5",
-		totalTimeSeconds: 3600,
-		roomsCount: 1,
-		user: {
-			id: "user-5",
-			name: "ArtBySarah",
-			image: null,
-		},
-	},
-];
+function ConnectionsSkeleton() {
+	return (
+		<div className="space-y-3">
+			{[1, 2, 3].map((i) => (
+				<div key={i} className="flex items-center gap-3">
+					<div className="h-6 w-6 rounded-full bg-depth-2 animate-pulse" />
+					<div className="h-10 w-10 rounded-lg bg-depth-2 animate-pulse" />
+					<div className="flex-1 space-y-2">
+						<div className="h-4 w-24 bg-depth-2 rounded animate-pulse" />
+						<div className="h-3 w-16 bg-depth-2 rounded animate-pulse" />
+					</div>
+				</div>
+			))}
+		</div>
+	);
+}
 
 export function TopConnectionsCard() {
 	const { data: session } = authClient.useSession();
-	const [relationships, setRelationships] = useState<Relationship[]>([]);
-	const [loading, setLoading] = useState(true);
 
-	useEffect(() => {
-		// Simulate fetching data
-		const fetchData = async () => {
-			setLoading(true);
-			// In a real implementation, this would call a server function
-			// For now, use mock data
-			await new Promise((resolve) => setTimeout(resolve, 500));
-			setRelationships(mockRelationships);
-			setLoading(false);
-		};
-
-		if (session?.user) {
-			fetchData();
-		}
-	}, [session?.user]);
+	// Fetch top relationships using the existing query
+	const { data: relationships, isLoading } = useQuery({
+		queryKey: ["topConnections", session?.user?.id],
+		queryFn: async () => {
+			if (!session?.user?.id) return [];
+			const result = await getTopRelationships(session.user.id, 5);
+			// Transform to match our interface
+			return result.map((rel) => ({
+				otherUserId: rel.otherUserId,
+				totalTimeSeconds: rel.totalTimeSeconds,
+				roomsCount: rel.roomsCount,
+				user: rel.user
+					? {
+							id: rel.user.id,
+							name: rel.user.name,
+							image: rel.user.image,
+						}
+					: undefined,
+			})) as Relationship[];
+		},
+		enabled: !!session?.user?.id,
+		staleTime: 30 * 60 * 1000, // 30 minutes
+	});
 
 	// Don't render if user is not logged in
 	if (!session?.user) {
@@ -108,20 +78,9 @@ export function TopConnectionsCard() {
 				<h3 className="font-semibold text-text-primary">Top Connections</h3>
 			</div>
 
-			{loading ? (
-				<div className="space-y-3">
-					{[...Array(3)].map((_, idx) => (
-						// biome-ignore lint: Skeleton items are identical, index is acceptable here
-						<div key={idx} className="flex items-center gap-3">
-							<div className="h-10 w-10 rounded-lg bg-depth-2 animate-pulse" />
-							<div className="flex-1 space-y-2">
-								<div className="h-4 w-24 bg-depth-2 rounded animate-pulse" />
-								<div className="h-3 w-16 bg-depth-2 rounded animate-pulse" />
-							</div>
-						</div>
-					))}
-				</div>
-			) : relationships.length === 0 ? (
+			{isLoading ? (
+				<ConnectionsSkeleton />
+			) : !relationships || relationships.length === 0 ? (
 				<p className="text-sm text-text-tertiary text-center py-4">
 					No connections yet. Join rooms to meet people!
 				</p>
