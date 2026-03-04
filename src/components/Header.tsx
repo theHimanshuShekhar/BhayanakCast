@@ -31,98 +31,119 @@ export default function Sidebar() {
 				isExpanded ? "w-60" : "w-16"
 			}`}
 		>
-			{/* Logo Section */}
-			<div className={`p-4 ${isExpanded ? "" : "flex justify-center"}`}>
-				{isExpanded ? (
-					<Link
-						to="/"
-						className="flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-depth-2 transition-colors"
-					>
-						<div className="flex items-center justify-center w-10 h-10 rounded-xl bg-accent/10 text-accent font-bold text-xl">
-							BC
+			{/* Section 1: Brand Logo */}
+			<div className="p-4">
+				<div className={isExpanded ? "" : "flex justify-center"}>
+					{isExpanded ? (
+						<Link
+							to="/"
+							className="flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-depth-2 transition-colors"
+						>
+							<div className="flex items-center justify-center w-10 h-10 rounded-xl bg-accent/10 text-accent font-bold text-xl">
+								BC
+							</div>
+							<div className="flex flex-col">
+								<span className="font-bold text-text-primary text-lg leading-tight">
+									Bhayanak
+								</span>
+								<span className="font-bold text-accent text-lg leading-tight -mt-1">
+									Cast
+								</span>
+							</div>
+						</Link>
+					) : (
+						<div className="w-12 h-12">
+							<Link
+								to="/"
+								className="flex items-center justify-center w-12 h-12 rounded-xl bg-accent/10 text-accent font-bold text-xl hover:bg-accent/20 transition-colors"
+								title="BhayanakCast"
+							>
+								BC
+							</Link>
 						</div>
-						<div className="flex flex-col">
-							<span className="font-bold text-text-primary text-lg leading-tight">
-								Bhayanak
-							</span>
-							<span className="font-bold text-accent text-lg leading-tight -mt-1">
-								Cast
-							</span>
-						</div>
-					</Link>
-				) : (
-					<Link
-						to="/"
-						className="flex items-center justify-center w-12 h-12 rounded-xl bg-accent/10 text-accent font-bold text-xl hover:bg-accent/20 transition-colors"
-						title="BhayanakCast"
-					>
-						BC
-					</Link>
-				)}
+					)}
+				</div>
 			</div>
 
-			{/* Divider */}
-			<div className="mx-4 h-px bg-border-subtle" />
+			{/* Section 2: Online Count and Theme Switcher */}
+			<div className="px-4 pb-4 space-y-3">
+				{/* Divider */}
+				<div className="h-px bg-border-subtle" />
 
-			{/* User Count Section */}
-			<div className={`p-4 ${isExpanded ? "" : "flex justify-center"}`}>
-				{isExpanded ? (
-					<div
-						className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-depth-2 border border-border-subtle hover:border-border-default transition-colors cursor-pointer group"
-						title={isConnected ? `${userCount} users online` : "Connecting..."}
-					>
-						<div className="relative">
-							<Users
-								className={`h-5 w-5 ${
-									isConnected ? "text-green-400" : "text-text-tertiary"
-								}`}
-							/>
-							<span
-								className={`absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full border-2 border-depth-2 ${
-									isConnected ? "bg-green-500" : "bg-gray-500"
-								}`}
-							/>
+				{/* User Count Section */}
+				<div className={isExpanded ? "" : "flex justify-center"}>
+					{isExpanded ? (
+						<div
+							className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-depth-2 border border-border-subtle hover:border-border-default transition-colors cursor-pointer group"
+							title={
+								isConnected ? `${userCount} users online` : "Connecting..."
+							}
+						>
+							<div className="relative shrink-0">
+								<Users
+									className={`h-5 w-5 ${
+										isConnected ? "text-green-400" : "text-text-tertiary"
+									}`}
+								/>
+								<span
+									className={`absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full border-2 border-depth-2 ${
+										isConnected ? "bg-green-500" : "bg-gray-500"
+									}`}
+								/>
+							</div>
+							<div className="flex flex-col min-w-0">
+								<span className="text-sm font-semibold text-text-primary">
+									{displayCount}
+								</span>
+								<span className="text-xs text-text-tertiary truncate">
+									online
+								</span>
+							</div>
 						</div>
-						<div className="flex flex-col">
-							<span className="text-sm font-semibold text-text-primary">
-								{displayCount}
-							</span>
-							<span className="text-xs text-text-tertiary">online now</span>
+					) : (
+						<div className="w-12 h-12">
+							<div
+								className="flex flex-col items-center justify-center w-12 h-12 rounded-xl bg-depth-2 border border-border-subtle hover:border-border-default transition-colors cursor-pointer group"
+								title={
+									isConnected ? `${userCount} users online` : "Connecting..."
+								}
+							>
+								<div className="relative">
+									<Users
+										className={`h-5 w-5 ${
+											isConnected ? "text-green-400" : "text-text-tertiary"
+										}`}
+									/>
+									<span
+										className={`absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full border-2 border-depth-2 ${
+											isConnected ? "bg-green-500" : "bg-gray-500"
+										}`}
+									/>
+								</div>
+								<span className="text-[10px] font-semibold text-text-secondary mt-0.5">
+									{displayCount}
+								</span>
+							</div>
 						</div>
-					</div>
-				) : (
-					<div
-						className="flex flex-col items-center justify-center w-12 h-12 rounded-xl bg-depth-2 border border-border-subtle hover:border-border-default transition-colors cursor-pointer group"
-						title={isConnected ? `${userCount} users online` : "Connecting..."}
-					>
-						<div className="relative">
-							<Users
-								className={`h-4 w-4 ${
-									isConnected ? "text-green-400" : "text-text-tertiary"
-								}`}
-							/>
-							<span
-								className={`absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full border-2 border-depth-2 ${
-									isConnected ? "bg-green-500" : "bg-gray-500"
-								}`}
-							/>
-						</div>
-						<span className="text-[10px] font-semibold text-text-secondary mt-0.5">
-							{displayCount}
-						</span>
-					</div>
-				)}
-			</div>
+					)}
+				</div>
 
-			{/* Theme Switcher */}
-			<div className={`p-4 ${isExpanded ? "" : "flex justify-center"}`}>
-				<ThemeSwitcher isExpanded={isExpanded} />
+				{/* Theme Switcher */}
+				<div className={isExpanded ? "" : "flex justify-center"}>
+					{isExpanded ? (
+						<ThemeSwitcher isExpanded={isExpanded} />
+					) : (
+						<div className="w-12 h-12">
+							<ThemeSwitcher isExpanded={isExpanded} />
+						</div>
+					)}
+				</div>
 			</div>
 
 			{/* Spacer */}
-			<div className="flex-1 min-h-8" />
+			<div className="flex-1" />
 
-			{/* Bottom Section */}
+			{/* Section 3: UserButton and Sidebar toggle */}
 			<div className="p-4 space-y-3">
 				{/* Divider */}
 				<div className="h-px bg-border-subtle" />

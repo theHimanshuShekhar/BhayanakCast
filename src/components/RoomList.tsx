@@ -1,5 +1,5 @@
 import { debounce } from "@tanstack/pacer";
-import { Search } from "lucide-react";
+import { Plus, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Input } from "#/components/ui/input";
 import { RoomCard } from "./RoomCard";
@@ -143,16 +143,26 @@ export function RoomList() {
 
 	return (
 		<div className="space-y-6">
-			{/* Search bar */}
-			<div className="relative">
-				<Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-tertiary" />
-				<Input
-					type="text"
-					placeholder="Search rooms by name, description, or streamer..."
-					value={searchQuery}
-					onChange={handleSearchChange}
-					className="pl-10 bg-depth-1 border-border-subtle text-text-primary placeholder:text-text-tertiary focus:border-accent focus:ring-accent"
-				/>
+			{/* Search bar and Create Room */}
+			<div className="flex gap-3">
+				<div className="relative flex-1">
+					<Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-tertiary" />
+					<Input
+						type="text"
+						placeholder="Search rooms..."
+						value={searchQuery}
+						onChange={handleSearchChange}
+						className="pl-10 bg-depth-1 border-border-subtle text-text-primary placeholder:text-text-tertiary focus:border-accent focus:ring-accent"
+					/>
+				</div>
+				<button
+					type="button"
+					className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-accent hover:bg-accent-hover text-bg-primary font-bold transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-accent/20 whitespace-nowrap xl:hidden"
+					onClick={() => alert("Create room feature coming soon!")}
+				>
+					<Plus className="h-5 w-5" />
+					<span>Create Room</span>
+				</button>
 			</div>
 
 			{/* Results count */}
