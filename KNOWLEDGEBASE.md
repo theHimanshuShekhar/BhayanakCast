@@ -10,7 +10,7 @@
 - **Framework**: TanStack Start (React + SSR)
 - **Router**: TanStack Router (file-based routing)
 - **Query**: TanStack Query v5
-- **Auth**: Better Auth with Discord OAuth (all environments) + Email/Password (dev only)
+- **Auth**: Better Auth with Discord OAuth (sole authentication method)
 - **Database**: PostgreSQL 15 + Drizzle ORM
 - **Real-time**: Socket.io WebSocket server
 - **Styling**: Tailwind CSS v4 with custom theme
@@ -248,10 +248,28 @@ pnpm docker:down    # Stop PostgreSQL
 ## Database Schema
 
 ### Better Auth Tables (Auto-managed)
-- `users` - User accounts
+- `users` - User accounts (populated from Discord OAuth)
+  - **name**: Discord username
+  - **email**: Discord email
+  - **image**: Discord avatar URL
+  - **emailVerified**: Discord verification status
 - `sessions` - Active sessions
-- `accounts` - OAuth accounts
+- `accounts` - OAuth accounts (Discord link)
 - `verifications` - Email verification codes
+
+### Discord OAuth Integration
+**User Data Flow:**
+1. User clicks "Continue with Discord" on `/auth/sign-in`
+2. Discord OAuth redirects to `/api/auth/callback/discord`
+3. `auth.ts` fetches user profile from Discord API
+4. User data synced: username, email, avatar URL
+5. Existing users updated, new users created automatically
+6. Profile refreshes on every login
+
+**Avatar URL Format:**
+```
+https://cdn.discordapp.com/avatars/{discordUserId}/{avatarHash}.png
+```
 
 ### Application Tables
 - `streaming_rooms` - Active/past streaming sessions (streamerId is nullable)

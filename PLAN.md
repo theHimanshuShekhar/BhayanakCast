@@ -88,24 +88,27 @@ This document outlines the current state and future development plans for Bhayan
 
 ---
 
-### 4. Authentication (`/auth/$authView`)
+### 4. Authentication (`/auth/sign-in`)
 **Status:** ✅ Complete  
 **Priority:** High
 
 #### Implemented:
 - [x] Better Auth integration
-- [x] Sign in/up pages
-- [x] Email/password authentication (dev only)
-- [x] Discord OAuth (dev & production)
+- [x] Discord OAuth (only authentication method)
+- [x] User profile sync from Discord (name, email, avatar)
+- [x] Profile refresh on every login
 - [x] Session management
 - [x] Protected routes
 
+#### Authentication Flow:
+1. User clicks "Continue with Discord" button
+2. Discord OAuth redirects to `/api/auth/callback/discord`
+3. User data (username, email, avatar) synced from Discord
+4. New users automatically created, existing users updated
+5. Redirected to home page after successful login
+
 #### Pending:
-- [ ] **Additional OAuth Providers** - Google, GitHub login
-- [ ] **Email Verification** - Verify email before account activation
-- [ ] **Password Reset** - Forgot password flow
-- [ ] **Two-Factor Authentication** - 2FA support
-- [ ] **Account Deletion** - GDPR compliance
+- [ ] **Additional OAuth Providers** - Google, GitHub login (optional)
 
 ---
 
@@ -322,10 +325,13 @@ waiting + 5 min empty → ended (cleanup)
 2. **Room Join/Leave Tracking** - Track participants in real-time
 3. **Streamer Transfer** - Automatic and manual ownership transfer with null streamer support
 4. **Room Lifecycle** - 5-min grace period, 3-hour past stream visibility
-5. **Discord OAuth** - Authentication via Discord
-6. **Room Status System** - Four-state status (waiting, preparing, active, ended)
-7. **Community Stats Caching** - Reduced to 2-minute refresh for better UX
-8. **Database Schema Update** - Made streamerId nullable with proper cascade handling
+5. **Discord OAuth** - Authentication via Discord (sole auth method)
+6. **Discord Profile Sync** - Auto-sync username, email, avatar on every login
+7. **Room Status System** - Four-state status (waiting, preparing, active, ended)
+8. **Community Stats Caching** - Reduced to 2-minute refresh for better UX
+9. **Database Schema Update** - Made streamerId nullable with proper cascade handling
+10. **Combined Docker Service** - Web app and WebSocket server in single container
+11. **Removed Excessive Logging** - Cleaned up unnecessary console logs
 
 ### Up Next 🚀
 1. **Basic Chat System** - Text chat in rooms

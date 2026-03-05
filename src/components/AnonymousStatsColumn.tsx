@@ -126,7 +126,7 @@ export function AnonymousStatsColumn({
 				</p>
 				<Link
 					to="/auth/$authView"
-					params={{ authView: "sign-up" }}
+					params={{ authView: "sign-in" }}
 					className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl bg-accent hover:bg-accent-hover text-bg-primary font-bold transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-accent/20"
 				>
 					<span>Get Started</span>

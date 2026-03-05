@@ -22,7 +22,6 @@ const io = new Server(httpServer, {
 });
 
 // Track unique users: userId -> Set of socket ids
-// For anonymous users, we use the socket.id as the userId
 const userSockets = new Map<string, Set<string>>();
 
 // Get unique user count
@@ -34,14 +33,9 @@ function getUniqueUserCount(): number {
 function broadcastUserCount() {
 	const count = getUniqueUserCount();
 	io.emit("userCount", { count });
-	console.log(`[Socket.io] User count updated: ${count} unique users`);
 }
 
 io.on("connection", (socket) => {
-	console.log(
-		`[Socket.io] Client connected: ${socket.id}. Total connections: ${io.engine.clientsCount}`,
-	);
-
 	// Handle user identification (called by client after connection)
 	socket.on("identify", (data: { userId?: string }) => {
 		const userId = data.userId || `anonymous:${socket.id}`;
@@ -55,7 +49,6 @@ io.on("connection", (socket) => {
 		}
 		userSockets.get(userId)?.add(socket.id);
 		
-		console.log(`[Socket.io] User identified: ${userId} (socket: ${socket.id})`);
 		broadcastUserCount();
 	});
 
@@ -66,7 +59,6 @@ io.on("connection", (socket) => {
 	socket.on("room:join", (data: { roomId: string }) => {
 		const { roomId } = data;
 		socket.join(roomId);
-		console.log(`[Socket.io] Socket ${socket.id} joined room: ${roomId}`);
 		
 		// Broadcast to room that user joined
 		socket.to(roomId).emit("room:join", {
@@ -78,7 +70,6 @@ io.on("connection", (socket) => {
 	socket.on("room:leave", (data: { roomId: string }) => {
 		const { roomId } = data;
 		socket.leave(roomId);
-		console.log(`[Socket.io] Socket ${socket.id} left room: ${roomId}`);
 		
 		// Broadcast to room that user left
 		socket.to(roomId).emit("room:leave", {
@@ -92,13 +83,8 @@ io.on("connection", (socket) => {
 		socket.emit("pong");
 	});
 
-	// Handle ping/pong for connection health
-	socket.on("ping", () => {
-		socket.emit("pong");
-	});
-
 	// Handle disconnect
-	socket.on("disconnect", (reason) => {
+	socket.on("disconnect", () => {
 		const userId = socket.data.userId;
 		
 		if (userId) {
@@ -113,9 +99,6 @@ io.on("connection", (socket) => {
 			}
 		}
 		
-		console.log(
-			`[Socket.io] Client disconnected: ${socket.id}. Reason: ${reason}. User: ${userId || 'unknown'}`,
-		);
 		broadcastUserCount();
 	});
 
@@ -132,7 +115,6 @@ export function broadcastRoomEvent(
 	data: unknown,
 ) {
 	io.to(roomId).emit(event, data);
-	console.log(`[Socket.io] Broadcast ${event} to room ${roomId}`, data);
 }
 
 export function broadcastStreamerChanged(
@@ -185,39 +167,29 @@ httpServer.on("request", (req, res) => {
 
 // Start server
 httpServer.listen(PORT, () => {
-	console.log(`[Socket.io] Server started on port ${PORT}`);
-	console.log(`[Socket.io] CORS enabled for: ${CLIENT_URL}`);
-
-	// Setup room cleanup job - runs every 5 minutes (300000 ms)
-	// Using setInterval instead of node-cron for better reliability
-	const CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes in milliseconds
+	// Setup room cleanup job - runs every 5 minutes
+	const CLEANUP_INTERVAL = 5 * 60 * 1000;
 	setInterval(async () => {
-		console.log("[Cleanup] Running room cleanup job...");
 		try {
 			await runRoomCleanup(broadcastRoomEnded);
 		} catch (error) {
 			console.error("[Cleanup] Error during room cleanup:", error);
 		}
 	}, CLEANUP_INTERVAL);
-	console.log("[Cleanup] Room cleanup scheduled every 5 minutes");
 });
 
 // Graceful shutdown
 process.on("SIGTERM", () => {
-	console.log("[Socket.io] SIGTERM received, closing server...");
 	io.close(() => {
 		httpServer.close(() => {
-			console.log("[Socket.io] Server closed");
 			process.exit(0);
 		});
 	});
 });
 
 process.on("SIGINT", () => {
-	console.log("[Socket.io] SIGINT received, closing server...");
 	io.close(() => {
 		httpServer.close(() => {
-			console.log("[Socket.io] Server closed");
 			process.exit(0);
 		});
 	});

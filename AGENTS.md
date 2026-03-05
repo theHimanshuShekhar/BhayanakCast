@@ -1,5 +1,13 @@
 # AGENTS.md - Coding Guidelines for BhayanakCast
 
+## Agent Rules
+
+### Git Commits
+- **Never commit changes without explicit user request**
+- Only create commits when the user specifically asks (e.g., "commit changes", "commit this", etc.)
+- It's acceptable to stage files with `git add` but do not run `git commit` unless requested
+- If unsure whether to commit, ask the user first
+
 ## Build & Development Commands
 
 ```bash
@@ -305,7 +313,7 @@ DISCORD_CLIENT_SECRET=your_discord_client_secret
 VITE_POSTHOG_KEY=<optional>
 ```
 
-### Discord OAuth Setup
+### Discord OAuth Setup (Sole Authentication Method)
 
 1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
 2. Create a new application
@@ -316,9 +324,11 @@ VITE_POSTHOG_KEY=<optional>
 5. Copy Client ID and Client Secret to `.env.local`
 
 **Auth Behavior:**
-- **Discord OAuth**: Available in both dev and production
-- **Email/Password**: Only available in development environment
-- Set `NODE_ENV=production` to disable email auth
+- **Discord OAuth**: The ONLY authentication method (both dev and production)
+- **User Profile Sync**: Discord username, email, and avatar automatically synced on every login
+- **Auto Account Creation**: New users automatically created on first Discord login
+- **Profile Refresh**: User data updated from Discord on every sign-in
+- **No Email/Password**: Email/password authentication has been removed
 
 ## Room System Architecture
 

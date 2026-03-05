@@ -56,28 +56,21 @@ export async function endRoom(roomId: string) {
 			endedAt: new Date(),
 		})
 		.where(eq(streamingRooms.id, roomId));
-
-	console.log(`[Room Cleanup] Ended room ${roomId}`);
 }
 
 /**
  * Run the room cleanup job
- * Called every 15 minutes
+ * Called every 5 minutes
  */
 export async function runRoomCleanup(
 	broadcastRoomEnded?: (roomId: string) => void,
 ) {
-	console.log("[Room Cleanup] Starting cleanup job...");
-
 	try {
 		const roomsToEnd = await findRoomsToEnd();
 
 		if (roomsToEnd.length === 0) {
-			console.log("[Room Cleanup] No rooms to end");
 			return;
 		}
-
-		console.log(`[Room Cleanup] Found ${roomsToEnd.length} rooms to end`);
 
 		for (const room of roomsToEnd) {
 			await endRoom(room.id);
@@ -87,8 +80,6 @@ export async function runRoomCleanup(
 				broadcastRoomEnded(room.id);
 			}
 		}
-
-		console.log(`[Room Cleanup] Ended ${roomsToEnd.length} rooms`);
 	} catch (error) {
 		console.error("[Room Cleanup] Error during cleanup:", error);
 	}
