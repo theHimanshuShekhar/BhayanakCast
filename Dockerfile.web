@@ -1,4 +1,7 @@
-# Multi-stage build for minimal image size
+# Production-ready multi-stage build for BhayanakCast Web App
+# Optimized for minimal image size and security
+# Based on TanStack Start + Nitro deployment guidelines
+
 # Stage 1: Dependencies
 FROM node:20-alpine AS deps
 RUN apk add --no-cache libc6-compat
@@ -11,7 +14,7 @@ RUN npm install -g pnpm
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages ./packages
 
-# Install dependencies
+# Install dependencies (including dev dependencies for build)
 RUN pnpm install --frozen-lockfile
 
 # Stage 2: Builder
@@ -29,34 +32,24 @@ COPY --from=deps /app/packages ./packages
 COPY . .
 
 # Build the application
+ENV NODE_ENV=production
 RUN pnpm build
 
-# Stage 3: Runner (production)
+# Stage 3: Production Runner
 FROM node:20-alpine AS runner
 WORKDIR /app
 
-# Install pnpm
-RUN npm install -g pnpm
-
 ENV NODE_ENV=production
+ENV PORT=3000
 
 # Create non-root user for security
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 appuser
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 appuser
 
-# Copy necessary files from builder
-COPY --from=builder --chown=appuser:nodejs /app/dist ./dist
-COPY --from=builder --chown=appuser:nodejs /app/node_modules ./node_modules
+# Copy only the necessary files from builder
+# TanStack Start + Nitro outputs to .output directory
+COPY --from=builder --chown=appuser:nodejs /app/.output ./.output
 COPY --from=builder --chown=appuser:nodejs /app/package.json ./package.json
-COPY --from=builder --chown=appuser:nodejs /app/pnpm-lock.yaml ./pnpm-lock.yaml
-COPY --from=builder --chown=appuser:nodejs /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
-COPY --from=builder --chown=appuser:nodejs /app/packages ./packages
-COPY --from=builder --chown=appuser:nodejs /app/src ./src
-COPY --from=builder --chown=appuser:nodejs /app/drizzle ./drizzle
-COPY --from=builder --chown=appuser:nodejs /app/drizzle.config.ts ./drizzle.config.ts
-COPY --from=builder --chown=appuser:nodejs /app/tsconfig.json ./tsconfig.json
-COPY --from=builder --chown=appuser:nodejs /app/vite.config.ts ./vite.config.ts
-COPY --from=builder --chown=appuser:nodejs /app/public ./public
 
 # Switch to non-root user
 USER appuser
@@ -64,5 +57,6 @@ USER appuser
 # Expose the port
 EXPOSE 3000
 
-# Start the application
-CMD ["pnpm", "preview", "--port", "3000", "--host"]
+# Start the application using Nitro server
+# This is the standard way to run TanStack Start apps
+CMD ["node", ".output/server/index.mjs"]
