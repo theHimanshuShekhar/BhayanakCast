@@ -59,9 +59,34 @@ io.on("connection", (socket) => {
 	// Send current user count to the new client
 	socket.emit("userCount", { count: getUniqueUserCount() });
 
-	// Handle custom events here in the future
-	socket.on("message", (data) => {
-		console.log("[Socket.io] Message from", socket.id, ":", data);
+	// Room management
+	socket.on("room:join", (data: { roomId: string }) => {
+		const { roomId } = data;
+		socket.join(roomId);
+		console.log(`[Socket.io] Socket ${socket.id} joined room: ${roomId}`);
+		
+		// Broadcast to room that user joined
+		socket.to(roomId).emit("room:join", {
+			userId: socket.data.userId,
+			socketId: socket.id,
+		});
+	});
+
+	socket.on("room:leave", (data: { roomId: string }) => {
+		const { roomId } = data;
+		socket.leave(roomId);
+		console.log(`[Socket.io] Socket ${socket.id} left room: ${roomId}`);
+		
+		// Broadcast to room that user left
+		socket.to(roomId).emit("room:leave", {
+			userId: socket.data.userId,
+			socketId: socket.id,
+		});
+	});
+
+	// Handle ping/pong for connection health
+	socket.on("ping", () => {
+		socket.emit("pong");
 	});
 
 	// Handle ping/pong for connection health
@@ -96,6 +121,29 @@ io.on("connection", (socket) => {
 		console.error(`[Socket.io] Socket error for ${socket.id}:`, error);
 	});
 });
+
+// Room event broadcast helpers
+export function broadcastRoomEvent(
+	roomId: string,
+	event: string,
+	data: unknown,
+) {
+	io.to(roomId).emit(event, data);
+	console.log(`[Socket.io] Broadcast ${event} to room ${roomId}`, data);
+}
+
+export function broadcastStreamerChanged(
+	roomId: string,
+	newStreamerId: string,
+) {
+	broadcastRoomEvent(roomId, "room:streamer_changed", { newStreamerId });
+}
+
+export function broadcastRoomEnded(roomId: string) {
+	broadcastRoomEvent(roomId, "room:ended", { roomId });
+	// Kick all clients from the room
+	io.in(roomId).socketsLeave(roomId);
+}
 
 // Start server
 httpServer.listen(PORT, () => {
