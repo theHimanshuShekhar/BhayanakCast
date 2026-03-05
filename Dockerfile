@@ -40,8 +40,10 @@ COPY --from=builder --chown=appuser:nodejs /app/.output ./.output
 COPY --from=builder --chown=appuser:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=appuser:nodejs /app/package.json ./package.json
 COPY --from=builder --chown=appuser:nodejs /app/pnpm-lock.yaml ./pnpm-lock.yaml
+COPY --from=builder --chown=appuser:nodejs /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
 COPY --from=builder --chown=appuser:nodejs /app/websocket-server.ts ./websocket-server.ts
 COPY --from=builder --chown=appuser:nodejs /app/src ./src
+COPY --from=builder --chown=appuser:nodejs /app/tsconfig.json ./tsconfig.json
 
 # Switch to non-root user
 USER appuser
