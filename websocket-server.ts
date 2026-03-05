@@ -3,7 +3,9 @@ import { createServer } from "http";
 import cron from "node-cron";
 import { runRoomCleanup } from "./src/utils/room-cleanup";
 
-const PORT = process.env.WS_PORT ? parseInt(process.env.WS_PORT) : 3001;
+// Parse port from VITE_WS_URL (e.g., "http://localhost:3001" -> 3001)
+const WS_URL = process.env.VITE_WS_URL || "http://localhost:3001";
+const PORT = parseInt(new URL(WS_URL).port) || 3001;
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:3000";
 
 // Create HTTP server
