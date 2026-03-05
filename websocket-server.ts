@@ -1,5 +1,7 @@
 import { Server } from "socket.io";
 import { createServer } from "http";
+import cron from "node-cron";
+import { runRoomCleanup } from "./src/utils/room-cleanup";
 
 const PORT = process.env.WS_PORT ? parseInt(process.env.WS_PORT) : 3001;
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:3000";
@@ -149,6 +151,13 @@ export function broadcastRoomEnded(roomId: string) {
 httpServer.listen(PORT, () => {
 	console.log(`[Socket.io] Server started on port ${PORT}`);
 	console.log(`[Socket.io] CORS enabled for: ${CLIENT_URL}`);
+
+	// Setup room cleanup cron job - runs every 15 minutes
+	cron.schedule("*/15 * * * *", async () => {
+		console.log("[Cron] Running room cleanup job...");
+		await runRoomCleanup(broadcastRoomEnded);
+	});
+	console.log("[Cron] Room cleanup scheduled every 15 minutes");
 });
 
 // Graceful shutdown
