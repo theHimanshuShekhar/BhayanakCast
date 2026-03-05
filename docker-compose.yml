@@ -18,12 +18,12 @@ services:
     networks:
       - bhayanak-network
 
-  web:
+  app:
     build:
       context: .
-      dockerfile: Dockerfile.web
+      dockerfile: Dockerfile
       target: runner
-    container_name: bhayanak-web
+    container_name: bhayanak-app
     env_file:
       - .env.production
     environment:
@@ -31,27 +31,6 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
     ports:
       - "3000:3000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      websocket:
-        condition: service_started
-    networks:
-      - bhayanak-network
-    restart: unless-stopped
-
-  websocket:
-    build:
-      context: .
-      dockerfile: Dockerfile.ws
-      target: runner
-    container_name: bhayanak-websocket
-    env_file:
-      - .env.production
-    environment:
-      NODE_ENV: production
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
-    ports:
       - "3001:3001"
     depends_on:
       postgres:
