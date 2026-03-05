@@ -1,7 +1,7 @@
 import { redirect } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 
-const getSessionOnServer = createServerFn({ method: "GET" }).handler(
+export const getSessionOnServer = createServerFn({ method: "GET" }).handler(
 	async () => {
 		// Dynamic import to avoid bundling for client
 		const { auth } = await import("#/lib/auth");

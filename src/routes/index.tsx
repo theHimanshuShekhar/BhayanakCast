@@ -2,9 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { AnonymousStatsColumn } from "#/components/AnonymousStatsColumn";
 import { RoomList, RoomListSkeleton } from "#/components/RoomList";
 import { UserStatsCard } from "#/components/UserStatsCard";
-import { publicRoute } from "#/lib/auth-guard";
+import { getSessionOnServer, publicRoute } from "#/lib/auth-guard";
 import { getHomeData } from "#/utils/home";
-import { getSessionOnServer } from "#/utils/session";
 
 // Loading fallback component
 function HomePageSkeleton() {
