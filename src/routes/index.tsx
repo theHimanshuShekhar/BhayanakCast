@@ -1,11 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { AnonymousStatsColumn } from "#/components/AnonymousStatsColumn";
-import { ClientOnly } from "#/components/ClientOnly";
 import { RoomList, RoomListSkeleton } from "#/components/RoomList";
 import { UserStatsCard } from "#/components/UserStatsCard";
-import { authClient } from "#/lib/auth-client";
 import { publicRoute } from "#/lib/auth-guard";
 import { getHomeData } from "#/utils/home";
+import { getSessionOnServer } from "#/utils/session";
 
 // Loading fallback component
 function HomePageSkeleton() {
@@ -34,16 +33,18 @@ export const Route = createFileRoute("/")({
 	component: App,
 	beforeLoad: publicRoute,
 	loader: async () => {
-		const homeData = await getHomeData();
-		return homeData;
+		const [homeData, session] = await Promise.all([
+			getHomeData(),
+			getSessionOnServer(),
+		]);
+		return { ...homeData, session };
 	},
 	pendingComponent: HomePageSkeleton,
 });
 
 function App() {
 	const homeData = Route.useLoaderData();
-	const { data: session } = authClient.useSession();
-	const isLoggedIn = !!session?.user;
+	const isLoggedIn = !!homeData.session?.user;
 
 	return (
 		<div className="h-full w-full bg-depth-0 px-4 py-8 overflow-auto">
@@ -60,17 +61,15 @@ function App() {
 						</div>
 						<RoomList initialRooms={homeData.activeRooms} />
 					</div>
-					<ClientOnly>
-						{isLoggedIn ? (
-							<UserStatsCard />
-						) : (
-							<AnonymousStatsColumn
-								trendingRooms={homeData.trendingRooms}
-								communityStats={homeData.communityStats}
-								globalStats={homeData.globalStats}
-							/>
-						)}
-					</ClientOnly>
+					{isLoggedIn ? (
+						<UserStatsCard />
+					) : (
+						<AnonymousStatsColumn
+							trendingRooms={homeData.trendingRooms}
+							communityStats={homeData.communityStats}
+							globalStats={homeData.globalStats}
+						/>
+					)}
 				</div>
 			</div>
 		</div>
