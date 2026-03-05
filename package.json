@@ -10,6 +10,7 @@
     "dev:web": "vite dev --port 3000",
     "dev:ws": "tsx watch websocket-server.ts",
     "build": "vite build",
+    "start": "node .output/server/index.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "format": "biome format",

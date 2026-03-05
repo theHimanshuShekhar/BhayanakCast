@@ -1,10 +1,9 @@
-# Production-ready multi-stage build for BhayanakCast Web App
-# Optimized for minimal image size and security
-# Based on TanStack Start + Nitro deployment guidelines
+# Production Dockerfile for BhayanakCast Web App
+# Following TanStack Start Node.js/Docker deployment guidelines
+# https://tanstack.com/start/latest/docs/framework/react/hosting
 
-# Stage 1: Dependencies
-FROM node:20-alpine AS deps
-RUN apk add --no-cache libc6-compat
+# Stage 1: Build
+FROM node:20-alpine AS builder
 WORKDIR /app
 
 # Install pnpm
@@ -14,19 +13,8 @@ RUN npm install -g pnpm
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages ./packages
 
-# Install dependencies (including dev dependencies for build)
+# Install dependencies
 RUN pnpm install --frozen-lockfile
-
-# Stage 2: Builder
-FROM node:20-alpine AS builder
-WORKDIR /app
-
-# Install pnpm
-RUN npm install -g pnpm
-
-# Copy dependencies from deps stage
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/packages ./packages
 
 # Copy source files
 COPY . .
@@ -35,7 +23,7 @@ COPY . .
 ENV NODE_ENV=production
 RUN pnpm build
 
-# Stage 3: Production Runner
+# Stage 2: Production
 FROM node:20-alpine AS runner
 WORKDIR /app
 
@@ -46,10 +34,8 @@ ENV PORT=3000
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 appuser
 
-# Copy only the necessary files from builder
-# TanStack Start + Nitro outputs to .output directory
+# Copy only the built application from builder
 COPY --from=builder --chown=appuser:nodejs /app/.output ./.output
-COPY --from=builder --chown=appuser:nodejs /app/package.json ./package.json
 
 # Switch to non-root user
 USER appuser
@@ -57,6 +43,6 @@ USER appuser
 # Expose the port
 EXPOSE 3000
 
-# Start the application using Nitro server
-# This is the standard way to run TanStack Start apps
+# Start the application
+# Per TanStack Start docs: node .output/server/index.mjs
 CMD ["node", ".output/server/index.mjs"]
