@@ -1,6 +1,5 @@
 import { Server } from "socket.io";
 import { createServer } from "http";
-import cron from "node-cron";
 import { runRoomCleanup } from "./src/utils/room-cleanup";
 
 // Parse port from VITE_WS_URL (e.g., "http://localhost:3001" -> 3001)
@@ -189,12 +188,18 @@ httpServer.listen(PORT, () => {
 	console.log(`[Socket.io] Server started on port ${PORT}`);
 	console.log(`[Socket.io] CORS enabled for: ${CLIENT_URL}`);
 
-	// Setup room cleanup cron job - runs every 5 minutes
-	cron.schedule("*/5 * * * *", async () => {
-		console.log("[Cron] Running room cleanup job...");
-		await runRoomCleanup(broadcastRoomEnded);
-	});
-	console.log("[Cron] Room cleanup scheduled every 5 minutes");
+	// Setup room cleanup job - runs every 5 minutes (300000 ms)
+	// Using setInterval instead of node-cron for better reliability
+	const CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes in milliseconds
+	setInterval(async () => {
+		console.log("[Cleanup] Running room cleanup job...");
+		try {
+			await runRoomCleanup(broadcastRoomEnded);
+		} catch (error) {
+			console.error("[Cleanup] Error during room cleanup:", error);
+		}
+	}, CLEANUP_INTERVAL);
+	console.log("[Cleanup] Room cleanup scheduled every 5 minutes");
 });
 
 // Graceful shutdown
