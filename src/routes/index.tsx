@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { ActiveRoomIndicator } from "#/components/ActiveRoomIndicator";
 import { AnonymousStatsColumn } from "#/components/AnonymousStatsColumn";
 import { RoomList, RoomListSkeleton } from "#/components/RoomList";
 import { UserStatsCard } from "#/components/UserStatsCard";
@@ -74,6 +75,9 @@ function App() {
 					)}
 				</div>
 			</div>
+			{homeData.session?.user?.id && (
+				<ActiveRoomIndicator userId={homeData.session.user.id} />
+			)}
 		</div>
 	);
 }
