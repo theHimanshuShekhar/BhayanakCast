@@ -29,10 +29,6 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
-      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
-      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID}
-      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET}
-      VITE_POSTHOG_KEY: ${VITE_POSTHOG_KEY}
     ports:
       - "3000:3000"
     depends_on:
