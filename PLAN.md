@@ -2,8 +2,8 @@
 
 This document outlines the current state and future development plans for BhayanakCast.
 
-**Last Updated:** March 2025  
-**Version:** 1.0
+**Last Updated:** March 5, 2026  
+**Version:** 1.1
 
 ---
 
@@ -28,8 +28,10 @@ This document outlines the current state and future development plans for Bhayan
 - [x] **Room Lifecycle Management** - Join/leave tracking with auto-leave previous room
 - [x] **Streamer Transfer** - Automatic and manual streamer ownership transfer
 - [x] **Active Room Indicator** - Bottom-right card showing current room with leave button
-- [x] **Room Cleanup Cron** - 15-minute cron job to end inactive rooms
+- [x] **Room Cleanup Cron** - 5-minute cron job to end inactive rooms
 - [x] **Past Streams Visibility** - Only show ended streams for 3 hours
+- [x] **Room Status System** - Four states: waiting, preparing, active, ended
+- [x] **Streamer Null Handling** - Rooms can exist without a streamer (waiting status)
 
 #### Pending:
 - [ ] **Real-time Participant Counts** - WebSocket updates for room viewer counts
@@ -53,7 +55,7 @@ This document outlines the current state and future development plans for Bhayan
 #### Implemented:
 - [x] **Join/Leave Room Tracking** - Backend participant management with auto-join on enter
 - [x] **Streamer Controls** - Transfer stream ownership, end stream
-- [x] **15-Minute Grace Period** - Empty rooms stay active for 15 mins, claimable by new joiners
+- [x] **5-Minute Grace Period** - Empty rooms stay in waiting status for 5 mins before cleanup
 
 #### Pending:
 - [ ] **Real-time Chat** - WebSocket-based chat system
@@ -172,6 +174,34 @@ This document outlines the current state and future development plans for Bhayan
 
 ---
 
+## Room Status System
+
+### Status States
+
+| Status | Description | Visual Indicator |
+|--------|-------------|------------------|
+| **waiting** | No streamer or viewers present | Gray dot • "Waiting" |
+| **preparing** | Streamer present but not streaming | Yellow dot • "Preparing" |
+| **active** | Streamer actively streaming (WebRTC) | Green dot • "Streaming" |
+| **ended** | Room cleaned up after grace period | History icon • "Ended" |
+
+### Status Transitions
+
+```
+Create Room → preparing (streamer joins)
+Streamer Leaves + Viewers Remain → new streamer promoted → preparing
+Streamer Leaves + No One Left → waiting
+waiting + 5 min empty → ended (cleanup)
+```
+
+### Implementation Details
+- **Database**: `streamerId` column is nullable, `status` has 4 values
+- **Cleanup**: Cron job runs every 5 minutes to end `waiting` rooms empty for 5+ minutes
+- **UI**: RoomCard shows appropriate status badge and "No Streamer" when applicable
+- **Queries**: All queries use `leftJoin` for streamer relationship to handle null cases
+
+---
+
 ## WebSocket Infrastructure
 
 ### Current:
@@ -192,7 +222,7 @@ This document outlines the current state and future development plans for Bhayan
 ## Performance & Optimization
 
 ### Implemented:
-- [x] 30-minute data caching
+- [x] 30-minute data caching (2-minute for community stats)
 - [x] Debounced search
 - [x] Server-side rendering (TanStack Start)
 - [x] Code splitting with lazy loading
@@ -290,9 +320,12 @@ This document outlines the current state and future development plans for Bhayan
 ### Recently Completed ✅
 1. **Create Room Backend** - Allow users to create rooms
 2. **Room Join/Leave Tracking** - Track participants in real-time
-3. **Streamer Transfer** - Automatic and manual ownership transfer
-4. **Room Lifecycle** - 15-min grace period, 3-hour past stream visibility
+3. **Streamer Transfer** - Automatic and manual ownership transfer with null streamer support
+4. **Room Lifecycle** - 5-min grace period, 3-hour past stream visibility
 5. **Discord OAuth** - Authentication via Discord
+6. **Room Status System** - Four-state status (waiting, preparing, active, ended)
+7. **Community Stats Caching** - Reduced to 2-minute refresh for better UX
+8. **Database Schema Update** - Made streamerId nullable with proper cascade handling
 
 ### Up Next 🚀
 1. **Basic Chat System** - Text chat in rooms
@@ -305,9 +338,13 @@ This document outlines the current state and future development plans for Bhayan
 ## Notes
 
 - All mock data should be replaced with real implementations
-- Database queries use 30-minute caching - adjust based on usage
+- Database queries use 30-minute caching for most data, 2-minute for community stats
 - WebSocket implementation needs scalability testing
+- Room cleanup runs every 5 minutes via cron job
+- Room status system supports 4 states: waiting, preparing, active, ended
+- Streamer can be null (room enters "waiting" status)
 - Consider implementing rate limiting before public launch
+- WebRTC integration pending for actual "active" streaming status
 
 ---
 

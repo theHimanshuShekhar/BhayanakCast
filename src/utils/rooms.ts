@@ -2,6 +2,11 @@ import { createServerFn } from "@tanstack/react-start";
 import { and, asc, eq, isNull, ne } from "drizzle-orm";
 import { z } from "zod";
 import { roomParticipants, streamingRooms, users } from "#/db/schema";
+import {
+	broadcastRoomJoin,
+	broadcastRoomLeave,
+	broadcastStreamerChanged,
+} from "#/utils/websocket-client";
 
 const createRoomSchema = z.object({
 	name: z.string().min(3).max(100),
@@ -11,6 +16,31 @@ const createRoomSchema = z.object({
 // Track last transfer time for cooldown
 const lastTransferTime = new Map<string, number>();
 const TRANSFER_COOLDOWN_MS = 30000;
+
+// Rate limiting for room creation
+const roomCreationAttempts = new Map<string, number[]>();
+const RATE_LIMIT_WINDOW_MS = 60000; // 1 minute
+const RATE_LIMIT_MAX_ATTEMPTS = 3; // Max 3 rooms per minute
+
+function checkRateLimit(userId: string): boolean {
+	const now = Date.now();
+	const userAttempts = roomCreationAttempts.get(userId) || [];
+
+	// Filter out old attempts outside the window
+	const recentAttempts = userAttempts.filter(
+		(timestamp) => now - timestamp < RATE_LIMIT_WINDOW_MS,
+	);
+
+	if (recentAttempts.length >= RATE_LIMIT_MAX_ATTEMPTS) {
+		return false; // Rate limit exceeded
+	}
+
+	// Add new attempt
+	recentAttempts.push(now);
+	roomCreationAttempts.set(userId, recentAttempts);
+
+	return true; // Within rate limit
+}
 
 export const getCurrentRoom = createServerFn({ method: "GET" })
 	.inputValidator((data: { userId: string }) => data)
@@ -44,6 +74,13 @@ export const createRoom = createServerFn({ method: "POST" })
 	.handler(async ({ data }) => {
 		const { db } = await import("#/db/index");
 		const { nanoid } = await import("nanoid");
+
+		// Check rate limit
+		if (!checkRateLimit(data.userId)) {
+			throw new Error(
+				"Rate limit exceeded. You can only create 3 rooms per minute.",
+			);
+		}
 
 		// Leave current room if any
 		const currentRoom = await db
@@ -93,6 +130,15 @@ export const createRoom = createServerFn({ method: "POST" })
 						.update(streamingRooms)
 						.set({ streamerId: nextViewer[0].userId })
 						.where(eq(streamingRooms.id, participation.roomId));
+				} else {
+					// No viewers left, set streamer to null and status to waiting
+					await db
+						.update(streamingRooms)
+						.set({ streamerId: null, status: "waiting" })
+						.where(eq(streamingRooms.id, participation.roomId));
+
+					// Broadcast streamer change with null
+					await broadcastStreamerChanged(participation.roomId, "");
 				}
 			}
 		}
@@ -105,7 +151,7 @@ export const createRoom = createServerFn({ method: "POST" })
 			name: data.name,
 			description: data.description || null,
 			streamerId: data.userId,
-			status: "active",
+			status: "preparing",
 			createdAt: now,
 		});
 
@@ -117,6 +163,9 @@ export const createRoom = createServerFn({ method: "POST" })
 			leftAt: null,
 			totalTimeSeconds: 0,
 		});
+
+		// Broadcast join event
+		await broadcastRoomJoin(roomId, data.userId);
 
 		const room = await db
 			.select({
@@ -175,6 +224,9 @@ export const joinRoom = createServerFn({ method: "POST" })
 			leftAt: null,
 			totalTimeSeconds: 0,
 		});
+
+		// Broadcast join event
+		await broadcastRoomJoin(data.roomId, data.userId);
 
 		return {
 			room: room[0],
@@ -242,8 +294,23 @@ export const leaveRoom = createServerFn({ method: "POST" })
 					.update(streamingRooms)
 					.set({ streamerId: nextViewer[0].userId })
 					.where(eq(streamingRooms.id, data.roomId));
+
+				// Broadcast streamer change
+				await broadcastStreamerChanged(data.roomId, nextViewer[0].userId);
+			} else {
+				// No viewers left, set streamer to null and status to waiting
+				await db
+					.update(streamingRooms)
+					.set({ streamerId: null, status: "waiting" })
+					.where(eq(streamingRooms.id, data.roomId));
+
+				// Broadcast streamer change with null
+				await broadcastStreamerChanged(data.roomId, "");
 			}
 		}
+
+		// Broadcast leave event
+		await broadcastRoomLeave(data.roomId, data.userId);
 
 		return { success: true };
 	});
@@ -310,6 +377,9 @@ export const transferStreamerOwnership = createServerFn({ method: "POST" })
 			.update(streamingRooms)
 			.set({ streamerId: data.newStreamerId })
 			.where(eq(streamingRooms.id, data.roomId));
+
+		// Broadcast streamer change
+		await broadcastStreamerChanged(data.roomId, data.newStreamerId);
 
 		// Update cooldown
 		lastTransferTime.set(data.roomId, now);

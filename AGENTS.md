@@ -165,7 +165,8 @@ From `.cursorrules`:
 - `verifications` - Email verification codes
 
 **Application Tables:**
-- `streaming_rooms` - Rooms (id, name, description, streamerId, status, createdAt, endedAt)
+- `streaming_rooms` - Rooms (id, name, description, streamerId **[nullable]**, status, createdAt, endedAt)
+  - **status**: `waiting` | `preparing` | `active` | `ended`
 - `room_participants` - Who joined what room (id, roomId, userId, joinedAt, leftAt, totalTimeSeconds)
 - `user_relationships` - Time spent between users (user1Id, user2Id, totalTimeSeconds, roomsCount, lastInteractionAt)
 - `user_room_overlaps` - Detailed overlap tracking
@@ -285,8 +286,11 @@ function Component() {
 
 ## Caching Strategy
 
-- **Client-side**: TanStack Query with 30-minute staleTime
-- **Server-side**: In-memory cache with 30-minute TTL
+- **Client-side**: TanStack Query with 30-minute staleTime (2-minute for community stats)
+- **Server-side**: In-memory cache with configurable TTL
+  - Default: 30 minutes
+  - Community stats: 2 minutes
+  - Active rooms: 2 minutes
 - **Location**: `src/db/queries/stats.ts`
 
 ## Environment Variables
@@ -340,18 +344,28 @@ VITE_POSTHOG_KEY=<optional>
    - Transfer streamer ownership automatically
    - Old streamer becomes regular participant
    - Show confirmation modal before leaving
-3. If last person leaves: room enters 15-minute grace period
+3. If no viewers left: set streamerId to null, status to `waiting`
+4. If last person leaves: room enters 5-minute grace period
 
 **Streamer Transfer:**
 - **Automatic**: When streamer leaves/joins another room
 - **Manual**: Streamer can voluntarily transfer to any viewer
 - 30-second cooldown between transfers
 - Transfer is automatic (no viewer acceptance needed)
+- If no viewers to transfer to: streamerId set to null, status becomes `waiting`
 
 **Room Cleanup (Cron Job):**
-- Runs every 15 minutes
-- Ends rooms that have been empty for > 15 minutes
+- Runs every 5 minutes
+- Ends `waiting` rooms that have been empty for > 5 minutes
 - Past streams visible for 3 hours after ending
+
+**Room Status System:**
+| Status | Description | Visual Indicator |
+|--------|-------------|------------------|
+| `waiting` | No streamer or viewers present | Gray dot • "Waiting" |
+| `preparing` | Streamer present but not streaming | Yellow dot • "Preparing" |
+| `active` | Streamer actively streaming | Green dot • "Streaming" |
+| `ended` | Room cleaned up | History icon • "Ended" |
 
 ### Active Room Indicator
 - Shows on: Home page, Profile page
@@ -402,6 +416,9 @@ See `PLAN.md` for detailed roadmap and pending features.
 - ✅ Room lifecycle (join/leave/transfer)
 - ✅ Streamer ownership transfer (auto & manual)
 - ✅ Active Room indicator
-- ✅ 15-minute room cleanup cron job
+- ✅ 5-minute room cleanup cron job
 - ✅ Discord OAuth authentication
 - ✅ JetBrains Mono static fonts
+- ✅ **Room Status System** - Four states: waiting, preparing, active, ended
+- ✅ **Nullable Streamer** - Rooms can exist without a streamer
+- ✅ **Improved Caching** - Community stats refresh every 2 minutes

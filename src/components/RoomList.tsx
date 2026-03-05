@@ -42,11 +42,11 @@ interface Room {
 	id: string;
 	name: string;
 	description: string;
-	streamerName: string;
+	streamerName?: string;
 	streamerImage?: string;
 	participantCount: number;
 	maxUsersJoined?: number;
-	status: "active" | "ended";
+	status: "waiting" | "preparing" | "active" | "ended";
 	createdAt: Date;
 }
 
@@ -63,7 +63,7 @@ interface RoomListProps {
 			id: string;
 			name: string;
 			image: string | null;
-		};
+		} | null;
 		participantCount: number;
 	}>;
 	userId?: string;
@@ -99,7 +99,7 @@ export function RoomList({ initialRooms, userId }: RoomListProps) {
 			return searchRooms({ data: { query: debouncedQuery } });
 		},
 		enabled: !!debouncedQuery.trim(),
-		staleTime: 30 * 60 * 1000, // 30 minutes
+		staleTime: 2 * 60 * 1000, // 2 minutes
 	});
 
 	// Transform database rooms to component format
@@ -116,7 +116,7 @@ export function RoomList({ initialRooms, userId }: RoomListProps) {
 				id: string;
 				name: string;
 				image: string | null;
-			};
+			} | null;
 			participantCount: number;
 		}>;
 		if (!sourceData) return [];
@@ -125,8 +125,8 @@ export function RoomList({ initialRooms, userId }: RoomListProps) {
 			id: roomData.room.id,
 			name: roomData.room.name,
 			description: roomData.room.description || "",
-			streamerName: roomData.streamer.name,
-			streamerImage: roomData.streamer.image || undefined,
+			streamerName: roomData.streamer?.name,
+			streamerImage: roomData.streamer?.image || undefined,
 			participantCount: roomData.participantCount || 0,
 			maxUsersJoined: undefined,
 			status: roomData.room.status as "active" | "ended",

@@ -147,17 +147,52 @@ export function broadcastRoomEnded(roomId: string) {
 	io.in(roomId).socketsLeave(roomId);
 }
 
+// HTTP endpoint for room events (called by server functions)
+httpServer.on("request", (req, res) => {
+	// Enable CORS
+	res.setHeader("Access-Control-Allow-Origin", "*");
+	res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+	res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+	if (req.method === "OPTIONS") {
+		res.writeHead(200);
+		res.end();
+		return;
+	}
+
+	if (req.method === "POST" && req.url === "/api/broadcast") {
+		let body = "";
+		req.on("data", (chunk) => {
+			body += chunk.toString();
+		});
+		req.on("end", () => {
+			try {
+				const { roomId, event, data } = JSON.parse(body);
+				broadcastRoomEvent(roomId, event, data);
+				res.writeHead(200, { "Content-Type": "application/json" });
+				res.end(JSON.stringify({ success: true }));
+			} catch (error) {
+				res.writeHead(400, { "Content-Type": "application/json" });
+				res.end(JSON.stringify({ error: "Invalid request" }));
+			}
+		});
+	} else {
+		res.writeHead(404);
+		res.end();
+	}
+});
+
 // Start server
 httpServer.listen(PORT, () => {
 	console.log(`[Socket.io] Server started on port ${PORT}`);
 	console.log(`[Socket.io] CORS enabled for: ${CLIENT_URL}`);
 
-	// Setup room cleanup cron job - runs every 15 minutes
-	cron.schedule("*/15 * * * *", async () => {
+	// Setup room cleanup cron job - runs every 5 minutes
+	cron.schedule("*/5 * * * *", async () => {
 		console.log("[Cron] Running room cleanup job...");
 		await runRoomCleanup(broadcastRoomEnded);
 	});
-	console.log("[Cron] Room cleanup scheduled every 15 minutes");
+	console.log("[Cron] Room cleanup scheduled every 5 minutes");
 });
 
 // Graceful shutdown

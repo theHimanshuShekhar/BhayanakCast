@@ -254,7 +254,8 @@ pnpm docker:down    # Stop PostgreSQL
 - `verifications` - Email verification codes
 
 ### Application Tables
-- `streaming_rooms` - Active/past streaming sessions
+- `streaming_rooms` - Active/past streaming sessions (streamerId is nullable)
+  - **status**: `waiting` | `preparing` | `active` | `ended`
 - `room_participants` - User participation in rooms
 - `user_relationships` - Aggregated time between users
 - `user_room_overlaps` - Detailed overlap logs
@@ -306,7 +307,9 @@ pnpm docker:down    # Stop PostgreSQL
 
 **Room States:**
 ```
-(none) --create--> ACTIVE --empty 15min--> ENDED --3hrs--> (hidden)
+(none) --create--> PREPARING --stream starts--> ACTIVE
+    |
+    +-- streamer leaves, no viewers left --> WAITING --empty 5min--> ENDED --3hrs--> (hidden)
 ```
 
 **Creating a Room:**
@@ -329,7 +332,8 @@ pnpm docker:down    # Stop PostgreSQL
    - Transfer ownership: update `streamingRooms.streamerId`
    - Old streamer becomes regular participant
    - WebSocket: `room:streamer_changed` event
-3. If no participants remain: schedule 15-min grace period
+3. If no viewers to transfer to: set streamerId to null, status to `waiting`
+4. If no participants remain: schedule 5-min grace period
 
 **Streamer Transfer (Manual):**
 - Streamer clicks "Transfer Stream" → selects viewer
@@ -337,8 +341,8 @@ pnpm docker:down    # Stop PostgreSQL
 - Automatic transfer (no viewer acceptance needed)
 
 **Room Cleanup (Cron Job):**
-- Runs every 15 minutes
-- Finds rooms with no participants for 15+ minutes
+- Runs every 5 minutes
+- Finds `waiting` rooms (no streamer) with no participants for 5+ minutes
 - Updates status to "ended", sets `endedAt`
 - WebSocket: `room:ended` event
 
@@ -360,11 +364,36 @@ async function joinRoom(userId, roomId) {
 }
 ```
 
+### Room Status System
+
+| Status | Description | Visual Indicator |
+|--------|-------------|------------------|
+| `waiting` | No streamer or viewers present | Gray dot • "Waiting" |
+| `preparing` | Streamer present but not streaming | Yellow dot • "Preparing" |
+| `active` | Streamer actively streaming | Green dot • "Streaming" |
+| `ended` | Room closed after grace period | History icon • "Ended" |
+
+**Status Transitions:**
+- **Create Room** → `preparing` (streamer joins as first participant)
+- **Streamer Leaves + Viewers Remain** → New streamer promoted, stays `preparing`
+- **Streamer Leaves + No Viewers** → `waiting` (streamerId set to null)
+- **Waiting + 5 min empty** → `ended` (cleanup cron job)
+
+**Database Schema:**
+- `streamerId` is nullable (onDelete: "set null")
+- `status` has 4 values: waiting, preparing, active, ended
+- Default status: `waiting`
+
+**Queries:**
+- Use `leftJoin` for streamer relationship to handle null cases
+- All room queries fetch `waiting`, `preparing`, and `active` rooms
+- Ended rooms only visible for 3 hours
+
 ### WebSocket Room Events
 
 - `room:join` - User joined room
 - `room:leave` - User left room  
-- `room:streamer_changed` - New streamer assigned
+- `room:streamer_changed` - New streamer assigned (empty string if null)
 - `room:ended` - Room closed
 
 ### Active Room Indicator
@@ -378,8 +407,10 @@ async function joinRoom(userId, roomId) {
 
 Potential features to implement:
 - [x] Room creation and management UI
+- [x] Room status system (waiting, preparing, active, ended)
+- [x] Nullable streamer support
 - [ ] Real-time chat in streaming rooms
-- [ ] WebRTC integration for video/audio
+- [ ] WebRTC integration for video/audio streaming
 - [ ] User search functionality
 - [ ] Friend request system
 - [ ] Notifications system
@@ -395,6 +426,9 @@ Potential features to implement:
 5. **Theme** - Hardcoded to dark mode in `__root.tsx`
 6. **Auth redirects** - Use `beforeLoad` for SSR-safe redirects
 7. **WebSocket** - Runs on port 3001, separate from web app (port 3000)
+8. **Caching** - 30-minute TTL default, 2-minute for community stats and room data
+9. **Room cleanup** - Runs every 5 minutes, ends `waiting` rooms empty for 5+ minutes
+10. **Streamer null** - Rooms can exist without streamer (enters `waiting` status)
 
 ## References
 

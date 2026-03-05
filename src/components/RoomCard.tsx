@@ -5,11 +5,11 @@ export interface Room {
 	id: string;
 	name: string;
 	description: string;
-	streamerName: string;
+	streamerName?: string;
 	streamerImage?: string;
 	participantCount: number;
 	maxUsersJoined?: number;
-	status: "active" | "ended";
+	status: "waiting" | "preparing" | "active" | "ended";
 	createdAt: Date;
 }
 
@@ -56,7 +56,7 @@ export function RoomCardSkeleton() {
 }
 
 export function RoomCard({ room }: RoomCardProps) {
-	const isActive = room.status === "active";
+	const isActive = room.status === "active" && !!room.streamerName;
 
 	const cardContent = (
 		<>
@@ -83,25 +83,41 @@ export function RoomCard({ room }: RoomCardProps) {
 
 			{/* Streamer info */}
 			<div className="flex items-center gap-3 mb-3">
-				{room.streamerImage ? (
-					<img
-						src={room.streamerImage}
-						alt={room.streamerName}
-						className="h-8 w-8 rounded-full object-cover"
-					/>
+				{room.streamerName ? (
+					<>
+						{room.streamerImage ? (
+							<img
+								src={room.streamerImage}
+								alt={room.streamerName}
+								className="h-8 w-8 rounded-full object-cover"
+							/>
+						) : (
+							<div className="h-8 w-8 rounded-full bg-accent flex items-center justify-center">
+								<span className="text-sm font-bold text-white">
+									{room.streamerName.charAt(0).toUpperCase()}
+								</span>
+							</div>
+						)}
+						<div className="flex-1 min-w-0">
+							<p className="text-sm font-medium text-text-primary truncate">
+								{room.streamerName}
+							</p>
+							<p className="text-xs text-text-tertiary">Streamer</p>
+						</div>
+					</>
 				) : (
-					<div className="h-8 w-8 rounded-full bg-accent flex items-center justify-center">
-						<span className="text-sm font-bold text-white">
-							{room.streamerName.charAt(0).toUpperCase()}
-						</span>
-					</div>
+					<>
+						<div className="h-8 w-8 rounded-full bg-depth-3 flex items-center justify-center">
+							<span className="text-sm font-bold text-text-secondary">?</span>
+						</div>
+						<div className="flex-1 min-w-0">
+							<p className="text-sm font-medium text-text-secondary truncate">
+								No Streamer
+							</p>
+							<p className="text-xs text-text-tertiary">Waiting for host</p>
+						</div>
+					</>
 				)}
-				<div className="flex-1 min-w-0">
-					<p className="text-sm font-medium text-text-primary truncate">
-						{room.streamerName}
-					</p>
-					<p className="text-xs text-text-tertiary">Streamer</p>
-				</div>
 			</div>
 
 			{/* Stats */}
@@ -115,10 +131,20 @@ export function RoomCard({ room }: RoomCardProps) {
 					</span>
 				</div>
 				<div className="flex items-center gap-1.5">
-					{isActive ? (
+					{room.status === "active" ? (
 						<>
 							<span className="h-2 w-2 rounded-full bg-green-500" />
 							<span className="text-sm text-text-secondary">Streaming</span>
+						</>
+					) : room.status === "preparing" ? (
+						<>
+							<span className="h-2 w-2 rounded-full bg-yellow-500" />
+							<span className="text-sm text-text-secondary">Preparing</span>
+						</>
+					) : room.status === "waiting" ? (
+						<>
+							<span className="h-2 w-2 rounded-full bg-gray-500" />
+							<span className="text-sm text-text-secondary">Waiting</span>
 						</>
 					) : (
 						<>
@@ -130,14 +156,6 @@ export function RoomCard({ room }: RoomCardProps) {
 			</div>
 		</>
 	);
-
-	if (isActive) {
-		return (
-			<div className="group relative bg-depth-1 rounded-lg border border-border-subtle p-4 hover:bg-depth-2 hover:border-border-default transition-all">
-				{cardContent}
-			</div>
-		);
-	}
 
 	return (
 		<Link

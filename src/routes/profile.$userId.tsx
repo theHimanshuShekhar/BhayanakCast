@@ -1,6 +1,7 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { User } from "lucide-react";
+import { ActiveRoomIndicator } from "#/components/ActiveRoomIndicator";
 import { authClient } from "#/lib/auth-client";
 import { getProfileData } from "#/utils/profile";
 
@@ -141,6 +142,9 @@ function ProfilePage() {
 					)}
 				</div>
 			</div>
+			{currentUser?.user?.id && (
+				<ActiveRoomIndicator userId={currentUser.user.id} />
+			)}
 		</div>
 	);
 }

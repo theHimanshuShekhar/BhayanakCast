@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, sql, sum } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, sql, sum } from "drizzle-orm";
 import { db } from "#/db/index";
 import {
 	roomParticipants,
@@ -13,20 +13,28 @@ import {
 const CACHE_TTL = 30 * 60 * 1000;
 
 /**
+ * Short Cache TTL: 2 minutes for frequently changing stats (in milliseconds)
+ */
+const SHORT_CACHE_TTL = 2 * 60 * 1000;
+
+/**
  * Simple in-memory cache with TTL
  */
-const cache = new Map<string, { data: unknown; timestamp: number }>();
+const cache = new Map<
+	string,
+	{ data: unknown; timestamp: number; ttl: number }
+>();
 
 function getCached<T>(key: string): T | undefined {
 	const cached = cache.get(key);
-	if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+	if (cached && Date.now() - cached.timestamp < cached.ttl) {
 		return cached.data as T;
 	}
 	return undefined;
 }
 
-function setCached<T>(key: string, data: T): void {
-	cache.set(key, { data, timestamp: Date.now() });
+function setCached<T>(key: string, data: T, ttl: number = CACHE_TTL): void {
+	cache.set(key, { data, timestamp: Date.now(), ttl });
 }
 
 interface UserStats {
@@ -53,7 +61,7 @@ interface ActiveRoom {
 		id: string;
 		name: string;
 		description: string | null;
-		streamerId: string;
+		streamerId: string | null;
 		status: string;
 		createdAt: Date;
 		endedAt: Date | null;
@@ -62,14 +70,14 @@ interface ActiveRoom {
 		id: string;
 		name: string;
 		image: string | null;
-	};
+	} | null;
 	participantCount: number;
 }
 
 interface TrendingRoom {
 	id: string;
 	name: string;
-	streamerName: string;
+	streamerName: string | null;
 	viewerCount: number;
 	trendingScore: number;
 }
@@ -79,7 +87,7 @@ interface EndedRoom {
 		id: string;
 		name: string;
 		description: string | null;
-		streamerId: string;
+		streamerId: string | null;
 		status: string;
 		createdAt: Date;
 		endedAt: Date | null;
@@ -88,7 +96,7 @@ interface EndedRoom {
 		id: string;
 		name: string;
 		image: string | null;
-	};
+	} | null;
 	maxUsersJoined: number;
 }
 
@@ -180,7 +188,7 @@ export async function getCommunityStats(): Promise<CommunityStats> {
 		newUsersThisWeek: Number(newUsersResult[0]?.count) || 0,
 	};
 
-	setCached(cacheKey, stats);
+	setCached(cacheKey, stats, SHORT_CACHE_TTL);
 	return stats;
 }
 
@@ -233,7 +241,7 @@ export async function getGlobalStats(): Promise<GlobalStats> {
 		peakConcurrentUsers: Number(peakTodayResult[0]?.maxParticipants) || 0,
 	};
 
-	setCached(cacheKey, stats);
+	setCached(cacheKey, stats, SHORT_CACHE_TTL);
 	return stats;
 }
 
@@ -247,8 +255,10 @@ export async function getActiveRooms(
 	const cached = getCached<ActiveRoom[]>(cacheKey);
 	if (cached) return cached;
 
-	// Build where conditions
-	const conditions = [eq(streamingRooms.status, "active")];
+	// Build where conditions - fetch waiting, preparing, and active rooms
+	const conditions = [
+		sql`${streamingRooms.status} IN ('waiting', 'preparing', 'active')`,
+	];
 
 	if (searchQuery) {
 		conditions.push(
@@ -267,7 +277,7 @@ export async function getActiveRooms(
 			},
 		})
 		.from(streamingRooms)
-		.innerJoin(users, eq(streamingRooms.streamerId, users.id))
+		.leftJoin(users, eq(streamingRooms.streamerId, users.id))
 		.where(and(...conditions))
 		.orderBy(desc(streamingRooms.createdAt));
 
@@ -282,7 +292,12 @@ export async function getActiveRooms(
 				count: sql<number>`count(*)`,
 			})
 			.from(roomParticipants)
-			.where(sql`${roomParticipants.roomId} IN (${sql.join(roomIds)})`)
+			.where(
+				and(
+					inArray(roomParticipants.roomId, roomIds),
+					isNull(roomParticipants.leftAt),
+				),
+			)
 			.groupBy(roomParticipants.roomId);
 	}
 
@@ -292,7 +307,7 @@ export async function getActiveRooms(
 			participantCounts.find((pc) => pc.roomId === room.room.id)?.count || 0,
 	}));
 
-	setCached(cacheKey, result);
+	setCached(cacheKey, result, SHORT_CACHE_TTL);
 	return result;
 }
 
@@ -310,7 +325,7 @@ export async function getTrendingRooms(
 
 	const now = new Date();
 
-	// Get active rooms with streamer info
+	// Get active and preparing rooms with streamer info
 	const rooms = await db
 		.select({
 			room: streamingRooms,
@@ -321,8 +336,8 @@ export async function getTrendingRooms(
 			},
 		})
 		.from(streamingRooms)
-		.innerJoin(users, eq(streamingRooms.streamerId, users.id))
-		.where(eq(streamingRooms.status, "active"));
+		.leftJoin(users, eq(streamingRooms.streamerId, users.id))
+		.where(sql`${streamingRooms.status} IN ('waiting', 'preparing', 'active')`);
 
 	// Get participant counts
 	const roomIds = rooms.map((r) => r.room.id);
@@ -335,7 +350,12 @@ export async function getTrendingRooms(
 				count: sql<number>`count(*)`,
 			})
 			.from(roomParticipants)
-			.where(sql`${roomParticipants.roomId} IN (${sql.join(roomIds)})`)
+			.where(
+				and(
+					inArray(roomParticipants.roomId, roomIds),
+					isNull(roomParticipants.leftAt),
+				),
+			)
 			.groupBy(roomParticipants.roomId);
 	}
 
@@ -352,7 +372,7 @@ export async function getTrendingRooms(
 		return {
 			id: room.room.id,
 			name: room.room.name,
-			streamerName: room.streamer.name,
+			streamerName: room.streamer?.name ?? "No Streamer",
 			viewerCount,
 			trendingScore,
 		};
@@ -375,6 +395,9 @@ export async function getEndedRooms(limit: number = 10): Promise<EndedRoom[]> {
 	const cached = getCached<EndedRoom[]>(cacheKey);
 	if (cached) return cached;
 
+	// Only show rooms ended within last 3 hours
+	const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
+
 	const rooms = await db
 		.select({
 			room: streamingRooms,
@@ -385,24 +408,30 @@ export async function getEndedRooms(limit: number = 10): Promise<EndedRoom[]> {
 			},
 		})
 		.from(streamingRooms)
-		.innerJoin(users, eq(streamingRooms.streamerId, users.id))
-		.where(eq(streamingRooms.status, "ended"))
+		.leftJoin(users, eq(streamingRooms.streamerId, users.id))
+		.where(
+			and(
+				eq(streamingRooms.status, "ended"),
+				gte(streamingRooms.endedAt, threeHoursAgo),
+			),
+		)
 		.orderBy(desc(streamingRooms.endedAt))
 		.limit(limit);
 
 	// Get max participant counts for each room
 	const roomIds = rooms.map((r) => r.room.id);
-	let maxParticipants: Array<{ roomId: string; count: number }> = [];
+	const maxParticipants: Array<{ roomId: string; count: number }> = [];
 
 	if (roomIds.length > 0) {
-		maxParticipants = await db
+		const counts = await db
 			.select({
 				roomId: roomParticipants.roomId,
 				count: sql<number>`count(*)`,
 			})
 			.from(roomParticipants)
-			.where(sql`${roomParticipants.roomId} IN (${sql.join(roomIds)})`)
+			.where(inArray(roomParticipants.roomId, roomIds))
 			.groupBy(roomParticipants.roomId);
+		maxParticipants.push(...counts);
 	}
 
 	const result = rooms.map((room) => ({

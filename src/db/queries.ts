@@ -1,4 +1,4 @@
-import { desc, eq, or, sql } from "drizzle-orm";
+import { desc, eq, inArray, or, sql } from "drizzle-orm";
 import { db } from "./index";
 import { userRelationships, users } from "./schema";
 
@@ -79,7 +79,7 @@ export async function getTopRelationships(
 			updatedAt: users.updatedAt,
 		})
 		.from(users)
-		.where(sql`${users.id} IN (${sql.join(otherUserIds)})`);
+		.where(inArray(users.id, otherUserIds));
 
 	// Combine the data
 	return relationships.map((rel: RelationshipResult) => ({

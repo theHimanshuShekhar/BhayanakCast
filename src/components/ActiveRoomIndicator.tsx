@@ -20,10 +20,24 @@ export function ActiveRoomIndicator({ userId }: ActiveRoomIndicatorProps) {
 		refetchInterval: 5000, // Refetch every 5 seconds
 	});
 
+	// Query to get participant count
+	const { data: participants } = useQuery({
+		queryKey: ["roomParticipants", currentRoom?.room.id],
+		queryFn: async () => {
+			if (!currentRoom) return null;
+			const { getRoomParticipants } = await import("#/utils/rooms");
+			return getRoomParticipants({ data: { roomId: currentRoom.room.id } });
+		},
+		refetchInterval: 5000, // Refetch every 5 seconds
+		enabled: !!currentRoom,
+	});
+
 	// Don't show if not in a room
 	if (!currentRoom) {
 		return null;
 	}
+
+	const participantCount = participants?.length ?? 1; // Default to 1 (the user themselves)
 
 	const handleLeave = async () => {
 		await leaveRoom({
@@ -53,9 +67,7 @@ export function ActiveRoomIndicator({ userId }: ActiveRoomIndicatorProps) {
 				</div>
 				<div className="flex items-center gap-1 text-text-secondary">
 					<Users className="h-4 w-4" />
-					<span className="text-sm">
-						{/* This would come from a participant count query */}-
-					</span>
+					<span className="text-sm">{participantCount}</span>
 				</div>
 			</div>
 

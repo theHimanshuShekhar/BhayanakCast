@@ -65,10 +65,10 @@ export const streamingRooms = pgTable("streaming_rooms", {
 	id: text("id").primaryKey(),
 	name: text("name").notNull(),
 	description: text("description"),
-	streamerId: text("streamer_id")
-		.notNull()
-		.references(() => users.id, { onDelete: "cascade" }),
-	status: text("status").notNull().default("active"), // active, ended
+	streamerId: text("streamer_id").references(() => users.id, {
+		onDelete: "set null",
+	}),
+	status: text("status").notNull().default("waiting"), // waiting, preparing, active, ended
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 	endedAt: timestamp("ended_at"),
 });

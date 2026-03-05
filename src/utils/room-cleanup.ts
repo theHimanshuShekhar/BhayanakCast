@@ -1,10 +1,10 @@
 import { and, eq, sql } from "drizzle-orm";
 import { roomParticipants, streamingRooms } from "#/db/schema";
 
-const GRACE_PERIOD_MINUTES = 15;
+const GRACE_PERIOD_MINUTES = 5;
 
 /**
- * Find rooms that should be ended (empty for 15+ minutes)
+ * Find rooms that should be ended (empty for 5+ minutes)
  */
 export async function findRoomsToEnd() {
 	const { db } = await import("#/db/index");
@@ -14,8 +14,8 @@ export async function findRoomsToEnd() {
 		now.getTime() - GRACE_PERIOD_MINUTES * 60 * 1000,
 	);
 
-	// Find active rooms with no active participants
-	// where the last participant left more than 15 minutes ago
+	// Find waiting rooms (no streamer) with no active participants
+	// where the last participant left more than 5 minutes ago
 	const roomsToEnd = await db
 		.select({
 			id: streamingRooms.id,
@@ -24,14 +24,14 @@ export async function findRoomsToEnd() {
 		.from(streamingRooms)
 		.where(
 			and(
-				eq(streamingRooms.status, "active"),
+				eq(streamingRooms.status, "waiting"),
 				// No active participants in this room
 				sql`NOT EXISTS (
 					SELECT 1 FROM ${roomParticipants}
 					WHERE ${roomParticipants.roomId} = ${streamingRooms.id}
 					AND ${roomParticipants.leftAt} IS NULL
 				)`,
-				// Last participant left more than 15 minutes ago
+				// Last participant left more than 5 minutes ago
 				sql`(
 					SELECT MAX(${roomParticipants.leftAt})
 					FROM ${roomParticipants}
