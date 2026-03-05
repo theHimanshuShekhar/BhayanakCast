@@ -316,6 +316,55 @@ VITE_POSTHOG_KEY=<optional>
 - **Email/Password**: Only available in development environment
 - Set `NODE_ENV=production` to disable email auth
 
+## Room System Architecture
+
+### Room Lifecycle
+
+**Creating a Room:**
+1. User clicks "Create Room" button → opens `CreateRoomModal`
+2. User enters name (required, 3-100 chars) and description (optional, max 500)
+3. Server validates authentication and creates room
+4. User is automatically added as streamer and participant
+5. Redirect to `/room/$roomId`
+
+**Joining a Room:**
+1. User can only be in ONE room at a time
+2. If already in a room, auto-leave previous room first
+3. Join new room as participant
+4. WebSocket notifies room of new participant
+
+**Leaving a Room:**
+1. Update `leftAt` timestamp and calculate `totalTimeSeconds`
+2. If streamer leaving:
+   - Find first joined viewer (oldest participation)
+   - Transfer streamer ownership automatically
+   - Old streamer becomes regular participant
+   - Show confirmation modal before leaving
+3. If last person leaves: room enters 15-minute grace period
+
+**Streamer Transfer:**
+- **Automatic**: When streamer leaves/joins another room
+- **Manual**: Streamer can voluntarily transfer to any viewer
+- 30-second cooldown between transfers
+- Transfer is automatic (no viewer acceptance needed)
+
+**Room Cleanup (Cron Job):**
+- Runs every 15 minutes
+- Ends rooms that have been empty for > 15 minutes
+- Past streams visible for 3 hours after ending
+
+### Active Room Indicator
+- Shows on: Home page, Profile page
+- Hidden on: Room page, Auth pages
+- Displays: Room name, participant count, Leave button
+- Click "View Room" to navigate to room
+
+### WebSocket Room Events
+- `room:join` - User joined room
+- `room:leave` - User left room
+- `room:streamer_changed` - Streamer ownership transferred
+- `room:ended` - Room closed after grace period
+
 ## Development Notes
 
 ### Theme System
@@ -349,3 +398,10 @@ See `PLAN.md` for detailed roadmap and pending features.
 - ✅ Server-side room search
 - ✅ Anonymous user stats column
 - ✅ Community stats reusable component
+- ✅ Create Room functionality with modal
+- ✅ Room lifecycle (join/leave/transfer)
+- ✅ Streamer ownership transfer (auto & manual)
+- ✅ Active Room indicator
+- ✅ 15-minute room cleanup cron job
+- ✅ Discord OAuth authentication
+- ✅ JetBrains Mono static fonts

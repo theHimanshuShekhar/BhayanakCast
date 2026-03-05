@@ -23,8 +23,15 @@ This document outlines the current state and future development plans for Bhayan
 - [x] Responsive grid layout (1-3 columns)
 - [x] Live/Ended room sections
 
+#### Implemented:
+- [x] **Create Room Functionality** - Backend API and UI modal for creating streaming rooms
+- [x] **Room Lifecycle Management** - Join/leave tracking with auto-leave previous room
+- [x] **Streamer Transfer** - Automatic and manual streamer ownership transfer
+- [x] **Active Room Indicator** - Bottom-right card showing current room with leave button
+- [x] **Room Cleanup Cron** - 15-minute cron job to end inactive rooms
+- [x] **Past Streams Visibility** - Only show ended streams for 3 hours
+
 #### Pending:
-- [ ] **Create Room Functionality** - Backend API to create streaming rooms
 - [ ] **Real-time Participant Counts** - WebSocket updates for room viewer counts
 - [ ] **Room Categories/Tags** - Filter rooms by category (Gaming, Coding, Music, etc.)
 - [ ] **Room Sorting Options** - Sort by viewers, recent, trending
@@ -43,11 +50,14 @@ This document outlines the current state and future development plans for Bhayan
 - [x] Viewers list with watch time
 - [x] Mock data for demonstration
 
+#### Implemented:
+- [x] **Join/Leave Room Tracking** - Backend participant management with auto-join on enter
+- [x] **Streamer Controls** - Transfer stream ownership, end stream
+- [x] **15-Minute Grace Period** - Empty rooms stay active for 15 mins, claimable by new joiners
+
 #### Pending:
 - [ ] **Real-time Chat** - WebSocket-based chat system
 - [ ] **Video/Audio Streaming** - WebRTC integration for actual streaming
-- [ ] **Join/Leave Room Tracking** - Backend participant management
-- [ ] **Stream Controls** - Start/stop stream, mute, settings
 - [ ] **Screen Share** - Allow streamers to share screen
 - [ ] **Room Permissions** - Public vs private rooms, password protection
 - [ ] **Room Settings** - Edit room details, kick/ban users
@@ -83,12 +93,13 @@ This document outlines the current state and future development plans for Bhayan
 #### Implemented:
 - [x] Better Auth integration
 - [x] Sign in/up pages
-- [x] Email/password authentication
+- [x] Email/password authentication (dev only)
+- [x] Discord OAuth (dev & production)
 - [x] Session management
 - [x] Protected routes
 
 #### Pending:
-- [ ] **OAuth Providers** - Google, GitHub, Discord login
+- [ ] **Additional OAuth Providers** - Google, GitHub login
 - [ ] **Email Verification** - Verify email before account activation
 - [ ] **Password Reset** - Forgot password flow
 - [ ] **Two-Factor Authentication** - 2FA support
@@ -167,13 +178,13 @@ This document outlines the current state and future development plans for Bhayan
 - [x] Basic Socket.io server
 - [x] Global user count tracking
 - [x] Client connection management
+- [x] **Room-specific Channels** - Join/leave room events
+- [x] **Stream Status Updates** - Streamer transfer and room ended notifications
+- [x] **Viewer Presence** - Track participants in rooms
 
 ### Pending:
-- [ ] **Room-specific Channels** - Join/leave room events
 - [ ] **Chat Messages** - Real-time chat
 - [ ] **Typing Indicators** - Show when users are typing
-- [ ] **Viewer Presence** - Show who's watching
-- [ ] **Stream Status Updates** - Live/offline notifications
 - [ ] **Heartbeat System** - Detect inactive users
 
 ---
@@ -276,11 +287,18 @@ This document outlines the current state and future development plans for Bhayan
 
 ## Development Priorities (Next 30 Days)
 
+### Recently Completed ✅
 1. **Create Room Backend** - Allow users to create rooms
 2. **Room Join/Leave Tracking** - Track participants in real-time
-3. **Basic Chat System** - Text chat in rooms
-4. **Edit Profile** - Allow users to update their profile
-5. **OAuth Login** - Google/GitHub authentication
+3. **Streamer Transfer** - Automatic and manual ownership transfer
+4. **Room Lifecycle** - 15-min grace period, 3-hour past stream visibility
+5. **Discord OAuth** - Authentication via Discord
+
+### Up Next 🚀
+1. **Basic Chat System** - Text chat in rooms
+2. **Edit Profile** - Allow users to update their profile
+3. **Additional OAuth** - Google/GitHub authentication
+4. **Rate Limiting** - Prevent abuse on room creation/joining
 
 ---
 

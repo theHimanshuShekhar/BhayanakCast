@@ -10,7 +10,7 @@
 - **Framework**: TanStack Start (React + SSR)
 - **Router**: TanStack Router (file-based routing)
 - **Query**: TanStack Query v5
-- **Auth**: Better Auth v1.4.12 with email/password
+- **Auth**: Better Auth with Discord OAuth (all environments) + Email/Password (dev only)
 - **Database**: PostgreSQL 15 + Drizzle ORM
 - **Real-time**: Socket.io WebSocket server
 - **Styling**: Tailwind CSS v4 with custom theme
@@ -300,10 +300,84 @@ pnpm docker:down    # Stop PostgreSQL
 - Prefer interfaces for object shapes
 - Use `type` for type imports when possible
 
+## Room System Architecture
+
+### Room Lifecycle
+
+**Room States:**
+```
+(none) --create--> ACTIVE --empty 15min--> ENDED --3hrs--> (hidden)
+```
+
+**Creating a Room:**
+1. User opens CreateRoomModal → submits name + description
+2. Server validates auth, auto-leaves previous room if any
+3. Creates `streamingRooms` record with user as streamer
+4. Inserts `room_participants` record (streamer as participant)
+5. WebSocket: Join room channel
+6. Navigate to `/room/$roomId`
+
+**Joining a Room:**
+1. Check if already in a room → leave previous if so
+2. Insert new `room_participants` record
+3. WebSocket: `room:join` event broadcast
+
+**Leaving a Room:**
+1. Update `leftAt` timestamp, calculate `totalTimeSeconds`
+2. If streamer leaving:
+   - Find first joined viewer (oldest `joinedAt`)
+   - Transfer ownership: update `streamingRooms.streamerId`
+   - Old streamer becomes regular participant
+   - WebSocket: `room:streamer_changed` event
+3. If no participants remain: schedule 15-min grace period
+
+**Streamer Transfer (Manual):**
+- Streamer clicks "Transfer Stream" → selects viewer
+- 30-second cooldown between transfers
+- Automatic transfer (no viewer acceptance needed)
+
+**Room Cleanup (Cron Job):**
+- Runs every 15 minutes
+- Finds rooms with no participants for 15+ minutes
+- Updates status to "ended", sets `endedAt`
+- WebSocket: `room:ended` event
+
+**Past Streams Visibility:**
+- Ended rooms visible for 3 hours after ending
+- Query filter: `endedAt >= NOW() - INTERVAL '3 hours'`
+- Direct URLs still work after 3 hours (for bookmarks)
+
+### Single-Room Constraint
+
+Each user can only be in ONE room at a time:
+```typescript
+async function joinRoom(userId, roomId) {
+  const currentRoom = await getCurrentRoom(userId);
+  if (currentRoom) {
+    await leaveRoom(userId, currentRoom.id);
+  }
+  await insertParticipant(userId, roomId);
+}
+```
+
+### WebSocket Room Events
+
+- `room:join` - User joined room
+- `room:leave` - User left room  
+- `room:streamer_changed` - New streamer assigned
+- `room:ended` - Room closed
+
+### Active Room Indicator
+
+- Shows on: Home page, Profile page
+- Hidden on: Room page, Auth pages
+- Displays: Room name, participant count, Leave button
+- Updates in real-time via WebSocket
+
 ## Future Enhancements
 
 Potential features to implement:
-- [ ] Room creation and management UI
+- [x] Room creation and management UI
 - [ ] Real-time chat in streaming rooms
 - [ ] WebRTC integration for video/audio
 - [ ] User search functionality
