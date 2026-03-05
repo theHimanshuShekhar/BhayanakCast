@@ -1,276 +1,200 @@
-Welcome to your new TanStack Start app! 
+# 🎭 BhayanakCast
 
-# Getting Started
+> *Where streamers become legends and viewers become friends*
 
-To run this application:
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue.svg)](https://www.typescriptlang.org/)
+[![React](https://img.shields.io/badge/React-19-61DAFB.svg)](https://react.dev/)
+[![TanStack](https://img.shields.io/badge/TanStack-Start-FF4154.svg)](https://tanstack.com/start)
+[![Tailwind](https://img.shields.io/badge/Tailwind-v4-38B2AC.svg)](https://tailwindcss.com/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-336791.svg)](https://www.postgresql.org/)
+
+**BhayanakCast** is a real-time streaming platform with a Discord-inspired dark aesthetic, built for creators who want to connect with their audience in a more intimate, community-focused way.
+
+![BhayanakCast Preview](https://via.placeholder.com/800x400/1a1b1e/5865f2?text=BhayanakCast+Preview)
+
+## ✨ Features
+
+### 🎥 **Smart Room System**
+- **4-State Room Lifecycle**: `waiting` → `preparing` → `active` → `ended`
+- Automatic streamer transfer when hosts leave
+- Rooms persist without streamers (enters "waiting" state)
+- 5-minute grace period before cleanup
+
+### 👥 **Community First**
+- Track time spent with other users automatically
+- Discover your top connections
+- Community stats with live participant counts
+- Anonymous browsing for non-logged-in users
+
+### 🎨 **Discord-Inspired Design**
+- 4 beautiful themes: Purple-Blue, Misty-Blue, Onyx-Black, Blue-Gray
+- Depth-based elevation system
+- JetBrains Mono monospace font
+- Smooth transitions and animations
+
+### ⚡ **Real-Time Everything**
+- Live user count via WebSocket
+- Instant room updates
+- Real-time participant tracking
+- 5-second refresh intervals
+
+### 🔐 **Secure Authentication**
+- Discord OAuth (production ready)
+- Email/Password (development only)
+- Session management with Better Auth
+- Protected routes
+
+## 🚀 Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| **Framework** | TanStack Start (React + SSR) |
+| **Router** | TanStack Router (File-based) |
+| **State** | TanStack Query v5 |
+| **Auth** | Better Auth |
+| **Database** | PostgreSQL 15 + Drizzle ORM |
+| **Real-time** | Socket.io |
+| **Styling** | Tailwind CSS v4 |
+| **UI Components** | shadcn/ui |
+
+## 🛠️ Quick Start
+
+### Prerequisites
+- Node.js 18+
+- PostgreSQL 15+ (or Docker)
+- pnpm
+
+### 1. Clone & Install
 
 ```bash
+git clone https://github.com/yourusername/bhayanak-cast.git
+cd bhayanak-cast
 pnpm install
+```
+
+### 2. Environment Setup
+
+```bash
+cp .env.example .env.local
+```
+
+Edit `.env.local`:
+
+```bash
+# Database
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/postgres"
+
+# Better Auth
+BETTER_AUTH_URL=http://localhost:3000
+BETTER_AUTH_SECRET=<generate with: pnpm dlx @better-auth/cli secret>
+
+# OAuth (optional but recommended)
+DISCORD_CLIENT_ID=your_discord_client_id
+DISCORD_CLIENT_SECRET=your_discord_client_secret
+
+# WebSocket
+WS_PORT=3001
+CLIENT_URL=http://localhost:3000
+VITE_WS_URL=http://localhost:3001
+```
+
+### 3. Start PostgreSQL (Docker)
+
+```bash
+pnpm docker:up
+```
+
+### 4. Database Setup
+
+```bash
+pnpm db:push
+```
+
+### 5. Run Development Server
+
+```bash
 pnpm dev
 ```
 
-# Building For Production
+This starts both the web app (port 3000) and WebSocket server (port 3001).
 
-To build this application for production:
+## 📖 Room Status Guide
+
+| Status | Meaning | Badge |
+|--------|---------|-------|
+| 🔘 **Waiting** | No streamer or viewers | Gray |
+| 🟡 **Preparing** | Streamer present, not streaming | Yellow |
+| 🟢 **Active** | Live streaming in progress | Green |
+| ⚫ **Ended** | Room cleaned up | History icon |
+
+## 🎯 Usage
+
+### Creating a Room
+1. Click "Create Room" on the home page
+2. Enter room name and optional description
+3. You're automatically set as the streamer
+4. Share the room link with friends!
+
+### Joining a Room
+1. Browse active rooms on the home page
+2. Click any room card to enter
+3. Automatically join as a participant
+4. Your watch time is tracked!
+
+### Streamer Features
+- **Transfer Stream**: Hand over hosting to any viewer
+- **Leave Room**: Automatic transfer or enters "waiting" state
+- **Room Stats**: See who's watching and for how long
+
+## 🧪 Development
 
 ```bash
-pnpm build
-```
-
-## Testing
-
-This project uses [Vitest](https://vitest.dev/) for testing. You can run the tests with:
-
-```bash
+# Run tests
 pnpm test
-```
 
-## Styling
-
-This project uses [Tailwind CSS](https://tailwindcss.com/) for styling.
-
-### Removing Tailwind CSS
-
-If you prefer not to use Tailwind CSS:
-
-1. Remove the demo pages in `src/routes/demo/`
-2. Replace the Tailwind import in `src/styles.css` with your own styles
-3. Remove `tailwindcss()` from the plugins array in `vite.config.ts`
-4. Uninstall the packages: `pnpm add @tailwindcss/vite tailwindcss --dev`
-
-## Linting & Formatting
-
-This project uses [Biome](https://biomejs.dev/) for linting and formatting. The following scripts are available:
-
-
-```bash
-pnpm lint
-pnpm format
+# Lint & format
 pnpm check
+
+# Database operations
+pnpm db:generate    # Generate migrations
+pnpm db:migrate     # Run migrations
+pnpm db:studio      # Open Drizzle Studio
+
+# Individual servers
+pnpm dev:web        # Web app only (port 3000)
+pnpm dev:ws         # WebSocket only (port 3001)
 ```
 
+## 🗺️ Roadmap
 
-## Shadcn
+- [ ] Real-time chat system
+- [ ] WebRTC video/audio streaming
+- [ ] Screen sharing
+- [ ] Room categories/tags
+- [ ] User profiles & following
+- [ ] Notifications system
+- [ ] Mobile app (PWA)
+- [ ] Virtual gifts & donations
 
-Add components using the latest version of [Shadcn](https://ui.shadcn.com/).
+## 🤝 Contributing
 
-```bash
-pnpm dlx shadcn@latest add button
-```
+Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) for details.
 
+## 📝 License
 
-## T3Env
+MIT License - see [LICENSE](LICENSE) file for details.
 
-- You can use T3Env to add type safety to your environment variables.
-- Add Environment variables to the `src/env.mjs` file.
-- Use the environment variables in your code.
+## 🙏 Acknowledgments
 
-### Usage
+- [TanStack](https://tanstack.com) for the amazing ecosystem
+- [Better Auth](https://better-auth.com) for authentication
+- [shadcn/ui](https://ui.shadcn.com) for UI components
+- The Discord design team for inspiration
 
-```ts
-import { env } from "#/env";
+---
 
-console.log(env.VITE_APP_TITLE);
-```
-
-
-
-
-
-## Setting up Better Auth
-
-1. Generate and set the `BETTER_AUTH_SECRET` environment variable in your `.env.local`:
-
-   ```bash
-   pnpm dlx @better-auth/cli secret
-   ```
-
-2. Visit the [Better Auth documentation](https://www.better-auth.com) to unlock the full potential of authentication in your app.
-
-### Adding a Database (Optional)
-
-Better Auth can work in stateless mode, but to persist user data, add a database:
-
-```typescript
-// src/lib/auth.ts
-import { betterAuth } from "better-auth";
-import { Pool } from "pg";
-
-export const auth = betterAuth({
-  database: new Pool({
-    connectionString: process.env.DATABASE_URL,
-  }),
-  // ... rest of config
-});
-```
-
-Then run migrations:
-
-```bash
-pnpm dlx @better-auth/cli migrate
-```
-
-
-## Setting up PostHog
-
-1. Create a PostHog account at [posthog.com](https://posthog.com)
-2. Get your Project API Key from [Project Settings](https://app.posthog.com/project/settings)
-3. Set `VITE_POSTHOG_KEY` in your `.env.local`
-
-### Optional Configuration
-
-- `VITE_POSTHOG_HOST` - Set this if you're using PostHog Cloud EU (`https://eu.i.posthog.com`) or self-hosting
-
-
-
-## Routing
-
-This project uses [TanStack Router](https://tanstack.com/router) with file-based routing. Routes are managed as files in `src/routes`.
-
-### Adding A Route
-
-To add a new route to your application just add a new file in the `./src/routes` directory.
-
-TanStack will automatically generate the content of the route file for you.
-
-Now that you have two routes you can use a `Link` component to navigate between them.
-
-### Adding Links
-
-To use SPA (Single Page Application) navigation you will need to import the `Link` component from `@tanstack/react-router`.
-
-```tsx
-import { Link } from "@tanstack/react-router";
-```
-
-Then anywhere in your JSX you can use it like so:
-
-```tsx
-<Link to="/about">About</Link>
-```
-
-This will create a link that will navigate to the `/about` route.
-
-More information on the `Link` component can be found in the [Link documentation](https://tanstack.com/router/v1/docs/framework/react/api/router/linkComponent).
-
-### Using A Layout
-
-In the File Based Routing setup the layout is located in `src/routes/__root.tsx`. Anything you add to the root route will appear in all the routes. The route content will appear in the JSX where you render `{children}` in the `shellComponent`.
-
-Here is an example layout that includes a header:
-
-```tsx
-import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
-
-export const Route = createRootRoute({
-  head: () => ({
-    meta: [
-      { charSet: 'utf-8' },
-      { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-      { title: 'My App' },
-    ],
-  }),
-  shellComponent: ({ children }) => (
-    <html lang="en">
-      <head>
-        <HeadContent />
-      </head>
-      <body>
-        <header>
-          <nav>
-            <Link to="/">Home</Link>
-            <Link to="/about">About</Link>
-          </nav>
-        </header>
-        {children}
-        <Scripts />
-      </body>
-    </html>
-  ),
-})
-```
-
-More information on layouts can be found in the [Layouts documentation](https://tanstack.com/router/latest/docs/framework/react/guide/routing-concepts#layouts).
-
-## Server Functions
-
-TanStack Start provides server functions that allow you to write server-side code that seamlessly integrates with your client components.
-
-```tsx
-import { createServerFn } from '@tanstack/react-start'
-
-const getServerTime = createServerFn({
-  method: 'GET',
-}).handler(async () => {
-  return new Date().toISOString()
-})
-
-// Use in a component
-function MyComponent() {
-  const [time, setTime] = useState('')
-  
-  useEffect(() => {
-    getServerTime().then(setTime)
-  }, [])
-  
-  return <div>Server time: {time}</div>
-}
-```
-
-## API Routes
-
-You can create API routes by using the `server` property in your route definitions:
-
-```tsx
-import { createFileRoute } from '@tanstack/react-router'
-import { json } from '@tanstack/react-start'
-
-export const Route = createFileRoute('/api/hello')({
-  server: {
-    handlers: {
-      GET: () => json({ message: 'Hello, World!' }),
-    },
-  },
-})
-```
-
-## Data Fetching
-
-There are multiple ways to fetch data in your application. You can use TanStack Query to fetch data from a server. But you can also use the `loader` functionality built into TanStack Router to load the data for a route before it's rendered.
-
-For example:
-
-```tsx
-import { createFileRoute } from '@tanstack/react-router'
-
-export const Route = createFileRoute('/people')({
-  loader: async () => {
-    const response = await fetch('https://swapi.dev/api/people')
-    return response.json()
-  },
-  component: PeopleComponent,
-})
-
-function PeopleComponent() {
-  const data = Route.useLoaderData()
-  return (
-    <ul>
-      {data.results.map((person) => (
-        <li key={person.name}>{person.name}</li>
-      ))}
-    </ul>
-  )
-}
-```
-
-Loaders simplify your data fetching logic dramatically. Check out more information in the [Loader documentation](https://tanstack.com/router/latest/docs/framework/react/guide/data-loading#loader-parameters).
-
-# Demo files
-
-Files prefixed with `demo` can be safely deleted. They are there to provide a starting point for you to play around with the features you've installed.
-
-# Learn More
-
-You can learn more about all of the offerings from TanStack in the [TanStack documentation](https://tanstack.com).
-
-For TanStack Start specific documentation, visit [TanStack Start](https://tanstack.com/start).
+<p align="center">
+  <b>BhayanakCast</b> - Made with ❤️ for streamers and viewers alike
+  <br>
+  <sub><em>"Bhayanak" means awesome/scary in Hindi - and that's exactly what we are!</em></sub>
+</p>

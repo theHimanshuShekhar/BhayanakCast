@@ -7,7 +7,7 @@ interface AnonymousStatsColumnProps {
 	trendingRooms: Array<{
 		id: string;
 		name: string;
-		streamerName: string;
+		streamerName: string | null;
 		viewerCount: number;
 	}>;
 	communityStats: {
@@ -97,7 +97,7 @@ export function AnonymousStatsColumn({
 										{room.name}
 									</p>
 									<p className="text-xs text-text-tertiary">
-										{room.streamerName}
+										{room.streamerName ?? "No Streamer"}
 									</p>
 								</div>
 								<div className="flex items-center gap-1 text-xs text-text-secondary">
