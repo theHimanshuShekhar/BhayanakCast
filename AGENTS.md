@@ -65,7 +65,7 @@ pnpm db:studio      # Open drizzle studio
 
 ### Styling
 - **Tailwind CSS v4** with custom theme system
-- **Font**: JetBrains Mono (monospace) loaded from Google Fonts CDN
+- **Font**: JetBrains Mono (monospace) loaded from static files in `/public/fonts/`
 - Use theme CSS variables (e.g., `text-text-primary`, `bg-depth-2`)
 - Components should use the depth system:
   - `bg-depth-0`: Deepest background (#1a1b1e)
@@ -296,8 +296,25 @@ Required in `.env.local`:
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/postgres"
 BETTER_AUTH_URL=http://localhost:3000
 BETTER_AUTH_SECRET=<generate with pnpm dlx @better-auth/cli secret>
+DISCORD_CLIENT_ID=your_discord_client_id
+DISCORD_CLIENT_SECRET=your_discord_client_secret
 VITE_POSTHOG_KEY=<optional>
 ```
+
+### Discord OAuth Setup
+
+1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
+2. Create a new application
+3. Go to OAuth2 → General
+4. Add redirect URLs:
+   - Development: `http://localhost:3000/api/auth/callback/discord`
+   - Production: `https://yourdomain.com/api/auth/callback/discord`
+5. Copy Client ID and Client Secret to `.env.local`
+
+**Auth Behavior:**
+- **Discord OAuth**: Available in both dev and production
+- **Email/Password**: Only available in development environment
+- Set `NODE_ENV=production` to disable email auth
 
 ## Development Notes
 

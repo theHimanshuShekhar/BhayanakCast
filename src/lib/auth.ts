@@ -4,6 +4,8 @@ import { tanstackStartCookies } from "better-auth/tanstack-start";
 import { db } from "#/db/index";
 import * as schema from "#/db/schema";
 
+const isDev = process.env.NODE_ENV === "development";
+
 export const auth = betterAuth({
 	database: drizzleAdapter(db, {
 		provider: "pg",
@@ -11,7 +13,13 @@ export const auth = betterAuth({
 		schema,
 	}),
 	emailAndPassword: {
-		enabled: true,
+		enabled: isDev,
+	},
+	socialProviders: {
+		discord: {
+			clientId: process.env.DISCORD_CLIENT_ID as string,
+			clientSecret: process.env.DISCORD_CLIENT_SECRET as string,
+		},
 	},
 	plugins: [tanstackStartCookies()],
 });
