@@ -24,6 +24,8 @@ services:
       dockerfile: Dockerfile.web
       target: runner
     container_name: bhayanak-web
+    env_file:
+      - .env.production
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
@@ -31,9 +33,6 @@ services:
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
       DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID}
       DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET}
-      WS_PORT: 3001
-      CLIENT_URL: http://localhost:3000
-      VITE_WS_URL: http://localhost:3001
       VITE_POSTHOG_KEY: ${VITE_POSTHOG_KEY}
     ports:
       - "3000:3000"
@@ -52,12 +51,11 @@ services:
       dockerfile: Dockerfile.ws
       target: runner
     container_name: bhayanak-websocket
+    env_file:
+      - .env.production
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
-      WS_PORT: 3001
-      CLIENT_URL: http://localhost:3000
-      VITE_WS_URL: http://localhost:3001
     ports:
       - "3001:3001"
     depends_on:
