@@ -1,7 +1,7 @@
 services:
   postgres:
     image: postgres:15-alpine
-    container_name: postgres
+    container_name: bhayanak-postgres
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -15,6 +15,61 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - bhayanak-network
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      target: runner
+    container_name: bhayanak-web
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
+      BETTER_AUTH_URL: http://localhost:3000
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET}
+      WS_PORT: 3001
+      CLIENT_URL: http://localhost:3000
+      VITE_WS_URL: http://localhost:3001
+      VITE_POSTHOG_KEY: ${VITE_POSTHOG_KEY}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      websocket:
+        condition: service_started
+    networks:
+      - bhayanak-network
+    restart: unless-stopped
+
+  websocket:
+    build:
+      context: .
+      dockerfile: Dockerfile.ws
+      target: runner
+    container_name: bhayanak-websocket
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
+      WS_PORT: 3001
+      CLIENT_URL: http://localhost:3000
+      VITE_WS_URL: http://localhost:3001
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - bhayanak-network
+    restart: unless-stopped
 
 volumes:
   postgres_data:
+
+networks:
+  bhayanak-network:
+    driver: bridge
