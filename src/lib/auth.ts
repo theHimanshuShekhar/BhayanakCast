@@ -6,6 +6,17 @@ import * as schema from "#/db/schema";
 
 const isDev = process.env.NODE_ENV === "development";
 
+// Debug logging for Discord OAuth configuration
+console.log(
+	"[Auth] Discord Client ID:",
+	process.env.DISCORD_CLIENT_ID ? "Set" : "Not set",
+);
+console.log(
+	"[Auth] Discord Client Secret:",
+	process.env.DISCORD_CLIENT_SECRET ? "Set" : "Not set",
+);
+console.log("[Auth] Environment:", process.env.NODE_ENV);
+
 export const auth = betterAuth({
 	database: drizzleAdapter(db, {
 		provider: "pg",
