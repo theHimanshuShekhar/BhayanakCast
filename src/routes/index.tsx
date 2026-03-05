@@ -58,7 +58,10 @@ function App() {
 								Join live streams or browse past broadcasts
 							</p>
 						</div>
-						<RoomList initialRooms={homeData.activeRooms} />
+						<RoomList
+							initialRooms={homeData.activeRooms}
+							userId={homeData.session?.user?.id}
+						/>
 					</div>
 					{isLoggedIn ? (
 						<UserStatsCard />

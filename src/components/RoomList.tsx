@@ -2,6 +2,7 @@ import { debounce } from "@tanstack/pacer";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, Search } from "lucide-react";
 import { useMemo, useState } from "react";
+import { CreateRoomModal } from "#/components/CreateRoomModal";
 import { Input } from "#/components/ui/input";
 import { searchRooms } from "#/utils/home";
 import { RoomCard, RoomCardSkeleton } from "./RoomCard";
@@ -65,9 +66,10 @@ interface RoomListProps {
 		};
 		participantCount: number;
 	}>;
+	userId?: string;
 }
 
-export function RoomList({ initialRooms }: RoomListProps) {
+export function RoomList({ initialRooms, userId }: RoomListProps) {
 	const [searchQuery, setSearchQuery] = useState("");
 	const [debouncedQuery, setDebouncedQuery] = useState("");
 
@@ -149,14 +151,17 @@ export function RoomList({ initialRooms }: RoomListProps) {
 						className="pl-10 bg-depth-1 border-border-subtle text-text-primary placeholder:text-text-tertiary focus:border-accent focus:ring-accent"
 					/>
 				</div>
-				<button
-					type="button"
-					className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-accent hover:bg-accent-hover text-bg-primary font-bold transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-accent/20 whitespace-nowrap xl:hidden"
-					onClick={() => alert("Create room feature coming soon!")}
-				>
-					<Plus className="h-5 w-5" />
-					<span>Create Room</span>
-				</button>
+				{userId && (
+					<CreateRoomModal userId={userId}>
+						<button
+							type="button"
+							className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-accent hover:bg-accent-hover text-bg-primary font-bold transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-accent/20 whitespace-nowrap xl:hidden"
+						>
+							<Plus className="h-5 w-5" />
+							<span>Create Room</span>
+						</button>
+					</CreateRoomModal>
+				)}
 			</div>
 
 			{/* Results count */}

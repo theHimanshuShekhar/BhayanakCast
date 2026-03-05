@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Clock, Plus, Users } from "lucide-react";
+import { CreateRoomModal } from "#/components/CreateRoomModal";
 import { authClient } from "#/lib/auth-client";
 import { getUserHomeStats } from "#/utils/home";
 import { CommunityStatsCard } from "./CommunityStatsCard";
@@ -137,14 +138,15 @@ export function UserStatsCard() {
 				</div>
 
 				{/* Create Room Button - Wide screens only */}
-				<button
-					type="button"
-					className="flex items-center justify-center gap-2 w-full px-4 py-3 rounded-xl bg-accent hover:bg-accent-hover text-bg-primary font-bold transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-accent/20"
-					onClick={() => alert("Create room feature coming soon!")}
-				>
-					<Plus className="h-5 w-5" />
-					<span>Create Room</span>
-				</button>
+				<CreateRoomModal userId={user.id}>
+					<button
+						type="button"
+						className="flex items-center justify-center gap-2 w-full px-4 py-3 rounded-xl bg-accent hover:bg-accent-hover text-bg-primary font-bold transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-accent/20"
+					>
+						<Plus className="h-5 w-5" />
+						<span>Create Room</span>
+					</button>
+				</CreateRoomModal>
 
 				{/* Top Connections */}
 				<TopConnectionsCard />
