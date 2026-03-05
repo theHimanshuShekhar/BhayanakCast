@@ -2,11 +2,13 @@ import { redirect } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 
 export const getSessionOnServer = createServerFn({ method: "GET" }).handler(
-	async () => {
+	async (ctx) => {
 		// Dynamic import to avoid bundling for client
 		const { auth } = await import("#/lib/auth");
+		// Access request from context
+		const request = (ctx as unknown as { request: Request }).request;
 		const session = await auth.api.getSession({
-			headers: new Headers(),
+			headers: request?.headers || new Headers(),
 		});
 		return session;
 	},
