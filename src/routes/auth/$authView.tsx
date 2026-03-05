@@ -11,7 +11,7 @@ function RouteComponent() {
 	return (
 		<main className="flex h-full w-full items-center justify-center bg-depth-0 p-4">
 			<div className="w-full max-w-md">
-				<AuthView pathname={authView} />
+				<AuthView pathname={authView} socialLayout="horizontal" />
 			</div>
 		</main>
 	);
