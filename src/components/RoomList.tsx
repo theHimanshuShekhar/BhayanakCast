@@ -4,7 +4,38 @@ import { Plus, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Input } from "#/components/ui/input";
 import { searchRooms } from "#/utils/home";
-import { RoomCard } from "./RoomCard";
+import { RoomCard, RoomCardSkeleton } from "./RoomCard";
+
+export function RoomListSkeleton() {
+	return (
+		<div className="space-y-6">
+			{/* Search bar placeholder */}
+			<div className="flex gap-3">
+				<div className="flex-1 h-10 bg-depth-1 rounded-xl border border-border-subtle animate-pulse" />
+			</div>
+
+			{/* Results count placeholder */}
+			<div className="h-5 w-32 bg-depth-1 rounded animate-pulse" />
+
+			{/* Section title placeholder */}
+			<div className="flex items-center gap-2 mb-4">
+				<div className="h-2.5 w-2.5 bg-depth-1 rounded-full animate-pulse" />
+				<div className="h-6 w-24 bg-depth-1 rounded animate-pulse" />
+				<div className="h-5 w-12 bg-depth-1 rounded animate-pulse ml-2" />
+			</div>
+
+			{/* Grid of skeleton cards */}
+			<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+				<RoomCardSkeleton />
+				<RoomCardSkeleton />
+				<RoomCardSkeleton />
+				<RoomCardSkeleton />
+				<RoomCardSkeleton />
+				<RoomCardSkeleton />
+			</div>
+		</div>
+	);
+}
 
 interface Room {
 	id: string;

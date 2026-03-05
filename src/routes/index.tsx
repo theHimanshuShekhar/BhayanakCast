@@ -1,11 +1,33 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { AnonymousStatsColumn } from "#/components/AnonymousStatsColumn";
 import { ClientOnly } from "#/components/ClientOnly";
-import { RoomList } from "#/components/RoomList";
+import { RoomList, RoomListSkeleton } from "#/components/RoomList";
 import { UserStatsCard } from "#/components/UserStatsCard";
 import { authClient } from "#/lib/auth-client";
 import { publicRoute } from "#/lib/auth-guard";
 import { getHomeData } from "#/utils/home";
+
+// Loading fallback component
+function HomePageSkeleton() {
+	return (
+		<div className="h-full w-full bg-depth-0 px-4 py-8 overflow-auto">
+			<div className="mx-auto max-w-7xl">
+				<div className="flex gap-8">
+					<div className="flex-1 min-w-0">
+						<div className="mb-8">
+							<div className="h-9 w-48 bg-depth-1 rounded animate-pulse mb-2" />
+							<div className="h-5 w-72 bg-depth-1 rounded animate-pulse" />
+						</div>
+						<RoomListSkeleton />
+					</div>
+					<div className="hidden xl:block w-72 shrink-0">
+						<div className="h-80 bg-depth-1 rounded-xl border border-border-subtle animate-pulse" />
+					</div>
+				</div>
+			</div>
+		</div>
+	);
+}
 
 // Public route - accessible to all users including logged out
 export const Route = createFileRoute("/")({
@@ -15,6 +37,7 @@ export const Route = createFileRoute("/")({
 		const homeData = await getHomeData();
 		return homeData;
 	},
+	pendingComponent: HomePageSkeleton,
 });
 
 function App() {

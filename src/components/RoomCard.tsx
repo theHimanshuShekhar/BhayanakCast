@@ -17,6 +17,44 @@ interface RoomCardProps {
 	room: Room;
 }
 
+export function RoomCardSkeleton() {
+	return (
+		<div className="group relative bg-depth-1 rounded-lg border border-border-subtle p-4">
+			{/* Live indicator placeholder */}
+			<div className="absolute top-3 right-3">
+				<div className="h-2.5 w-12 bg-depth-3 rounded animate-pulse" />
+			</div>
+
+			{/* Room name and description */}
+			<div className="mb-4 pr-16">
+				<div className="h-6 w-3/4 bg-depth-3 rounded animate-pulse mb-2" />
+				<div className="h-4 w-full bg-depth-3 rounded animate-pulse" />
+			</div>
+
+			{/* Streamer info */}
+			<div className="flex items-center gap-3 mb-3">
+				<div className="h-8 w-8 rounded-full bg-depth-3 animate-pulse" />
+				<div className="flex-1">
+					<div className="h-4 w-24 bg-depth-3 rounded animate-pulse mb-1" />
+					<div className="h-3 w-16 bg-depth-3 rounded animate-pulse" />
+				</div>
+			</div>
+
+			{/* Stats */}
+			<div className="flex items-center gap-4 pt-3 border-t border-border-subtle">
+				<div className="flex items-center gap-1.5">
+					<div className="h-4 w-4 bg-depth-3 rounded animate-pulse" />
+					<div className="h-4 w-12 bg-depth-3 rounded animate-pulse" />
+				</div>
+				<div className="flex items-center gap-1.5">
+					<div className="h-2 w-2 bg-depth-3 rounded-full animate-pulse" />
+					<div className="h-4 w-16 bg-depth-3 rounded animate-pulse" />
+				</div>
+			</div>
+		</div>
+	);
+}
+
 export function RoomCard({ room }: RoomCardProps) {
 	const isActive = room.status === "active";
 
