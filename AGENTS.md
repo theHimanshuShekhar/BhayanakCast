@@ -17,7 +17,7 @@ pnpm dev
 # Build for production
 pnpm build
 
-# Run all tests
+# Run all tests (automatically uses test database)
 pnpm test
 
 # Run a single test file
@@ -25,6 +25,9 @@ pnpm vitest run path/to/test.ts
 
 # Run tests in watch mode
 pnpm vitest
+
+# Setup test database (one-time)
+pnpm test:setup
 
 # Lint code
 pnpm lint
@@ -87,9 +90,47 @@ pnpm db:studio      # Open drizzle studio
 - Status colors: `text-success`, `text-warning`, `text-danger`, `text-info`
 
 ### Testing
-- Framework: Vitest with jsdom environment
-- Test utilities: @testing-library/react
-- Place tests alongside source files or in `__tests__` folders
+- Framework: Vitest v3 with jsdom environment
+- Test utilities: @testing-library/react, @testing-library/user-event
+- Place tests in `tests/` folder with subfolders for `unit/` and `integration/`
+- Coverage threshold: 90% for statements, branches, functions, lines
+
+### Test Database
+- Use separate `bhayanak_cast_test` database
+- Clear tables before each test (no transaction rollback)
+- Test query functions directly, not `createServerFn` wrappers
+- Server functions require TanStack Start runtime context
+
+### Writing Tests
+```typescript
+// Unit test example
+import { render, screen } from "@testing-library/react";
+import { RoomCard } from "../../src/components/RoomCard";
+
+describe("RoomCard", () => {
+  it("renders room name", () => {
+    render(<RoomCard room={mockRoom} />);
+    expect(screen.getByText("Test Room")).toBeInTheDocument();
+  });
+});
+
+// Integration test example
+import { clearTables } from "../utils/database";
+import { getActiveRooms } from "../../src/db/queries/stats";
+
+describe("Room Management", () => {
+  beforeEach(async () => {
+    await clearTables();
+    await insertTestUsers(db);
+    await insertTestRooms(db);
+  });
+
+  it("returns active rooms", async () => {
+    const rooms = await getActiveRooms();
+    expect(rooms.length).toBeGreaterThan(0);
+  });
+});
+```
 
 ## Project Structure
 
@@ -432,3 +473,4 @@ See `PLAN.md` for detailed roadmap and pending features.
 - ✅ **Room Status System** - Four states: waiting, preparing, active, ended
 - ✅ **Nullable Streamer** - Rooms can exist without a streamer
 - ✅ **Improved Caching** - Community stats refresh every 2 minutes
+- ✅ **Comprehensive Test Suite** - 59 tests with 90%+ coverage (Vitest + jsdom)

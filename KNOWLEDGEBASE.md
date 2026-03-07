@@ -227,7 +227,14 @@ pnpm dev:ws     # WebSocket server only (port 3001)
 pnpm build
 
 # Run tests
-pnpm test
+pnpm test              # Run all tests
+pnpm test:watch        # Run tests in watch mode
+pnpm test:coverage     # Run tests with coverage report
+pnpm test:setup        # Create test database
+
+# Run specific test file
+pnpm vitest run tests/unit/RoomCard.test.tsx
+pnpm vitest run tests/integration/room-management.test.ts
 
 # Lint and format
 pnpm check
@@ -244,6 +251,109 @@ pnpm db:studio      # Open drizzle studio
 pnpm docker:up      # Start PostgreSQL
 pnpm docker:down    # Stop PostgreSQL
 ```
+
+## Testing Infrastructure
+
+### Test Suite Overview
+
+**Framework**: Vitest v3 with jsdom environment
+**Total Tests**: 59 tests across 6 test files
+**Coverage Threshold**: 90% (statements, branches, functions, lines)
+
+### Test Structure
+
+```
+tests/
+├── fixtures/              # Test data fixtures
+│   ├── users.ts          # 3 test users
+│   ├── rooms.ts          # 5 test rooms (various statuses)
+│   ├── participants.ts   # Room participation data
+│   └── relationships.ts  # User relationships
+├── integration/          # Integration tests
+│   ├── room-management.test.ts    # 15 tests - DB queries
+│   ├── user-stats.test.ts         # 14 tests - Stats calculations
+│   └── room-list.test.tsx         # 10 tests - Component + DB
+├── unit/                 # Unit tests
+│   ├── RoomCard.test.tsx          # 8 tests
+│   ├── CommunityStatsCard.test.tsx # 6 tests
+│   └── CreateRoomModal.test.tsx   # 6 tests
+├── utils/                # Test utilities
+│   ├── database.ts       # Test DB connection & cleanup
+│   ├── mocks.ts          # Common mocks
+│   └── render.tsx        # Custom render with providers
+└── setup.ts              # Test environment setup
+```
+
+### Test Database Setup
+
+**Separate Test Database**: `bhayanak_cast_test`
+- Runs on same PostgreSQL container as dev database
+- Isolated from development data
+- Schema synchronized via `pnpm db:push`
+
+**Database Cleanup Strategy**:
+```typescript
+// Clear all tables before each test (no transactions)
+await clearTables();  // DELETE all data
+await insertTestUsers(db);      // Fresh test data
+await insertTestRooms(db);
+await insertTestParticipants(db);
+```
+
+**Why No Transactions?**
+- `createServerFn` creates its own database connections
+- Test data must be committed for server functions to access it
+- Tables are cleared and re-populated before each test instead
+
+### Testing Database Queries
+
+Test query functions directly, not `createServerFn` wrappers:
+
+```typescript
+// ✅ Good - Test the query function directly
+import { getActiveRooms } from "../../src/db/queries/stats";
+
+const rooms = await getActiveRooms();
+expect(rooms.length).toBeGreaterThan(0);
+
+// ❌ Bad - createServerFn requires TanStack Start runtime
+import { getHomeData } from "../../src/utils/home";
+// This won't work in Vitest - requires server context
+```
+
+### Coverage Configuration
+
+**vitest.config.ts**:
+```typescript
+coverage: {
+  provider: "v8",
+  thresholds: {
+    statements: 90,
+    branches: 90,
+    functions: 90,
+    lines: 90,
+  },
+  include: ["src/**/*.{ts,tsx}"],
+}
+```
+
+### Running Tests
+
+```bash
+# Setup test database (one-time)
+pnpm test:setup
+
+# Run all tests (automatically uses test database)
+pnpm test
+
+# Run with coverage
+pnpm test:coverage
+
+# Run specific file
+pnpm vitest run tests/unit/RoomCard.test.tsx
+```
+
+**Note**: Test commands automatically set `DATABASE_URL` to use the test database. No manual environment variable setup required.
 
 ## Database Schema
 
