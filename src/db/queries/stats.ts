@@ -72,6 +72,7 @@ interface ActiveRoom {
 		image: string | null;
 	} | null;
 	participantCount: number;
+	streamerIsPresent: boolean;
 }
 
 interface TrendingRoom {
@@ -281,15 +282,15 @@ export async function getActiveRooms(
 		.where(and(...conditions))
 		.orderBy(desc(streamingRooms.createdAt));
 
-	// Get participant counts for each room
+	// Get all active participants to check presence
 	const roomIds = rooms.map((r) => r.room.id);
-	let participantCounts: Array<{ roomId: string; count: number }> = [];
+	let participants: Array<{ roomId: string; userId: string }> = [];
 
 	if (roomIds.length > 0) {
-		participantCounts = await db
+		participants = await db
 			.select({
 				roomId: roomParticipants.roomId,
-				count: sql<number>`count(*)`,
+				userId: roomParticipants.userId,
 			})
 			.from(roomParticipants)
 			.where(
@@ -297,15 +298,26 @@ export async function getActiveRooms(
 					inArray(roomParticipants.roomId, roomIds),
 					isNull(roomParticipants.leftAt),
 				),
-			)
-			.groupBy(roomParticipants.roomId);
+			);
 	}
 
-	const result = rooms.map((room) => ({
-		...room,
-		participantCount:
-			participantCounts.find((pc) => pc.roomId === room.room.id)?.count || 0,
-	}));
+	// Build result with participant count and streamer presence check
+	const result = rooms.map((room) => {
+		const roomParticipants = participants.filter(
+			(p) => p.roomId === room.room.id,
+		);
+		const participantCount = roomParticipants.length;
+		const streamerId = room.streamer?.id;
+		const streamerIsPresent = streamerId
+			? roomParticipants.some((p) => p.userId === streamerId)
+			: false;
+
+		return {
+			...room,
+			participantCount,
+			streamerIsPresent,
+		};
+	});
 
 	setCached(cacheKey, result, SHORT_CACHE_TTL);
 	return result;

@@ -1,6 +1,23 @@
 import { Server } from "socket.io";
 import { createServer } from "http";
+import { config } from "dotenv";
 import { runRoomCleanup } from "./src/utils/room-cleanup";
+import { updateAllRoomStatuses } from "./src/utils/room-presence";
+
+// Load environment variables from .env files
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Load .env files from the project root
+config({ path: join(__dirname, ".env.local"), override: true });
+config({ path: join(__dirname, ".env"), override: true });
+
+// Debug: Log environment variables
+console.log("[WebSocket Server] DATABASE_URL:", process.env.DATABASE_URL ? "Set" : "Not set");
+console.log("[WebSocket Server] VITE_WS_URL:", process.env.VITE_WS_URL);
 
 // Parse port from VITE_WS_URL (e.g., "http://localhost:3001" -> 3001)
 const WS_URL = process.env.VITE_WS_URL || "http://localhost:3001";
@@ -166,16 +183,49 @@ httpServer.on("request", (req, res) => {
 });
 
 // Start server
-httpServer.listen(PORT, () => {
+httpServer.listen(PORT, async () => {
+	console.log(`[Server] WebSocket server running on port ${PORT}`);
+	
+	// Run initial cleanup immediately
+	console.log("[Room Cleanup] Running initial cleanup on startup...");
+	try {
+		await runRoomCleanup(broadcastRoomEnded);
+	} catch (error) {
+		console.error("[Room Cleanup] Error during initial cleanup:", error);
+	}
+	
 	// Setup room cleanup job - runs every 5 minutes
 	const CLEANUP_INTERVAL = 5 * 60 * 1000;
+	console.log(`[Room Cleanup] Scheduled to run every ${CLEANUP_INTERVAL / 1000} seconds`);
+	
 	setInterval(async () => {
+		console.log("[Room Cleanup] Running scheduled cleanup...");
 		try {
 			await runRoomCleanup(broadcastRoomEnded);
 		} catch (error) {
-			console.error("[Cleanup] Error during room cleanup:", error);
+			console.error("[Room Cleanup] Error during scheduled cleanup:", error);
 		}
 	}, CLEANUP_INTERVAL);
+	
+	// Setup presence update job - runs every 30 seconds
+	const PRESENCE_INTERVAL = 30 * 1000;
+	console.log(`[Presence] Scheduled to run every ${PRESENCE_INTERVAL / 1000} seconds`);
+	
+	// Run initial presence check
+	console.log("[Presence] Running initial presence check on startup...");
+	try {
+		await updateAllRoomStatuses();
+	} catch (error) {
+		console.error("[Presence] Error during initial presence check:", error);
+	}
+	
+	setInterval(async () => {
+		try {
+			await updateAllRoomStatuses();
+		} catch (error) {
+			console.error("[Presence] Error during presence check:", error);
+		}
+	}, PRESENCE_INTERVAL);
 });
 
 // Graceful shutdown

@@ -12,8 +12,14 @@ export function render(ui: ReactElement, options: RenderOptions = {}) {
 		new QueryClient({
 			defaultOptions: {
 				queries: {
+					// Disable retries in tests for faster failure
 					retry: false,
+					// Disable garbage collection in tests
 					gcTime: 0,
+					// Disable window focus refetching in tests
+					refetchOnWindowFocus: false,
+					// Disable reconnect refetching in tests
+					refetchOnReconnect: false,
 				},
 			},
 		});

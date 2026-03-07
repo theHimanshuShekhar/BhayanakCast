@@ -67,12 +67,15 @@ describe("RoomList Integration", () => {
 	});
 
 	describe("Room Filtering", () => {
-		it("filters active rooms correctly", async () => {
+		it("shows all non-ended rooms in Live Now section", async () => {
 			const initialRooms = await getActiveRooms();
 			render(<RoomList initialRooms={initialRooms} />);
 
 			expect(screen.getByText("Live Now")).toBeInTheDocument();
+			// Should show active, preparing, and waiting rooms
 			expect(screen.getByText("Gaming Stream")).toBeInTheDocument();
+			expect(screen.getByText("Coding Session")).toBeInTheDocument();
+			expect(screen.getByText("Music Live")).toBeInTheDocument();
 		});
 
 		it("displays correct room counts in headers", async () => {
@@ -82,14 +85,18 @@ describe("RoomList Integration", () => {
 			expect(screen.getByText(/\(\d+\)/)).toBeInTheDocument();
 		});
 
-		it("shows Streaming status for active rooms", async () => {
+		it("shows different status indicators for live rooms", async () => {
 			const initialRooms = await getActiveRooms();
 			render(<RoomList initialRooms={initialRooms} />);
 
-			// RoomList only shows active and ended rooms
-			// Multiple rooms may have "Streaming" status
+			// RoomList shows all non-ended rooms with their status indicators
+			// Multiple rooms may have "Streaming" status (for active rooms)
 			const streamingElements = screen.getAllByText("Streaming");
 			expect(streamingElements.length).toBeGreaterThan(0);
+			
+			// Should also show Preparing and Waiting statuses
+			expect(screen.getByText("Preparing")).toBeInTheDocument();
+			expect(screen.getByText("Waiting")).toBeInTheDocument();
 		});
 	});
 

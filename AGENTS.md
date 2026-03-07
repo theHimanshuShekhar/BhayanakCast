@@ -373,12 +373,36 @@ VITE_POSTHOG_KEY=<optional>
 
 ## Room System Architecture
 
+### Room Management Business Logic (CRITICAL - DO NOT CHANGE)
+
+**Streamer Departure Rules:**
+1. When streamer leaves room → earliest joined viewer automatically becomes new streamer
+2. If no viewers left when streamer leaves → room has no streamer (streamerId = null), status = `waiting`
+3. Streamer transfer is automatic and immediate (no acceptance needed)
+
+**Joining Waiting Rooms:**
+1. When someone joins a room with `waiting` status → they automatically become the streamer
+2. Room status changes from `waiting` → `preparing` (if only 1 person) or `active` (if multiple)
+3. First person to join a waiting room always becomes streamer
+
+**Room Cleanup:**
+1. `waiting` rooms with no participants for 5 minutes → status changes to `ended`
+2. Cleanup job runs every 5 minutes via cron
+3. Ended rooms visible for 3 hours then hidden
+
+**Status Transitions:**
+- `waiting` → `preparing`: First participant joins (becomes streamer)
+- `waiting` → `ended`: Empty for 5+ minutes (cleanup job)
+- `preparing` → `active`: Multiple participants present
+- `active` → `preparing`: Streamer leaves, viewers remain (new streamer auto-assigned)
+- `active`/`preparing` → `waiting`: Last person leaves (no streamer, room empty)
+
 ### Room Lifecycle
 
 **Creating a Room:**
 1. User clicks "Create Room" button → opens `CreateRoomModal`
 2. User enters name (required, 3-100 chars) and description (optional, max 500)
-3. Server validates authentication and creates room
+3. Server validates authentication and creates room with status `preparing`
 4. User is automatically added as streamer and participant
 5. Redirect to `/room/$roomId`
 
@@ -386,24 +410,22 @@ VITE_POSTHOG_KEY=<optional>
 1. User can only be in ONE room at a time
 2. If already in a room, auto-leave previous room first
 3. Join new room as participant
-4. WebSocket notifies room of new participant
+4. **SPECIAL**: If joining a `waiting` room → automatically become streamer
+5. WebSocket notifies room of new participant
 
 **Leaving a Room:**
 1. Update `leftAt` timestamp and calculate `totalTimeSeconds`
 2. If streamer leaving:
-   - Find first joined viewer (oldest participation)
-   - Transfer streamer ownership automatically
-   - Old streamer becomes regular participant
-   - Show confirmation modal before leaving
-3. If no viewers left: set streamerId to null, status to `waiting`
-4. If last person leaves: room enters 5-minute grace period
+   - Find earliest joined viewer (oldest `joinedAt` timestamp)
+   - Transfer streamer ownership automatically to that viewer
+   - If no viewers left: set streamerId to null, status to `waiting`
+3. If last person leaves: room enters 5-minute grace period (status = `waiting`)
 
 **Streamer Transfer:**
-- **Automatic**: When streamer leaves/joins another room
+- **Automatic**: When streamer leaves → earliest viewer becomes streamer
 - **Manual**: Streamer can voluntarily transfer to any viewer
 - 30-second cooldown between transfers
-- Transfer is automatic (no viewer acceptance needed)
-- If no viewers to transfer to: streamerId set to null, status becomes `waiting`
+- Transfer is immediate (no viewer acceptance needed)
 
 **Room Cleanup (Cron Job):**
 - Runs every 5 minutes
@@ -413,10 +435,10 @@ VITE_POSTHOG_KEY=<optional>
 **Room Status System:**
 | Status | Description | Visual Indicator |
 |--------|-------------|------------------|
-| `waiting` | No streamer or viewers present | Gray dot • "Waiting" |
-| `preparing` | Streamer present but not streaming | Yellow dot • "Preparing" |
-| `active` | Streamer actively streaming | Green dot • "Streaming" |
-| `ended` | Room cleaned up | History icon • "Ended" |
+| `waiting` | No streamer, waiting for first participant | Gray dot • "Waiting" |
+| `preparing` | Has streamer but only 1 participant | Yellow dot • "Preparing" |
+| `active` | Streamer + multiple participants | Green dot • "Streaming" |
+| `ended` | Room cleaned up after grace period | History icon • "Ended" |
 
 ### Active Room Indicator
 - Shows on: Home page, Profile page

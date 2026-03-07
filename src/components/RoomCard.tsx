@@ -11,6 +11,7 @@ export interface Room {
 	maxUsersJoined?: number;
 	status: "waiting" | "preparing" | "active" | "ended";
 	createdAt: Date;
+	streamerIsPresent?: boolean;
 }
 
 interface RoomCardProps {
@@ -102,7 +103,11 @@ export function RoomCard({ room }: RoomCardProps) {
 							<p className="text-sm font-medium text-text-primary truncate">
 								{room.streamerName}
 							</p>
-							<p className="text-xs text-text-tertiary">Streamer</p>
+							<p className="text-xs text-text-tertiary">
+								{room.streamerIsPresent
+									? "Streamer • Online"
+									: "Streamer • Away"}
+							</p>
 						</div>
 					</>
 				) : (

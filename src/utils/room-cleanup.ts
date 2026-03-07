@@ -65,14 +65,19 @@ export async function endRoom(roomId: string) {
 export async function runRoomCleanup(
 	broadcastRoomEnded?: (roomId: string) => void,
 ) {
+	console.log("[Room Cleanup] Starting cleanup job...");
 	try {
 		const roomsToEnd = await findRoomsToEnd();
 
 		if (roomsToEnd.length === 0) {
+			console.log("[Room Cleanup] No rooms to end");
 			return;
 		}
 
+		console.log(`[Room Cleanup] Found ${roomsToEnd.length} rooms to end`);
+
 		for (const room of roomsToEnd) {
+			console.log(`[Room Cleanup] Ending room: ${room.name} (${room.id})`);
 			await endRoom(room.id);
 
 			// Broadcast room ended event if broadcast function provided
@@ -80,6 +85,8 @@ export async function runRoomCleanup(
 				broadcastRoomEnded(room.id);
 			}
 		}
+
+		console.log("[Room Cleanup] Cleanup completed successfully");
 	} catch (error) {
 		console.error("[Room Cleanup] Error during cleanup:", error);
 	}

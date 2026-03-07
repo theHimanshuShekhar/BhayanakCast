@@ -134,7 +134,7 @@ export function RoomList({ initialRooms, userId }: RoomListProps) {
 		}));
 	}, [searchedRooms, initialRooms]);
 
-	const activeRooms = rooms.filter((room) => room.status === "active");
+	const liveRooms = rooms.filter((room) => room.status !== "ended");
 	const endedRooms = rooms.filter((room) => room.status === "ended");
 
 	return (
@@ -176,8 +176,8 @@ export function RoomList({ initialRooms, userId }: RoomListProps) {
 				)}
 			</div>
 
-			{/* Active rooms section */}
-			{activeRooms.length > 0 && (
+			{/* Live rooms section - includes active, preparing, and waiting */}
+			{liveRooms.length > 0 && (
 				<div>
 					<h2 className="text-xl font-semibold text-text-primary mb-4 flex items-center gap-2">
 						<span className="relative flex h-2.5 w-2.5">
@@ -186,11 +186,11 @@ export function RoomList({ initialRooms, userId }: RoomListProps) {
 						</span>
 						Live Now
 						<span className="text-sm font-normal text-text-tertiary ml-2">
-							({activeRooms.length})
+							({liveRooms.length})
 						</span>
 					</h2>
 					<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-						{activeRooms.map((room) => (
+						{liveRooms.map((room) => (
 							<RoomCard key={room.id} room={room} />
 						))}
 					</div>

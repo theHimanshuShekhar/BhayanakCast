@@ -12,7 +12,25 @@ export function getContext() {
 		return context;
 	}
 
-	const queryClient = new QueryClient();
+	const queryClient = new QueryClient({
+		defaultOptions: {
+			queries: {
+				// Refetch when window regains focus
+				refetchOnWindowFocus: true,
+				// Refetch when network reconnects
+				refetchOnReconnect: true,
+				// Retry failed requests 3 times with exponential backoff
+				retry: 3,
+				retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
+				// Data is considered fresh for 5 minutes (300 seconds)
+				staleTime: 5 * 60 * 1000,
+				// Keep inactive data in cache for 10 minutes
+				gcTime: 10 * 60 * 1000,
+				// Only run queries when online
+				networkMode: "online",
+			},
+		},
+	});
 
 	context = {
 		queryClient,
