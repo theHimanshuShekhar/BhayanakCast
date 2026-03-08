@@ -15,6 +15,10 @@ export function AuthProviders({ children }: { children: ReactNode }) {
 				navigate={(href) => router.navigate({ href })}
 				replace={(href) => router.navigate({ href, replace: true })}
 				Link={({ href, ...props }) => <Link to={href} {...props} />}
+				onSessionChange={() => {
+					// Force a router reload when session changes (sign in/out)
+					router.invalidate();
+				}}
 			>
 				{children}
 			</AuthUIProviderTanstack>

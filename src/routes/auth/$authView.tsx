@@ -1,3 +1,4 @@
+import { AuthView } from "@daveyplate/better-auth-ui";
 import { createFileRoute } from "@tanstack/react-router";
 import { MessageSquare } from "lucide-react";
 import { useState } from "react";
@@ -8,6 +9,24 @@ export const Route = createFileRoute("/auth/$authView")({
 });
 
 function RouteComponent() {
+	const { authView } = Route.useParams();
+
+	// For sign-out, use the AuthView component which handles signout properly
+	if (authView === "sign-out") {
+		return (
+			<main className="flex h-full w-full items-center justify-center bg-depth-0 p-4">
+				<div className="w-full max-w-md rounded-xl border border-border-subtle bg-depth-1 p-8">
+					<AuthView pathname={authView} />
+				</div>
+			</main>
+		);
+	}
+
+	// For sign-in and other auth views, use custom Discord-only UI
+	return <DiscordAuthView />;
+}
+
+function DiscordAuthView() {
 	const [isLoading, setIsLoading] = useState(false);
 
 	const handleDiscordLogin = async () => {

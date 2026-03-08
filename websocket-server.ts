@@ -81,6 +81,16 @@ const io = new Server(httpServer, {
 // Track socket -> user mapping for presence
 const socketUserMap = new Map<string, { userId: string; userName: string; roomId?: string }>();
 
+// Track unique users and their connection count for global user count
+const connectedUsers = new Map<string, number>();
+
+// Broadcast user count to all connected clients
+function broadcastUserCount() {
+	const count = connectedUsers.size;
+	console.log(`[WebSocket] Broadcasting user count: ${count}`);
+	io.emit("userCount", { count });
+}
+
 // Chat message type
 interface ChatMessage {
 	id: string;
@@ -121,6 +131,9 @@ function sendSystemMessage(roomId: string, content: string) {
 io.on("connection", (socket) => {
 	console.log(`[Socket.io] Client connected: ${socket.id}`);
 
+	// Send current user count on connection
+	socket.emit("userCount", { count: connectedUsers.size });
+
 	// Handle user identification
 	socket.on("identify", (data: { userId?: string; userName?: string; userImage?: string | null }) => {
 		const userId = data.userId || `anonymous:${socket.id}`;
@@ -131,6 +144,14 @@ io.on("connection", (socket) => {
 		socket.data.userImage = data.userImage;
 		
 		socketUserMap.set(socket.id, { userId, userName });
+		
+		// Increment connection count for this user
+		const currentCount = connectedUsers.get(userId) || 0;
+		connectedUsers.set(userId, currentCount + 1);
+		// Only broadcast if this is the first connection for this user
+		if (currentCount === 0) {
+			broadcastUserCount();
+		}
 		
 		console.log(`[Socket.io] User identified: ${userName} (${userId}) (socket: ${socket.id})`);
 		socket.emit("identified", { userId, userName });
@@ -440,6 +461,17 @@ io.on("connection", (socket) => {
 
 		// Remove from socket user map
 		socketUserMap.delete(socket.id);
+		
+		// Decrement connection count for this user
+		const currentCount = connectedUsers.get(userId) || 0;
+		if (currentCount <= 1) {
+			// Last connection - remove user and broadcast
+			connectedUsers.delete(userId);
+			broadcastUserCount();
+		} else {
+			// Still has other connections - just decrement
+			connectedUsers.set(userId, currentCount - 1);
+		}
 	});
 });
 
