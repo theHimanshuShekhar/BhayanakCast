@@ -38,6 +38,12 @@ export function RoomListSkeleton() {
 	);
 }
 
+interface Participant {
+	id: string;
+	name: string;
+	image?: string;
+}
+
 interface Room {
 	id: string;
 	name: string;
@@ -48,6 +54,7 @@ interface Room {
 	maxUsersJoined?: number;
 	status: "waiting" | "preparing" | "active" | "ended";
 	createdAt: Date;
+	participants?: Participant[];
 }
 
 interface RoomListProps {
@@ -65,6 +72,7 @@ interface RoomListProps {
 			image: string | null;
 		} | null;
 		participantCount: number;
+		participants?: Participant[];
 	}>;
 	userId?: string;
 }
@@ -118,6 +126,7 @@ export function RoomList({ initialRooms, userId }: RoomListProps) {
 				image: string | null;
 			} | null;
 			participantCount: number;
+			participants?: Participant[];
 		}>;
 		if (!sourceData) return [];
 
@@ -129,8 +138,13 @@ export function RoomList({ initialRooms, userId }: RoomListProps) {
 			streamerImage: roomData.streamer?.image || undefined,
 			participantCount: roomData.participantCount || 0,
 			maxUsersJoined: undefined,
-			status: roomData.room.status as "active" | "ended",
+			status: roomData.room.status as
+				| "waiting"
+				| "preparing"
+				| "active"
+				| "ended",
 			createdAt: new Date(roomData.room.createdAt),
+			participants: roomData.participants,
 		}));
 	}, [searchedRooms, initialRooms]);
 

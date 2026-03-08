@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { and, asc, eq, isNull, ne } from "drizzle-orm";
+import { and, asc, eq, isNull, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { roomParticipants, streamingRooms, users } from "#/db/schema";
 import {
@@ -186,13 +186,14 @@ export const joinRoom = createServerFn({ method: "POST" })
 		const { db } = await import("#/db/index");
 		const { nanoid } = await import("nanoid");
 
+		// Allow joining active, preparing, or waiting rooms
 		const room = await db
 			.select()
 			.from(streamingRooms)
 			.where(
 				and(
 					eq(streamingRooms.id, data.roomId),
-					eq(streamingRooms.status, "active"),
+					sql`${streamingRooms.status} IN ('active', 'preparing', 'waiting')`,
 				),
 			)
 			.limit(1);
@@ -224,6 +225,38 @@ export const joinRoom = createServerFn({ method: "POST" })
 			leftAt: null,
 			totalTimeSeconds: 0,
 		});
+
+		// If joining a waiting room, become the streamer
+		if (room[0].status === "waiting") {
+			await db
+				.update(streamingRooms)
+				.set({
+					streamerId: data.userId,
+					status: "preparing",
+				})
+				.where(eq(streamingRooms.id, data.roomId));
+
+			// Broadcast streamer change
+			await broadcastStreamerChanged(data.roomId, data.userId);
+		} else {
+			// Check if room should become active (2+ participants)
+			const participantCount = await db
+				.select({ count: sql<number>`count(*)` })
+				.from(roomParticipants)
+				.where(
+					and(
+						eq(roomParticipants.roomId, data.roomId),
+						isNull(roomParticipants.leftAt),
+					),
+				);
+
+			if (participantCount[0]?.count >= 2 && room[0].status === "preparing") {
+				await db
+					.update(streamingRooms)
+					.set({ status: "active" })
+					.where(eq(streamingRooms.id, data.roomId));
+			}
+		}
 
 		// Broadcast join event
 		await broadcastRoomJoin(data.roomId, data.userId);

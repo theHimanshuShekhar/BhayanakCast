@@ -446,11 +446,51 @@ VITE_POSTHOG_KEY=<optional>
 - Displays: Room name, participant count, Leave button
 - Click "View Room" to navigate to room
 
-### WebSocket Room Events
+### WebSocket Room Management (Centralized)
+
+**Architecture:** All room management logic is centralized in the WebSocket server (`websocket-server.ts`) using `websocket-room-manager.ts`.
+
+**Why WebSocket Server:**
+- Real-time presence tracking via socket connections
+- Immediate state updates to all clients
+- Centralized business logic enforcement
+- Automatic cleanup on disconnects
+
+**Room Manager (`websocket-room-manager.ts`):**
+- `addParticipant()` - Join room with automatic streamer assignment for waiting rooms
+- `removeParticipant()` - Leave room with automatic streamer transfer
+- `updateRoomStatusFromPresence()` - Sync status based on actual presence
+- `updateAllRoomStatusesFromPresence()` - Run every 1 minute
+- `runRoomCleanupJob()` - End empty waiting rooms (runs every 5 minutes)
+
+**Scheduled Jobs:**
+- **Status Update**: Every 1 minute - Updates room status based on actual presence
+- **Room Cleanup**: Every 5 minutes - Ends waiting rooms empty for 5+ minutes
+
+**WebSocket Events:**
 - `room:join` - User joined room
-- `room:leave` - User left room
+- `room:leave` - User left room  
 - `room:streamer_changed` - Streamer ownership transferred
-- `room:ended` - Room closed after grace period
+- `room:status_changed` - Room status updated
+- `room:participant_joined` - New participant with count
+- `room:participant_left` - Participant left with count
+- `room:ended` - Room closed
+
+**Client Integration:**
+Clients should use WebSocket events for room operations:
+```typescript
+// Join room via WebSocket
+socket.emit("room:join", { roomId });
+
+// Listen for updates
+socket.on("room:participant_joined", ({ userId, participantCount }) => {
+  // Update UI
+});
+
+socket.on("room:streamer_changed", ({ newStreamerId }) => {
+  // Update streamer display
+});
+```
 
 ## Development Notes
 
@@ -496,3 +536,5 @@ See `PLAN.md` for detailed roadmap and pending features.
 - ✅ **Nullable Streamer** - Rooms can exist without a streamer
 - ✅ **Improved Caching** - Community stats refresh every 2 minutes
 - ✅ **Comprehensive Test Suite** - 59 tests with 90%+ coverage (Vitest + jsdom)
+- ✅ **Social Media Meta Tags** - Open Graph and Twitter Card tags for room detail page
+- ✅ **Production Site URL** - Updated to https://cast.bhayanak.net

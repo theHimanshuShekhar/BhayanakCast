@@ -1,6 +1,12 @@
 import { Link } from "@tanstack/react-router";
 import { History, Users } from "lucide-react";
 
+export interface Participant {
+	id: string;
+	name: string;
+	image?: string;
+}
+
 export interface Room {
 	id: string;
 	name: string;
@@ -12,6 +18,7 @@ export interface Room {
 	status: "waiting" | "preparing" | "active" | "ended";
 	createdAt: Date;
 	streamerIsPresent?: boolean;
+	participants?: Participant[];
 }
 
 interface RoomCardProps {
@@ -56,8 +63,48 @@ export function RoomCardSkeleton() {
 	);
 }
 
+// Component to show participant avatars for ended rooms
+function ParticipantAvatars({ participants }: { participants: Participant[] }) {
+	const displayCount = Math.min(participants.length, 5);
+	const remainingCount = participants.length - displayCount;
+
+	return (
+		<div className="flex items-center gap-1">
+			<div className="flex -space-x-2">
+				{participants.slice(0, displayCount).map((participant, index) => (
+					<div
+						key={participant.id}
+						className="relative inline-block h-8 w-8 rounded-full border-2 border-depth-1"
+						style={{ zIndex: displayCount - index }}
+					>
+						{participant.image ? (
+							<img
+								src={participant.image}
+								alt={participant.name}
+								className="h-full w-full rounded-full object-cover"
+							/>
+						) : (
+							<div className="h-full w-full rounded-full bg-accent flex items-center justify-center">
+								<span className="text-xs font-bold text-white">
+									{participant.name.charAt(0).toUpperCase()}
+								</span>
+							</div>
+						)}
+					</div>
+				))}
+			</div>
+			{remainingCount > 0 && (
+				<span className="text-xs text-text-tertiary ml-1">
+					+{remainingCount}
+				</span>
+			)}
+		</div>
+	);
+}
+
 export function RoomCard({ room }: RoomCardProps) {
 	const isActive = room.status === "active" && !!room.streamerName;
+	const isEnded = room.status === "ended";
 
 	const cardContent = (
 		<>
@@ -82,57 +129,72 @@ export function RoomCard({ room }: RoomCardProps) {
 				</p>
 			</div>
 
-			{/* Streamer info */}
-			<div className="flex items-center gap-3 mb-3">
-				{room.streamerName ? (
-					<>
-						{room.streamerImage ? (
-							<img
-								src={room.streamerImage}
-								alt={room.streamerName}
-								className="h-8 w-8 rounded-full object-cover"
-							/>
-						) : (
-							<div className="h-8 w-8 rounded-full bg-accent flex items-center justify-center">
-								<span className="text-sm font-bold text-white">
-									{room.streamerName.charAt(0).toUpperCase()}
-								</span>
+			{/* For ended rooms, show participant avatars */}
+			{isEnded && room.participants && room.participants.length > 0 ? (
+				<div className="flex items-center gap-3 mb-3">
+					<ParticipantAvatars participants={room.participants} />
+					<div className="flex-1 min-w-0">
+						<p className="text-sm font-medium text-text-primary truncate">
+							{room.participants.length} joined
+						</p>
+						<p className="text-xs text-text-tertiary">Stream participants</p>
+					</div>
+				</div>
+			) : (
+				/* For active/preparing/waiting rooms, show streamer info */
+				<div className="flex items-center gap-3 mb-3">
+					{room.streamerName ? (
+						<>
+							{room.streamerImage ? (
+								<img
+									src={room.streamerImage}
+									alt={room.streamerName}
+									className="h-8 w-8 rounded-full object-cover"
+								/>
+							) : (
+								<div className="h-8 w-8 rounded-full bg-accent flex items-center justify-center">
+									<span className="text-sm font-bold text-white">
+										{room.streamerName.charAt(0).toUpperCase()}
+									</span>
+								</div>
+							)}
+							<div className="flex-1 min-w-0">
+								<p className="text-sm font-medium text-text-primary truncate">
+									{room.streamerName}
+								</p>
+								<p className="text-xs text-text-tertiary">
+									{room.streamerIsPresent
+										? "Streamer • Online"
+										: "Streamer • Away"}
+								</p>
 							</div>
-						)}
-						<div className="flex-1 min-w-0">
-							<p className="text-sm font-medium text-text-primary truncate">
-								{room.streamerName}
-							</p>
-							<p className="text-xs text-text-tertiary">
-								{room.streamerIsPresent
-									? "Streamer • Online"
-									: "Streamer • Away"}
-							</p>
-						</div>
-					</>
-				) : (
-					<>
-						<div className="h-8 w-8 rounded-full bg-depth-3 flex items-center justify-center">
-							<span className="text-sm font-bold text-text-secondary">?</span>
-						</div>
-						<div className="flex-1 min-w-0">
-							<p className="text-sm font-medium text-text-secondary truncate">
-								No Streamer
-							</p>
-							<p className="text-xs text-text-tertiary">Waiting for host</p>
-						</div>
-					</>
-				)}
-			</div>
+						</>
+					) : (
+						<>
+							<div className="h-8 w-8 rounded-full bg-depth-3 flex items-center justify-center">
+								<span className="text-sm font-bold text-text-secondary">?</span>
+							</div>
+							<div className="flex-1 min-w-0">
+								<p className="text-sm font-medium text-text-secondary truncate">
+									No Streamer
+								</p>
+								<p className="text-xs text-text-tertiary">Waiting for host</p>
+							</div>
+						</>
+					)}
+				</div>
+			)}
 
 			{/* Stats */}
 			<div className="flex items-center gap-4 pt-3 border-t border-border-subtle">
 				<div className="flex items-center gap-1.5">
 					<Users className="h-4 w-4 text-text-tertiary" />
 					<span className="text-sm text-text-secondary">
-						{isActive
-							? room.participantCount
-							: `Max: ${room.maxUsersJoined || room.participantCount}`}
+						{isEnded
+							? `${room.participantCount} joined`
+							: isActive
+								? room.participantCount
+								: `Max: ${room.maxUsersJoined || room.participantCount}`}
 					</span>
 				</div>
 				<div className="flex items-center gap-1.5">

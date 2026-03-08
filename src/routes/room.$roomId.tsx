@@ -23,6 +23,12 @@ import {
 	DialogTitle,
 } from "#/components/ui/dialog";
 import { authClient } from "#/lib/auth-client";
+import {
+	OG_IMAGE_URL,
+	SITE_DESCRIPTION,
+	SITE_TITLE,
+	SITE_URL,
+} from "#/lib/site";
 import { getRoomDetails } from "#/utils/room-details";
 import { joinRoom, leaveRoom, transferStreamerOwnership } from "#/utils/rooms";
 
@@ -63,6 +69,33 @@ export const Route = createFileRoute("/room/$roomId")({
 			throw notFound();
 		}
 	},
+	head: ({ loaderData }) => {
+		const room = loaderData?.room.room;
+		const streamer = loaderData?.room.streamer;
+		const roomUrl = `${SITE_URL}/room/${room?.id}`;
+		const title = room?.name ? `${room.name} | ${SITE_TITLE}` : SITE_TITLE;
+		const description = room?.description || SITE_DESCRIPTION;
+		const image = streamer?.image || OG_IMAGE_URL;
+
+		return {
+			meta: [
+				{ title },
+				{ name: "description", content: description },
+				// Open Graph
+				{ property: "og:title", content: title },
+				{ property: "og:description", content: description },
+				{ property: "og:image", content: image },
+				{ property: "og:url", content: roomUrl },
+				{ property: "og:type", content: "website" },
+				// Twitter Card
+				{ name: "twitter:title", content: title },
+				{ name: "twitter:description", content: description },
+				{ name: "twitter:image", content: image },
+				{ name: "twitter:url", content: roomUrl },
+				{ name: "twitter:card", content: "summary_large_image" },
+			],
+		};
+	},
 });
 
 function RoomDetailPage() {
@@ -84,6 +117,7 @@ function RoomDetailPage() {
 	const streamer = roomData?.room.streamer;
 	const participants = roomData?.participants || [];
 	const isActive = room?.status === "active";
+	const isEnded = room?.status === "ended";
 
 	// Join room on mount (if active and user is logged in)
 	const joinMutation = useMutation({
@@ -290,135 +324,211 @@ function RoomDetailPage() {
 					</div>
 				</div>
 
-				{/* Streamer Section */}
-				<div className="bg-depth-1 rounded-lg p-6 border border-border-subtle">
-					<h2 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
-						<Crown className="h-5 w-5 text-yellow-500" />
-						Streamer
-					</h2>
-					<div className="flex items-center gap-4">
-						{streamer ? (
-							<>
-								{streamer.image ? (
-									<img
-										src={streamer.image}
-										alt={streamer.name}
-										className="h-16 w-16 rounded-full object-cover"
-									/>
-								) : (
-									<div className="h-16 w-16 rounded-full bg-accent flex items-center justify-center">
-										<span className="text-xl font-bold text-white">
-											{streamer.name.charAt(0).toUpperCase()}
-										</span>
-									</div>
-								)}
-								<div>
-									<h3 className="text-lg font-medium text-text-primary">
-										{streamer.name}
-									</h3>
-									<p className="text-sm text-text-tertiary">Host</p>
-								</div>
-								<Link
-									to="/profile/$userId"
-									params={{ userId: streamer.id }}
-									className="ml-auto px-4 py-2 bg-depth-2 hover:bg-depth-3 rounded-lg text-sm font-medium transition-colors"
-								>
-									View Profile
-								</Link>
-							</>
+				{isEnded ? (
+					/* Ended Room - Show Participants Section */
+					<div className="bg-depth-1 rounded-lg p-6 border border-border-subtle">
+						<h2 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
+							<Users className="h-5 w-5 text-accent" />
+							Participants
+							<span className="text-sm font-normal text-text-tertiary ml-2">
+								({participants.length})
+							</span>
+						</h2>
+
+						{participants.length === 0 ? (
+							<p className="text-text-secondary">
+								No participants in this stream.
+							</p>
 						) : (
-							<>
-								<div className="h-16 w-16 rounded-full bg-depth-3 flex items-center justify-center">
-									<span className="text-xl font-bold text-text-secondary">
-										?
-									</span>
-								</div>
-								<div>
-									<h3 className="text-lg font-medium text-text-secondary">
-										No Streamer
-									</h3>
-									<p className="text-sm text-text-tertiary">Waiting for host</p>
-								</div>
-							</>
-						)}
-					</div>
-				</div>
+							<div className="space-y-3">
+								{participants.map((p, index) => (
+									<div
+										key={p.participant.id}
+										className="flex items-center gap-4 p-3 bg-depth-2 rounded-lg"
+									>
+										<div className="shrink-0 w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center">
+											<span className="text-sm font-bold text-accent">
+												#{index + 1}
+											</span>
+										</div>
 
-				{/* Viewers List - Filter out streamer */}
-				{(() => {
-					const viewers = participants.filter(
-						(p) => p.user.id !== streamer?.id,
-					);
-					return (
-						<div className="bg-depth-1 rounded-lg p-6 border border-border-subtle">
-							<h2 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
-								<Users className="h-5 w-5 text-accent" />
-								Viewers
-								<span className="text-sm font-normal text-text-tertiary ml-2">
-									({viewers.length})
-								</span>
-							</h2>
-
-							{viewers.length === 0 ? (
-								<p className="text-text-secondary">
-									{isActive
-										? "No viewers yet. Be the first to join!"
-										: "No viewers participated in this stream."}
-								</p>
-							) : (
-								<div className="space-y-3">
-									{viewers.map((p, index) => (
-										<div
-											key={p.participant.id}
-											className="flex items-center gap-4 p-3 bg-depth-2 rounded-lg"
-										>
-											<div className="shrink-0 w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center">
-												<span className="text-sm font-bold text-accent">
-													#{index + 1}
+										{p.user.image ? (
+											<img
+												src={p.user.image}
+												alt={p.user.name}
+												className="h-12 w-12 rounded-full object-cover"
+											/>
+										) : (
+											<div className="h-12 w-12 rounded-full bg-surface-3 flex items-center justify-center">
+												<span className="text-lg font-medium text-text-primary">
+													{p.user.name.charAt(0).toUpperCase()}
 												</span>
 											</div>
+										)}
 
-											{p.user.image ? (
-												<img
-													src={p.user.image}
-													alt={p.user.name}
-													className="h-12 w-12 rounded-full object-cover"
-												/>
-											) : (
-												<div className="h-12 w-12 rounded-full bg-surface-3 flex items-center justify-center">
-													<span className="text-lg font-medium text-text-primary">
-														{p.user.name.charAt(0).toUpperCase()}
-													</span>
+										<div className="flex-1 min-w-0">
+											<h3 className="text-base font-medium text-text-primary truncate">
+												{p.user.name}
+											</h3>
+											<p className="text-sm text-text-tertiary">
+												Joined <ClientDate date={p.participant.joinedAt} />
+											</p>
+										</div>
+
+										{p.participant.totalTimeSeconds !== null &&
+											p.participant.totalTimeSeconds > 0 && (
+												<div className="text-right shrink-0">
+													<p className="text-base font-semibold text-accent">
+														{formatDuration(p.participant.totalTimeSeconds)}
+													</p>
+													<p className="text-xs text-text-tertiary">
+														watch time
+													</p>
 												</div>
 											)}
-
-											<div className="flex-1 min-w-0">
-												<h3 className="text-base font-medium text-text-primary truncate">
-													{p.user.name}
-												</h3>
-												<p className="text-sm text-text-tertiary">
-													Joined <ClientDate date={p.participant.joinedAt} />
-												</p>
+									</div>
+								))}
+							</div>
+						)}
+					</div>
+				) : (
+					<>
+						{/* Streamer Section */}
+						<div className="bg-depth-1 rounded-lg p-6 border border-border-subtle">
+							<h2 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
+								<Crown className="h-5 w-5 text-yellow-500" />
+								Streamer
+							</h2>
+							<div className="flex items-center gap-4">
+								{streamer ? (
+									<>
+										{streamer.image ? (
+											<img
+												src={streamer.image}
+												alt={streamer.name}
+												className="h-16 w-16 rounded-full object-cover"
+											/>
+										) : (
+											<div className="h-16 w-16 rounded-full bg-accent flex items-center justify-center">
+												<span className="text-xl font-bold text-white">
+													{streamer.name.charAt(0).toUpperCase()}
+												</span>
 											</div>
+										)}
+										<div>
+											<h3 className="text-lg font-medium text-text-primary">
+												{streamer.name}
+											</h3>
+											<p className="text-sm text-text-tertiary">Host</p>
+										</div>
+										<Link
+											to="/profile/$userId"
+											params={{ userId: streamer.id }}
+											className="ml-auto px-4 py-2 bg-depth-2 hover:bg-depth-3 rounded-lg text-sm font-medium transition-colors"
+										>
+											View Profile
+										</Link>
+									</>
+								) : (
+									<>
+										<div className="h-16 w-16 rounded-full bg-depth-3 flex items-center justify-center">
+											<span className="text-xl font-bold text-text-secondary">
+												?
+											</span>
+										</div>
+										<div>
+											<h3 className="text-lg font-medium text-text-secondary">
+												No Streamer
+											</h3>
+											<p className="text-sm text-text-tertiary">
+												Waiting for host
+											</p>
+										</div>
+									</>
+								)}
+							</div>
+						</div>
 
-											{p.participant.totalTimeSeconds !== null &&
-												p.participant.totalTimeSeconds > 0 && (
-													<div className="text-right shrink-0">
-														<p className="text-base font-semibold text-accent">
-															{formatDuration(p.participant.totalTimeSeconds)}
-														</p>
-														<p className="text-xs text-text-tertiary">
-															watch time
+						{/* Viewers List - Filter out streamer */}
+						{(() => {
+							const viewers = participants.filter(
+								(p) => p.user.id !== streamer?.id,
+							);
+							return (
+								<div className="bg-depth-1 rounded-lg p-6 border border-border-subtle">
+									<h2 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
+										<Users className="h-5 w-5 text-accent" />
+										Viewers
+										<span className="text-sm font-normal text-text-tertiary ml-2">
+											({viewers.length})
+										</span>
+									</h2>
+
+									{viewers.length === 0 ? (
+										<p className="text-text-secondary">
+											{isActive
+												? "No viewers yet. Be the first to join!"
+												: "No viewers participated in this stream."}
+										</p>
+									) : (
+										<div className="space-y-3">
+											{viewers.map((p, index) => (
+												<div
+													key={p.participant.id}
+													className="flex items-center gap-4 p-3 bg-depth-2 rounded-lg"
+												>
+													<div className="shrink-0 w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center">
+														<span className="text-sm font-bold text-accent">
+															#{index + 1}
+														</span>
+													</div>
+
+													{p.user.image ? (
+														<img
+															src={p.user.image}
+															alt={p.user.name}
+															className="h-12 w-12 rounded-full object-cover"
+														/>
+													) : (
+														<div className="h-12 w-12 rounded-full bg-surface-3 flex items-center justify-center">
+															<span className="text-lg font-medium text-text-primary">
+																{p.user.name.charAt(0).toUpperCase()}
+															</span>
+														</div>
+													)}
+
+													<div className="flex-1 min-w-0">
+														<h3 className="text-base font-medium text-text-primary truncate">
+															{p.user.name}
+														</h3>
+														<p className="text-sm text-text-tertiary">
+															Joined{" "}
+															<ClientDate date={p.participant.joinedAt} />
 														</p>
 													</div>
-												)}
+
+													{p.participant.totalTimeSeconds !== null &&
+														p.participant.totalTimeSeconds > 0 && (
+															<div className="text-right shrink-0">
+																<p className="text-base font-semibold text-accent">
+																	{formatDuration(
+																		p.participant.totalTimeSeconds,
+																	)}
+																</p>
+																<p className="text-xs text-text-tertiary">
+																	watch time
+																</p>
+															</div>
+														)}
+												</div>
+											))}
 										</div>
-									))}
+									)}
 								</div>
-							)}
-						</div>
-					);
-				})()}
+							);
+						})()}
+					</>
+				)}
 
 				{/* Transfer Ownership Dialog */}
 				{showTransferDialog && (

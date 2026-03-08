@@ -82,7 +82,9 @@ describe("RoomList Integration", () => {
 			const initialRooms = await getActiveRooms();
 			render(<RoomList initialRooms={initialRooms} />);
 
-			expect(screen.getByText(/\(\d+\)/)).toBeInTheDocument();
+			// Should show count for Live Now section (may also show Past Streams count)
+			const counts = screen.getAllByText(/\(\d+\)/);
+			expect(counts.length).toBeGreaterThan(0);
 		});
 
 		it("shows different status indicators for live rooms", async () => {

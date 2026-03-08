@@ -1,4 +1,5 @@
-export const SITE_TITLE = "TanStack Start";
+export const SITE_TITLE = "BhayanakCast";
 export const SITE_DESCRIPTION =
-	"A tropical, breathable app starter with full-document SSR, server functions, streaming, and type-safe routing.";
-export const SITE_URL = "https://example.com";
+	"Watch live streams and connect with friends in real-time on BhayanakCast.";
+export const SITE_URL = "https://cast.bhayanak.net";
+export const OG_IMAGE_URL = "https://cast.bhayanak.net/og-image.png";

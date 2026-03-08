@@ -337,6 +337,10 @@ waiting + 5 min empty → ended (cleanup)
     - Integration tests for database queries and stats calculations
     - PostgreSQL test database with proper isolation
     - 90%+ code coverage threshold configured
+13. **Social Media Meta Tags** - Open Graph and Twitter Card tags for social sharing
+    - Dynamic og:title, og:description, og:image, og:url per room
+    - Twitter Card support (twitter:title, twitter:description, twitter:image, twitter:url)
+14. **Production URL** - Site configured for https://cast.bhayanak.net
 
 ### Up Next 🚀
 1. **Basic Chat System** - Text chat in rooms

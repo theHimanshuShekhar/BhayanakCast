@@ -56,6 +56,12 @@ interface GlobalStats {
 	peakConcurrentUsers: number;
 }
 
+interface RoomParticipant {
+	id: string;
+	name: string;
+	image: string | null;
+}
+
 interface ActiveRoom {
 	room: {
 		id: string;
@@ -73,6 +79,7 @@ interface ActiveRoom {
 	} | null;
 	participantCount: number;
 	streamerIsPresent: boolean;
+	participants?: RoomParticipant[];
 }
 
 interface TrendingRoom {
@@ -248,6 +255,7 @@ export async function getGlobalStats(): Promise<GlobalStats> {
 
 /**
  * Get active rooms with streamer details and participant counts
+ * Also includes last 5 ended rooms for the "Past Streams" section
  */
 export async function getActiveRooms(
 	searchQuery?: string,
@@ -267,8 +275,8 @@ export async function getActiveRooms(
 		);
 	}
 
-	// Execute query with all conditions
-	const rooms = await db
+	// Execute query for active rooms
+	const activeRooms = await db
 		.select({
 			room: streamingRooms,
 			streamer: {
@@ -282,11 +290,77 @@ export async function getActiveRooms(
 		.where(and(...conditions))
 		.orderBy(desc(streamingRooms.createdAt));
 
-	// Get all active participants to check presence
-	const roomIds = rooms.map((r) => r.room.id);
+	// Get last 5 ended rooms (only if not searching)
+	let endedRooms: typeof activeRooms = [];
+	const endedRoomParticipants: Map<string, RoomParticipant[]> = new Map();
+
+	if (!searchQuery) {
+		endedRooms = await db
+			.select({
+				room: streamingRooms,
+				streamer: {
+					id: users.id,
+					name: users.name,
+					image: users.image,
+				},
+			})
+			.from(streamingRooms)
+			.leftJoin(users, eq(streamingRooms.streamerId, users.id))
+			.where(eq(streamingRooms.status, "ended"))
+			.orderBy(desc(streamingRooms.endedAt))
+			.limit(5);
+
+		// Fetch all participants who joined ended rooms (not just active ones)
+		if (endedRooms.length > 0) {
+			const endedRoomIds = endedRooms.map((r) => r.room.id);
+			const allParticipants = await db
+				.select({
+					roomId: roomParticipants.roomId,
+					userId: roomParticipants.userId,
+				})
+				.from(roomParticipants)
+				.where(inArray(roomParticipants.roomId, endedRoomIds));
+
+			// Get unique user IDs
+			const userIds = [...new Set(allParticipants.map((p) => p.userId))];
+
+			if (userIds.length > 0) {
+				// Fetch user details
+				const userDetails = await db
+					.select({
+						id: users.id,
+						name: users.name,
+						image: users.image,
+					})
+					.from(users)
+					.where(inArray(users.id, userIds));
+
+				// Group participants by room
+				for (const room of endedRooms) {
+					const roomParticipantIds = allParticipants
+						.filter((p) => p.roomId === room.room.id)
+						.map((p) => p.userId);
+
+					const uniqueParticipantIds = [...new Set(roomParticipantIds)];
+
+					const participantsList = uniqueParticipantIds
+						.map((userId) => userDetails.find((u) => u.id === userId))
+						.filter((u): u is RoomParticipant => u !== undefined);
+
+					endedRoomParticipants.set(room.room.id, participantsList);
+				}
+			}
+		}
+	}
+
+	// Combine active and ended rooms
+	const rooms = [...activeRooms, ...endedRooms];
+
+	// Get all active participants to check presence (only for non-ended rooms)
+	const activeRoomIds = activeRooms.map((r) => r.room.id);
 	let participants: Array<{ roomId: string; userId: string }> = [];
 
-	if (roomIds.length > 0) {
+	if (activeRoomIds.length > 0) {
 		participants = await db
 			.select({
 				roomId: roomParticipants.roomId,
@@ -295,7 +369,7 @@ export async function getActiveRooms(
 			.from(roomParticipants)
 			.where(
 				and(
-					inArray(roomParticipants.roomId, roomIds),
+					inArray(roomParticipants.roomId, activeRoomIds),
 					isNull(roomParticipants.leftAt),
 				),
 			);
@@ -312,10 +386,17 @@ export async function getActiveRooms(
 			? roomParticipants.some((p) => p.userId === streamerId)
 			: false;
 
+		// For ended rooms, include the participants list
+		const participantsList =
+			room.room.status === "ended"
+				? endedRoomParticipants.get(room.room.id)
+				: undefined;
+
 		return {
 			...room,
-			participantCount,
+			participantCount: participantsList?.length || participantCount,
 			streamerIsPresent,
+			participants: participantsList,
 		};
 	});
 
