@@ -1,3 +1,14 @@
+import { config } from "dotenv";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Load .env files FIRST before any other imports
+config({ path: join(__dirname, ".env.local"), override: true });
+config({ path: join(__dirname, ".env"), override: true });
+
 import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import { db } from "./src/db/index";
 import { roomParticipants, streamingRooms } from "./src/db/schema";
