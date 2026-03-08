@@ -84,7 +84,11 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 			setIsConnected(true);
 			// Identify the user after connection
 			const userId = getEffectiveUserId(session?.user?.id);
-			socket.emit("identify", { userId });
+			socket.emit("identify", {
+				userId,
+				userName: session?.user?.name || userId,
+				userImage: session?.user?.image,
+			});
 		});
 
 		socket.on("disconnect", () => {
@@ -98,16 +102,20 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 		return () => {
 			socket.disconnect();
 		};
-	}, [session?.user?.id]);
+	}, [session?.user?.id, session?.user?.name, session?.user?.image]);
 
 	// Re-identify when session changes (user logs in/out)
 	useEffect(() => {
 		const socket = socketRef.current;
 		if (socket?.connected) {
 			const userId = getEffectiveUserId(session?.user?.id);
-			socket.emit("identify", { userId });
+			socket.emit("identify", {
+				userId,
+				userName: session?.user?.name || userId,
+				userImage: session?.user?.image,
+			});
 		}
-	}, [session?.user?.id]);
+	}, [session?.user?.id, session?.user?.name, session?.user?.image]);
 
 	const sendMessage = useCallback((message: unknown) => {
 		if (socketRef.current?.connected) {

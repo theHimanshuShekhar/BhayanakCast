@@ -1,8 +1,16 @@
-import { Server } from "socket.io";
-import { createServer } from "http";
 import { config } from "dotenv";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Load .env files FIRST before any other imports
+config({ path: join(__dirname, ".env.local"), override: true });
+config({ path: join(__dirname, ".env"), override: true });
+
+import { Server } from "socket.io";
+import { createServer } from "http";
 import {
 	addParticipant,
 	removeParticipant,
@@ -14,13 +22,6 @@ import {
 	getRoomParticipants,
 	getRoom,
 } from "./websocket-room-manager";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-// Load .env files from the project root
-config({ path: join(__dirname, ".env.local"), override: true });
-config({ path: join(__dirname, ".env"), override: true });
 
 // Debug: Log environment variables
 console.log("[WebSocket Server] DATABASE_URL:", process.env.DATABASE_URL ? "Set" : "Not set");
@@ -73,12 +74,53 @@ function broadcastStreamerChanged(roomId: string, newStreamerId: string) {
 	broadcastToRoom(roomId, "room:streamer_changed", { newStreamerId });
 }
 
-function broadcastParticipantJoined(roomId: string, userId: string, participantCount: number) {
-	broadcastToRoom(roomId, "room:participant_joined", { userId, participantCount });
+function broadcastParticipantJoined(roomId: string, userId: string, userName: string, participantCount: number) {
+	broadcastToRoom(roomId, "room:participant_joined", { userId, userName, participantCount });
+	
+	// Send system message to chat
+	const systemMessage: ChatMessage = {
+		id: `system-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+		roomId,
+		userId: "system",
+		userName: "System",
+		content: `${userName} joined the room`,
+		timestamp: Date.now(),
+		type: "system",
+	};
+	broadcastChatMessage(roomId, systemMessage);
 }
 
-function broadcastParticipantLeft(roomId: string, userId: string, participantCount: number) {
-	broadcastToRoom(roomId, "room:participant_left", { userId, participantCount });
+function broadcastParticipantLeft(roomId: string, userId: string, userName: string, participantCount: number) {
+	broadcastToRoom(roomId, "room:participant_left", { userId, userName, participantCount });
+	
+	// Send system message to chat
+	const systemMessage: ChatMessage = {
+		id: `system-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+		roomId,
+		userId: "system",
+		userName: "System",
+		content: `${userName} left the room`,
+		timestamp: Date.now(),
+		type: "system",
+	};
+	broadcastChatMessage(roomId, systemMessage);
+}
+
+// Broadcast chat message to room
+function broadcastChatMessage(roomId: string, message: ChatMessage) {
+	broadcastToRoom(roomId, "chat:message", message);
+}
+
+// Chat message type
+interface ChatMessage {
+	id: string;
+	roomId: string;
+	userId: string;
+	userName: string;
+	userImage?: string | null;
+	content: string;
+	timestamp: number;
+	type: "user" | "system";
 }
 
 // Socket.io connection handler
@@ -86,16 +128,19 @@ io.on("connection", (socket) => {
 	console.log(`[Socket.io] Client connected: ${socket.id}`);
 
 	// Handle user identification
-	socket.on("identify", (data: { userId?: string }) => {
+	socket.on("identify", (data: { userId?: string; userName?: string; userImage?: string | null }) => {
 		const userId = data.userId || `anonymous:${socket.id}`;
+		const userName = data.userName || userId;
 		socket.data.userId = userId;
+		socket.data.userName = userName;
+		socket.data.userImage = data.userImage;
 
 		if (!userSockets.has(userId)) {
 			userSockets.set(userId, new Set());
 		}
 		userSockets.get(userId)?.add(socket.id);
 
-		console.log(`[Socket.io] User identified: ${userId} (socket: ${socket.id})`);
+		console.log(`[Socket.io] User identified: ${userName} (${userId}) (socket: ${socket.id})`);
 		broadcastUserCount();
 	});
 
@@ -126,17 +171,59 @@ io.on("connection", (socket) => {
 			const participants = await getRoomParticipants(roomId);
 
 			// Broadcast join to room
-			broadcastParticipantJoined(roomId, userId, participants.length);
+			broadcastParticipantJoined(roomId, userId, socket.data.userName || userId, participants.length);
 
 			// If user became streamer, broadcast it
 			if (result.becameStreamer) {
 				console.log(`[Room] User ${userId} became streamer of room ${roomId}`);
 				broadcastStreamerChanged(roomId, userId);
+				
+				// Send system message
+				const systemMessage: ChatMessage = {
+					id: `system-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+					roomId,
+					userId: "system",
+					userName: "System",
+					content: `${socket.data.userName || userId} is now the streamer`,
+					timestamp: Date.now(),
+					type: "system",
+				};
+				broadcastChatMessage(roomId, systemMessage);
 			}
 
 			// If status changed, broadcast it
 			if (result.newStatus) {
 				broadcastToRoom(roomId, "room:status_changed", { status: result.newStatus });
+				
+				// Send system message for status change
+				let statusMessage = "";
+				switch (result.newStatus) {
+					case "waiting":
+						statusMessage = "Room is now waiting for participants";
+						break;
+					case "preparing":
+						statusMessage = "Room is preparing for stream";
+						break;
+					case "active":
+						statusMessage = "Stream is now live!";
+						break;
+					case "ended":
+						statusMessage = "Room has ended";
+						break;
+					default:
+						statusMessage = `Room status changed to ${result.newStatus}`;
+				}
+				
+				const statusSystemMessage: ChatMessage = {
+					id: `system-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+					roomId,
+					userId: "system",
+					userName: "System",
+					content: statusMessage,
+					timestamp: Date.now(),
+					type: "system",
+				};
+				broadcastChatMessage(roomId, statusSystemMessage);
 			}
 
 			// Send room state to joining user
@@ -180,17 +267,55 @@ io.on("connection", (socket) => {
 			const participants = await getRoomParticipants(roomId);
 
 			// Broadcast leave to room
-			broadcastParticipantLeft(roomId, userId, participants.length);
+			broadcastParticipantLeft(roomId, userId, socket.data.userName || userId, participants.length);
 
 			// If streamer changed, broadcast it
 			if (result.newStreamerId) {
 				console.log(`[Room] Streamer changed in room ${roomId} to ${result.newStreamerId}`);
 				broadcastStreamerChanged(roomId, result.newStreamerId);
+				
+				// Send system message
+				const streamerMessage: ChatMessage = {
+					id: `system-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+					roomId,
+					userId: "system",
+					userName: "System",
+					content: `Streamer changed to a new host`,
+					timestamp: Date.now(),
+					type: "system",
+				};
+				broadcastChatMessage(roomId, streamerMessage);
 			}
 
 			// If room is empty, broadcast status change
 			if (result.newStatus) {
 				broadcastToRoom(roomId, "room:status_changed", { status: result.newStatus });
+				
+				// Send system message for status change
+				let statusMsg = "";
+				switch (result.newStatus) {
+					case "waiting":
+						statusMsg = "Room is now waiting for participants";
+						break;
+					case "ended":
+						statusMsg = "Room has ended";
+						break;
+					default:
+						statusMsg = `Room status changed to ${result.newStatus}`;
+				}
+				
+				if (statusMsg) {
+					const statusSystemMsg: ChatMessage = {
+						id: `system-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+						roomId,
+						userId: "system",
+						userName: "System",
+						content: statusMsg,
+						timestamp: Date.now(),
+						type: "system",
+					};
+					broadcastChatMessage(roomId, statusSystemMsg);
+				}
 			}
 
 			socket.emit("room:left", { roomId, roomEmpty: result.roomEmpty });
@@ -199,6 +324,43 @@ io.on("connection", (socket) => {
 		} catch (error) {
 			console.error(`[Room] Error leaving room:`, error);
 		}
+	});
+
+	// Handle chat messages
+	socket.on("chat:send", (data: { roomId: string; content: string; userName: string; userImage?: string | null }) => {
+		const { roomId, content, userName, userImage } = data;
+		const userId = socket.data.userId;
+
+		if (!userId) {
+			socket.emit("chat:error", { message: "Not authenticated" });
+			return;
+		}
+
+		if (!content || content.trim().length === 0) {
+			socket.emit("chat:error", { message: "Message cannot be empty" });
+			return;
+		}
+
+		// Check if user is in the room
+		const roomInfo = getSocketRoomInfo(socket.id);
+		if (!roomInfo || roomInfo.roomId !== roomId) {
+			socket.emit("chat:error", { message: "You must join the room first" });
+			return;
+		}
+
+		const message: ChatMessage = {
+			id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+			roomId,
+			userId,
+			userName,
+			userImage,
+			content: content.trim(),
+			timestamp: Date.now(),
+			type: "user",
+		};
+
+		console.log(`[Chat] Message from ${userName} in room ${roomId}: ${content}`);
+		broadcastChatMessage(roomId, message);
 	});
 
 	// Handle disconnect
@@ -213,7 +375,7 @@ io.on("connection", (socket) => {
 				const result = await removeParticipant(roomInfo.roomId, roomInfo.userId);
 				const participants = await getRoomParticipants(roomInfo.roomId);
 
-				broadcastParticipantLeft(roomInfo.roomId, roomInfo.userId, participants.length);
+				broadcastParticipantLeft(roomInfo.roomId, roomInfo.userId, "A user", participants.length);
 
 				if (result.newStreamerId) {
 					broadcastStreamerChanged(roomInfo.roomId, result.newStreamerId);

@@ -12,9 +12,12 @@ import {
 	Crown,
 	DoorOpen,
 	Loader2,
+	Monitor,
 	Users,
+	Video,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { Chat } from "#/components/Chat";
 import {
 	Dialog,
 	DialogContent,
@@ -98,6 +101,41 @@ export const Route = createFileRoute("/room/$roomId")({
 	},
 });
 
+// Video player placeholder component
+interface VideoPlayerPlaceholderProps {
+	isStreamer: boolean;
+	streamerName?: string | null;
+}
+
+function VideoPlayerPlaceholder({
+	isStreamer,
+	streamerName,
+}: VideoPlayerPlaceholderProps) {
+	return (
+		<div className="bg-depth-2 rounded-xl aspect-video flex flex-col items-center justify-center border-2 border-dashed border-border-subtle">
+			{isStreamer ? (
+				<>
+					<Monitor className="h-16 w-16 text-text-tertiary mb-4" />
+					<p className="text-text-secondary text-lg mb-2">Start Streaming</p>
+					<p className="text-text-tertiary text-sm">
+						Screen share will appear here
+					</p>
+				</>
+			) : (
+				<>
+					<Video className="h-16 w-16 text-text-tertiary mb-4" />
+					<p className="text-text-secondary text-lg mb-2">Waiting for Stream</p>
+					<p className="text-text-tertiary text-sm">
+						{streamerName
+							? `${streamerName} will start streaming soon`
+							: "No streamer yet"}
+					</p>
+				</>
+			)}
+		</div>
+	);
+}
+
 function RoomDetailPage() {
 	const navigate = useNavigate();
 	const { roomId } = Route.useParams();
@@ -117,7 +155,7 @@ function RoomDetailPage() {
 	const streamer = roomData?.room.streamer;
 	const participants = roomData?.participants || [];
 	const isActive = room?.status === "active";
-	const isEnded = room?.status === "ended";
+	const isPreparing = room?.status === "preparing";
 
 	// Join room on mount (if active and user is logged in)
 	const joinMutation = useMutation({
@@ -203,75 +241,76 @@ function RoomDetailPage() {
 		},
 	});
 
-	return (
-		<div className="h-full w-full bg-depth-0 px-4 py-8 overflow-auto">
-			<div className="mx-auto max-w-4xl space-y-6">
-				{/* Back button */}
-				<Link
-					to="/"
-					className="inline-flex items-center gap-2 text-text-secondary hover:text-text-primary transition-colors"
-				>
-					<ArrowLeft className="h-4 w-4" />
-					<span>Back to rooms</span>
-				</Link>
+	// Active room layout with two columns
+	if (isActive || isPreparing) {
+		return (
+			<div className="h-full w-full bg-depth-0 overflow-hidden">
+				{/* Back button - Fixed at top */}
+				<div className="px-4 py-3 border-b border-border-subtle bg-depth-1">
+					<Link
+						to="/"
+						className="inline-flex items-center gap-2 text-text-secondary hover:text-text-primary transition-colors"
+					>
+						<ArrowLeft className="h-4 w-4" />
+						<span>Back to rooms</span>
+					</Link>
+				</div>
 
-				{/* Room Header */}
-				<div className="bg-depth-1 rounded-lg p-6 border border-border-subtle">
-					<div className="flex items-start gap-4">
-						<div className="flex-1">
-							<div className="flex items-center gap-3 mb-2">
-								<h1 className="text-2xl font-bold text-text-primary">
-									{room?.name}
-								</h1>
-								{isActive ? (
-									<span className="px-2 py-1 rounded text-xs font-medium bg-red-500/20 text-red-400 flex items-center gap-1">
-										<span className="relative flex h-2 w-2">
-											<span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-											<span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
+				{/* Two-column layout */}
+				<div className="flex h-[calc(100%-53px)]">
+					{/* Column 1: Main Content (70%) */}
+					<div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
+						<div className="p-6 space-y-6">
+							{/* Room Header */}
+							<div>
+								<div className="flex items-center gap-3 mb-2">
+									<h1 className="text-2xl font-bold text-text-primary">
+										{room?.name}
+									</h1>
+									{isActive ? (
+										<span className="px-2 py-1 rounded text-xs font-medium bg-red-500/20 text-red-400 flex items-center gap-1">
+											<span className="relative flex h-2 w-2">
+												<span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+												<span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
+											</span>
+											LIVE
 										</span>
-										LIVE
-									</span>
-								) : (
-									<span className="px-2 py-1 rounded text-xs font-medium bg-gray-500/20 text-gray-400">
-										Ended
-									</span>
-								)}
-							</div>
-							<p className="text-text-secondary mb-4">{room?.description}</p>
+									) : (
+										<span className="px-2 py-1 rounded text-xs font-medium bg-yellow-500/20 text-yellow-400">
+											Preparing
+										</span>
+									)}
+								</div>
+								<p className="text-text-secondary">{room?.description}</p>
 
-							<div className="flex flex-wrap gap-4 text-sm text-text-tertiary">
-								<div className="flex items-center gap-1.5">
-									<Clock className="h-4 w-4" />
-									<span>
-										{isActive ? "Duration: " : "Duration: "}
-										{formatDuration(totalDuration)}
-									</span>
-								</div>
-								<div className="flex items-center gap-1.5">
-									<Users className="h-4 w-4" />
-									<span>
-										Viewers:{" "}
-										{
-											participants.filter((p) => p.user.id !== streamer?.id)
-												.length
-										}
-									</span>
-								</div>
-								{!isActive && room?.endedAt && (
+								{/* Room Stats */}
+								<div className="flex flex-wrap gap-4 mt-4 text-sm text-text-tertiary">
 									<div className="flex items-center gap-1.5">
+										<Clock className="h-4 w-4" />
+										<span>{formatDuration(totalDuration)}</span>
+									</div>
+									<div className="flex items-center gap-1.5">
+										<Users className="h-4 w-4" />
 										<span>
-											Ended: <ClientDate date={room.endedAt} />
+											{
+												participants.filter((p) => p.user.id !== streamer?.id)
+													.length
+											}{" "}
+											viewers
 										</span>
 									</div>
-								)}
+								</div>
 							</div>
-						</div>
 
-						{/* Join/Leave and Streamer Controls */}
-						{userId && isActive && (
-							<div className="flex items-center gap-3">
-								{/* Streamer Controls - Transfer Only */}
-								{isStreamer && (
+							{/* Video Player */}
+							<VideoPlayerPlaceholder
+								isStreamer={isStreamer}
+								streamerName={streamer?.name}
+							/>
+
+							{/* Streamer Controls */}
+							{userId && isStreamer && (
+								<div className="flex items-center gap-3 pt-2">
 									<button
 										type="button"
 										onClick={() => setShowTransferDialog(true)}
@@ -280,19 +319,23 @@ function RoomDetailPage() {
 										<ArrowLeftRight className="h-4 w-4" />
 										<span>Transfer Streamer</span>
 									</button>
-								)}
-
-								{/* Join/Leave Button */}
-								{isParticipant ? (
 									<button
 										type="button"
-										onClick={() => {
-											if (isStreamer) {
-												setShowStreamerLeaveDialog(true);
-											} else {
-												leaveMutation.mutate();
-											}
-										}}
+										onClick={() => setShowStreamerLeaveDialog(true)}
+										className="flex items-center gap-2 px-4 py-2 rounded-lg bg-depth-2 hover:bg-depth-3 text-text-secondary transition-colors"
+									>
+										<DoorOpen className="h-4 w-4" />
+										<span>Leave Room</span>
+									</button>
+								</div>
+							)}
+
+							{/* Viewer Leave Button */}
+							{userId && isParticipant && !isStreamer && (
+								<div className="flex items-center gap-3 pt-2">
+									<button
+										type="button"
+										onClick={() => leaveMutation.mutate()}
 										disabled={leaveMutation.isPending}
 										className="flex items-center gap-2 px-4 py-2 rounded-lg bg-depth-2 hover:bg-depth-3 text-text-secondary transition-colors"
 									>
@@ -301,11 +344,16 @@ function RoomDetailPage() {
 										) : (
 											<>
 												<DoorOpen className="h-4 w-4" />
-												<span>Leave</span>
+												<span>Leave Room</span>
 											</>
 										)}
 									</button>
-								) : (
+								</div>
+							)}
+
+							{/* Join Button for non-participants */}
+							{userId && !isParticipant && isActive && (
+								<div className="flex items-center gap-3 pt-2">
 									<button
 										type="button"
 										onClick={() => joinMutation.mutate()}
@@ -318,217 +366,127 @@ function RoomDetailPage() {
 											<span>Join Room</span>
 										)}
 									</button>
-								)}
-							</div>
-						)}
+								</div>
+							)}
+						</div>
 					</div>
-				</div>
 
-				{isEnded ? (
-					/* Ended Room - Show Participants Section */
-					<div className="bg-depth-1 rounded-lg p-6 border border-border-subtle">
-						<h2 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
-							<Users className="h-5 w-5 text-accent" />
-							Participants
-							<span className="text-sm font-normal text-text-tertiary ml-2">
-								({participants.length})
-							</span>
-						</h2>
-
-						{participants.length === 0 ? (
-							<p className="text-text-secondary">
-								No participants in this stream.
-							</p>
-						) : (
-							<div className="space-y-3">
-								{participants.map((p, index) => (
-									<div
-										key={p.participant.id}
-										className="flex items-center gap-4 p-3 bg-depth-2 rounded-lg"
-									>
-										<div className="shrink-0 w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center">
-											<span className="text-sm font-bold text-accent">
-												#{index + 1}
-											</span>
-										</div>
-
-										{p.user.image ? (
-											<img
-												src={p.user.image}
-												alt={p.user.name}
-												className="h-12 w-12 rounded-full object-cover"
-											/>
-										) : (
-											<div className="h-12 w-12 rounded-full bg-surface-3 flex items-center justify-center">
-												<span className="text-lg font-medium text-text-primary">
-													{p.user.name.charAt(0).toUpperCase()}
-												</span>
-											</div>
-										)}
-
-										<div className="flex-1 min-w-0">
-											<h3 className="text-base font-medium text-text-primary truncate">
-												{p.user.name}
-											</h3>
-											<p className="text-sm text-text-tertiary">
-												Joined <ClientDate date={p.participant.joinedAt} />
-											</p>
-										</div>
-
-										{p.participant.totalTimeSeconds !== null &&
-											p.participant.totalTimeSeconds > 0 && (
-												<div className="text-right shrink-0">
-													<p className="text-base font-semibold text-accent">
-														{formatDuration(p.participant.totalTimeSeconds)}
-													</p>
-													<p className="text-xs text-text-tertiary">
-														watch time
-													</p>
-												</div>
-											)}
-									</div>
-								))}
-							</div>
-						)}
-					</div>
-				) : (
-					<>
-						{/* Streamer Section */}
-						<div className="bg-depth-1 rounded-lg p-6 border border-border-subtle">
-							<h2 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
-								<Crown className="h-5 w-5 text-yellow-500" />
-								Streamer
-							</h2>
-							<div className="flex items-center gap-4">
+					{/* Column 2: Sidebar (30%, min 320px) */}
+					<div className="w-80 min-w-80 border-l border-border-subtle bg-depth-1 flex flex-col">
+						{/* Streamer & Viewers Section */}
+						<div className="p-4 border-b border-border-subtle">
+							{/* Current Streamer */}
+							<div className="mb-4">
+								<h3 className="text-xs font-semibold text-text-tertiary uppercase tracking-wider mb-2 flex items-center gap-1.5">
+									<Crown className="h-3 w-3" />
+									Streamer
+								</h3>
 								{streamer ? (
-									<>
+									<Link
+										to="/profile/$userId"
+										params={{ userId: streamer.id }}
+										className="flex items-center gap-3 p-2 rounded-lg bg-depth-2 hover:bg-depth-3 transition-colors"
+									>
 										{streamer.image ? (
 											<img
 												src={streamer.image}
 												alt={streamer.name}
-												className="h-16 w-16 rounded-full object-cover"
+												className="h-10 w-10 rounded-full object-cover"
 											/>
 										) : (
-											<div className="h-16 w-16 rounded-full bg-accent flex items-center justify-center">
-												<span className="text-xl font-bold text-white">
+											<div className="h-10 w-10 rounded-full bg-accent flex items-center justify-center">
+												<span className="text-sm font-bold text-white">
 													{streamer.name.charAt(0).toUpperCase()}
 												</span>
 											</div>
 										)}
-										<div>
-											<h3 className="text-lg font-medium text-text-primary">
+										<div className="flex-1 min-w-0">
+											<p className="text-sm font-medium text-text-primary truncate">
 												{streamer.name}
-											</h3>
-											<p className="text-sm text-text-tertiary">Host</p>
+											</p>
+											<p className="text-xs text-text-tertiary">Host</p>
 										</div>
-										<Link
-											to="/profile/$userId"
-											params={{ userId: streamer.id }}
-											className="ml-auto px-4 py-2 bg-depth-2 hover:bg-depth-3 rounded-lg text-sm font-medium transition-colors"
-										>
-											View Profile
-										</Link>
-									</>
+									</Link>
 								) : (
-									<>
-										<div className="h-16 w-16 rounded-full bg-depth-3 flex items-center justify-center">
-											<span className="text-xl font-bold text-text-secondary">
+									<div className="flex items-center gap-3 p-2 rounded-lg bg-depth-2">
+										<div className="h-10 w-10 rounded-full bg-depth-3 flex items-center justify-center">
+											<span className="text-sm font-bold text-text-secondary">
 												?
 											</span>
 										</div>
 										<div>
-											<h3 className="text-lg font-medium text-text-secondary">
+											<p className="text-sm font-medium text-text-secondary">
 												No Streamer
-											</h3>
-											<p className="text-sm text-text-tertiary">
-												Waiting for host
 											</p>
+											<p className="text-xs text-text-tertiary">Waiting</p>
 										</div>
-									</>
+									</div>
 								)}
 							</div>
-						</div>
 
-						{/* Viewers List - Filter out streamer */}
-						{(() => {
-							const viewers = participants.filter(
-								(p) => p.user.id !== streamer?.id,
-							);
-							return (
-								<div className="bg-depth-1 rounded-lg p-6 border border-border-subtle">
-									<h2 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
-										<Users className="h-5 w-5 text-accent" />
-										Viewers
-										<span className="text-sm font-normal text-text-tertiary ml-2">
-											({viewers.length})
-										</span>
-									</h2>
-
-									{viewers.length === 0 ? (
-										<p className="text-text-secondary">
-											{isActive
-												? "No viewers yet. Be the first to join!"
-												: "No viewers participated in this stream."}
+							{/* Viewers List */}
+							<div>
+								<h3 className="text-xs font-semibold text-text-tertiary uppercase tracking-wider mb-2 flex items-center gap-1.5">
+									<Users className="h-3 w-3" />
+									Viewers
+									<span className="text-text-tertiary">
+										(
+										{
+											participants.filter((p) => p.user.id !== streamer?.id)
+												.length
+										}
+										)
+									</span>
+								</h3>
+								<div className="space-y-1 max-h-32 overflow-y-auto">
+									{participants.filter((p) => p.user.id !== streamer?.id)
+										.length === 0 ? (
+										<p className="text-xs text-text-tertiary italic">
+											No viewers yet
 										</p>
 									) : (
-										<div className="space-y-3">
-											{viewers.map((p, index) => (
-												<div
+										participants
+											.filter((p) => p.user.id !== streamer?.id)
+											.slice(0, 5)
+											.map((p) => (
+												<Link
 													key={p.participant.id}
-													className="flex items-center gap-4 p-3 bg-depth-2 rounded-lg"
+													to="/profile/$userId"
+													params={{ userId: p.user.id }}
+													className="flex items-center gap-2 p-1.5 rounded hover:bg-depth-2 transition-colors"
 												>
-													<div className="shrink-0 w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center">
-														<span className="text-sm font-bold text-accent">
-															#{index + 1}
-														</span>
-													</div>
-
 													{p.user.image ? (
 														<img
 															src={p.user.image}
 															alt={p.user.name}
-															className="h-12 w-12 rounded-full object-cover"
+															className="h-6 w-6 rounded-full object-cover"
 														/>
 													) : (
-														<div className="h-12 w-12 rounded-full bg-surface-3 flex items-center justify-center">
-															<span className="text-lg font-medium text-text-primary">
+														<div className="h-6 w-6 rounded-full bg-surface-3 flex items-center justify-center">
+															<span className="text-xs font-medium text-text-primary">
 																{p.user.name.charAt(0).toUpperCase()}
 															</span>
 														</div>
 													)}
-
-													<div className="flex-1 min-w-0">
-														<h3 className="text-base font-medium text-text-primary truncate">
-															{p.user.name}
-														</h3>
-														<p className="text-sm text-text-tertiary">
-															Joined{" "}
-															<ClientDate date={p.participant.joinedAt} />
-														</p>
-													</div>
-
-													{p.participant.totalTimeSeconds !== null &&
-														p.participant.totalTimeSeconds > 0 && (
-															<div className="text-right shrink-0">
-																<p className="text-base font-semibold text-accent">
-																	{formatDuration(
-																		p.participant.totalTimeSeconds,
-																	)}
-																</p>
-																<p className="text-xs text-text-tertiary">
-																	watch time
-																</p>
-															</div>
-														)}
-												</div>
-											))}
-										</div>
+													<span className="text-sm text-text-secondary truncate">
+														{p.user.name}
+													</span>
+												</Link>
+											))
 									)}
 								</div>
-							);
-						})()}
-					</>
-				)}
+							</div>
+						</div>
+
+						{/* Chat Section */}
+						<Chat
+							roomId={roomId}
+							userId={userId}
+							userName={session?.user?.name}
+							userImage={session?.user?.image}
+						/>
+					</div>
+				</div>
 
 				{/* Transfer Ownership Dialog */}
 				{showTransferDialog && (
@@ -639,6 +597,128 @@ function RoomDetailPage() {
 						</div>
 					</DialogContent>
 				</Dialog>
+			</div>
+		);
+	}
+
+	// Ended room layout (unchanged)
+	return (
+		<div className="h-full w-full bg-depth-0 px-4 py-8 overflow-auto">
+			<div className="mx-auto max-w-4xl space-y-6">
+				{/* Back button */}
+				<Link
+					to="/"
+					className="inline-flex items-center gap-2 text-text-secondary hover:text-text-primary transition-colors"
+				>
+					<ArrowLeft className="h-4 w-4" />
+					<span>Back to rooms</span>
+				</Link>
+
+				{/* Room Header */}
+				<div className="bg-depth-1 rounded-lg p-6 border border-border-subtle">
+					<div className="flex items-start gap-4">
+						<div className="flex-1">
+							<div className="flex items-center gap-3 mb-2">
+								<h1 className="text-2xl font-bold text-text-primary">
+									{room?.name}
+								</h1>
+								<span className="px-2 py-1 rounded text-xs font-medium bg-gray-500/20 text-gray-400">
+									Ended
+								</span>
+							</div>
+							<p className="text-text-secondary mb-4">{room?.description}</p>
+
+							<div className="flex flex-wrap gap-4 text-sm text-text-tertiary">
+								<div className="flex items-center gap-1.5">
+									<Clock className="h-4 w-4" />
+									<span>Duration: {formatDuration(totalDuration)}</span>
+								</div>
+								<div className="flex items-center gap-1.5">
+									<Users className="h-4 w-4" />
+									<span>
+										Viewers:{" "}
+										{
+											participants.filter((p) => p.user.id !== streamer?.id)
+												.length
+										}
+									</span>
+								</div>
+								{room?.endedAt && (
+									<div className="flex items-center gap-1.5">
+										<span>
+											Ended: <ClientDate date={room.endedAt} />
+										</span>
+									</div>
+								)}
+							</div>
+						</div>
+					</div>
+				</div>
+
+				{/* Participants Section */}
+				<div className="bg-depth-1 rounded-lg p-6 border border-border-subtle">
+					<h2 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
+						<Users className="h-5 w-5 text-accent" />
+						Participants
+						<span className="text-sm font-normal text-text-tertiary ml-2">
+							({participants.length})
+						</span>
+					</h2>
+
+					{participants.length === 0 ? (
+						<p className="text-text-secondary">
+							No participants in this stream.
+						</p>
+					) : (
+						<div className="space-y-3">
+							{participants.map((p, index) => (
+								<div
+									key={p.participant.id}
+									className="flex items-center gap-4 p-3 bg-depth-2 rounded-lg"
+								>
+									<div className="shrink-0 w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center">
+										<span className="text-sm font-bold text-accent">
+											#{index + 1}
+										</span>
+									</div>
+
+									{p.user.image ? (
+										<img
+											src={p.user.image}
+											alt={p.user.name}
+											className="h-12 w-12 rounded-full object-cover"
+										/>
+									) : (
+										<div className="h-12 w-12 rounded-full bg-surface-3 flex items-center justify-center">
+											<span className="text-lg font-medium text-text-primary">
+												{p.user.name.charAt(0).toUpperCase()}
+											</span>
+										</div>
+									)}
+
+									<div className="flex-1 min-w-0">
+										<h3 className="text-base font-medium text-text-primary truncate">
+											{p.user.name}
+										</h3>
+										<p className="text-sm text-text-tertiary">
+											Joined <ClientDate date={p.participant.joinedAt} />
+										</p>
+									</div>
+
+									{p.participant.totalTimeSeconds !== null &&
+										p.participant.totalTimeSeconds > 0 && (
+											<div className="text-right shrink-0">
+												<p className="text-base font-semibold text-accent">
+													{formatDuration(p.participant.totalTimeSeconds)}
+												</p>
+												<p className="text-xs text-text-tertiary">watch time</p>
+											</div>
+										)}
+								</div>
+							))}
+						</div>
+					)}
+				</div>
 			</div>
 		</div>
 	);
