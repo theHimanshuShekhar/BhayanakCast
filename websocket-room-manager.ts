@@ -11,7 +11,7 @@ config({ path: join(__dirname, ".env"), override: true });
 
 import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import { db } from "./src/db/index";
-import { roomParticipants, streamingRooms } from "./src/db/schema";
+import { roomParticipants, streamingRooms, users } from "./src/db/schema";
 import { nanoid } from "nanoid";
 
 // In-memory tracking of socket -> room mapping for presence detection
@@ -143,6 +143,7 @@ export async function removeParticipant(
 	userId: string,
 ): Promise<{
 	newStreamerId?: string;
+	newStreamerName?: string;
 	roomEmpty: boolean;
 	newStatus?: string;
 }> {
@@ -222,8 +223,16 @@ export async function removeParticipant(
 			.set({ streamerId: nextViewer[0].userId })
 			.where(eq(streamingRooms.id, roomId));
 
+		// Get new streamer's name
+		const newStreamerUser = await db
+			.select({ name: users.name })
+			.from(users)
+			.where(eq(users.id, nextViewer[0].userId))
+			.limit(1);
+
 		return {
 			newStreamerId: nextViewer[0].userId,
+			newStreamerName: newStreamerUser[0]?.name || "Someone",
 			roomEmpty: false,
 		};
 	} else {
@@ -391,4 +400,94 @@ export async function runRoomCleanupJob(
 			broadcastRoomEnded(room.id);
 		}
 	}
+}
+
+// Track last transfer time for cooldown
+const lastTransferTime = new Map<string, number>();
+const TRANSFER_COOLDOWN_MS = 30000;
+
+/**
+ * Transfer streamer ownership to another user
+ */
+export async function transferStreamer(
+	roomId: string,
+	currentStreamerId: string,
+	newStreamerId: string,
+): Promise<{
+	success: boolean;
+	newStreamerId?: string;
+	newStreamerName?: string;
+	error?: string;
+}> {
+	// Check cooldown
+	const lastTransfer = lastTransferTime.get(roomId);
+	const now = Date.now();
+	if (lastTransfer && now - lastTransfer < TRANSFER_COOLDOWN_MS) {
+		const remaining = Math.ceil(
+			(TRANSFER_COOLDOWN_MS - (now - lastTransfer)) / 1000,
+		);
+		return {
+			success: false,
+			error: `Transfer cooldown active. Try again in ${remaining} seconds.`,
+		};
+	}
+
+	// Verify current user is streamer
+	const room = await db
+		.select()
+		.from(streamingRooms)
+		.where(
+			and(
+				eq(streamingRooms.id, roomId),
+				sql`${streamingRooms.status} IN ('active', 'preparing')`,
+			),
+		)
+		.limit(1);
+
+	if (room.length === 0) {
+		return { success: false, error: "Room not found" };
+	}
+
+	if (room[0].streamerId !== currentStreamerId) {
+		return { success: false, error: "Only the streamer can transfer ownership" };
+	}
+
+	// Verify new streamer is in room
+	const newStreamerParticipant = await db
+		.select()
+		.from(roomParticipants)
+		.where(
+			and(
+				eq(roomParticipants.roomId, roomId),
+				eq(roomParticipants.userId, newStreamerId),
+				isNull(roomParticipants.leftAt),
+			),
+		)
+		.limit(1);
+
+	if (newStreamerParticipant.length === 0) {
+		return { success: false, error: "New streamer is not in the room" };
+	}
+
+	// Transfer ownership
+	await db
+		.update(streamingRooms)
+		.set({ streamerId: newStreamerId })
+		.where(eq(streamingRooms.id, roomId));
+
+	// Get new streamer's name
+	const newStreamerUser = await db
+		.select({ name: users.name })
+		.from(users)
+		.where(eq(users.id, newStreamerId))
+		.limit(1);
+
+	// Update cooldown
+	lastTransferTime.set(roomId, now);
+
+	return {
+		success: true,
+		newStreamerId,
+		newStreamerName: newStreamerUser[0]?.name || "Someone",
+	};
 }

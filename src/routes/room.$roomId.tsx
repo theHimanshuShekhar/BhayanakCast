@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import {
 	createFileRoute,
 	Link,
@@ -11,12 +11,11 @@ import {
 	Clock,
 	Crown,
 	DoorOpen,
-	Loader2,
 	Monitor,
 	Users,
 	Video,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Chat } from "#/components/Chat";
 import {
 	Dialog,
@@ -32,8 +31,8 @@ import {
 	SITE_TITLE,
 	SITE_URL,
 } from "#/lib/site";
+import { useWebSocket } from "#/lib/websocket-context";
 import { getRoomDetails } from "#/utils/room-details";
-import { joinRoom, leaveRoom, transferStreamerOwnership } from "#/utils/rooms";
 
 function formatDuration(seconds: number): string {
 	const hours = Math.floor(seconds / 3600);
@@ -148,7 +147,7 @@ function RoomDetailPage() {
 		queryKey: ["room", roomId],
 		queryFn: () => getRoomDetails({ data: { roomId } }),
 		initialData,
-		refetchInterval: 5000, // Refresh every 5 seconds
+		refetchInterval: 5000, // Refresh every 5 seconds as fallback
 	});
 
 	const room = roomData?.room.room;
@@ -157,49 +156,66 @@ function RoomDetailPage() {
 	const isActive = room?.status === "active";
 	const isPreparing = room?.status === "preparing";
 
-	// Join room on mount (if active and user is logged in)
-	const joinMutation = useMutation({
-		mutationFn: () => {
-			if (!userId || !isActive) throw new Error("Cannot join room");
-			return joinRoom({ data: { roomId, userId } });
-		},
-		onSuccess: () => {
-			refetch();
-		},
-	});
+	// WebSocket for real-time updates
+	const { socket, isConnected } = useWebSocket();
 
-	// Leave room
-	const leaveMutation = useMutation({
-		mutationFn: () => {
-			if (!userId) throw new Error("Not logged in");
-			return leaveRoom({ data: { roomId, userId } });
-		},
-		onSuccess: () => {
-			refetch();
-			// Redirect to home page after leaving
-			void navigate({ to: "/" });
-		},
-		onError: (error) => {
-			console.error("Failed to leave room:", error);
-			alert(`Failed to leave room: ${error.message}`);
-		},
-	});
+	// Track if user has joined the room via WebSocket
+	const hasJoinedRef = useRef(false);
 
-	// Auto-join room on mount (only once)
-	const hasAutoJoined = useRef(false);
-	useEffect(() => {
-		if (userId && isActive && !hasAutoJoined.current) {
-			hasAutoJoined.current = true;
-			joinMutation.mutate();
+	// Join room via WebSocket
+	const handleJoinRoom = useCallback(() => {
+		if (!userId || !isActive || !socket || !isConnected) {
+			console.log("[Room] Cannot join - missing requirements");
+			return;
 		}
-	}, [userId, isActive, joinMutation]);
+		console.log("[Room] Emitting room:join via WebSocket");
+		socket.emit("room:join", { roomId });
+	}, [userId, isActive, socket, isConnected, roomId]);
+
+	// Leave room via WebSocket
+	const handleLeaveRoom = useCallback(() => {
+		if (!userId || !socket || !isConnected) {
+			console.log("[Room] Cannot leave - missing requirements");
+			return;
+		}
+		console.log("[Room] Emitting room:leave via WebSocket");
+		socket.emit("room:leave", { roomId });
+		hasJoinedRef.current = false;
+		// Redirect to home page after leaving
+		void navigate({ to: "/" });
+	}, [userId, socket, isConnected, roomId, navigate]);
+
+	// Auto-join room on mount - fires when user loads room page
+	useEffect(() => {
+		if (userId && !hasJoinedRef.current && socket && isConnected) {
+			hasJoinedRef.current = true;
+			console.log("[Room] Auto-joining room via WebSocket on page load");
+			socket.emit("room:join", { roomId });
+		}
+	}, [userId, socket, isConnected, roomId]);
+
+	// Reset hasJoinedRef when roomId changes (user navigates to different room)
+	// biome-ignore lint/correctness/useExhaustiveDependencies: intentional - reset when room changes
+	useEffect(() => {
+		hasJoinedRef.current = false;
+	}, [roomId]);
+
+	// Leave room when component unmounts (user leaves the page)
+	useEffect(() => {
+		return () => {
+			if (hasJoinedRef.current && socket && isConnected) {
+				console.log("[Room] Component unmounting - leaving room");
+				socket.emit("room:leave", { roomId });
+				hasJoinedRef.current = false;
+			}
+		};
+	}, [socket, isConnected, roomId]);
 
 	// Calculate duration - use client-only time to avoid hydration mismatch
 	const [clientNow, setClientNow] = useState<Date | null>(null);
 
 	useEffect(() => {
 		setClientNow(new Date());
-		// Update every second for live duration
 		const interval = setInterval(() => {
 			setClientNow(new Date());
 		}, 1000);
@@ -217,29 +233,111 @@ function RoomDetailPage() {
 	const isParticipant = participants.some((p) => p.user.id === userId);
 	const isStreamer = streamer?.id === userId;
 
+	// Listen for WebSocket events
+	useEffect(() => {
+		if (!socket || !isConnected) return;
+
+		console.log("[Room] Setting up WebSocket listeners for room:", roomId);
+
+		// User joined the room
+		const handleUserJoined = (data: {
+			userId: string;
+			userName: string;
+			participantCount: number;
+		}) => {
+			console.log("[Room] User joined:", data);
+			refetch();
+		};
+
+		// User left the room
+		const handleUserLeft = (data: {
+			userId: string;
+			userName: string;
+			participantCount: number;
+		}) => {
+			console.log("[Room] User left:", data);
+			refetch();
+		};
+
+		// Streamer changed
+		const handleStreamerChanged = (data: {
+			newStreamerId: string;
+			newStreamerName: string;
+		}) => {
+			console.log("[Room] Streamer changed:", data);
+			refetch();
+		};
+
+		// Room status changed
+		const handleStatusChanged = (data: { status: string }) => {
+			console.log("[Room] Status changed:", data);
+			refetch();
+		};
+
+		// Room joined confirmation
+		const handleRoomJoined = (data: {
+			roomId: string;
+			participantCount: number;
+			participants: unknown[];
+			isStreamer: boolean;
+			becameStreamer: boolean;
+			status: string;
+			alreadyInRoom?: boolean;
+		}) => {
+			console.log("[Room] Joined room:", data);
+			refetch();
+		};
+
+		// Room left confirmation
+		const handleRoomLeft = (data: {
+			roomId: string;
+			participantCount: number;
+		}) => {
+			console.log("[Room] Left room:", data);
+			hasJoinedRef.current = false;
+		};
+
+		// Error
+		const handleRoomError = (data: { message: string }) => {
+			console.error("[Room] Error:", data.message);
+			alert(data.message);
+		};
+
+		socket.on("room:user_joined", handleUserJoined);
+		socket.on("room:user_left", handleUserLeft);
+		socket.on("room:streamer_changed", handleStreamerChanged);
+		socket.on("room:status_changed", handleStatusChanged);
+		socket.on("room:joined", handleRoomJoined);
+		socket.on("room:left", handleRoomLeft);
+		socket.on("room:error", handleRoomError);
+
+		return () => {
+			console.log("[Room] Cleaning up WebSocket listeners");
+			socket.off("room:user_joined", handleUserJoined);
+			socket.off("room:user_left", handleUserLeft);
+			socket.off("room:streamer_changed", handleStreamerChanged);
+			socket.off("room:status_changed", handleStatusChanged);
+			socket.off("room:joined", handleRoomJoined);
+			socket.off("room:left", handleRoomLeft);
+			socket.off("room:error", handleRoomError);
+		};
+	}, [socket, isConnected, refetch, roomId]);
+
 	// Transfer dialog state
 	const [showTransferDialog, setShowTransferDialog] = useState(false);
 
 	// Streamer leave confirmation dialog state
 	const [showStreamerLeaveDialog, setShowStreamerLeaveDialog] = useState(false);
 
-	// Transfer ownership mutation
-	const transferMutation = useMutation({
-		mutationFn: (newStreamerId: string) => {
-			if (!userId) throw new Error("Not logged in");
-			return transferStreamerOwnership({
-				data: {
-					roomId,
-					newStreamerId,
-					currentStreamerId: userId,
-				},
-			});
-		},
-		onSuccess: () => {
-			refetch();
+	// Transfer streamer via WebSocket
+	const handleTransferStreamer = useCallback(
+		(newStreamerId: string) => {
+			if (!socket || !isConnected) return;
+			socket.emit("streamer:transfer", { roomId, newStreamerId });
 			setShowTransferDialog(false);
 		},
-	});
+		[socket, isConnected, roomId],
+	);
 
 	// Active room layout with two columns
 	if (isActive || isPreparing) {
@@ -247,13 +345,14 @@ function RoomDetailPage() {
 			<div className="h-full w-full bg-depth-0 overflow-hidden">
 				{/* Back button - Fixed at top */}
 				<div className="px-4 py-3 border-b border-border-subtle bg-depth-1">
-					<Link
-						to="/"
+					<button
+						type="button"
+						onClick={handleLeaveRoom}
 						className="inline-flex items-center gap-2 text-text-secondary hover:text-text-primary transition-colors"
 					>
 						<ArrowLeft className="h-4 w-4" />
 						<span>Back to rooms</span>
-					</Link>
+					</button>
 				</div>
 
 				{/* Two-column layout */}
@@ -335,18 +434,11 @@ function RoomDetailPage() {
 								<div className="flex items-center gap-3 pt-2">
 									<button
 										type="button"
-										onClick={() => leaveMutation.mutate()}
-										disabled={leaveMutation.isPending}
+										onClick={handleLeaveRoom}
 										className="flex items-center gap-2 px-4 py-2 rounded-lg bg-depth-2 hover:bg-depth-3 text-text-secondary transition-colors"
 									>
-										{leaveMutation.isPending ? (
-											<Loader2 className="h-4 w-4 animate-spin" />
-										) : (
-											<>
-												<DoorOpen className="h-4 w-4" />
-												<span>Leave Room</span>
-											</>
-										)}
+										<DoorOpen className="h-4 w-4" />
+										<span>Leave Room</span>
 									</button>
 								</div>
 							)}
@@ -356,15 +448,10 @@ function RoomDetailPage() {
 								<div className="flex items-center gap-3 pt-2">
 									<button
 										type="button"
-										onClick={() => joinMutation.mutate()}
-										disabled={joinMutation.isPending}
+										onClick={handleJoinRoom}
 										className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent hover:bg-accent-hover text-bg-primary font-bold transition-colors"
 									>
-										{joinMutation.isPending ? (
-											<Loader2 className="h-4 w-4 animate-spin" />
-										) : (
-											<span>Join Room</span>
-										)}
+										<span>Join Room</span>
 									</button>
 								</div>
 							)}
@@ -507,8 +594,7 @@ function RoomDetailPage() {
 										<button
 											key={p.participant.id}
 											type="button"
-											onClick={() => transferMutation.mutate(p.user.id)}
-											disabled={transferMutation.isPending}
+											onClick={() => handleTransferStreamer(p.user.id)}
 											className="w-full flex items-center gap-3 p-3 bg-depth-2 hover:bg-depth-3 rounded-lg transition-colors text-left"
 										>
 											{p.user.image ? (
@@ -579,20 +665,13 @@ function RoomDetailPage() {
 							<button
 								type="button"
 								onClick={() => {
-									leaveMutation.mutate();
+									handleLeaveRoom();
 									setShowStreamerLeaveDialog(false);
 								}}
-								disabled={leaveMutation.isPending}
 								className="flex-1 px-4 py-2 bg-warning hover:bg-warning/90 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
 							>
-								{leaveMutation.isPending ? (
-									<Loader2 className="h-4 w-4 animate-spin" />
-								) : (
-									<>
-										<DoorOpen className="h-4 w-4" />
-										<span>Leave Room</span>
-									</>
-								)}
+								<DoorOpen className="h-4 w-4" />
+								<span>Leave Room</span>
 							</button>
 						</div>
 					</DialogContent>
@@ -601,18 +680,19 @@ function RoomDetailPage() {
 		);
 	}
 
-	// Ended room layout (unchanged)
+	// Ended room layout
 	return (
 		<div className="h-full w-full bg-depth-0 px-4 py-8 overflow-auto">
 			<div className="mx-auto max-w-4xl space-y-6">
 				{/* Back button */}
-				<Link
-					to="/"
+				<button
+					type="button"
+					onClick={handleLeaveRoom}
 					className="inline-flex items-center gap-2 text-text-secondary hover:text-text-primary transition-colors"
 				>
 					<ArrowLeft className="h-4 w-4" />
 					<span>Back to rooms</span>
-				</Link>
+				</button>
 
 				{/* Room Header */}
 				<div className="bg-depth-1 rounded-lg p-6 border border-border-subtle">

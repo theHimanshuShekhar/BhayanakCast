@@ -34,8 +34,13 @@ export async function broadcastRoomEvent(
 export async function broadcastRoomJoin(
 	roomId: string,
 	userId: string,
+	userName?: string,
 ): Promise<void> {
-	await broadcastRoomEvent(roomId, "room:join", { userId });
+	await broadcastRoomEvent(roomId, "room:participant_joined", {
+		userId,
+		userName: userName || userId,
+		participantCount: 0,
+	});
 }
 
 /**
@@ -44,8 +49,13 @@ export async function broadcastRoomJoin(
 export async function broadcastRoomLeave(
 	roomId: string,
 	userId: string,
+	userName?: string,
 ): Promise<void> {
-	await broadcastRoomEvent(roomId, "room:leave", { userId });
+	await broadcastRoomEvent(roomId, "room:participant_left", {
+		userId,
+		userName: userName || userId,
+		participantCount: 0,
+	});
 }
 
 /**

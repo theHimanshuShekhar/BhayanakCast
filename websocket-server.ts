@@ -15,12 +15,9 @@ import {
 	addParticipant,
 	removeParticipant,
 	updateAllRoomStatusesFromPresence,
-	trackSocketJoin,
-	trackSocketLeave,
-	getSocketRoomInfo,
-	runRoomCleanupJob,
 	getRoomParticipants,
 	getRoom,
+	transferStreamer,
 } from "./websocket-room-manager";
 
 // Debug: Log environment variables
@@ -33,7 +30,42 @@ const PORT = parseInt(new URL(WS_URL).port) || 3001;
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:3000";
 
 // Create HTTP server
-const httpServer = createServer();
+const httpServer = createServer((req, res) => {
+	res.setHeader("Access-Control-Allow-Origin", CLIENT_URL);
+	res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+	res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+	if (req.method === "OPTIONS") {
+		res.writeHead(200);
+		res.end();
+		return;
+	}
+
+	// Handle broadcast endpoint for server functions
+	if (req.url === "/api/broadcast" && req.method === "POST") {
+		let body = "";
+		req.on("data", (chunk) => {
+			body += chunk.toString();
+		});
+		req.on("end", () => {
+			try {
+				const { roomId, event, data } = JSON.parse(body);
+				console.log(`[Broadcast] Broadcasting ${event} to room ${roomId}`);
+				io.to(roomId).emit(event, data);
+				res.writeHead(200, { "Content-Type": "application/json" });
+				res.end(JSON.stringify({ success: true }));
+			} catch (error) {
+				console.error("[Broadcast] Error parsing request:", error);
+				res.writeHead(400, { "Content-Type": "application/json" });
+				res.end(JSON.stringify({ error: "Invalid request" }));
+			}
+		});
+		return;
+	}
+
+	res.writeHead(404);
+	res.end("Not Found");
+});
 
 // Create Socket.io server
 const io = new Server(httpServer, {
@@ -46,70 +78,8 @@ const io = new Server(httpServer, {
 	pingInterval: 25000,
 });
 
-// Track unique users: userId -> Set of socket ids
-const userSockets = new Map<string, Set<string>>();
-
-// Get unique user count
-function getUniqueUserCount(): number {
-	return userSockets.size;
-}
-
-// Broadcast user count to all connected clients
-function broadcastUserCount() {
-	const count = getUniqueUserCount();
-	io.emit("userCount", { count });
-}
-
-// Broadcast room events
-function broadcastToRoom(roomId: string, event: string, data: unknown) {
-	io.to(roomId).emit(event, data);
-}
-
-function broadcastRoomEnded(roomId: string) {
-	broadcastToRoom(roomId, "room:ended", { roomId });
-	io.in(roomId).socketsLeave(roomId);
-}
-
-function broadcastStreamerChanged(roomId: string, newStreamerId: string) {
-	broadcastToRoom(roomId, "room:streamer_changed", { newStreamerId });
-}
-
-function broadcastParticipantJoined(roomId: string, userId: string, userName: string, participantCount: number) {
-	broadcastToRoom(roomId, "room:participant_joined", { userId, userName, participantCount });
-	
-	// Send system message to chat
-	const systemMessage: ChatMessage = {
-		id: `system-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-		roomId,
-		userId: "system",
-		userName: "System",
-		content: `${userName} joined the room`,
-		timestamp: Date.now(),
-		type: "system",
-	};
-	broadcastChatMessage(roomId, systemMessage);
-}
-
-function broadcastParticipantLeft(roomId: string, userId: string, userName: string, participantCount: number) {
-	broadcastToRoom(roomId, "room:participant_left", { userId, userName, participantCount });
-	
-	// Send system message to chat
-	const systemMessage: ChatMessage = {
-		id: `system-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-		roomId,
-		userId: "system",
-		userName: "System",
-		content: `${userName} left the room`,
-		timestamp: Date.now(),
-		type: "system",
-	};
-	broadcastChatMessage(roomId, systemMessage);
-}
-
-// Broadcast chat message to room
-function broadcastChatMessage(roomId: string, message: ChatMessage) {
-	broadcastToRoom(roomId, "chat:message", message);
-}
+// Track socket -> user mapping for presence
+const socketUserMap = new Map<string, { userId: string; userName: string; roomId?: string }>();
 
 // Chat message type
 interface ChatMessage {
@@ -123,6 +93,30 @@ interface ChatMessage {
 	type: "user" | "system";
 }
 
+// Broadcast to all clients in a room (including sender)
+function broadcastToRoom(roomId: string, event: string, data: unknown) {
+	io.to(roomId).emit(event, data);
+}
+
+// Broadcast to all clients in a room except sender
+function broadcastToRoomExceptSender(socket: any, roomId: string, event: string, data: unknown) {
+	socket.to(roomId).emit(event, data);
+}
+
+// Send system message to room
+function sendSystemMessage(roomId: string, content: string) {
+	const message: ChatMessage = {
+		id: `system-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+		roomId,
+		userId: "system",
+		userName: "System",
+		content,
+		timestamp: Date.now(),
+		type: "system",
+	};
+	broadcastToRoom(roomId, "chat:message", message);
+}
+
 // Socket.io connection handler
 io.on("connection", (socket) => {
 	console.log(`[Socket.io] Client connected: ${socket.id}`);
@@ -131,113 +125,117 @@ io.on("connection", (socket) => {
 	socket.on("identify", (data: { userId?: string; userName?: string; userImage?: string | null }) => {
 		const userId = data.userId || `anonymous:${socket.id}`;
 		const userName = data.userName || userId;
+		
 		socket.data.userId = userId;
 		socket.data.userName = userName;
 		socket.data.userImage = data.userImage;
-
-		if (!userSockets.has(userId)) {
-			userSockets.set(userId, new Set());
-		}
-		userSockets.get(userId)?.add(socket.id);
-
+		
+		socketUserMap.set(socket.id, { userId, userName });
+		
 		console.log(`[Socket.io] User identified: ${userName} (${userId}) (socket: ${socket.id})`);
-		broadcastUserCount();
+		socket.emit("identified", { userId, userName });
 	});
-
-	// Send current user count
-	socket.emit("userCount", { count: getUniqueUserCount() });
 
 	// Handle room join
 	socket.on("room:join", async (data: { roomId: string }) => {
 		const { roomId } = data;
 		const userId = socket.data.userId;
+		const userName = socket.data.userName || userId;
 
 		if (!userId) {
 			socket.emit("room:error", { message: "Not authenticated" });
 			return;
 		}
 
+		// Check if already in this room
+		const currentRoom = socketUserMap.get(socket.id)?.roomId;
+		if (currentRoom === roomId) {
+			socket.emit("room:joined", { roomId, alreadyInRoom: true });
+			return;
+		}
+
+		// Leave current room if any
+		if (currentRoom) {
+			console.log(`[Room] User ${userId} leaving previous room ${currentRoom}`);
+			socket.leave(currentRoom);
+			const result = await removeParticipant(currentRoom, userId);
+			const participants = await getRoomParticipants(currentRoom);
+			
+			// Notify others in old room
+			broadcastToRoom(currentRoom, "room:user_left", {
+				userId,
+				userName,
+				participantCount: participants.length,
+			});
+			sendSystemMessage(currentRoom, `${userName} left the room`);
+
+			if (result.newStreamerId) {
+				const newStreamerName = result.newStreamerName || "Someone";
+				broadcastToRoom(currentRoom, "room:streamer_changed", {
+					newStreamerId: result.newStreamerId,
+					newStreamerName,
+				});
+				sendSystemMessage(currentRoom, `${newStreamerName} is now the streamer`);
+			}
+		}
+
 		try {
 			console.log(`[Room] User ${userId} joining room ${roomId}`);
 
-			// Add participant via room manager
+			// Update database
 			const result = await addParticipant(roomId, userId);
 
-			// Join socket to room
+			// Join Socket.io room
 			socket.join(roomId);
-			trackSocketJoin(socket.id, roomId, userId);
+			socketUserMap.set(socket.id, { userId, userName, roomId });
 
-			// Get updated participant count
+			// Get updated participants
 			const participants = await getRoomParticipants(roomId);
-
-			// Broadcast join to room
-			broadcastParticipantJoined(roomId, userId, socket.data.userName || userId, participants.length);
-
-			// If user became streamer, broadcast it
-			if (result.becameStreamer) {
-				console.log(`[Room] User ${userId} became streamer of room ${roomId}`);
-				broadcastStreamerChanged(roomId, userId);
-				
-				// Send system message
-				const systemMessage: ChatMessage = {
-					id: `system-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-					roomId,
-					userId: "system",
-					userName: "System",
-					content: `${socket.data.userName || userId} is now the streamer`,
-					timestamp: Date.now(),
-					type: "system",
-				};
-				broadcastChatMessage(roomId, systemMessage);
-			}
-
-			// If status changed, broadcast it
-			if (result.newStatus) {
-				broadcastToRoom(roomId, "room:status_changed", { status: result.newStatus });
-				
-				// Send system message for status change
-				let statusMessage = "";
-				switch (result.newStatus) {
-					case "waiting":
-						statusMessage = "Room is now waiting for participants";
-						break;
-					case "preparing":
-						statusMessage = "Room is preparing for stream";
-						break;
-					case "active":
-						statusMessage = "Stream is now live!";
-						break;
-					case "ended":
-						statusMessage = "Room has ended";
-						break;
-					default:
-						statusMessage = `Room status changed to ${result.newStatus}`;
-				}
-				
-				const statusSystemMessage: ChatMessage = {
-					id: `system-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-					roomId,
-					userId: "system",
-					userName: "System",
-					content: statusMessage,
-					timestamp: Date.now(),
-					type: "system",
-				};
-				broadcastChatMessage(roomId, statusSystemMessage);
-			}
+			const room = await getRoom(roomId);
 
 			// Send room state to joining user
-			const room = await getRoom(roomId);
 			socket.emit("room:joined", {
 				roomId,
 				participantCount: participants.length,
-				participants: participants.map((p) => ({
-					userId: p.userId,
-					joinedAt: p.joinedAt,
-				})),
+				participants,
 				isStreamer: room?.streamerId === userId,
 				becameStreamer: result.becameStreamer,
+				status: room?.status,
 			});
+
+			// Notify others in room (exclude sender)
+			broadcastToRoomExceptSender(socket, roomId, "room:user_joined", {
+				userId,
+				userName,
+				participantCount: participants.length,
+			});
+
+			// Send system message to room
+			sendSystemMessage(roomId, `${userName} joined the room`);
+
+			// If user became streamer
+			if (result.becameStreamer) {
+				broadcastToRoom(roomId, "room:streamer_changed", {
+					newStreamerId: userId,
+					newStreamerName: userName,
+				});
+				sendSystemMessage(roomId, `${userName} is now the streamer`);
+			}
+
+			// If room status changed
+			if (result.newStatus) {
+				broadcastToRoom(roomId, "room:status_changed", { status: result.newStatus });
+				
+				const statusMessages: Record<string, string> = {
+					waiting: "Room is now waiting for participants",
+					preparing: "Room is preparing for stream",
+					active: "Stream is now live!",
+					ended: "Room has ended",
+				};
+				if (statusMessages[result.newStatus]) {
+					sendSystemMessage(roomId, statusMessages[result.newStatus]);
+				}
+			}
 
 			console.log(`[Room] User ${userId} joined room ${roomId} (${participants.length} participants)`);
 		} catch (error) {
@@ -250,86 +248,82 @@ io.on("connection", (socket) => {
 	socket.on("room:leave", async (data: { roomId: string }) => {
 		const { roomId } = data;
 		const userId = socket.data.userId;
+		const userName = socket.data.userName || userId;
 
-		if (!userId) return;
+		if (!userId) {
+			socket.emit("room:error", { message: "Not authenticated" });
+			return;
+		}
 
 		try {
 			console.log(`[Room] User ${userId} leaving room ${roomId}`);
 
-			// Remove participant via room manager
+			// Update database
 			const result = await removeParticipant(roomId, userId);
 
-			// Leave socket room
+			// Leave Socket.io room
 			socket.leave(roomId);
-			trackSocketLeave(socket.id);
-
-			// Get updated participant count
-			const participants = await getRoomParticipants(roomId);
-
-			// Broadcast leave to room
-			broadcastParticipantLeft(roomId, userId, socket.data.userName || userId, participants.length);
-
-			// If streamer changed, broadcast it
-			if (result.newStreamerId) {
-				console.log(`[Room] Streamer changed in room ${roomId} to ${result.newStreamerId}`);
-				broadcastStreamerChanged(roomId, result.newStreamerId);
-				
-				// Send system message
-				const streamerMessage: ChatMessage = {
-					id: `system-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-					roomId,
-					userId: "system",
-					userName: "System",
-					content: `Streamer changed to a new host`,
-					timestamp: Date.now(),
-					type: "system",
-				};
-				broadcastChatMessage(roomId, streamerMessage);
+			
+			// Update socket user map
+			const socketData = socketUserMap.get(socket.id);
+			if (socketData) {
+				socketUserMap.set(socket.id, { userId, userName });
 			}
 
-			// If room is empty, broadcast status change
+			// Get updated participants
+			const participants = await getRoomParticipants(roomId);
+
+			// Confirm leave to user
+			socket.emit("room:left", { roomId, participantCount: participants.length });
+
+			// Notify others in room
+			broadcastToRoom(roomId, "room:user_left", {
+				userId,
+				userName,
+				participantCount: participants.length,
+			});
+
+			// Send system message
+			sendSystemMessage(roomId, `${userName} left the room`);
+
+			// If streamer changed
+			if (result.newStreamerId) {
+				const newStreamerName = result.newStreamerName || "Someone";
+				broadcastToRoom(roomId, "room:streamer_changed", {
+					newStreamerId: result.newStreamerId,
+					newStreamerName,
+				});
+				sendSystemMessage(roomId, `${newStreamerName} is now the streamer`);
+			}
+
+			// If room status changed
 			if (result.newStatus) {
 				broadcastToRoom(roomId, "room:status_changed", { status: result.newStatus });
 				
-				// Send system message for status change
-				let statusMsg = "";
-				switch (result.newStatus) {
-					case "waiting":
-						statusMsg = "Room is now waiting for participants";
-						break;
-					case "ended":
-						statusMsg = "Room has ended";
-						break;
-					default:
-						statusMsg = `Room status changed to ${result.newStatus}`;
-				}
-				
-				if (statusMsg) {
-					const statusSystemMsg: ChatMessage = {
-						id: `system-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-						roomId,
-						userId: "system",
-						userName: "System",
-						content: statusMsg,
-						timestamp: Date.now(),
-						type: "system",
-					};
-					broadcastChatMessage(roomId, statusSystemMsg);
+				const statusMessages: Record<string, string> = {
+					waiting: "Room is now waiting for participants",
+					preparing: "Room is preparing for stream",
+					active: "Stream is now live!",
+					ended: "Room has ended",
+				};
+				if (statusMessages[result.newStatus]) {
+					sendSystemMessage(roomId, statusMessages[result.newStatus]);
 				}
 			}
 
-			socket.emit("room:left", { roomId, roomEmpty: result.roomEmpty });
-
-			console.log(`[Room] User ${userId} left room ${roomId} (${participants.length} participants remaining)`);
+			console.log(`[Room] User ${userId} left room ${roomId} (${participants.length} participants)`);
 		} catch (error) {
 			console.error(`[Room] Error leaving room:`, error);
+			socket.emit("room:error", { message: error instanceof Error ? error.message : "Failed to leave room" });
 		}
 	});
 
 	// Handle chat messages
-	socket.on("chat:send", (data: { roomId: string; content: string; userName: string; userImage?: string | null }) => {
-		const { roomId, content, userName, userImage } = data;
+	socket.on("chat:send", (data: { roomId: string; content: string }) => {
+		const { roomId, content } = data;
 		const userId = socket.data.userId;
+		const userName = socket.data.userName || userId;
+		const userImage = socket.data.userImage;
 
 		if (!userId) {
 			socket.emit("chat:error", { message: "Not authenticated" });
@@ -342,8 +336,8 @@ io.on("connection", (socket) => {
 		}
 
 		// Check if user is in the room
-		const roomInfo = getSocketRoomInfo(socket.id);
-		if (!roomInfo || roomInfo.roomId !== roomId) {
+		const socketData = socketUserMap.get(socket.id);
+		if (!socketData?.roomId || socketData.roomId !== roomId) {
 			socket.emit("chat:error", { message: "You must join the room first" });
 			return;
 		}
@@ -360,52 +354,92 @@ io.on("connection", (socket) => {
 		};
 
 		console.log(`[Chat] Message from ${userName} in room ${roomId}: ${content}`);
-		broadcastChatMessage(roomId, message);
+		
+		// Broadcast to all in room (including sender)
+		broadcastToRoom(roomId, "chat:message", message);
+	});
+
+	// Handle streamer transfer
+	socket.on("streamer:transfer", async (data: { roomId: string; newStreamerId: string }) => {
+		const { roomId, newStreamerId } = data;
+		const userId = socket.data.userId;
+
+		if (!userId) {
+			socket.emit("room:error", { message: "Not authenticated" });
+			return;
+		}
+
+		try {
+			console.log(`[Room] User ${userId} transferring streamer to ${newStreamerId} in room ${roomId}`);
+
+			// Update database
+			const result = await transferStreamer(roomId, userId, newStreamerId);
+
+			if (!result.success) {
+				socket.emit("room:error", { message: result.error || "Failed to transfer streamer" });
+				return;
+			}
+
+			// Notify all in room
+			broadcastToRoom(roomId, "room:streamer_changed", {
+				newStreamerId,
+				newStreamerName: result.newStreamerName || "Someone",
+			});
+
+			sendSystemMessage(roomId, `${result.newStreamerName || "Someone"} is now the streamer`);
+
+			// Confirm to sender
+			socket.emit("streamer:transferred", { roomId, newStreamerId });
+
+			console.log(`[Room] Streamer transferred in room ${roomId} to ${newStreamerId}`);
+		} catch (error) {
+			console.error(`[Room] Error transferring streamer:`, error);
+			socket.emit("room:error", { message: error instanceof Error ? error.message : "Failed to transfer streamer" });
+		}
 	});
 
 	// Handle disconnect
 	socket.on("disconnect", async () => {
-		const userId = socket.data.userId;
-		console.log(`[Socket.io] Client disconnected: ${socket.id} (user: ${userId})`);
+		const socketData = socketUserMap.get(socket.id);
+		if (!socketData) return;
 
-		// Check if user was in a room
-		const roomInfo = getSocketRoomInfo(socket.id);
-		if (roomInfo) {
+		const { userId, userName, roomId } = socketData;
+		console.log(`[Socket.io] Client disconnected: ${socket.id} (user: ${userName})`);
+
+		// If user was in a room, handle leave
+		if (roomId) {
 			try {
-				const result = await removeParticipant(roomInfo.roomId, roomInfo.userId);
-				const participants = await getRoomParticipants(roomInfo.roomId);
+				const result = await removeParticipant(roomId, userId);
+				const participants = await getRoomParticipants(roomId);
 
-				broadcastParticipantLeft(roomInfo.roomId, roomInfo.userId, "A user", participants.length);
+				// Notify others in room
+				broadcastToRoom(roomId, "room:user_left", {
+					userId,
+					userName,
+					participantCount: participants.length,
+				});
+
+				sendSystemMessage(roomId, `${userName} left the room`);
 
 				if (result.newStreamerId) {
-					broadcastStreamerChanged(roomInfo.roomId, result.newStreamerId);
+					const newStreamerName = result.newStreamerName || "Someone";
+					broadcastToRoom(roomId, "room:streamer_changed", {
+						newStreamerId: result.newStreamerId,
+						newStreamerName,
+					});
+					sendSystemMessage(roomId, `${newStreamerName} is now the streamer`);
 				}
 
 				if (result.newStatus) {
-					broadcastToRoom(roomInfo.roomId, "room:status_changed", { status: result.newStatus });
+					broadcastToRoom(roomId, "room:status_changed", { status: result.newStatus });
 				}
 			} catch (error) {
 				console.error(`[Room] Error handling disconnect:`, error);
 			}
 		}
 
-		// Remove from user tracking
-		if (userId) {
-			const sockets = userSockets.get(userId);
-			if (sockets) {
-				sockets.delete(socket.id);
-				if (sockets.size === 0) {
-					userSockets.delete(userId);
-				}
-			}
-		}
-
-		broadcastUserCount();
-	});
-
-	// Handle errors
-	socket.on("error", (error: Error) => {
-		console.error(`[Socket.io] Socket error for ${socket.id}:`, error);
+		// Remove from socket user map
+		socketUserMap.delete(socket.id);
 	});
 });
 
@@ -416,31 +450,10 @@ httpServer.listen(PORT, async () => {
 	// Run initial cleanup
 	console.log("[RoomManager] Running initial cleanup on startup...");
 	try {
-		await runRoomCleanupJob(broadcastRoomEnded);
+		await updateAllRoomStatusesFromPresence();
 	} catch (error) {
 		console.error("[RoomManager] Error during initial cleanup:", error);
 	}
-
-	// Run initial status update
-	console.log("[RoomManager] Running initial status update...");
-	try {
-		await updateAllRoomStatusesFromPresence();
-	} catch (error) {
-		console.error("[RoomManager] Error during initial status update:", error);
-	}
-
-	// Setup cleanup job - runs every 5 minutes
-	const CLEANUP_INTERVAL = 5 * 60 * 1000;
-	console.log(`[RoomManager] Cleanup scheduled every ${CLEANUP_INTERVAL / 1000} seconds`);
-
-	setInterval(async () => {
-		console.log("[RoomManager] Running scheduled cleanup...");
-		try {
-			await runRoomCleanupJob(broadcastRoomEnded);
-		} catch (error) {
-			console.error("[RoomManager] Error during cleanup:", error);
-		}
-	}, CLEANUP_INTERVAL);
 
 	// Setup status update job - runs every 1 minute
 	const STATUS_INTERVAL = 60 * 1000;
