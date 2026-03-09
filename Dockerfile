@@ -17,8 +17,20 @@ RUN pnpm install --frozen-lockfile
 # Copy source files
 COPY . .
 
-# Build the application
+# Accept build arguments for environment variables
+ARG VITE_WS_URL=http://localhost:3001
+ARG VITE_BETTER_AUTH_URL=http://localhost:3000
+ARG VITE_POSTHOG_KEY
+ARG VITE_POSTHOG_HOST=https://eu.i.posthog.com
+
+# Make them available as environment variables during build
+ENV VITE_WS_URL=${VITE_WS_URL}
+ENV VITE_BETTER_AUTH_URL=${VITE_BETTER_AUTH_URL}
+ENV VITE_POSTHOG_KEY=${VITE_POSTHOG_KEY}
+ENV VITE_POSTHOG_HOST=${VITE_POSTHOG_HOST}
 ENV NODE_ENV=production
+
+# Build the application
 RUN pnpm build
 
 # Stage 2: Production
