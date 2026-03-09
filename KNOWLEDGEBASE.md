@@ -1,626 +1,162 @@
 # BhayanakCast Knowledge Base
 
-## Project Overview
+## Overview
+Real-time streaming platform built with TanStack Start, featuring Discord OAuth, Socket.io rooms, and PostgreSQL.
 
-**BhayanakCast** is a TanStack Start application with a Discord-inspired dark theme, featuring user authentication, streaming rooms, real-time user tracking via WebSocket, and user relationship tracking.
-
-## Architecture
-
-### Framework Stack
+## Tech Stack
 - **Framework**: TanStack Start (React + SSR)
-- **Router**: TanStack Router (file-based routing)
-- **Query**: TanStack Query v5
-- **Auth**: Better Auth with Discord OAuth (sole authentication method)
-- **Database**: PostgreSQL 15 + Drizzle ORM
-- **Real-time**: Socket.io WebSocket server
-- **Styling**: Tailwind CSS v4 with custom theme
-- **UI Components**: shadcn/ui + better-auth-ui
-- **Debouncing**: @tanstack/pacer
+- **Auth**: Better Auth with Discord OAuth
+- **Database**: PostgreSQL + Drizzle ORM
+- **Real-time**: Socket.io WebSocket server (port 3001)
+- **Styling**: Tailwind CSS v4 with custom dark theme
+- **Icons**: Lucide React
 
-### File Structure
+## Quick Start
+
+```bash
+# Development
+pnpm dev              # Runs both web (3000) and websocket (3001)
+pnpm dev:web          # Web only
+pnpm dev:ws           # WebSocket only
+
+# Testing
+pnpm test             # Run all tests (requires PostgreSQL)
+pnpm test:setup       # Create test database
+
+# Database
+pnpm db:push          # Push schema changes
+pnpm db:studio        # Drizzle Studio
+
+# Code quality
+pnpm lint
+pnpm format
+pnpm check
+```
+
+## Project Structure
+
 ```
 src/
-├── components/          # Reusable UI components
-│   └── Header.tsx       # Shows real-time user count
-├── db/                  # Database layer (server-only)
-│   ├── index.ts         # Database connection (Pool)
-│   ├── schema.ts        # Drizzle ORM schema
-│   └── queries.ts       # Database query utilities
-├── integrations/        # Third-party integrations
-│   ├── better-auth/    # Auth providers
-│   ├── posthog/        # Analytics
-│   └── tanstack-query/ # Query provider
-├── lib/                # Utilities and core logic
-│   ├── auth.ts         # Better-auth server config
-│   ├── auth-client.ts  # Better-auth client
-│   ├── auth-guard.ts   # Route protection utilities
-│   └── websocket-context.tsx  # Global WebSocket connection
-├── routes/             # TanStack Router file-based routes
-│   ├── __root.tsx      # Root layout (with WebSocketProvider)
-│   ├── index.tsx       # Home page (public)
-│   ├── profile.$userId.tsx  # Profile page (public)
-│   └── auth/$authView.tsx   # Auth pages
-├── utils/              # Server utility functions
-│   └── profile.ts      # Profile data fetching (server functions)
-├── styles.css          # Global styles with theme
-websocket-server.ts     # Socket.io server (port 3001)
+├── components/      # UI components (Header, RoomCard, Chat, etc.)
+├── db/             # Database layer (SERVER-ONLY)
+│   ├── schema.ts   # Drizzle ORM schema
+│   └── queries/    # Query functions
+├── lib/            # Core utilities
+│   ├── auth.ts     # Better Auth config
+│   └── websocket-context.tsx
+├── routes/         # TanStack Router file-based routes
+│   ├── index.tsx   # Home page
+│   ├── room.$roomId.tsx
+│   └── auth/$authView.tsx
+├── utils/          # Server utility functions
+└── styles.css      # Global styles with theme
+
+websocket/          # WebSocket server files
+├── websocket-server.ts
+└── websocket-room-manager.ts
 ```
 
-## Key Implementation Details
+## Critical Rules
 
-### WebSocket Server
-
-**Socket.io Server** (runs separately on port 3001):
+### Database Usage
+⚠️ **Database imports ONLY in server functions:**
 ```typescript
-// websocket-server.ts
-import { Server } from "socket.io";
-
-const io = new Server(httpServer, {
-  cors: { origin: "http://localhost:3000" }
-});
-
-io.on("connection", (socket) => {
-  // Track connections and broadcast user count
-  io.emit("userCount", { count: io.engine.clientsCount });
-});
-```
-
-**WebSocket Client** (global context):
-```typescript
-// src/lib/websocket-context.tsx
-import { io } from "socket.io-client";
-import { debounce } from "@tanstack/pacer";
-
-// Debounced user count updates (300ms)
-const debouncedUpdate = debounce(setUserCount, 300);
-
-socket.on("userCount", (data) => {
-  debouncedUpdate(data.count);
-});
-```
-
-### Real-time User Count
-
-The Header component displays live user count:
-- Shows `...` while connecting
-- Shows actual count with green pulse when connected
-- Updates are debounced to prevent rapid re-renders
-
-### Database Setup
-
-**Connection**: Use `Pool` from `pg` for connection pooling:
-```typescript
-// src/db/index.ts
-import { drizzle } from "drizzle-orm/node-postgres";
-import { Pool } from "pg";
-
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-export const db = drizzle(pool, { schema });
-```
-
-**⚠️ CRITICAL**: Database imports must ONLY be used in server functions:
-```typescript
-// ✅ CORRECT - Inside createServerFn
-const getData = createServerFn({ method: "GET" })
+// ✅ CORRECT - Dynamic import inside server function
+const myFn = createServerFn({ method: "GET" })
   .handler(async () => {
     const { db } = await import("#/db/index");
-    return db.query...;
+    return db.query.users.findMany();
   });
 
-// ❌ WRONG - Will cause Buffer errors in browser
-import { db } from "#/db/index"; // At top of route file
+// ❌ WRONG - Will cause Buffer error in browser
+import { db } from "#/db/index";  // Never at top level of client files
 ```
 
-### Better Auth Configuration
-
-**Critical**: Must use `usePlural: true` with Drizzle adapter:
-```typescript
-import { betterAuth } from "better-auth";
-import { drizzleAdapter } from "better-auth/adapters/drizzle";
-
-export const auth = betterAuth({
-  database: drizzleAdapter(db, {
-    provider: "pg",
-    usePlural: true,  // REQUIRED
-    schema,
-  }),
-  emailAndPassword: { enabled: true },
-});
-```
-
-### Route Protection
-
-Use `beforeLoad` for auth protection in route definitions:
-
-```typescript
-import { createFileRoute } from "@tanstack/react-router";
-import { requireAuth, publicRoute } from "#/lib/auth-guard";
-
-// Protected route
-export const Route = createFileRoute("/dashboard")({
-  component: DashboardPage,
-  beforeLoad: requireAuth,
-});
-
-// Public route
-export const Route = createFileRoute("/")({
-  component: HomePage,
-  beforeLoad: publicRoute,
-});
-```
-
-**Current Public Routes**:
-- `/` - Home page
-- `/profile/$userId` - User profiles (viewable by anyone)
-- `/auth/$authView` - Sign in/up pages
-
-### Server Functions
-
-Always use `inputValidator` (not `validator`) and import db dynamically:
-```typescript
-import { createServerFn } from "@tanstack/react-start";
-
-const myServerFn = createServerFn({ method: "GET" })
-  .inputValidator((data: { userId: string }) => data)
-  .handler(async ({ data }) => {
-    // Dynamic import prevents client bundling
-    const { db } = await import("#/db/index");
-    return db.query...;
-  });
-```
-
-### UserButton Customization
-
-```tsx
-import { UserButton } from "@daveyplate/better-auth-ui";
-import { User } from "lucide-react";
-
-<UserButton
-  size="sm"
-  disableDefaultLinks
-  additionalLinks={[{
-    label: "Profile",
-    href: `/profile/${userId}`,
-    icon: <User className="h-4 w-4" />,
-  }]}
-/>
-```
-
-### Theme System
-
-Custom Discord-inspired dark theme with depth levels:
-- `bg-depth-0` - Deepest background (#1a1b1e)
-- `bg-depth-1` to `bg-depth-4` - Increasing elevation
-- Never use arbitrary Tailwind values
-
-### Environment Variables
-
-Required in `.env.local`:
-```bash
-# Database
-DATABASE_URL="postgresql://postgres:postgres@localhost:5432/postgres"
-
-# Better Auth
-BETTER_AUTH_URL=http://localhost:3000
-BETTER_AUTH_SECRET=<generate with pnpm dlx @better-auth/cli secret>
-
-# WebSocket Server
-WS_PORT=3001
-CLIENT_URL=http://localhost:3000
-VITE_WS_URL=http://localhost:3001
-
-# PostHog (optional)
-VITE_POSTHOG_KEY=<optional>
-```
-
-## Development Commands
-
-```bash
-# Development (runs both web app and WebSocket server)
-pnpm dev
-
-# Run individually
-pnpm dev:web    # Web app only (port 3000)
-pnpm dev:ws     # WebSocket server only (port 3001)
-
-# Build for production
-pnpm build
-
-# Run tests
-pnpm test              # Run all tests
-pnpm test:watch        # Run tests in watch mode
-pnpm test:coverage     # Run tests with coverage report
-pnpm test:setup        # Create test database
-
-# Run specific test file
-pnpm vitest run tests/unit/RoomCard.test.tsx
-pnpm vitest run tests/integration/room-management.test.ts
-
-# Lint and format
-pnpm check
-pnpm format
-pnpm lint
-
-# Database operations
-pnpm db:generate    # Generate drizzle migrations
-pnpm db:migrate     # Run migrations
-pnpm db:push        # Push schema changes
-pnpm db:studio      # Open drizzle studio
-
-# Docker
-pnpm docker:up      # Start PostgreSQL
-pnpm docker:down    # Stop PostgreSQL
-```
-
-## Testing Infrastructure
-
-### Test Suite Overview
-
-**Framework**: Vitest v3 with jsdom environment
-**Total Tests**: 59 tests across 6 test files
-**Coverage Threshold**: 90% (statements, branches, functions, lines)
-
-### Test Structure
-
-```
-tests/
-├── fixtures/              # Test data fixtures
-│   ├── users.ts          # 3 test users
-│   ├── rooms.ts          # 5 test rooms (various statuses)
-│   ├── participants.ts   # Room participation data
-│   └── relationships.ts  # User relationships
-├── integration/          # Integration tests
-│   ├── room-management.test.ts    # 15 tests - DB queries
-│   ├── user-stats.test.ts         # 14 tests - Stats calculations
-│   └── room-list.test.tsx         # 10 tests - Component + DB
-├── unit/                 # Unit tests
-│   ├── RoomCard.test.tsx          # 8 tests
-│   ├── CommunityStatsCard.test.tsx # 6 tests
-│   └── CreateRoomModal.test.tsx   # 6 tests
-├── utils/                # Test utilities
-│   ├── database.ts       # Test DB connection & cleanup
-│   ├── mocks.ts          # Common mocks
-│   └── render.tsx        # Custom render with providers
-└── setup.ts              # Test environment setup
-```
-
-### Test Database Setup
-
-**Separate Test Database**: `bhayanak_cast_test`
-- Runs on same PostgreSQL container as dev database
-- Isolated from development data
-- Schema synchronized via `pnpm db:push`
-
-**Database Cleanup Strategy**:
-```typescript
-// Clear all tables before each test (no transactions)
-await clearTables();  // DELETE all data
-await insertTestUsers(db);      // Fresh test data
-await insertTestRooms(db);
-await insertTestParticipants(db);
-```
-
-**Why No Transactions?**
-- `createServerFn` creates its own database connections
-- Test data must be committed for server functions to access it
-- Tables are cleared and re-populated before each test instead
-
-### Testing Database Queries
-
-Test query functions directly, not `createServerFn` wrappers:
-
-```typescript
-// ✅ Good - Test the query function directly
-import { getActiveRooms } from "../../src/db/queries/stats";
-
-const rooms = await getActiveRooms();
-expect(rooms.length).toBeGreaterThan(0);
-
-// ❌ Bad - createServerFn requires TanStack Start runtime
-import { getHomeData } from "../../src/utils/home";
-// This won't work in Vitest - requires server context
-```
-
-### Coverage Configuration
-
-**vitest.config.ts**:
-```typescript
-coverage: {
-  provider: "v8",
-  thresholds: {
-    statements: 90,
-    branches: 90,
-    functions: 90,
-    lines: 90,
-  },
-  include: ["src/**/*.{ts,tsx}"],
-}
-```
-
-### Running Tests
-
-```bash
-# Setup test database (one-time)
-pnpm test:setup
-
-# Run all tests (automatically uses test database)
-pnpm test
-
-# Run with coverage
-pnpm test:coverage
-
-# Run specific file
-pnpm vitest run tests/unit/RoomCard.test.tsx
-```
-
-**Note**: Test commands automatically set `DATABASE_URL` to use the test database. No manual environment variable setup required.
+### Code Style
+- **Indentation**: Tabs (Biome)
+- **Quotes**: Double
+- **Formatter**: Biome (not Prettier)
+- **Imports**: Use `#/` alias for src
+- **Types**: Strict mode, no non-null assertions
+- **Theme**: Use `bg-depth-0` to `bg-depth-4`, never arbitrary Tailwind values
 
 ## Database Schema
 
-### Better Auth Tables (Auto-managed)
-- `users` - User accounts (populated from Discord OAuth)
-  - **name**: Discord username
-  - **email**: Discord email
-  - **image**: Discord avatar URL
-  - **emailVerified**: Discord verification status
-- `sessions` - Active sessions
-- `accounts` - OAuth accounts (Discord link)
-- `verifications` - Email verification codes
-
-### Discord OAuth Integration
-**User Data Flow:**
-1. User clicks "Continue with Discord" on `/auth/sign-in`
-2. Discord OAuth redirects to `/api/auth/callback/discord`
-3. `auth.ts` fetches user profile from Discord API
-4. User data synced: username, email, avatar URL
-5. Existing users updated, new users created automatically
-6. Profile refreshes on every login
-
-**Avatar URL Format:**
-```
-https://cdn.discordapp.com/avatars/{discordUserId}/{avatarHash}.png
-```
+### Better Auth Tables
+- `users` - Discord OAuth users (auto-synced on login)
+- `sessions`, `accounts`, `verifications`
 
 ### Application Tables
-- `streaming_rooms` - Active/past streaming sessions (streamerId is nullable)
-  - **status**: `waiting` | `preparing` | `active` | `ended`
-- `room_participants` - User participation in rooms
+- `streaming_rooms` - Rooms (status: waiting/preparing/active/ended, streamerId nullable)
+- `room_participants` - Room join/leave tracking with watch time
 - `user_relationships` - Aggregated time between users
-- `user_room_overlaps` - Detailed overlap logs
+- `user_room_overlaps` - Detailed overlap tracking
 
-## Common Issues & Solutions
+## Room System
 
-### Buffer is not defined Error
-**Cause**: Database imports being bundled for client side
-**Solution**: Use dynamic imports inside server functions only
+### Status States
+| Status | Description | Indicator |
+|--------|-------------|-----------|
+| `waiting` | No streamer | Gray dot |
+| `preparing` | Streamer only | Yellow dot |
+| `active` | Streaming | Green dot + "LIVE" |
+| `ended` | Closed | History icon |
 
-### 422 Error on Sign-up
-**Cause**: Missing database adapter configuration
-**Solution**: Ensure `drizzleAdapter` has `usePlural: true`
+### Business Logic
+- **Streamer leaves** → earliest viewer auto-becomes streamer
+- **No viewers** → streamerId = null, status = waiting
+- **Waiting + 5 min empty** → status = ended (cleanup job)
+- **User can only be in ONE room** at a time
 
-### "Model 'user' not found" Error
-**Cause**: Better Auth looking for singular table names
-**Solution**: Add `usePlural: true` to adapter config
+### Socket.io Events
 
-### Type Errors with Server Functions
-**Cause**: Using `.validator()` instead of `.inputValidator()`
-**Solution**: Use `.inputValidator()` method
+**Client → Server:**
+- `room:join` / `room:leave` - Join/leave room
+- `chat:send` - Send chat message
+- `streamer:transfer` - Transfer ownership (30s cooldown)
 
-### Database Import Errors
-**Cause**: Using wrong import path or importing at top level
-**Solution**: Use dynamic imports inside `createServerFn` handlers
+**Server → Client:**
+- `room:user_joined` / `room:user_left`
+- `room:streamer_changed`
+- `room:status_changed`
+- `chat:message` (user or system)
 
-## Code Style Guidelines
+## Environment Variables
 
-### Formatting
-- **Indentation**: Tabs (configured in biome.json)
-- **Quotes**: Double quotes for strings
-- **Formatter**: Biome (not Prettier)
-- **No non-null assertions**: Use proper validation instead of `!`
+```bash
+# Required
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/postgres"
+BETTER_AUTH_URL=http://localhost:3000
+BETTER_AUTH_SECRET=<generate: pnpm dlx @better-auth/cli secret>
+DISCORD_CLIENT_ID=<from Discord Developer Portal>
+DISCORD_CLIENT_SECRET=<from Discord Developer Portal>
 
-### Imports
-- Use path alias `#/` for src imports
-- Dynamic import database modules in server functions
-- Organize imports automatically (Biome handles this)
+# WebSocket
+VITE_WS_URL=http://localhost:3001
+CLIENT_URL=http://localhost:3000
 
-### TypeScript
-- Strict mode enabled
-- No unused locals or parameters (enforced)
-- Prefer interfaces for object shapes
-- Use `type` for type imports when possible
-
-## Room System Architecture
-
-### Room Lifecycle
-
-**Room States:**
-```
-(none) --create--> PREPARING --stream starts--> ACTIVE
-    |
-    +-- streamer leaves, no viewers left --> WAITING --empty 5min--> ENDED --3hrs--> (hidden)
+# Optional
+VITE_POSTHOG_KEY=<optional>
 ```
 
-**Creating a Room:**
-1. User opens CreateRoomModal → submits name + description
-2. Server validates auth, auto-leaves previous room if any
-3. Creates `streamingRooms` record with user as streamer
-4. Inserts `room_participants` record (streamer as participant)
-5. WebSocket: Join room channel
-6. Navigate to `/room/$roomId`
+## Testing
 
-**Joining a Room:**
-1. Check if already in a room → leave previous if so
-2. Insert new `room_participants` record
-3. WebSocket: `room:join` event broadcast
+**Framework**: Vitest v3 + jsdom
+**Total Tests**: 59
+**Coverage**: 90%+ threshold
 
-**Leaving a Room:**
-1. Update `leftAt` timestamp, calculate `totalTimeSeconds`
-2. If streamer leaving:
-   - Find first joined viewer (oldest `joinedAt`)
-   - Transfer ownership: update `streamingRooms.streamerId`
-   - Old streamer becomes regular participant
-   - WebSocket: `room:streamer_changed` event
-3. If no viewers to transfer to: set streamerId to null, status to `waiting`
-4. If no participants remain: schedule 5-min grace period
-
-**Streamer Transfer (Manual):**
-- Streamer clicks "Transfer Stream" → selects viewer
-- 30-second cooldown between transfers
-- Automatic transfer (no viewer acceptance needed)
-
-**Room Cleanup (Cron Job):**
-- Runs every 5 minutes
-- Finds `waiting` rooms (no streamer) with no participants for 5+ minutes
-- Updates status to "ended", sets `endedAt`
-- WebSocket: `room:ended` event
-
-**Past Streams Visibility:**
-- Ended rooms visible for 3 hours after ending
-- Query filter: `endedAt >= NOW() - INTERVAL '3 hours'`
-- Direct URLs still work after 3 hours (for bookmarks)
-
-### Single-Room Constraint
-
-Each user can only be in ONE room at a time:
-```typescript
-async function joinRoom(userId, roomId) {
-  const currentRoom = await getCurrentRoom(userId);
-  if (currentRoom) {
-    await leaveRoom(userId, currentRoom.id);
-  }
-  await insertParticipant(userId, roomId);
-}
+```bash
+pnpm test:setup       # One-time setup
+pnpm test             # Run all tests
+pnpm vitest run tests/unit/RoomCard.test.tsx
 ```
 
-### Room Status System
-
-| Status | Description | Visual Indicator |
-|--------|-------------|------------------|
-| `waiting` | No streamer or viewers present | Gray dot • "Waiting" |
-| `preparing` | Streamer present but not streaming | Yellow dot • "Preparing" |
-| `active` | Streamer actively streaming | Green dot • "Streaming" |
-| `ended` | Room closed after grace period | History icon • "Ended" |
-
-**Status Transitions:**
-- **Create Room** → `preparing` (streamer joins as first participant)
-- **Streamer Leaves + Viewers Remain** → New streamer promoted, stays `preparing`
-- **Streamer Leaves + No Viewers** → `waiting` (streamerId set to null)
-- **Waiting + 5 min empty** → `ended` (cleanup cron job)
-
-**Database Schema:**
-- `streamerId` is nullable (onDelete: "set null")
-- `status` has 4 values: waiting, preparing, active, ended
-- Default status: `waiting`
-
-**Queries:**
-- Use `leftJoin` for streamer relationship to handle null cases
-- All room queries fetch `waiting`, `preparing`, and `active` rooms
-- Ended rooms only visible for 3 hours
-
-### Socket.io Room Architecture
-
-The application uses Socket.io Rooms for real-time communication. Each streaming room is a Socket.io channel that clients can join and leave.
-
-**Socket.io Rooms Concept:**
-- Each room is a Socket.io channel that sockets can `join()` and `leave()`
-- Broadcasting: `io.to(roomId).emit(event, data)` sends to all in room
-- Excluding sender: `socket.to(roomId).emit(event, data)` sends to all except sender
-- Rooms are server-only; clients don't know which rooms they're in
-
-**Event Flow:**
-1. **Client Action** → emits event to WebSocket server
-2. **Server Processing** → updates database, manages Socket.io room membership
-3. **Broadcast** → server broadcasts to all clients in the room
-4. **UI Update** → clients receive event and refresh data via React Query
-
-#### Client → Server Events
-
-- `room:join` - User wants to join a room
-- `room:leave` - User wants to leave a room
-- `chat:send` - Send a chat message
-- `streamer:transfer` - Transfer streamer ownership
-
-#### Server → Client Events
-
-- `room:joined` - Confirmation of joining room (includes room state)
-- `room:left` - Confirmation of leaving room
-- `room:user_joined` - Another user joined
-- `room:user_left` - Another user left
-- `room:streamer_changed` - Streamer ownership changed
-- `room:status_changed` - Room status changed
-- `room:error` - Error occurred
-- `chat:message` - New chat message (user or system)
-
-#### WebSocket Server Components
-
-**Location:** `websocket/websocket-server.ts`
-
-- **Socket User Map**: Tracks socket -> user/room mapping
-- **Join Room**: Updates DB, joins Socket.io room, broadcasts to others
-- **Leave Room**: Updates DB, leaves Socket.io room, broadcasts to others
-- **Chat**: Validates user is in room, broadcasts to all including sender
-- **Streamer Transfer**: Validates permissions, updates DB, broadcasts change
-- **Disconnect**: Auto-leaves room, updates DB, broadcasts to others
-
-**Room Manager:** `websocket/websocket-room-manager.ts`
-
-- `addParticipant()` - Adds user to room, handles streamer assignment
-- `removeParticipant()` - Removes user, handles streamer transfer
-- `transferStreamer()` - Manual streamer transfer with 30-second cooldown
-- All functions return `newStreamerName` for better UX
-
-#### Database + WebSocket Sync Pattern
-
-1. WebSocket server updates database first
-2. Then broadcasts to Socket.io room
-3. Clients receive event and refetch via React Query
-4. UI updates automatically
-
-**Why this pattern?**
-- Database is source of truth for persistence
-- WebSocket is for real-time communication
-- React Query provides caching and background updates
-
-### Active Room Indicator
-
-- Shows on: Home page, Profile page
-- Hidden on: Room page, Auth pages
-- Displays: Room name, participant count, Leave button
-- Updates in real-time via WebSocket
-
-## Future Enhancements
-
-Potential features to implement:
-- [x] Room creation and management UI
-- [x] Room status system (waiting, preparing, active, ended)
-- [x] Nullable streamer support
-- [ ] Real-time chat in streaming rooms
-- [ ] WebRTC integration for video/audio streaming
-- [ ] User search functionality
-- [ ] Friend request system
-- [ ] Notifications system
-- [ ] User settings page
-- [ ] Admin dashboard
-
-## Important Notes
-
-1. **Never commit secrets** - `.env.local` contains sensitive data
-2. **Database imports** - Only use inside server functions with dynamic imports
-3. **Route files** - Must match TanStack Router's file-based routing conventions
-4. **Server functions** - Always validate input data
-5. **Theme** - Hardcoded to dark mode in `__root.tsx`
-6. **Auth redirects** - Use `beforeLoad` for SSR-safe redirects
-7. **WebSocket** - Runs on port 3001, separate from web app (port 3000)
-8. **Caching** - 30-minute TTL default, 2-minute for community stats and room data
-9. **Room cleanup** - Runs every 5 minutes, ends `waiting` rooms empty for 5+ minutes
-10. **Streamer null** - Rooms can exist without streamer (enters `waiting` status)
+**Test Database**: `bhayanak_cast_test` (isolated, cleared before each test)
 
 ## References
 
 - [Socket.io Docs](https://socket.io/docs/)
-- [TanStack Pacer Docs](https://tanstack.com/pacer/latest)
-- [Better Auth UI Docs](https://better-auth-ui.com)
-- [TanStack Router Docs](https://tanstack.com/router/latest)
-- [TanStack Start Docs](https://tanstack.com/start/latest)
-- [Drizzle ORM Docs](https://orm.drizzle.team)
-- [Better Auth Docs](https://www.better-auth.com)
+- [TanStack Start](https://tanstack.com/start/latest)
+- [Drizzle ORM](https://orm.drizzle.team)
+- [Better Auth](https://www.better-auth.com)
+- [PLAN.md](./PLAN.md) - Roadmap and features
