@@ -5,9 +5,9 @@ import { dirname, join } from "node:path";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Load .env files FIRST before any other imports
-config({ path: join(__dirname, ".env.local"), override: true });
-config({ path: join(__dirname, ".env"), override: true });
+// Load .env files FIRST before any other imports (from parent directory)
+config({ path: join(__dirname, "..", ".env.local"), override: true });
+config({ path: join(__dirname, "..", ".env"), override: true });
 
 import { Server } from "socket.io";
 import { createServer } from "http";

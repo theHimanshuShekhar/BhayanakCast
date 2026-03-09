@@ -40,7 +40,7 @@ COPY --from=builder --chown=appuser:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=appuser:nodejs /app/package.json ./package.json
 COPY --from=builder --chown=appuser:nodejs /app/pnpm-lock.yaml ./pnpm-lock.yaml
 COPY --from=builder --chown=appuser:nodejs /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
-COPY --from=builder --chown=appuser:nodejs /app/websocket-server.ts ./websocket-server.ts
+COPY --from=builder --chown=appuser:nodejs /app/websocket ./websocket
 COPY --from=builder --chown=appuser:nodejs /app/src ./src
 COPY --from=builder --chown=appuser:nodejs /app/tsconfig.json ./tsconfig.json
 
@@ -52,4 +52,4 @@ EXPOSE 3000 3001
 
 # Start both services using concurrently
 # Web app on port 3000, WebSocket on port 3001
-CMD ["pnpm", "concurrently", "-n", "web,websocket", "-c", "cyan,yellow", "node .output/server/index.mjs", "tsx websocket-server.ts"]
+CMD ["pnpm", "concurrently", "-n", "web,websocket", "-c", "cyan,yellow", "node .output/server/index.mjs", "tsx websocket/websocket-server.ts"]
