@@ -10,8 +10,8 @@ config({ path: join(__dirname, ".env.local"), override: true });
 config({ path: join(__dirname, ".env"), override: true });
 
 import { and, eq, isNull, ne, sql } from "drizzle-orm";
-import { db } from "./src/db/index";
-import { roomParticipants, streamingRooms, users } from "./src/db/schema";
+import { db } from "../src/db/index";
+import { roomParticipants, streamingRooms, users } from "../src/db/schema";
 import { nanoid } from "nanoid";
 
 // In-memory tracking of socket -> room mapping for presence detection
