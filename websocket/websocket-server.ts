@@ -41,6 +41,95 @@ const httpServer = createServer((req, res) => {
 		return;
 	}
 
+	// Handle root path - show simple HTML page
+	if (req.url === "/" && req.method === "GET") {
+		res.writeHead(200, { "Content-Type": "text/html" });
+		res.end(`<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BhayanakCast WebSocket Server</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1b1e 0%, #2d2f36 100%);
+            color: #ffffff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .container {
+            text-align: center;
+            padding: 2rem;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            max-width: 500px;
+        }
+        h1 {
+            margin: 0 0 1rem 0;
+            font-size: 2rem;
+            background: linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        p {
+            margin: 0.5rem 0;
+            color: #9ca3af;
+            line-height: 1.6;
+        }
+        .status {
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            background: rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+            border-radius: 20px;
+            font-size: 0.875rem;
+            margin-top: 1rem;
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+        .dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background: #22c55e;
+            border-radius: 50%;
+            margin-right: 0.5rem;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        a {
+            color: #8b5cf6;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>BhayanakCast</h1>
+        <p><strong>WebSocket Server</strong></p>
+        <p>This is the WebSocket server for BhayanakCast real-time streaming platform.</p>
+        <p>Port: ${PORT}</p>
+        <div class="status"><span class="dot"></span>Server Running</div>
+        <p style="margin-top: 1.5rem; font-size: 0.875rem;">
+            Visit the main app at <a href="${CLIENT_URL}">${CLIENT_URL}</a>
+        </p>
+    </div>
+</body>
+</html>`);
+		return;
+	}
+
 	// Handle broadcast endpoint for server functions
 	if (req.url === "/api/broadcast" && req.method === "POST") {
 		let body = "";
