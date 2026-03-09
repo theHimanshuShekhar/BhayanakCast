@@ -23,12 +23,21 @@ services:
       context: .
       dockerfile: Dockerfile
       target: runner
+      args:
+        # These are baked into the client bundle at build time
+        - VITE_WS_URL=${VITE_WS_URL:-http://localhost:3001}
+        - VITE_BETTER_AUTH_URL=${VITE_BETTER_AUTH_URL:-http://localhost:3000}
+        - VITE_POSTHOG_KEY=${VITE_POSTHOG_KEY}
+        - VITE_POSTHOG_HOST=${VITE_POSTHOG_HOST:-https://eu.i.posthog.com}
     container_name: bhayanak-app
     env_file:
       - .env.production
     environment:
+      # These are runtime environment variables (server-side only)
       NODE_ENV: production
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
+      CLIENT_URL: ${CLIENT_URL:-http://localhost:3000}
+      VITE_WS_URL: ${VITE_WS_URL:-http://localhost:3001}
     ports:
       - "3000:3000"
       - "3001:3001"
