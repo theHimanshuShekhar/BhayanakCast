@@ -1,4 +1,5 @@
 import { debounce } from "@tanstack/pacer";
+import { useQuery } from "@tanstack/react-query";
 import type React from "react";
 import {
 	createContext,
@@ -10,6 +11,7 @@ import {
 } from "react";
 import { io, type Socket } from "socket.io-client";
 import { authClient } from "#/lib/auth-client";
+import { getRuntimeConfig } from "#/utils/runtime-config";
 
 interface WebSocketContextType {
 	socket: Socket | null;
@@ -22,7 +24,6 @@ const WebSocketContext = createContext<WebSocketContextType | undefined>(
 	undefined,
 );
 
-const WS_URL = import.meta.env.VITE_WS_URL || "http://localhost:3001";
 const ANONYMOUS_USER_KEY = "bhayanak_anonymous_user_id";
 
 /**
@@ -57,8 +58,18 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 	const debouncedUpdateRef = useRef<((count: number) => void) | null>(null);
 	const { data: session } = authClient.useSession();
 
+	// Fetch runtime configuration from server
+	const { data: runtimeConfig } = useQuery({
+		queryKey: ["runtimeConfig"],
+		queryFn: () => getRuntimeConfig(),
+		staleTime: Infinity, // Config doesn't change during session
+		gcTime: Infinity,
+	});
+
+	const wsUrl = runtimeConfig?.wsUrl || "http://localhost:3001";
+
 	useEffect(() => {
-		if (typeof window === "undefined") {
+		if (typeof window === "undefined" || !wsUrl) {
 			return;
 		}
 
@@ -70,7 +81,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 			{ wait: 300 },
 		);
 
-		const socket = io(WS_URL, {
+		const socket = io(wsUrl, {
 			transports: ["websocket", "polling"],
 			autoConnect: true,
 			reconnection: true,
@@ -102,7 +113,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 		return () => {
 			socket.disconnect();
 		};
-	}, [session?.user?.id, session?.user?.name, session?.user?.image]);
+	}, [wsUrl, session?.user?.id, session?.user?.name, session?.user?.image]);
 
 	// Re-identify when session changes (user logs in/out)
 	useEffect(() => {
