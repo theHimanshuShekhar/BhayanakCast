@@ -517,12 +517,69 @@ async function joinRoom(userId, roomId) {
 - All room queries fetch `waiting`, `preparing`, and `active` rooms
 - Ended rooms only visible for 3 hours
 
-### WebSocket Room Events
+### Socket.io Room Architecture
 
-- `room:join` - User joined room
-- `room:leave` - User left room  
-- `room:streamer_changed` - New streamer assigned (empty string if null)
-- `room:ended` - Room closed
+The application uses Socket.io Rooms for real-time communication. Each streaming room is a Socket.io channel that clients can join and leave.
+
+**Socket.io Rooms Concept:**
+- Each room is a Socket.io channel that sockets can `join()` and `leave()`
+- Broadcasting: `io.to(roomId).emit(event, data)` sends to all in room
+- Excluding sender: `socket.to(roomId).emit(event, data)` sends to all except sender
+- Rooms are server-only; clients don't know which rooms they're in
+
+**Event Flow:**
+1. **Client Action** → emits event to WebSocket server
+2. **Server Processing** → updates database, manages Socket.io room membership
+3. **Broadcast** → server broadcasts to all clients in the room
+4. **UI Update** → clients receive event and refresh data via React Query
+
+#### Client → Server Events
+
+- `room:join` - User wants to join a room
+- `room:leave` - User wants to leave a room
+- `chat:send` - Send a chat message
+- `streamer:transfer` - Transfer streamer ownership
+
+#### Server → Client Events
+
+- `room:joined` - Confirmation of joining room (includes room state)
+- `room:left` - Confirmation of leaving room
+- `room:user_joined` - Another user joined
+- `room:user_left` - Another user left
+- `room:streamer_changed` - Streamer ownership changed
+- `room:status_changed` - Room status changed
+- `room:error` - Error occurred
+- `chat:message` - New chat message (user or system)
+
+#### WebSocket Server Components
+
+**Location:** `websocket/websocket-server.ts`
+
+- **Socket User Map**: Tracks socket -> user/room mapping
+- **Join Room**: Updates DB, joins Socket.io room, broadcasts to others
+- **Leave Room**: Updates DB, leaves Socket.io room, broadcasts to others
+- **Chat**: Validates user is in room, broadcasts to all including sender
+- **Streamer Transfer**: Validates permissions, updates DB, broadcasts change
+- **Disconnect**: Auto-leaves room, updates DB, broadcasts to others
+
+**Room Manager:** `websocket/websocket-room-manager.ts`
+
+- `addParticipant()` - Adds user to room, handles streamer assignment
+- `removeParticipant()` - Removes user, handles streamer transfer
+- `transferStreamer()` - Manual streamer transfer with 30-second cooldown
+- All functions return `newStreamerName` for better UX
+
+#### Database + WebSocket Sync Pattern
+
+1. WebSocket server updates database first
+2. Then broadcasts to Socket.io room
+3. Clients receive event and refetch via React Query
+4. UI updates automatically
+
+**Why this pattern?**
+- Database is source of truth for persistence
+- WebSocket is for real-time communication
+- React Query provides caching and background updates
 
 ### Active Room Indicator
 
