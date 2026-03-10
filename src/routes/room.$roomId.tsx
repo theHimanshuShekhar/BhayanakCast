@@ -185,6 +185,11 @@ function RoomDetailPage() {
 		void navigate({ to: "/" });
 	}, [userId, socket, isConnected, roomId, navigate]);
 
+	// Simple back navigation for ended rooms (no WebSocket required)
+	const handleBackToRooms = useCallback(() => {
+		void navigate({ to: "/" });
+	}, [navigate]);
+
 	// Auto-join room on mount - fires when user loads room page
 	useEffect(() => {
 		if (userId && !hasJoinedRef.current && socket && isConnected) {
@@ -684,10 +689,10 @@ function RoomDetailPage() {
 	return (
 		<div className="h-full w-full bg-depth-0 px-4 py-8 overflow-auto">
 			<div className="mx-auto max-w-4xl space-y-6">
-				{/* Back button */}
+				{/* Back button - use simple navigation for ended rooms */}
 				<button
 					type="button"
-					onClick={handleLeaveRoom}
+					onClick={handleBackToRooms}
 					className="inline-flex items-center gap-2 text-text-secondary hover:text-text-primary transition-colors"
 				>
 					<ArrowLeft className="h-4 w-4" />
@@ -751,51 +756,61 @@ function RoomDetailPage() {
 						</p>
 					) : (
 						<div className="space-y-3">
-							{participants.map((p, index) => (
-								<div
-									key={p.participant.id}
-									className="flex items-center gap-4 p-3 bg-depth-2 rounded-lg"
-								>
-									<div className="shrink-0 w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center">
-										<span className="text-sm font-bold text-accent">
-											#{index + 1}
-										</span>
-									</div>
-
-									{p.user.image ? (
-										<img
-											src={p.user.image}
-											alt={p.user.name}
-											className="h-12 w-12 rounded-full object-cover"
-										/>
-									) : (
-										<div className="h-12 w-12 rounded-full bg-surface-3 flex items-center justify-center">
-											<span className="text-lg font-medium text-text-primary">
-												{p.user.name.charAt(0).toUpperCase()}
+							{[...participants]
+								.sort(
+									(a, b) =>
+										(b.participant.totalTimeSeconds || 0) -
+										(a.participant.totalTimeSeconds || 0),
+								)
+								.map((p, index) => (
+									<Link
+										key={p.participant.id}
+										to="/profile/$userId"
+										params={{ userId: p.user.id }}
+										className="flex items-center gap-4 p-3 bg-depth-2 rounded-lg hover:bg-depth-3 transition-colors"
+									>
+										<div className="shrink-0 w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center">
+											<span className="text-sm font-bold text-accent">
+												#{index + 1}
 											</span>
 										</div>
-									)}
 
-									<div className="flex-1 min-w-0">
-										<h3 className="text-base font-medium text-text-primary truncate">
-											{p.user.name}
-										</h3>
-										<p className="text-sm text-text-tertiary">
-											Joined <ClientDate date={p.participant.joinedAt} />
-										</p>
-									</div>
-
-									{p.participant.totalTimeSeconds !== null &&
-										p.participant.totalTimeSeconds > 0 && (
-											<div className="text-right shrink-0">
-												<p className="text-base font-semibold text-accent">
-													{formatDuration(p.participant.totalTimeSeconds)}
-												</p>
-												<p className="text-xs text-text-tertiary">watch time</p>
+										{p.user.image ? (
+											<img
+												src={p.user.image}
+												alt={p.user.name}
+												className="h-12 w-12 rounded-full object-cover"
+											/>
+										) : (
+											<div className="h-12 w-12 rounded-full bg-surface-3 flex items-center justify-center">
+												<span className="text-lg font-medium text-text-primary">
+													{p.user.name.charAt(0).toUpperCase()}
+												</span>
 											</div>
 										)}
-								</div>
-							))}
+
+										<div className="flex-1 min-w-0">
+											<h3 className="text-base font-medium text-text-primary truncate">
+												{p.user.name}
+											</h3>
+											<p className="text-sm text-text-tertiary">
+												Joined <ClientDate date={p.participant.joinedAt} />
+											</p>
+										</div>
+
+										{p.participant.totalTimeSeconds !== null &&
+											p.participant.totalTimeSeconds > 0 && (
+												<div className="text-right shrink-0">
+													<p className="text-base font-semibold text-accent">
+														{formatDuration(p.participant.totalTimeSeconds)}
+													</p>
+													<p className="text-xs text-text-tertiary">
+														watch time
+													</p>
+												</div>
+											)}
+									</Link>
+								))}
 						</div>
 					)}
 				</div>
