@@ -125,6 +125,11 @@ export function Chat({ roomId, userId, userName, userImage }: ChatProps) {
 		};
 
 		const handleStatusChanged = (data: { status: string }) => {
+			// Skip showing "Room has ended" message
+			if (data.status === "ended") {
+				return;
+			}
+
 			let statusMessage = "";
 			switch (data.status) {
 				case "waiting":
@@ -135,9 +140,6 @@ export function Chat({ roomId, userId, userName, userImage }: ChatProps) {
 					break;
 				case "active":
 					statusMessage = "Stream is now live!";
-					break;
-				case "ended":
-					statusMessage = "Room has ended";
 					break;
 				default:
 					statusMessage = `Room status changed to ${data.status}`;
