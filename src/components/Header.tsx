@@ -215,7 +215,7 @@ export default function Sidebar() {
 					<button
 						type="button"
 						onClick={toggleSidebar}
-						className={`flex items-center justify-center rounded-xl transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] ${
+						className={`flex items-center justify-center rounded-xl transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] focus:outline-none ${
 							isExpanded
 								? "w-full px-4 py-2.5 gap-2 hover:bg-depth-2 text-text-secondary hover:text-text-primary"
 								: "w-12 h-12 hover:bg-depth-2 text-text-secondary hover:text-text-primary"

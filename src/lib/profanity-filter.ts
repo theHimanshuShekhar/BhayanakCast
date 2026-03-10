@@ -51,6 +51,9 @@ const customEnglishWords = [
 // Add custom words
 profanity.addWords([...customHindiWords, ...customEnglishWords]);
 
+// Add whitelist - words that should never be censored
+profanity.whitelist.addWords(["bhayanak", "BhayanakCast"]);
+
 /**
  * Censor text by replacing profanity with ***
  * Used for display purposes only - original text is preserved in database
