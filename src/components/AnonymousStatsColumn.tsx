@@ -15,6 +15,7 @@ interface AnonymousStatsColumnProps {
 		totalWatchHoursThisWeek: number;
 		mostActiveStreamers: number;
 		newUsersThisWeek: number;
+		totalWatchSecondsThisWeek: number;
 	};
 	globalStats: {
 		totalRoomsCreated: number;

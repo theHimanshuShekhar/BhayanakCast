@@ -160,7 +160,12 @@ export function RoomList({ initialRooms, userId }: RoomListProps) {
 			{/* Search bar and Create Room */}
 			<div className="flex gap-3">
 				<div className="relative flex-1">
-					<Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-tertiary" />
+					<span
+						className="absolute left-3 top-1/2 -translate-y-1/2"
+						suppressHydrationWarning
+					>
+						<Search className="h-4 w-4 text-text-tertiary" />
+					</span>
 					<Input
 						type="text"
 						placeholder="Search rooms..."
@@ -175,7 +180,9 @@ export function RoomList({ initialRooms, userId }: RoomListProps) {
 							type="button"
 							className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-accent hover:bg-accent-hover text-bg-primary font-bold transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-accent/20 whitespace-nowrap xl:hidden"
 						>
-							<Plus className="h-5 w-5" />
+							<span suppressHydrationWarning>
+								<Plus className="h-5 w-5" />
+							</span>
 							<span>Create Room</span>
 						</button>
 					</CreateRoomModal>

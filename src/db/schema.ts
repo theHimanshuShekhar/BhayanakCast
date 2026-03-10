@@ -145,6 +145,27 @@ export const userRoomOverlaps = pgTable(
 	}),
 );
 
+// Community stats snapshots - pre-calculated every 30 minutes
+export const communityStatsSnapshots = pgTable(
+	"community_stats_snapshots",
+	{
+		id: text("id").primaryKey(),
+		totalRegisteredUsers: integer("total_registered_users").notNull(),
+		totalWatchHoursThisWeek: integer("total_watch_hours_this_week").notNull(),
+		totalWatchSecondsThisWeek: integer("total_watch_seconds_this_week")
+			.notNull()
+			.default(0),
+		mostActiveStreamers: integer("most_active_streamers").notNull(),
+		newUsersThisWeek: integer("new_users_this_week").notNull(),
+		calculatedAt: timestamp("calculated_at").notNull().defaultNow(),
+	},
+	(table) => ({
+		calculatedAtIdx: index("community_stats_calculated_at_idx").on(
+			table.calculatedAt,
+		),
+	}),
+);
+
 // Relations for easier querying
 export const usersRelations = relations(users, ({ many }) => ({
 	streamingRooms: many(streamingRooms),
@@ -193,4 +214,9 @@ export const userRelationshipsRelations = relations(
 			relationName: "user2",
 		}),
 	}),
+);
+
+export const communityStatsSnapshotsRelations = relations(
+	communityStatsSnapshots,
+	() => ({}),
 );

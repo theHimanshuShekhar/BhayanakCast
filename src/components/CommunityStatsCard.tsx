@@ -5,11 +5,28 @@ interface CommunityStatsData {
 	totalWatchHoursThisWeek: number;
 	mostActiveStreamers: number;
 	newUsersThisWeek: number;
+	/** Total watch time in seconds (for accurate minute display) */
+	totalWatchSecondsThisWeek: number;
 }
 
 interface CommunityStatsCardProps {
 	stats?: CommunityStatsData;
 	isLoading?: boolean;
+}
+
+/**
+ * Format watch time - shows hours if >= 1 hour, otherwise shows minutes
+ */
+function formatWatchTime(hours: number, seconds: number): string {
+	if (hours >= 1) {
+		return `${hours.toLocaleString()}h`;
+	}
+	// Less than 1 hour, show minutes
+	const minutes = Math.round(seconds / 60);
+	if (minutes < 1) {
+		return "<1m";
+	}
+	return `${minutes}m`;
 }
 
 function CommunityStatsSkeleton() {
@@ -50,10 +67,13 @@ export function CommunityStatsCard({
 					</div>
 					<div className="flex items-center justify-between p-2.5 rounded-lg bg-depth-2">
 						<span className="text-sm text-text-secondary">
-							Watch Hours (Week)
+							Watch Time (Week)
 						</span>
 						<span className="text-lg font-bold text-accent">
-							{stats.totalWatchHoursThisWeek.toLocaleString()}h
+							{formatWatchTime(
+								stats.totalWatchHoursThisWeek,
+								stats.totalWatchSecondsThisWeek,
+							)}
 						</span>
 					</div>
 					<div className="flex items-center justify-between p-2.5 rounded-lg bg-depth-2">

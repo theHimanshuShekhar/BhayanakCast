@@ -197,7 +197,9 @@ export function RoomCard({ room }: RoomCardProps) {
 			{/* Stats */}
 			<div className="flex items-center gap-4 pt-3 border-t border-border-subtle">
 				<div className="flex items-center gap-1.5">
-					<Users className="h-4 w-4 text-text-tertiary" />
+					<span suppressHydrationWarning>
+						<Users className="h-4 w-4 text-text-tertiary" />
+					</span>
 					<span className="text-sm text-text-secondary">
 						{isEnded
 							? `${room.participantCount} joined`
@@ -224,7 +226,9 @@ export function RoomCard({ room }: RoomCardProps) {
 						</>
 					) : (
 						<>
-							<History className="h-4 w-4 text-text-tertiary" />
+							<span suppressHydrationWarning>
+								<History className="h-4 w-4 text-text-tertiary" />
+							</span>
 							<span className="text-sm text-text-secondary">
 								Ended
 								{room.endedAt &&
