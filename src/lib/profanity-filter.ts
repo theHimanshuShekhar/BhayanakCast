@@ -3,7 +3,7 @@ import { Profanity } from "@2toad/profanity";
 // Create profanity instance with English and Hindi support
 const profanity = new Profanity({
 	languages: ["en", "hi"],
-	wholeWord: true,
+	wholeWord: false, // Allow partial word matches (e.g., "chod" in "behenchod")
 	grawlix: "***",
 });
 
@@ -30,6 +30,10 @@ const customHindiWords = [
 	"bhadwe",
 	"chutiye",
 	"madar",
+	"chod",
+	"chodne",
+	"chodu",
+	"choda",
 ];
 
 const customEnglishWords = [
