@@ -290,7 +290,7 @@ export async function getActiveRooms(
 		.where(and(...conditions))
 		.orderBy(desc(streamingRooms.createdAt));
 
-	// Get last 5 ended rooms (only if not searching)
+	// Get last 6 ended rooms (only if not searching)
 	let endedRooms: typeof activeRooms = [];
 	const endedRoomParticipants: Map<string, RoomParticipant[]> = new Map();
 
@@ -308,7 +308,7 @@ export async function getActiveRooms(
 			.leftJoin(users, eq(streamingRooms.streamerId, users.id))
 			.where(eq(streamingRooms.status, "ended"))
 			.orderBy(desc(streamingRooms.endedAt))
-			.limit(5);
+			.limit(6);
 
 		// Fetch all participants who joined ended rooms (not just active ones)
 		if (endedRooms.length > 0) {
@@ -483,13 +483,10 @@ export async function getTrendingRooms(
 /**
  * Get ended rooms with max participant counts
  */
-export async function getEndedRooms(limit: number = 10): Promise<EndedRoom[]> {
+export async function getEndedRooms(limit: number = 6): Promise<EndedRoom[]> {
 	const cacheKey = `endedRooms:${limit}`;
 	const cached = getCached<EndedRoom[]>(cacheKey);
 	if (cached) return cached;
-
-	// Only show rooms ended within last 3 hours
-	const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
 
 	const rooms = await db
 		.select({
@@ -502,12 +499,7 @@ export async function getEndedRooms(limit: number = 10): Promise<EndedRoom[]> {
 		})
 		.from(streamingRooms)
 		.leftJoin(users, eq(streamingRooms.streamerId, users.id))
-		.where(
-			and(
-				eq(streamingRooms.status, "ended"),
-				gte(streamingRooms.endedAt, threeHoursAgo),
-			),
-		)
+		.where(eq(streamingRooms.status, "ended"))
 		.orderBy(desc(streamingRooms.endedAt))
 		.limit(limit);
 
