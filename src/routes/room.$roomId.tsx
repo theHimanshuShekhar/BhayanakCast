@@ -25,6 +25,7 @@ import {
 	DialogTitle,
 } from "#/components/ui/dialog";
 import { authClient } from "#/lib/auth-client";
+import { censorText } from "#/lib/profanity-filter";
 import {
 	OG_IMAGE_URL,
 	SITE_DESCRIPTION,
@@ -75,8 +76,12 @@ export const Route = createFileRoute("/room/$roomId")({
 		const room = loaderData?.room.room;
 		const streamer = loaderData?.room.streamer;
 		const roomUrl = `${SITE_URL}/room/${room?.id}`;
-		const title = room?.name ? `${room.name} | ${SITE_TITLE}` : SITE_TITLE;
-		const description = room?.description || SITE_DESCRIPTION;
+		const title = room?.name
+			? `${censorText(room.name)} | ${SITE_TITLE}`
+			: SITE_TITLE;
+		const description =
+			(room?.description ? censorText(room.description) : null) ||
+			SITE_DESCRIPTION;
 		const image = streamer?.image || OG_IMAGE_URL;
 
 		return {
@@ -369,7 +374,7 @@ function RoomDetailPage() {
 							<div>
 								<div className="flex items-center gap-3 mb-2">
 									<h1 className="text-2xl font-bold text-text-primary">
-										{room?.name}
+										{censorText(room?.name || "")}
 									</h1>
 									{isActive ? (
 										<span className="px-2 py-1 rounded text-xs font-medium bg-red-500/20 text-red-400 flex items-center gap-1">
@@ -385,7 +390,9 @@ function RoomDetailPage() {
 										</span>
 									)}
 								</div>
-								<p className="text-text-secondary">{room?.description}</p>
+								<p className="text-text-secondary">
+									{censorText(room?.description || "")}
+								</p>
 
 								{/* Room Stats */}
 								<div className="flex flex-wrap gap-4 mt-4 text-sm text-text-tertiary">
@@ -705,13 +712,15 @@ function RoomDetailPage() {
 						<div className="flex-1">
 							<div className="flex items-center gap-3 mb-2">
 								<h1 className="text-2xl font-bold text-text-primary">
-									{room?.name}
+									{censorText(room?.name || "")}
 								</h1>
 								<span className="px-2 py-1 rounded text-xs font-medium bg-gray-500/20 text-gray-400">
 									Ended
 								</span>
 							</div>
-							<p className="text-text-secondary mb-4">{room?.description}</p>
+							<p className="text-text-secondary mb-4">
+								{censorText(room?.description || "")}
+							</p>
 
 							<div className="flex flex-wrap gap-4 text-sm text-text-tertiary">
 								<div className="flex items-center gap-1.5">
