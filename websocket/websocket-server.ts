@@ -18,6 +18,7 @@ import {
 	getRoomParticipants,
 	getRoom,
 	transferStreamer,
+	runRoomCleanupJob,
 } from "./websocket-room-manager";
 
 // Debug: Log environment variables
@@ -587,6 +588,20 @@ httpServer.listen(PORT, async () => {
 			console.error("[RoomManager] Error during status update:", error);
 		}
 	}, STATUS_INTERVAL);
+
+	// Setup room cleanup job - runs every 5 minutes
+	const CLEANUP_INTERVAL = 5 * 60 * 1000;
+	console.log(`[RoomManager] Room cleanup scheduled every ${CLEANUP_INTERVAL / 1000 / 60} minutes`);
+
+	setInterval(async () => {
+		try {
+			await runRoomCleanupJob((roomId) => {
+				broadcastToRoom(roomId, "room:status_changed", { status: "ended" });
+			});
+		} catch (error) {
+			console.error("[RoomManager] Error during room cleanup:", error);
+		}
+	}, CLEANUP_INTERVAL);
 });
 
 // Graceful shutdown
