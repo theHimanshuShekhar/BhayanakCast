@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { History, Users } from "lucide-react";
+import { censorText } from "#/lib/profanity-filter";
 
 function formatDuration(seconds: number): string {
 	const hours = Math.floor(seconds / 3600);
@@ -127,13 +128,13 @@ export function RoomCard({ room }: RoomCardProps) {
 				</div>
 			)}
 
-			{/* Room name and description */}
+			{/* Room name and description - censored for display */}
 			<div className="mb-4 pr-16 min-h-[3.5rem]">
 				<h3 className="text-lg font-semibold text-text-primary truncate">
-					{room.name}
+					{censorText(room.name)}
 				</h3>
 				<p className="text-sm text-text-secondary mt-1 line-clamp-2">
-					{room.description}
+					{censorText(room.description)}
 				</p>
 			</div>
 
