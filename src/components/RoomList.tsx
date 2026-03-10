@@ -190,43 +190,56 @@ export function RoomList({ initialRooms, userId }: RoomListProps) {
 				)}
 			</div>
 
-			{/* Live rooms section - includes active, preparing, and waiting */}
-			{liveRooms.length > 0 && (
-				<div>
-					<h2 className="text-xl font-semibold text-text-primary mb-4 flex items-center gap-2">
-						<span className="relative flex h-2.5 w-2.5">
-							<span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-							<span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500" />
-						</span>
-						Live Now
-						<span className="text-sm font-normal text-text-tertiary ml-2">
-							({liveRooms.length})
-						</span>
-					</h2>
+			{/* Live rooms section - always show, even when empty */}
+			<div>
+				<h2 className="text-xl font-semibold text-text-primary mb-4 flex items-center gap-2">
+					<span className="relative flex h-2.5 w-2.5">
+						<span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+						<span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500" />
+					</span>
+					Live Now
+					<span className="text-sm font-normal text-text-tertiary ml-2">
+						({liveRooms.length})
+					</span>
+				</h2>
+				{liveRooms.length > 0 ? (
 					<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 						{liveRooms.map((room) => (
 							<RoomCard key={room.id} room={room} />
 						))}
 					</div>
-				</div>
-			)}
+				) : (
+					<div className="text-center py-8">
+						<p className="text-text-secondary mb-2">
+							No live streams right now
+						</p>
+						<p className="text-text-tertiary text-sm">
+							Check out past streams below or create your own!
+						</p>
+					</div>
+				)}
+			</div>
 
-			{/* Ended rooms section */}
-			{endedRooms.length > 0 && (
-				<div>
-					<h2 className="text-xl font-semibold text-text-primary mb-4">
-						Past Streams
-						<span className="text-sm font-normal text-text-tertiary ml-2">
-							({endedRooms.length})
-						</span>
-					</h2>
+			{/* Ended rooms section - always show */}
+			<div>
+				<h2 className="text-xl font-semibold text-text-primary mb-4">
+					Past Streams
+					<span className="text-sm font-normal text-text-tertiary ml-2">
+						({endedRooms.length})
+					</span>
+				</h2>
+				{endedRooms.length > 0 ? (
 					<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 						{endedRooms.map((room) => (
 							<RoomCard key={room.id} room={room} />
 						))}
 					</div>
-				</div>
-			)}
+				) : (
+					<div className="text-center py-8">
+						<p className="text-text-secondary">No past streams yet</p>
+					</div>
+				)}
+			</div>
 
 			{/* Empty state */}
 			{rooms.length === 0 && (
