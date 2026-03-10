@@ -154,19 +154,21 @@ export default function Sidebar() {
 				{/* Auth */}
 				<div>
 					{session?.user?.id ? (
-						<div className={isExpanded ? "" : "flex justify-center"}>
+						<div className={isExpanded ? "w-full" : "flex justify-center"}>
 							{isExpanded ? (
-								<UserButton
-									size="sm"
-									disableDefaultLinks
-									additionalLinks={[
-										{
-											label: "Profile",
-											href: `/profile/${session.user.id}`,
-											icon: <User className="h-4 w-4" />,
-										},
-									]}
-								/>
+								<div className="w-full flex justify-center">
+									<UserButton
+										size="sm"
+										disableDefaultLinks
+										additionalLinks={[
+											{
+												label: "Profile",
+												href: `/profile/${session.user.id}`,
+												icon: <User className="h-4 w-4" />,
+											},
+										]}
+									/>
+								</div>
 							) : (
 								<div className="w-12 h-12">
 									<UserButton
