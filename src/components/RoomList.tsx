@@ -119,6 +119,7 @@ export function RoomList({ initialRooms, userId }: RoomListProps) {
 				description: string | null;
 				status: string;
 				createdAt: Date;
+				endedAt: Date | null;
 			};
 			streamer: {
 				id: string;
@@ -144,6 +145,9 @@ export function RoomList({ initialRooms, userId }: RoomListProps) {
 				| "active"
 				| "ended",
 			createdAt: new Date(roomData.room.createdAt),
+			endedAt: roomData.room.endedAt
+				? new Date(roomData.room.endedAt)
+				: undefined,
 			participants: roomData.participants,
 		}));
 	}, [searchedRooms, initialRooms]);

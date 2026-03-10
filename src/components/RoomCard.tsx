@@ -1,6 +1,13 @@
 import { Link } from "@tanstack/react-router";
 import { History, Users } from "lucide-react";
 
+function formatDuration(seconds: number): string {
+	const hours = Math.floor(seconds / 3600);
+	const minutes = Math.floor((seconds % 3600) / 60);
+	if (hours > 0) return `${hours}h ${minutes}m`;
+	return `${minutes}m`;
+}
+
 export interface Participant {
 	id: string;
 	name: string;
@@ -17,6 +24,7 @@ export interface Room {
 	maxUsersJoined?: number;
 	status: "waiting" | "preparing" | "active" | "ended";
 	createdAt: Date;
+	endedAt?: Date;
 	streamerIsPresent?: boolean;
 	participants?: Participant[];
 }
@@ -120,7 +128,7 @@ export function RoomCard({ room }: RoomCardProps) {
 			)}
 
 			{/* Room name and description */}
-			<div className="mb-4 pr-16">
+			<div className="mb-4 pr-16 min-h-[3.5rem]">
 				<h3 className="text-lg font-semibold text-text-primary truncate">
 					{room.name}
 				</h3>
@@ -216,7 +224,20 @@ export function RoomCard({ room }: RoomCardProps) {
 					) : (
 						<>
 							<History className="h-4 w-4 text-text-tertiary" />
-							<span className="text-sm text-text-secondary">Ended</span>
+							<span className="text-sm text-text-secondary">
+								Ended
+								{room.endedAt &&
+									` • ${(() => {
+										const endedAt = room.endedAt;
+										if (!endedAt) return "";
+										const duration = Math.floor(
+											(new Date(endedAt).getTime() -
+												new Date(room.createdAt).getTime()) /
+												1000,
+										);
+										return formatDuration(duration);
+									})()}`}
+							</span>
 						</>
 					)}
 				</div>
