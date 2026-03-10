@@ -43,12 +43,7 @@ interface UserStats {
 	totalConnections: number;
 }
 
-interface CommunityStats {
-	totalRegisteredUsers: number;
-	totalWatchHoursThisWeek: number;
-	mostActiveStreamers: number;
-	newUsersThisWeek: number;
-}
+import type { CommunityStats } from "#/db/queries/community-stats";
 
 interface GlobalStats {
 	totalRoomsCreated: number;
@@ -153,51 +148,14 @@ export async function getUserStats(userId: string): Promise<UserStats> {
 
 /**
  * Get global community stats (30-day rolling window)
+ * Reads from pre-calculated database snapshots
  */
 export async function getCommunityStats(): Promise<CommunityStats> {
-	const cacheKey = "communityStats";
-	const cached = getCached<CommunityStats>(cacheKey);
-	if (cached) return cached;
-
-	const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-	const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-
-	// Total registered users
-	const totalUsersResult = await db
-		.select({ count: sql<number>`count(*)` })
-		.from(users);
-
-	// Watch hours this week (last 7 days)
-	const watchHoursResult = await db
-		.select({ totalSeconds: sum(roomParticipants.totalTimeSeconds) })
-		.from(roomParticipants)
-		.where(gte(roomParticipants.joinedAt, oneWeekAgo));
-
-	// Active streamers (users who have streamed in last 30 days)
-	const activeStreamersResult = await db
-		.select({
-			count: sql<number>`count(distinct ${streamingRooms.streamerId})`,
-		})
-		.from(streamingRooms)
-		.where(gte(streamingRooms.createdAt, thirtyDaysAgo));
-
-	// New users this week
-	const newUsersResult = await db
-		.select({ count: sql<number>`count(*)` })
-		.from(users)
-		.where(gte(users.createdAt, oneWeekAgo));
-
-	const stats = {
-		totalRegisteredUsers: Number(totalUsersResult[0]?.count) || 0,
-		totalWatchHoursThisWeek: Math.round(
-			(Number(watchHoursResult[0]?.totalSeconds) || 0) / 3600,
-		),
-		mostActiveStreamers: Number(activeStreamersResult[0]?.count) || 0,
-		newUsersThisWeek: Number(newUsersResult[0]?.count) || 0,
-	};
-
-	setCached(cacheKey, stats, SHORT_CACHE_TTL);
-	return stats;
+	// Import dynamically to avoid circular dependency issues
+	const { getCommunityStats: getCommunityStatsFromDB } = await import(
+		"#/db/queries/community-stats"
+	);
+	return getCommunityStatsFromDB();
 }
 
 /**

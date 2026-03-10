@@ -47,6 +47,7 @@ export function UserStatsCard() {
 			totalWatchHoursThisWeek: number;
 			mostActiveStreamers: number;
 			newUsersThisWeek: number;
+			totalWatchSecondsThisWeek: number;
 		};
 	} | null>({
 		queryKey: ["userHomeStats", session?.user?.id],

@@ -52,6 +52,7 @@ interface UserHomeStats {
 		totalWatchHoursThisWeek: number;
 		mostActiveStreamers: number;
 		newUsersThisWeek: number;
+		totalWatchSecondsThisWeek: number;
 	};
 }
 

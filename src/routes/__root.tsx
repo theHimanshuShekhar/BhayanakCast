@@ -53,7 +53,10 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 				<script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
 				<HeadContent />
 			</head>
-			<body className="flex h-screen w-screen overflow-hidden font-sans antialiased">
+			<body
+				className="flex h-screen w-screen overflow-hidden font-sans antialiased"
+				suppressHydrationWarning
+			>
 				<ThemeProvider>
 					<TanStackQueryProvider>
 						<AuthProviders>

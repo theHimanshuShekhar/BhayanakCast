@@ -20,6 +20,7 @@ import {
 	transferStreamer,
 	runRoomCleanupJob,
 } from "./websocket-room-manager";
+import { initializeCommunityStats } from "../src/db/queries/community-stats";
 
 // Debug: Log environment variables
 console.log("[WebSocket Server] DATABASE_URL:", process.env.DATABASE_URL ? "Set" : "Not set");
@@ -350,8 +351,16 @@ io.on("connection", (socket) => {
 
 			console.log(`[Room] User ${userId} joined room ${roomId} (${participants.length} participants)`);
 		} catch (error) {
-			console.error(`[Room] Error joining room:`, error);
-			socket.emit("room:error", { message: error instanceof Error ? error.message : "Failed to join room" });
+			const errorMessage = error instanceof Error ? error.message : "Failed to join room";
+			
+			// Log expected errors (like "Room has ended") as warnings, not errors
+			if (errorMessage === "Room has ended") {
+				console.log(`[Room] User ${userId} attempted to join ended room ${roomId}`);
+			} else {
+				console.error(`[Room] Error joining room:`, error);
+			}
+			
+			socket.emit("room:error", { message: errorMessage });
 		}
 	});
 
@@ -577,6 +586,18 @@ httpServer.listen(PORT, async () => {
 		console.error("[RoomManager] Error during initial cleanup:", error);
 	}
 
+	// Calculate initial community stats
+	console.log("[RoomManager] Calculating initial community stats...");
+	try {
+		const stats = await initializeCommunityStats();
+		console.log("[RoomManager] Initial community stats calculated:", {
+			totalWatchSecondsThisWeek: stats.totalWatchSecondsThisWeek,
+			totalWatchHoursThisWeek: stats.totalWatchHoursThisWeek,
+		});
+	} catch (error) {
+		console.error("[RoomManager] Error during initial stats calculation:", error);
+	}
+
 	// Setup status update job - runs every 1 minute
 	const STATUS_INTERVAL = 60 * 1000;
 	console.log(`[RoomManager] Status updates scheduled every ${STATUS_INTERVAL / 1000} seconds`);
@@ -602,6 +623,23 @@ httpServer.listen(PORT, async () => {
 			console.error("[RoomManager] Error during room cleanup:", error);
 		}
 	}, CLEANUP_INTERVAL);
+
+	// Setup community stats recalculation - runs every 30 minutes
+	const STATS_INTERVAL = 30 * 60 * 1000;
+	console.log(`[RoomManager] Community stats recalculation scheduled every ${STATS_INTERVAL / 1000 / 60} minutes`);
+
+	setInterval(async () => {
+		try {
+			console.log("[RoomManager] Recalculating community stats...");
+			const stats = await initializeCommunityStats();
+			console.log("[RoomManager] Community stats updated:", {
+				totalWatchSecondsThisWeek: stats.totalWatchSecondsThisWeek,
+				totalWatchHoursThisWeek: stats.totalWatchHoursThisWeek,
+			});
+		} catch (error) {
+			console.error("[RoomManager] Error during community stats recalculation:", error);
+		}
+	}, STATS_INTERVAL);
 });
 
 // Graceful shutdown

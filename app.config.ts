@@ -1,21 +1,28 @@
 import { defineConfig } from "@tanstack/react-start/config";
 import { runRoomCleanup } from "./src/utils/room-cleanup";
 
-// Track if cleanup has been initialized
-let cleanupInitialized = false;
-
 export default defineConfig({
 	server: {
 		// Run before the server starts handling requests
 		beforeStart: async () => {
-			if (cleanupInitialized) {
-				return;
+			console.log("[App] Initializing server...");
+			
+			// Initialize community stats
+			try {
+				console.log("[Community Stats] Calculating initial stats on app startup...");
+				const { initializeCommunityStats, clearAllStatsSnapshots } = await import("./src/db/queries/community-stats");
+				
+				// Clear old stats to force fresh calculation
+				await clearAllStatsSnapshots();
+				console.log("[Community Stats] Cleared old stats snapshots");
+				
+				const stats = await initializeCommunityStats();
+				console.log("[Community Stats] Initial stats calculated:", stats);
+			} catch (error) {
+				console.error("[Community Stats] Error calculating initial stats:", error);
 			}
 			
-			console.log("[App] Initializing room cleanup job...");
-			cleanupInitialized = true;
-			
-			// Run initial cleanup
+			// Run initial room cleanup
 			try {
 				console.log("[Room Cleanup] Running initial cleanup on app startup...");
 				await runRoomCleanup();
@@ -24,7 +31,7 @@ export default defineConfig({
 				console.error("[Room Cleanup] Error during initial cleanup:", error);
 			}
 			
-			// Setup interval for subsequent runs
+			// Setup interval for subsequent room cleanup runs
 			const CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes
 			console.log(`[Room Cleanup] Scheduled to run every ${CLEANUP_INTERVAL / 1000} seconds`);
 			
