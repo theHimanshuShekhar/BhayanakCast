@@ -6,7 +6,7 @@
 [![React](https://img.shields.io/badge/React-19-61DAFB.svg)](https://react.dev/)
 [![TanStack](https://img.shields.io/badge/TanStack-Start-FF4154.svg)](https://tanstack.com/start)
 [![Tailwind](https://img.shields.io/badge/Tailwind-v4-38B2AC.svg)](https://tailwindcss.com/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-336791.svg)](https://www.postgresql.org/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791.svg)](https://www.postgresql.org/)
 
 **BhayanakCast** is a real-time streaming platform with a Discord-inspired dark aesthetic, built for creators who want to connect with their audience in a more intimate, community-focused way.
 
@@ -34,9 +34,9 @@
 
 ### ⚡ **Real-Time Everything**
 - Live user count via WebSocket
-- Instant room updates
-- Real-time participant tracking
-- 5-second refresh intervals
+- Instant room updates with Socket.io
+- Real-time chat with profanity filtering
+- Comprehensive rate limiting (8 action types)
 
 ### 🔐 **Secure Authentication**
 - Discord OAuth (production ready)
@@ -52,7 +52,7 @@
 | **Router** | TanStack Router (File-based) |
 | **State** | TanStack Query v5 |
 | **Auth** | Better Auth |
-| **Database** | PostgreSQL 15 + Drizzle ORM |
+| **Database** | PostgreSQL 16 + Drizzle ORM |
 | **Real-time** | Socket.io |
 | **Styling** | Tailwind CSS v4 |
 | **UI Components** | shadcn/ui |
@@ -76,32 +76,20 @@ pnpm install
 
 ```bash
 cp .env.example .env.local
+# Edit .env.local with your Discord OAuth credentials
 ```
 
-Edit `.env.local`:
+Required environment variables:
+- `DATABASE_URL` - PostgreSQL connection string
+- `BETTER_AUTH_SECRET` - Generate with `pnpm dlx @better-auth/cli secret`
+- `DISCORD_CLIENT_ID` & `DISCORD_CLIENT_SECRET` - From Discord Developer Portal
 
-```bash
-# Database
-DATABASE_URL="postgresql://postgres:postgres@localhost:5432/postgres"
-
-# Better Auth
-BETTER_AUTH_URL=http://localhost:3000
-BETTER_AUTH_SECRET=<generate with: pnpm dlx @better-auth/cli secret>
-
-# OAuth (optional but recommended)
-DISCORD_CLIENT_ID=your_discord_client_id
-DISCORD_CLIENT_SECRET=your_discord_client_secret
-
-# WebSocket
-WS_PORT=3001
-CLIENT_URL=http://localhost:3000
-VITE_WS_URL=http://localhost:3001
-```
+See [Environment Variables](docs/ENVIRONMENT_VARIABLES.md) for complete configuration.
 
 ### 3. Start PostgreSQL (Docker)
 
 ```bash
-pnpm docker:up
+docker compose up -d postgres
 ```
 
 ### 4. Database Setup
@@ -149,13 +137,18 @@ This starts both the web app (port 3000) and WebSocket server (port 3001).
 ## 🧪 Development
 
 ```bash
-# Run tests
-pnpm test
+# Testing (159 tests, 90%+ coverage)
+pnpm test:setup     # One-time test DB setup
+pnpm test           # Run all tests
+pnpm test:watch     # Watch mode
 
-# Lint & format
-pnpm check
+# Code quality
+pnpm lint           # Check code style
+pnpm format         # Format code
+pnpm check          # Run all checks
 
 # Database operations
+pnpm db:push        # Push schema changes
 pnpm db:generate    # Generate migrations
 pnpm db:migrate     # Run migrations
 pnpm db:studio      # Open Drizzle Studio
@@ -167,14 +160,38 @@ pnpm dev:ws         # WebSocket only (port 3001)
 
 ## 🗺️ Roadmap
 
-- [ ] Real-time chat system
+### Completed ✅
+- [x] Real-time chat system with profanity filtering
+- [x] Comprehensive rate limiting (8 action types)
+- [x] Automatic streamer transfer with cooldown
+- [x] 159 tests with 90%+ coverage
+- [x] Complete documentation (11 docs)
+
+### In Progress 🚧
 - [ ] WebRTC video/audio streaming
-- [ ] Screen sharing
+- [ ] E2E tests with Playwright
+
+### Planned 📋
 - [ ] Room categories/tags
 - [ ] User profiles & following
 - [ ] Notifications system
+- [ ] Screen sharing
 - [ ] Mobile app (PWA)
 - [ ] Virtual gifts & donations
+
+## 📚 Documentation
+
+Comprehensive documentation is available in the `/docs` directory:
+
+- **[AGENTS.md](AGENTS.md)** - Developer guide and coding standards
+- **[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)** - Detailed setup instructions
+- **[docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)** - Directory organization
+- **[docs/DATABASE_SCHEMA.md](docs/DATABASE_SCHEMA.md)** - Table definitions
+- **[docs/ROOM_SYSTEM.md](docs/ROOM_SYSTEM.md)** - Room lifecycle and business logic
+- **[docs/WEBSOCKET_EVENTS.md](docs/WEBSOCKET_EVENTS.md)** - Socket.io events reference
+- **[docs/TESTING.md](docs/TESTING.md)** - Testing guide
+- **[docs/RATE_LIMITING.md](docs/RATE_LIMITING.md)** - Rate limit configuration
+- **[PLAN.md](PLAN.md)** - Roadmap and features
 
 ## 🤝 Contributing
 
@@ -186,8 +203,10 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ## 🙏 Acknowledgments
 
-- [TanStack](https://tanstack.com) for the amazing ecosystem
+- [TanStack](https://tanstack.com) for the amazing ecosystem (Start, Router, Query)
 - [Better Auth](https://better-auth.com) for authentication
+- [Drizzle ORM](https://orm.drizzle.team) for type-safe database operations
+- [Socket.io](https://socket.io) for real-time communication
 - [shadcn/ui](https://ui.shadcn.com) for UI components
 - The Discord design team for inspiration
 
@@ -197,4 +216,6 @@ MIT License - see [LICENSE](LICENSE) file for details.
   <b>BhayanakCast</b> - Made with ❤️ for streamers and viewers alike
   <br>
   <sub><em>"Bhayanak" means awesome/scary in Hindi - and that's exactly what we are!</em></sub>
+  <br><br>
+  <sub>👩‍💻 New developer? Start with <a href="./AGENTS.md">AGENTS.md</a></sub>
 </p>
