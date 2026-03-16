@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Chat } from "#/components/Chat";
+import { StreamerControls } from "#/components/StreamerControls";
 import {
 	Dialog,
 	DialogContent,
@@ -24,7 +25,9 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "#/components/ui/dialog";
+import { useWebRTC } from "#/hooks/useWebRTC";
 import { authClient } from "#/lib/auth-client";
+import { detectDevice } from "#/lib/device-detection";
 import { censorText } from "#/lib/profanity-filter";
 import {
 	OG_IMAGE_URL,
@@ -105,36 +108,127 @@ export const Route = createFileRoute("/room/$roomId")({
 	},
 });
 
-// Video player placeholder component
-interface VideoPlayerPlaceholderProps {
-	isStreamer: boolean;
+// Video display component for viewers
+interface VideoDisplayProps {
+	stream: MediaStream | null;
 	streamerName?: string | null;
 }
 
-function VideoPlayerPlaceholder({
-	isStreamer,
-	streamerName,
-}: VideoPlayerPlaceholderProps) {
+function VideoDisplay({ stream, streamerName }: VideoDisplayProps) {
+	const videoRef = useRef<HTMLVideoElement>(null);
+
+	useEffect(() => {
+		if (videoRef.current && stream) {
+			videoRef.current.srcObject = stream;
+		}
+	}, [stream]);
+
+	if (!stream) {
+		return (
+			<div className="bg-depth-2 rounded-xl aspect-video flex flex-col items-center justify-center border-2 border-dashed border-border-subtle">
+				<Video className="h-16 w-16 text-text-tertiary mb-4" />
+				<p className="text-text-secondary text-lg mb-2">Waiting for Stream</p>
+				<p className="text-text-tertiary text-sm">
+					{streamerName
+						? `${streamerName} will start streaming soon`
+						: "No streamer yet"}
+				</p>
+			</div>
+		);
+	}
+
 	return (
-		<div className="bg-depth-2 rounded-xl aspect-video flex flex-col items-center justify-center border-2 border-dashed border-border-subtle">
-			{isStreamer ? (
-				<>
-					<Monitor className="h-16 w-16 text-text-tertiary mb-4" />
-					<p className="text-text-secondary text-lg mb-2">Start Streaming</p>
-					<p className="text-text-tertiary text-sm">
-						Screen share will appear here
-					</p>
-				</>
-			) : (
-				<>
-					<Video className="h-16 w-16 text-text-tertiary mb-4" />
-					<p className="text-text-secondary text-lg mb-2">Waiting for Stream</p>
-					<p className="text-text-tertiary text-sm">
-						{streamerName
-							? `${streamerName} will start streaming soon`
-							: "No streamer yet"}
-					</p>
-				</>
+		<div className="relative rounded-xl overflow-hidden bg-black aspect-video">
+			<video
+				ref={videoRef}
+				autoPlay
+				playsInline
+				className="w-full h-full object-contain"
+			/>
+			<div className="absolute top-4 left-4 px-3 py-1 rounded bg-black/70 text-white text-sm flex items-center gap-2">
+				<Monitor className="h-4 w-4" />
+				{streamerName ? `${streamerName}'s Screen` : "Screen Share"}
+			</div>
+		</div>
+	);
+}
+
+// Screen share preview component for streamers
+interface ScreenSharePreviewProps {
+	stream: MediaStream | null;
+}
+
+function ScreenSharePreview({ stream }: ScreenSharePreviewProps) {
+	const videoRef = useRef<HTMLVideoElement>(null);
+
+	useEffect(() => {
+		if (videoRef.current && stream) {
+			videoRef.current.srcObject = stream;
+		}
+	}, [stream]);
+
+	if (!stream) {
+		return (
+			<div className="bg-depth-2 rounded-xl aspect-video flex flex-col items-center justify-center border-2 border-dashed border-border-subtle">
+				<Monitor className="h-16 w-16 text-text-tertiary mb-4" />
+				<p className="text-text-secondary text-lg mb-2">Ready to Stream</p>
+				<p className="text-text-tertiary text-sm">
+					Click "Start Streaming" to begin
+				</p>
+			</div>
+		);
+	}
+
+	return (
+		<div className="relative rounded-xl overflow-hidden bg-black aspect-video">
+			<video
+				ref={videoRef}
+				autoPlay
+				playsInline
+				muted
+				className="w-full h-full object-contain"
+			/>
+			<div className="absolute top-4 left-4 px-3 py-1 rounded bg-red-500/90 text-white text-sm flex items-center gap-2">
+				<span className="relative flex h-2 w-2">
+					<span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75" />
+					<span className="relative inline-flex rounded-full h-2 w-2 bg-white" />
+				</span>
+				LIVE - Your Screen
+			</div>
+		</div>
+	);
+}
+
+// Transfer overlay component
+interface TransferOverlayProps {
+	transferState: string;
+	transferInfo: { newStreamerName?: string } | null;
+}
+
+function TransferOverlay({
+	transferState,
+	transferInfo,
+}: TransferOverlayProps) {
+	if (transferState === "idle" || transferState === "connected") return null;
+
+	const messages: Record<string, string> = {
+		initiating: "Streamer is leaving...",
+		cleaning_up: "Disconnecting...",
+		waiting_for_streamer: `Waiting for ${transferInfo?.newStreamerName || "new streamer"}...`,
+		reconnecting: "Reconnecting to new streamer...",
+		failed: "Connection failed. Retrying...",
+	};
+
+	return (
+		<div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center z-50 backdrop-blur-sm">
+			<div className="w-12 h-12 border-3 border-white/10 border-t-accent rounded-full animate-spin mb-4" />
+			<p className="text-white text-lg font-medium">
+				{messages[transferState] || "Connecting..."}
+			</p>
+			{transferState === "reconnecting" && (
+				<p className="text-white/60 text-sm mt-2">
+					Setting up peer-to-peer connection
+				</p>
 			)}
 		</div>
 	);
@@ -146,6 +240,9 @@ function RoomDetailPage() {
 	const initialData = Route.useLoaderData();
 	const { data: session } = authClient.useSession();
 	const userId = session?.user?.id;
+
+	// Device detection
+	const deviceCapabilities = useRef(detectDevice());
 
 	// Query for real-time room data
 	const { data: roomData, refetch } = useQuery({
@@ -160,6 +257,16 @@ function RoomDetailPage() {
 	const participants = roomData?.participants || [];
 	const isActive = room?.status === "active";
 	const isPreparing = room?.status === "preparing";
+
+	// WebRTC hook for streaming
+	const {
+		localStream,
+		remoteStream,
+		isScreenSharing,
+		transferState,
+		transferInfo,
+		deviceCapabilities: webrtcDeviceCapabilities,
+	} = useWebRTC({ roomId, userId: userId || "" });
 
 	// WebSocket for real-time updates
 	const { socket, isConnected } = useWebSocket();
@@ -220,6 +327,19 @@ function RoomDetailPage() {
 			}
 		};
 	}, [socket, isConnected, roomId]);
+
+	// Send device info on identify
+	useEffect(() => {
+		if (socket && isConnected && userId) {
+			const device = detectDevice();
+			socket.emit("identify", {
+				userId,
+				userName: session?.user?.name,
+				userImage: session?.user?.image,
+				isMobile: device.isMobile,
+			});
+		}
+	}, [socket, isConnected, userId, session?.user?.name, session?.user?.image]);
 
 	// Calculate duration - use client-only time to avoid hydration mismatch
 	const [clientNow, setClientNow] = useState<Date | null>(null);
@@ -413,15 +533,26 @@ function RoomDetailPage() {
 								</div>
 							</div>
 
-							{/* Video Player */}
-							<VideoPlayerPlaceholder
-								isStreamer={isStreamer}
-								streamerName={streamer?.name}
-							/>
+							{/* Video Player with Transfer Overlay */}
+							<div className="relative">
+								{isStreamer ? (
+									<ScreenSharePreview stream={localStream} />
+								) : (
+									<VideoDisplay
+										stream={remoteStream}
+										streamerName={streamer?.name}
+									/>
+								)}
+								<TransferOverlay
+									transferState={transferState}
+									transferInfo={transferInfo}
+								/>
+							</div>
 
 							{/* Streamer Controls */}
 							{userId && isStreamer && (
 								<div className="flex items-center gap-3 pt-2">
+									<StreamerControls roomId={roomId} userId={userId} />
 									<button
 										type="button"
 										onClick={() => setShowTransferDialog(true)}
