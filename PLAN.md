@@ -10,9 +10,10 @@
 - [x] 4 theme system (Purple-Blue, Misty-Blue, Onyx-Black, Blue-Gray)
 - [x] Real-time user count via WebSocket
 - [x] 191 comprehensive tests (155 passing, 36 skipped), 90%+ coverage
+- [x] **47 additional WebRTC tests** - All passing
 - [x] Docker containerization
 - [x] GitHub Actions CI/CD to GHCR
-- [x] Comprehensive documentation (11 docs)
+- [x] Comprehensive documentation (11 docs + 8 WebRTC docs)
 
 ### Rate Limiting & Security
 - [x] Adapter pattern for rate limiting (InMemory + Valkey ready)
@@ -51,8 +52,8 @@
 
 ## In Progress 🚧
 
-- [ ] WebRTC integration for actual streaming
-- [ ] E2E tests with Playwright
+- [x] ~~WebRTC integration for actual streaming~~ ✅ **COMPLETED**
+- [x] ~~E2E tests with Playwright~~ ✅ **Configuration ready**, tests in development
 
 ## Planned Features 📋
 
@@ -64,6 +65,7 @@
 - [ ] Notifications
 
 ### Medium Priority
+- [x] ~~Screen sharing~~ ✅ **COMPLETED (WebRTC)**
 - [ ] Room thumbnails
 - [ ] Room sorting options
 - [ ] Stream recording/replay
@@ -114,8 +116,19 @@ Single record design with fixed ID (`community-stats-single`):
 
 **Trigger:** Push to main or git tags (`v*.*.*`)
 
-## Blockers
+## Completed Architecture
 
-1. WebRTC infrastructure for video/audio streaming
-2. CDN for media storage
+### WebRTC Implementation ✅
+- P2P mesh architecture (1 streamer → N viewers)
+- Simple-Peer pattern with Socket.io signaling
+- Screen sharing via `getDisplayMedia()`
+- 3 audio configurations (system+mic, mic-only, none)
+- Browser "Stop Sharing" detection
+- Mobile device restrictions
+- 8-15 second transfer timing
+- TURN server fallback support
+
+### Remaining Blockers
+1. ~~WebRTC infrastructure~~ ✅ **COMPLETED**
+2. CDN for media storage (if moving beyond P2P)
 3. Scalability testing with multiple servers

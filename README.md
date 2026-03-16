@@ -14,7 +14,17 @@
 
 ## ✨ Features
 
-### 🎥 **Smart Room System**
+### 🎥 **WebRTC Screen Sharing** ⭐ NEW
+- **P2P Screen Sharing** with 3 audio modes:
+  - System audio + Microphone
+  - Microphone only
+  - No audio
+- **Browser "Stop Sharing" Detection** - Automatic transfer when clicked
+- **Mobile Restrictions** - Mobile users can view but cannot stream
+- **Adaptive Quality** - Simulcast for best viewing experience
+- **Graceful Transfers** - 8-15 second handoff between streamers
+
+### 📺 **Smart Room System**
 - **4-State Room Lifecycle**: `waiting` → `preparing` → `active` → `ended`
 - Automatic streamer transfer when hosts leave
 - Rooms persist without streamers (enters "waiting" state)
@@ -33,6 +43,7 @@
 - Smooth transitions and animations
 
 ### ⚡ **Real-Time Everything**
+- **WebRTC P2P Streaming** - Peer-to-peer screen sharing
 - Live user count via WebSocket
 - Instant room updates with Socket.io
 - Real-time chat with profanity filtering
@@ -53,7 +64,8 @@
 | **State** | TanStack Query v5 |
 | **Auth** | Better Auth |
 | **Database** | PostgreSQL 16 + Drizzle ORM |
-| **Real-time** | Socket.io |
+| **Real-time** | Socket.io + WebRTC |
+| **Streaming** | WebRTC P2P (Simple-Peer pattern) |
 | **Styling** | Tailwind CSS v4 |
 | **UI Components** | shadcn/ui |
 
@@ -137,10 +149,11 @@ This starts both the web app (port 3000) and WebSocket server (port 3001).
 ## 🧪 Development
 
 ```bash
-# Testing (159 tests, 90%+ coverage)
+# Testing (238 tests, 90%+ coverage)
 pnpm test:setup     # One-time test DB setup
 pnpm test           # Run all tests
 pnpm test:watch     # Watch mode
+pnpm test:coverage  # With coverage report
 
 # Code quality
 pnpm lint           # Check code style
@@ -161,21 +174,22 @@ pnpm dev:ws         # WebSocket only (port 3001)
 ## 🗺️ Roadmap
 
 ### Completed ✅
+- [x] **WebRTC Screen Sharing** - P2P streaming with audio configuration
 - [x] Real-time chat system with profanity filtering
 - [x] Comprehensive rate limiting (8 action types)
 - [x] Automatic streamer transfer with cooldown
-- [x] 159 tests with 90%+ coverage
-- [x] Complete documentation (11 docs)
+- [x] **238 tests** (191 + 47 WebRTC) with 90%+ coverage
+- [x] Complete documentation (11 docs + WebRTC docs)
+- [x] Playwright E2E test configuration
 
 ### In Progress 🚧
-- [ ] WebRTC video/audio streaming
-- [ ] E2E tests with Playwright
+- [ ] E2E tests with Playwright (configuration ready)
 
 ### Planned 📋
 - [ ] Room categories/tags
 - [ ] User profiles & following
 - [ ] Notifications system
-- [ ] Screen sharing
+- [ ] Stream recording/replay
 - [ ] Mobile app (PWA)
 - [ ] Virtual gifts & donations
 
@@ -191,6 +205,7 @@ Comprehensive documentation is available in the `/docs` directory:
 - **[docs/WEBSOCKET_EVENTS.md](docs/WEBSOCKET_EVENTS.md)** - Socket.io events reference
 - **[docs/TESTING.md](docs/TESTING.md)** - Testing guide
 - **[docs/RATE_LIMITING.md](docs/RATE_LIMITING.md)** - Rate limit configuration
+- **[docs/webrtc/README.md](docs/webrtc/README.md)** - WebRTC streaming documentation
 - **[PLAN.md](PLAN.md)** - Roadmap and features
 
 ## 🤝 Contributing
