@@ -21,6 +21,7 @@ import {
 	runRoomCleanupJob,
 } from "./websocket-room-manager";
 import { initializeCommunityStats } from "../src/db/queries/community-stats";
+import { RateLimits, rateLimiter } from "../src/lib/rate-limiter";
 
 // Debug: Log environment variables
 console.log("[WebSocket Server] DATABASE_URL:", process.env.DATABASE_URL ? "Set" : "Not set");
@@ -220,7 +221,20 @@ function sendSystemMessage(roomId: string, content: string) {
 
 // Socket.io connection handler
 io.on("connection", (socket) => {
-	console.log(`[Socket.io] Client connected: ${socket.id}`);
+	const clientIp = socket.handshake.address;
+	console.log(`[Socket.io] Client connected: ${socket.id} (IP: ${clientIp})`);
+
+	// Check connection rate limit
+	const connectionLimiter = rateLimiter.forAction("ws:connection");
+	const rateLimitResult = connectionLimiter.checkAndRecord(clientIp, RateLimits.WS_CONNECTION);
+	if (!rateLimitResult.allowed) {
+		console.log(`[Socket.io] Connection rejected for IP ${clientIp}: rate limit exceeded`);
+		socket.emit("error", { 
+			message: `Connection rate limit exceeded. Try again in ${rateLimitResult.retryAfter} seconds.` 
+		});
+		socket.disconnect(true);
+		return;
+	}
 
 	// Send current user count on connection
 	socket.emit("userCount", { count: connectedUsers.size });
@@ -256,6 +270,17 @@ io.on("connection", (socket) => {
 
 		if (!userId) {
 			socket.emit("room:error", { message: "Not authenticated" });
+			return;
+		}
+
+		// Check rate limit
+		const joinLimiter = rateLimiter.forAction("room:join");
+		const rateLimitResult = joinLimiter.checkAndRecord(userId, RateLimits.ROOM_JOIN);
+		if (!rateLimitResult.allowed) {
+			socket.emit("room:error", { 
+				message: `You're joining rooms too quickly. Try again in ${rateLimitResult.retryAfter} seconds.`,
+				retryAfter: rateLimitResult.retryAfter
+			});
 			return;
 		}
 
@@ -375,6 +400,17 @@ io.on("connection", (socket) => {
 			return;
 		}
 
+		// Check rate limit
+		const leaveLimiter = rateLimiter.forAction("room:leave");
+		const rateLimitResult = leaveLimiter.checkAndRecord(userId, RateLimits.ROOM_LEAVE);
+		if (!rateLimitResult.allowed) {
+			socket.emit("room:error", { 
+				message: `You're leaving rooms too quickly. Try again in ${rateLimitResult.retryAfter} seconds.`,
+				retryAfter: rateLimitResult.retryAfter
+			});
+			return;
+		}
+
 		try {
 			console.log(`[Room] User ${userId} leaving room ${roomId}`);
 
@@ -452,6 +488,17 @@ io.on("connection", (socket) => {
 
 		if (!content || content.trim().length === 0) {
 			socket.emit("chat:error", { message: "Message cannot be empty" });
+			return;
+		}
+
+		// Check rate limit
+		const chatLimiter = rateLimiter.forAction("chat:send");
+		const rateLimitResult = chatLimiter.checkAndRecord(userId, RateLimits.CHAT_SEND);
+		if (!rateLimitResult.allowed) {
+			socket.emit("chat:error", { 
+				message: `You're sending messages too quickly. Try again in ${rateLimitResult.retryAfter} seconds.`,
+				retryAfter: rateLimitResult.retryAfter
+			});
 			return;
 		}
 

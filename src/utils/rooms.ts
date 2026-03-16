@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { and, asc, eq, isNull, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { roomParticipants, streamingRooms, users } from "#/db/schema";
+import { RateLimits, rateLimiter } from "#/lib/rate-limiter";
 import {
 	broadcastRoomJoin,
 	broadcastRoomLeave,
@@ -12,35 +13,6 @@ const createRoomSchema = z.object({
 	name: z.string().min(3).max(100),
 	description: z.string().max(500).optional(),
 });
-
-// Track last transfer time for cooldown
-const lastTransferTime = new Map<string, number>();
-const TRANSFER_COOLDOWN_MS = 30000;
-
-// Rate limiting for room creation
-const roomCreationAttempts = new Map<string, number[]>();
-const RATE_LIMIT_WINDOW_MS = 60000; // 1 minute
-const RATE_LIMIT_MAX_ATTEMPTS = 3; // Max 3 rooms per minute
-
-function checkRateLimit(userId: string): boolean {
-	const now = Date.now();
-	const userAttempts = roomCreationAttempts.get(userId) || [];
-
-	// Filter out old attempts outside the window
-	const recentAttempts = userAttempts.filter(
-		(timestamp) => now - timestamp < RATE_LIMIT_WINDOW_MS,
-	);
-
-	if (recentAttempts.length >= RATE_LIMIT_MAX_ATTEMPTS) {
-		return false; // Rate limit exceeded
-	}
-
-	// Add new attempt
-	recentAttempts.push(now);
-	roomCreationAttempts.set(userId, recentAttempts);
-
-	return true; // Within rate limit
-}
 
 export const getCurrentRoom = createServerFn({ method: "GET" })
 	.inputValidator((data: { userId: string }) => data)
@@ -76,9 +48,14 @@ export const createRoom = createServerFn({ method: "POST" })
 		const { nanoid } = await import("nanoid");
 
 		// Check rate limit
-		if (!checkRateLimit(data.userId)) {
+		const roomCreateLimiter = rateLimiter.forAction("room:create");
+		const rateLimitResult = roomCreateLimiter.checkAndRecord(
+			data.userId,
+			RateLimits.ROOM_CREATE,
+		);
+		if (!rateLimitResult.allowed) {
 			throw new Error(
-				"Rate limit exceeded. You can only create 3 rooms per minute.",
+				`Rate limit exceeded. You can only create 3 rooms per minute. Try again in ${rateLimitResult.retryAfter} seconds.`,
 			);
 		}
 
@@ -186,6 +163,18 @@ export const joinRoom = createServerFn({ method: "POST" })
 		const { db } = await import("#/db/index");
 		const { nanoid } = await import("nanoid");
 
+		// Check rate limit
+		const joinLimiter = rateLimiter.forAction("room:join");
+		const rateLimitResult = joinLimiter.checkAndRecord(
+			data.userId,
+			RateLimits.ROOM_JOIN,
+		);
+		if (!rateLimitResult.allowed) {
+			throw new Error(
+				`Rate limit exceeded. You can only join 5 rooms per minute. Try again in ${rateLimitResult.retryAfter} seconds.`,
+			);
+		}
+
 		// Allow joining active, preparing, or waiting rooms
 		const room = await db
 			.select()
@@ -277,6 +266,18 @@ export const leaveRoom = createServerFn({ method: "POST" })
 	.handler(async ({ data }) => {
 		const { db } = await import("#/db/index");
 
+		// Check rate limit
+		const leaveLimiter = rateLimiter.forAction("room:leave");
+		const rateLimitResult = leaveLimiter.checkAndRecord(
+			data.userId,
+			RateLimits.ROOM_LEAVE,
+		);
+		if (!rateLimitResult.allowed) {
+			throw new Error(
+				`Rate limit exceeded. You're leaving rooms too quickly. Try again in ${rateLimitResult.retryAfter} seconds.`,
+			);
+		}
+
 		const participation = await db
 			.select()
 			.from(roomParticipants)
@@ -359,15 +360,15 @@ export const transferStreamerOwnership = createServerFn({ method: "POST" })
 	.handler(async ({ data }) => {
 		const { db } = await import("#/db/index");
 
-		// Check cooldown
-		const lastTransfer = lastTransferTime.get(data.roomId);
-		const now = Date.now();
-		if (lastTransfer && now - lastTransfer < TRANSFER_COOLDOWN_MS) {
-			const remaining = Math.ceil(
-				(TRANSFER_COOLDOWN_MS - (now - lastTransfer)) / 1000,
-			);
+		// Check rate limit
+		const transferLimiter = rateLimiter.forAction("streamer:transfer");
+		const rateLimitResult = transferLimiter.checkAndRecord(
+			data.roomId,
+			RateLimits.STREAMER_TRANSFER,
+		);
+		if (!rateLimitResult.allowed) {
 			throw new Error(
-				`Transfer cooldown active. Try again in ${remaining} seconds.`,
+				`Transfer cooldown active. Try again in ${rateLimitResult.retryAfter} seconds.`,
 			);
 		}
 
@@ -413,9 +414,6 @@ export const transferStreamerOwnership = createServerFn({ method: "POST" })
 
 		// Broadcast streamer change
 		await broadcastStreamerChanged(data.roomId, data.newStreamerId);
-
-		// Update cooldown
-		lastTransferTime.set(data.roomId, now);
 
 		return { success: true, newStreamerId: data.newStreamerId };
 	});

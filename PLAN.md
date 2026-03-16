@@ -9,9 +9,20 @@
 - [x] User profile sync from Discord
 - [x] 4 theme system (Purple-Blue, Misty-Blue, Onyx-Black, Blue-Gray)
 - [x] Real-time user count via WebSocket
-- [x] 59 comprehensive tests (90%+ coverage)
+- [x] 159 comprehensive tests, 90%+ coverage
 - [x] Docker containerization
 - [x] GitHub Actions CI/CD to GHCR
+- [x] Comprehensive documentation (11 docs)
+
+### Rate Limiting & Security
+- [x] Adapter pattern for rate limiting (InMemory + Valkey ready)
+- [x] Room creation: 3/minute per user
+- [x] Room join: 10/minute per user
+- [x] Room leave: 5/minute per user
+- [x] Chat: 30 messages/15 seconds
+- [x] WebSocket connections: 30/minute per IP
+- [x] Streamer transfer: 1/30 seconds per room
+- [x] Profanity filter (Hindi + English)
 
 ### Room System
 - [x] Create/join/leave rooms
@@ -41,7 +52,7 @@
 ## In Progress 🚧
 
 - [ ] WebRTC integration for actual streaming
-- [ ] Rate limiting for abuse prevention
+- [ ] E2E tests with Playwright
 
 ## Planned Features 📋
 

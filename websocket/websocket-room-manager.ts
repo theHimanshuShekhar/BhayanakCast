@@ -13,6 +13,7 @@ import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import { db } from "../src/db/index";
 import { roomParticipants, streamingRooms, users } from "../src/db/schema";
 import { nanoid } from "nanoid";
+import { RateLimits, rateLimiter } from "../src/lib/rate-limiter";
 
 // In-memory tracking of socket -> room mapping for presence detection
 const socketRoomMap = new Map<string, { roomId: string; userId: string }>();
@@ -402,10 +403,6 @@ export async function runRoomCleanupJob(
 	}
 }
 
-// Track last transfer time for cooldown
-const lastTransferTime = new Map<string, number>();
-const TRANSFER_COOLDOWN_MS = 30000;
-
 /**
  * Transfer streamer ownership to another user
  */
@@ -419,16 +416,16 @@ export async function transferStreamer(
 	newStreamerName?: string;
 	error?: string;
 }> {
-	// Check cooldown
-	const lastTransfer = lastTransferTime.get(roomId);
-	const now = Date.now();
-	if (lastTransfer && now - lastTransfer < TRANSFER_COOLDOWN_MS) {
-		const remaining = Math.ceil(
-			(TRANSFER_COOLDOWN_MS - (now - lastTransfer)) / 1000,
-		);
+	// Check rate limit
+	const transferLimiter = rateLimiter.forAction("streamer:transfer");
+	const rateLimitResult = transferLimiter.checkAndRecord(
+		roomId,
+		RateLimits.STREAMER_TRANSFER,
+	);
+	if (!rateLimitResult.allowed) {
 		return {
 			success: false,
-			error: `Transfer cooldown active. Try again in ${remaining} seconds.`,
+			error: `Transfer cooldown active. Try again in ${rateLimitResult.retryAfter} seconds.`,
 		};
 	}
 
@@ -481,9 +478,6 @@ export async function transferStreamer(
 		.from(users)
 		.where(eq(users.id, newStreamerId))
 		.limit(1);
-
-	// Update cooldown
-	lastTransferTime.set(roomId, now);
 
 	return {
 		success: true,

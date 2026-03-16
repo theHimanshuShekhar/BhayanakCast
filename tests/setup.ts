@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom";
 import { cleanup } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
+import { RateLimiter } from "#/lib/rate-limiter";
 
 // Mock environment variables
 vi.mock("import.meta.env", () => ({
@@ -34,10 +35,11 @@ Object.defineProperty(window, "localStorage", {
 	value: localStorageMock,
 });
 
-// Mock crypto.randomUUID
+// Mock crypto.randomUUID - return unique values each call
+let uuidCounter = 0;
 Object.defineProperty(globalThis, "crypto", {
 	value: {
-		randomUUID: () => "test-uuid-12345",
+		randomUUID: () => `test-uuid-${Date.now()}-${++uuidCounter}`,
 	},
 });
 
@@ -57,6 +59,9 @@ Object.defineProperty(window, "IntersectionObserver", {
 afterEach(() => {
 	cleanup();
 	vi.clearAllMocks();
-	// Reset modules to clear in-memory state (rate limiters, cooldowns, etc.)
+	// Note: Rate limiter reset is now handled by individual tests that need it
+	// This avoids interference between tests that manage their own rate limiters
+	// and tests that use the global instance
+	// Reset modules to clear in-memory state
 	vi.resetModules();
 });

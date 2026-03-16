@@ -2,7 +2,8 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import * as schema from "../../src/db/schema";
 
-const TEST_DATABASE_URL =
+// Use DATABASE_URL from environment (set in .env.local) or fallback to default
+const TEST_DATABASE_URL = process.env.DATABASE_URL ||
 	"postgresql://postgres:postgres@localhost:5432/bhayanak_cast_test";
 
 let pool: Pool | null = null;
