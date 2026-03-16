@@ -67,7 +67,9 @@ export function detectDevice(): DeviceCapabilities {
  */
 export function isScreenSharingSupported(): boolean {
 	return (
-		"mediaDevices" in navigator && "getDisplayMedia" in navigator.mediaDevices
+		navigator.mediaDevices !== undefined &&
+		navigator.mediaDevices !== null &&
+		"getDisplayMedia" in navigator.mediaDevices
 	);
 }
 

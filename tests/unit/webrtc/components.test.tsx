@@ -239,7 +239,7 @@ describe("AudioConfigModal", () => {
 			);
 
 			expect(screen.getByText("Always")).toBeInTheDocument();
-			expect(screen.getByText("On motion")).toBeInTheDocument();
+			expect(screen.getByText("Motion")).toBeInTheDocument();
 			expect(screen.getByText("Never")).toBeInTheDocument();
 		});
 
