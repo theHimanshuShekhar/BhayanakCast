@@ -84,7 +84,7 @@ export function useWebRTC({ roomId, userId }: UseWebRTCOptions) {
 		peerConnectionsRef.current.forEach((peerState) => {
 			try {
 				peerState.connection.close();
-			} catch (e) {
+			} catch (_e) {
 				// Ignore errors during cleanup
 			}
 		});
@@ -289,7 +289,7 @@ export function useWebRTC({ roomId, userId }: UseWebRTCOptions) {
 				await peerState.connection.addIceCandidate(
 					new RTCIceCandidate(candidate),
 				);
-			} catch (e) {
+			} catch (_e) {
 				console.warn("[WebRTC] Error adding ICE candidate:", e);
 			}
 		},
@@ -394,7 +394,7 @@ export function useWebRTC({ roomId, userId }: UseWebRTCOptions) {
 				if (peerState) {
 					try {
 						peerState.connection.close();
-					} catch (e) {
+					} catch (_e) {
 						// Ignore
 					}
 					peerConnectionsRef.current.delete(streamerId);

@@ -81,9 +81,7 @@ export function AudioConfigModal({
 				<div className="space-y-6 py-4">
 					{/* Audio Configuration */}
 					<div className="space-y-3">
-						<label className="text-text-primary text-sm font-medium">
-							Audio
-						</label>
+						<h3 className="text-text-primary text-sm font-medium">Audio</h3>
 						<div className="space-y-2">
 							{audioOptions.map((option) => (
 								<button
@@ -137,9 +135,9 @@ export function AudioConfigModal({
 
 					{/* Cursor Options */}
 					<div className="space-y-3">
-						<label className="text-text-primary text-sm font-medium">
+						<h3 className="text-text-primary text-sm font-medium">
 							Show Cursor
-						</label>
+						</h3>
 						<div className="flex gap-2">
 							{(["always", "motion", "never"] as const).map((option) => (
 								<button

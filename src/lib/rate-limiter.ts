@@ -138,8 +138,6 @@ export class InMemoryBackend implements RateLimiterBackend {
  * Implement this when migrating to multi-server setup
  */
 export class ValkeyBackend implements RateLimiterBackend {
-	private client: unknown; // Will be Redis/Valkey client
-
 	constructor(_connectionUrl?: string) {
 		// TODO: Initialize Valkey client
 		throw new Error(

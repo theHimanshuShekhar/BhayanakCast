@@ -88,6 +88,6 @@ export function logDeviceCapabilities(): void {
 		isMobile: caps.isMobile,
 		canStream: caps.canStream,
 		canView: caps.canView,
-		userAgent: caps.userAgent.substring(0, 50) + "...",
+		userAgent: `${caps.userAgent.substring(0, 50)}...`,
 	});
 }
