@@ -21,8 +21,8 @@ pnpm db:push
 # 5. Start development
 pnpm dev              # Runs web (3000) + WebSocket (3001)
 
-# 6. Run tests (in another terminal)
-pnpm test             # Auto-creates test DB and runs all tests
+# 6. Run tests (in another terminal, requires dev server running)
+pnpm test             # Auto-creates test DB and runs all tests (unit + E2E)
 ```
 
 ## Commands
@@ -36,9 +36,12 @@ pnpm dev:ws           # WebSocket only
 
 ### Testing
 ```bash
-pnpm test             # All tests (requires PostgreSQL)
-pnpm test:watch       # Watch mode
+pnpm test             # All tests (unit + integration + E2E, requires PostgreSQL)
+pnpm test:unit        # Unit and integration tests only
+pnpm test:e2e         # Playwright E2E tests only
+pnpm test:watch       # Watch mode (unit tests)
 pnpm test:coverage    # With coverage report
+pnpm test:e2e:ui      # E2E tests with UI mode
 pnpm vitest run path/to/test.ts
 ```
 
@@ -64,24 +67,26 @@ pnpm db:migrate       # Run migrations
 **Database:** PostgreSQL 16 + Drizzle ORM  
 **Real-time:** Socket.io WebSocket server (port 3001)  
 **Styling:** Tailwind CSS v4 with custom dark theme  
-**Testing:** Vitest v3 + jsdom (155 passing, 36 skipped, 191 total)  
+**Testing:** Vitest v3 + jsdom (238 tests, 90%+ coverage) + Playwright E2E  
 **Formatter:** Biome (not Prettier)
 
 ### Key Features
 
-🎥 **Real-time Streaming** - WebSocket-powered rooms with live chat  
+🎥 **WebRTC Screen Sharing** - P2P streaming with audio configuration  
 🔄 **Automatic Streamer Transfer** - Ownership transfers to earliest viewer  
 ⏱️ **Watch Time Tracking** - Community statistics and user relationships  
 🛡️ **Rate Limiting** - 8 different action types protected  
 🎨 **Discord-inspired UI** - Dark theme with depth-based styling  
 🔒 **Discord OAuth** - Secure authentication  
+🧪 **Comprehensive Testing** - 238 unit/integration + 23 E2E tests  
 
 ### Project Stats
 
-- **Tests:** 155 passing, 36 skipped (191 total)
+- **Tests:** 238 unit/integration + 23 E2E (261 total)
 - **Coverage:** 90%+ threshold
 - **Rate Limits:** Room create (3/min), Join (10/min), Chat (30/15s), etc.
 - **Room States:** 4 lifecycle states (waiting → preparing → active → ended)
+- **WebRTC:** P2P screen sharing with 3 audio modes
 - **Community Stats:** Single-record upsert pattern (no historical data)
 
 ## Coding Standards
@@ -155,36 +160,56 @@ See [Testing Guide](./docs/TESTING.md) for detailed documentation.
 
 ```
 src/
-├── components/      # UI components (RoomCard, Chat, Header, etc.)
-├── db/             # Database layer (SERVER-ONLY)
-│   ├── schema.ts   # Drizzle ORM table definitions
-│   └── queries/    # Query functions (stats, etc.)
-├── lib/            # Core utilities
-│   ├── auth.ts     # Better Auth configuration
+├── components/           # UI components (RoomCard, Chat, Header, etc.)
+│   ├── AudioConfigModal.tsx
+│   ├── StreamerControls.tsx
+│   └── ...
+├── db/                  # Database layer (SERVER-ONLY)
+│   ├── schema.ts        # Drizzle ORM table definitions
+│   └── queries/         # Query functions (stats, etc.)
+├── hooks/               # React hooks
+│   └── useWebRTC.ts     # WebRTC streaming hook
+├── lib/                 # Core utilities
+│   ├── auth.ts          # Better Auth configuration
+│   ├── device-detection.ts  # Mobile/desktop detection
 │   ├── rate-limiter.ts  # Rate limiting system
 │   ├── profanity-filter.ts
+│   ├── webrtc-config.ts # WebRTC configuration
 │   └── websocket-context.tsx
-├── routes/         # TanStack Router file-based routes
-│   ├── index.tsx   # Home page
+├── routes/              # TanStack Router file-based routes
+│   ├── index.tsx        # Home page
 │   ├── room.$roomId.tsx
-│   └── api/        # API routes
-├── utils/          # Server utility functions
-│   ├── rooms.ts    # Room CRUD operations
-│   ├── home.ts     # Home page data
+│   └── api/             # API routes
+├── types/               # TypeScript types
+│   └── webrtc.ts        # WebRTC type definitions
+├── utils/               # Server utility functions
+│   ├── rooms.ts         # Room CRUD operations
+│   ├── home.ts          # Home page data
 │   └── websocket-client.ts
-└── styles.css      # Global styles with theme system
+└── styles.css           # Global styles with theme system
 
-websocket/          # WebSocket server (separate process)
+websocket/               # WebSocket server (separate process)
 ├── websocket-server.ts
 └── websocket-room-manager.ts
 
-tests/              # Test files
-├── unit/           # Unit tests
-├── integration/    # Integration tests
-├── fixtures/       # Test data
-└── utils/          # Test utilities
+tests/                   # Test files
+├── unit/                # Unit tests
+│   └── webrtc/          # WebRTC tests (47 tests)
+├── integration/         # Integration tests
+│   └── webrtc/          # WebRTC integration tests
+├── fixtures/            # Test data
+└── utils/               # Test utilities
 
-docs/               # Documentation (see below)
+e2e/                     # E2E tests (Playwright)
+├── fixtures/
+├── tests/
+│   ├── room-management.spec.ts
+│   ├── screen-sharing.spec.ts
+│   ├── streamer-transfer.spec.ts
+│   └── chat.spec.ts
+└── README.md
+
+docs/                    # Documentation (see below)
 ```
 
 ## Room System Business Logic
@@ -240,6 +265,9 @@ See [Environment Variables](./docs/ENVIRONMENT_VARIABLES.md) for complete guide.
 - **Stats queries:** `src/db/queries/stats.ts`
 - **Rate limiter:** `src/lib/rate-limiter.ts`
 - **Room utilities:** `src/utils/rooms.ts`
+- **WebRTC hook:** `src/hooks/useWebRTC.ts`
+- **Device detection:** `src/lib/device-detection.ts`
+- **WebRTC config:** `src/lib/webrtc-config.ts`
 
 ## Documentation Index
 
@@ -254,6 +282,7 @@ All detailed documentation is in the `/docs` directory:
 - [Room System](./docs/ROOM_SYSTEM.md) - Room lifecycle and business logic
 - [WebSocket Events](./docs/WEBSOCKET_EVENTS.md) - Socket.io events reference
 - [Rate Limiting](./docs/RATE_LIMITING.md) - Rate limit configurations
+- [WebRTC Documentation](./docs/webrtc/) - WebRTC implementation guide (8 files)
 
 ### Development Guides
 - [Project Structure](./docs/PROJECT_STRUCTURE.md) - Directory organization
