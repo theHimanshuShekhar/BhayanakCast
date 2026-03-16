@@ -1,27 +1,88 @@
 import { describe, it, expect, beforeEach, afterAll } from "vitest";
-import { clearTables, teardownTestDatabase } from "../utils/database";
-import { insertTestUsers } from "../fixtures/users";
-import { insertTestRooms } from "../fixtures/rooms";
-import { insertTestParticipants } from "../fixtures/participants";
+import { clearTables, teardownTestDatabase, getTestDatabase } from "../utils/database";
 import {
 	getActiveRooms,
 	getTrendingRooms,
 	getCommunityStats,
 	getGlobalStats,
 } from "../../src/db/queries/stats";
+import { users, streamingRooms, roomParticipants } from "../../src/db/schema";
+
+// Helper to create test data
+async function createTestData() {
+	const { db } = await getTestDatabase();
+	
+	// Create test users
+	await db.insert(users).values([
+		{
+			id: "test-user-1",
+			name: "Alice Smith",
+			email: "alice@test.com",
+			emailVerified: true,
+			createdAt: new Date(),
+			updatedAt: new Date(),
+		},
+		{
+			id: "test-user-2",
+			name: "Bob Johnson",
+			email: "bob@test.com",
+			emailVerified: true,
+			createdAt: new Date(),
+			updatedAt: new Date(),
+		},
+	]);
+	
+	// Create test rooms
+	await db.insert(streamingRooms).values([
+		{
+			id: "test-room-1",
+			name: "Gaming Stream",
+			description: "Playing games",
+			streamerId: "test-user-1",
+			status: "active",
+			createdAt: new Date(),
+			endedAt: null,
+		},
+		{
+			id: "test-room-2",
+			name: "Coding Session",
+			description: "Building stuff",
+			streamerId: "test-user-2",
+			status: "preparing",
+			createdAt: new Date(),
+			endedAt: null,
+		},
+	]);
+	
+	// Create test participants
+	await db.insert(roomParticipants).values([
+		{
+			id: "test-part-1",
+			roomId: "test-room-1",
+			userId: "test-user-1",
+			joinedAt: new Date(),
+			leftAt: null,
+			totalTimeSeconds: 3600,
+		},
+		{
+			id: "test-part-2",
+			roomId: "test-room-1",
+			userId: "test-user-2",
+			joinedAt: new Date(),
+			leftAt: null,
+			totalTimeSeconds: 1800,
+		},
+	]);
+}
 
 describe("Room Management Integration (Direct DB Queries)", () => {
 	beforeEach(async () => {
-		const { db } = await import("../utils/database").then((m) =>
-			m.getTestDatabase(),
-		);
 		await clearTables();
-		await insertTestUsers(db);
-		await insertTestRooms(db);
-		await insertTestParticipants(db);
+		await createTestData();
 	});
 
 	afterAll(async () => {
+		await clearTables();
 		await teardownTestDatabase();
 	});
 

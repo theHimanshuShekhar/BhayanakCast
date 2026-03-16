@@ -1,6 +1,7 @@
 import { relations } from "drizzle-orm";
 import {
 	boolean,
+	decimal,
 	index,
 	integer,
 	pgTable,
@@ -152,9 +153,12 @@ export const communityStatsSnapshots = pgTable(
 		id: text("id").primaryKey(),
 		totalRegisteredUsers: integer("total_registered_users").notNull(),
 		totalWatchHoursThisWeek: integer("total_watch_hours_this_week").notNull(),
-		totalWatchSecondsThisWeek: integer("total_watch_seconds_this_week")
+		totalWatchSecondsThisWeek: decimal("total_watch_seconds_this_week", {
+			precision: 10,
+			scale: 2,
+		})
 			.notNull()
-			.default(0),
+			.default("0"),
 		mostActiveStreamers: integer("most_active_streamers").notNull(),
 		newUsersThisWeek: integer("new_users_this_week").notNull(),
 		calculatedAt: timestamp("calculated_at").notNull().defaultNow(),
