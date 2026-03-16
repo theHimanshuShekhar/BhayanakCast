@@ -1,6 +1,6 @@
 # BhayanakCast Development Plan
 
-**Last Updated:** March 9, 2026
+**Last Updated:** March 16, 2026
 
 ## Completed Features ✅
 
@@ -37,7 +37,7 @@
 
 ### User Features
 - [x] User profiles with top 5 connections
-- [x] Community stats with 2-minute caching
+- [x] Community stats with single-record upsert (no historical data)
 - [x] Debounced room search
 - [x] Trending rooms algorithm
 - [x] Active room indicator
@@ -93,8 +93,15 @@ Create → preparing → active (multiple participants)
 
 ### Caching Strategy
 - Static data: 30 minutes
-- Community stats: 2 minutes
+- Community stats: 30 minutes (single record, updated via upsert)
 - Room data: 2 minutes
+
+### Community Stats Architecture
+Single record design with fixed ID (`community-stats-single`):
+- Uses `INSERT ... ON CONFLICT DO UPDATE` for atomic upsert
+- No historical data stored (keeps table size constant)
+- In-memory cache with 30-minute TTL
+- Auto-recalculation when cache expires or data missing
 
 ## Deployment
 

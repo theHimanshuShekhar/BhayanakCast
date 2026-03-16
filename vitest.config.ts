@@ -6,6 +6,13 @@ import { config } from "dotenv";
 // Load .env.local for tests
 config({ path: ".env.local" });
 
+// Override DATABASE_URL to use test database
+const originalDbUrl = process.env.DATABASE_URL ||
+	"postgresql://postgres:postgres@localhost:5432/postgres";
+const testDbUrl = originalDbUrl.replace(/\/[^/]+$/, "/bhayanak_cast_test");
+process.env.DATABASE_URL = testDbUrl;
+console.log(`[Vitest Config] Using test database: ${testDbUrl}`);
+
 export default defineConfig({
 	plugins: [react(), tsconfigPaths()],
 	test: {
