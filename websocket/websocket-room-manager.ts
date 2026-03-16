@@ -6,8 +6,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Load .env files FIRST before any other imports
-config({ path: join(__dirname, ".env.local"), override: true });
-config({ path: join(__dirname, ".env"), override: true });
+config({ path: join(__dirname, "..", ".env.local"), override: true });
+config({ path: join(__dirname, "..", ".env"), override: true });
 
 import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import { db } from "../src/db/index";
@@ -17,6 +17,13 @@ import { RateLimits, rateLimiter } from "../src/lib/rate-limiter";
 
 // In-memory tracking of socket -> room mapping for presence detection
 const socketRoomMap = new Map<string, { roomId: string; userId: string }>();
+
+interface SocketUserData {
+	userId: string;
+	userName: string;
+	roomId?: string;
+	isMobile: boolean;
+}
 
 /**
  * Get room details from database
@@ -142,11 +149,13 @@ export async function addParticipant(
 export async function removeParticipant(
 	roomId: string,
 	userId: string,
+	socketUserMap?: Map<string, SocketUserData>,
 ): Promise<{
 	newStreamerId?: string;
 	newStreamerName?: string;
 	roomEmpty: boolean;
 	newStatus?: string;
+	skippedMobileUsers?: number;
 }> {
 	const now = new Date();
 
@@ -203,9 +212,13 @@ export async function removeParticipant(
 		return { roomEmpty: false };
 	}
 
-	// Streamer is leaving - find next viewer
-	const nextViewer = await db
-		.select()
+	// Streamer is leaving - find next eligible viewer (non-mobile)
+	const allViewers = await db
+		.select({
+			id: roomParticipants.id,
+			userId: roomParticipants.userId,
+			joinedAt: roomParticipants.joinedAt,
+		})
 		.from(roomParticipants)
 		.where(
 			and(
@@ -214,30 +227,61 @@ export async function removeParticipant(
 				ne(roomParticipants.userId, userId),
 			),
 		)
-		.orderBy(roomParticipants.joinedAt)
-		.limit(1);
+		.orderBy(roomParticipants.joinedAt);
 
-	if (nextViewer.length > 0) {
-		// Transfer to next viewer
+	// Filter out mobile users if socketUserMap is provided
+	let eligibleViewers = allViewers;
+	let skippedMobileUsers = 0;
+
+	if (socketUserMap) {
+		eligibleViewers = allViewers.filter((viewer) => {
+			// Check socket data for device type
+			for (const [, socketData] of socketUserMap.entries()) {
+				if (socketData.userId === viewer.userId) {
+					return !socketData.isMobile; // Only non-mobile can stream
+				}
+			}
+			return true; // Default to eligible if can't determine
+		});
+		skippedMobileUsers = allViewers.length - eligibleViewers.length;
+	}
+
+	if (eligibleViewers.length > 0) {
+		// Transfer to first eligible (earliest joined) viewer
+		const nextViewer = eligibleViewers[0];
+
 		await db
 			.update(streamingRooms)
-			.set({ streamerId: nextViewer[0].userId })
+			.set({ streamerId: nextViewer.userId })
 			.where(eq(streamingRooms.id, roomId));
 
 		// Get new streamer's name
 		const newStreamerUser = await db
 			.select({ name: users.name })
 			.from(users)
-			.where(eq(users.id, nextViewer[0].userId))
+			.where(eq(users.id, nextViewer.userId))
 			.limit(1);
 
 		return {
-			newStreamerId: nextViewer[0].userId,
+			newStreamerId: nextViewer.userId,
 			newStreamerName: newStreamerUser[0]?.name || "Someone",
 			roomEmpty: false,
+			skippedMobileUsers: skippedMobileUsers > 0 ? skippedMobileUsers : undefined,
+		};
+	} else if (allViewers.length > 0) {
+		// All viewers are mobile - set to waiting
+		await db
+			.update(streamingRooms)
+			.set({ streamerId: null, status: "waiting" })
+			.where(eq(streamingRooms.id, roomId));
+
+		return {
+			roomEmpty: false,
+			newStatus: "waiting",
+			skippedMobileUsers,
 		};
 	} else {
-		// No viewers left - set to waiting
+		// No viewers at all
 		await db
 			.update(streamingRooms)
 			.set({ streamerId: null, status: "waiting" })

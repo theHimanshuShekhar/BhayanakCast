@@ -171,10 +171,31 @@ const io = new Server(httpServer, {
 });
 
 // Track socket -> user mapping for presence
-const socketUserMap = new Map<string, { userId: string; userName: string; roomId?: string }>();
+interface SocketUserData {
+	userId: string;
+	userName: string;
+	roomId?: string;
+	isMobile: boolean;
+}
+
+const socketUserMap = new Map<string, SocketUserData>();
 
 // Track unique users and their connection count for global user count
 const connectedUsers = new Map<string, number>();
+
+// Track WebRTC state per room
+interface RoomWebRTCState {
+	streamerId: string;
+	streamerSocketId: string;
+	viewerIds: Set<string>;
+	transferInProgress: boolean;
+	transferStartedAt?: number;
+}
+
+const roomWebRTCState = new Map<string, RoomWebRTCState>();
+
+// Debounce transfers to prevent rapid changes
+const transferDebounces = new Map<string, NodeJS.Timeout>();
 
 // Broadcast user count to all connected clients
 function broadcastUserCount() {
@@ -219,6 +240,88 @@ function sendSystemMessage(roomId: string, content: string) {
 	broadcastToRoom(roomId, "chat:message", message);
 }
 
+// Initiate WebRTC transfer with debouncing
+async function initiateWebRTCTransfer(
+	roomId: string,
+	oldStreamerId: string,
+	newStreamerId: string,
+	participants: Array<{ userId: string; userName: string }>,
+) {
+	// Clear any existing debounce for this room
+	const existing = transferDebounces.get(roomId);
+	if (existing) {
+		clearTimeout(existing);
+	}
+
+	// Debounce by 500ms to batch rapid changes
+	const timeout = setTimeout(async () => {
+		console.log(`[WebRTC] Executing transfer in room ${roomId}`);
+
+		// Update room WebRTC state
+		roomWebRTCState.set(roomId, {
+			streamerId: newStreamerId,
+			streamerSocketId: "", // Will be set when new streamer connects
+			viewerIds: new Set(participants.map((p) => p.userId)),
+			transferInProgress: true,
+			transferStartedAt: Date.now(),
+		});
+
+		// Notify all clients to initiate cleanup
+		broadcastToRoom(roomId, "webrtc:transfer_initiating", {
+			oldStreamerId,
+			newStreamerId,
+			reason: "streamer_left",
+			estimatedReconnectAt: Date.now() + 3000,
+			allParticipants: participants.map((p) => ({
+				userId: p.userId,
+				userName: p.userName,
+				isMobile: false, // Will be determined by socket data
+			})),
+		});
+
+		// Find new streamer's socket
+		let newStreamerSocketId = "";
+		for (const [socketId, userData] of socketUserMap.entries()) {
+			if (userData.userId === newStreamerId && userData.roomId === roomId) {
+				newStreamerSocketId = socketId;
+				break;
+			}
+		}
+
+		if (newStreamerSocketId) {
+			// Update state with socket ID
+			const state = roomWebRTCState.get(roomId);
+			if (state) {
+				state.streamerSocketId = newStreamerSocketId;
+			}
+
+			// Notify new streamer specifically
+			io.to(newStreamerSocketId).emit("webrtc:become_streamer", {
+				viewers: participants
+					.filter((p) => p.userId !== newStreamerId)
+					.map((p) => ({
+						userId: p.userId,
+						userName: p.userName,
+					})),
+				startBroadcastingAt: Date.now() + 1500,
+			});
+		}
+
+		// Set transfer timeout (10 seconds)
+		setTimeout(() => {
+			const state = roomWebRTCState.get(roomId);
+			if (state?.transferInProgress) {
+				console.error(`[WebRTC] Transfer timeout in room ${roomId}`);
+				roomWebRTCState.delete(roomId);
+			}
+		}, 10000);
+
+		transferDebounces.delete(roomId);
+	}, 500);
+
+	transferDebounces.set(roomId, timeout);
+}
+
 // Socket.io connection handler
 io.on("connection", (socket) => {
 	const clientIp = socket.handshake.address;
@@ -229,8 +332,8 @@ io.on("connection", (socket) => {
 	const rateLimitResult = connectionLimiter.checkAndRecord(clientIp, RateLimits.WS_CONNECTION);
 	if (!rateLimitResult.allowed) {
 		console.log(`[Socket.io] Connection rejected for IP ${clientIp}: rate limit exceeded`);
-		socket.emit("error", { 
-			message: `Connection rate limit exceeded. Try again in ${rateLimitResult.retryAfter} seconds.` 
+		socket.emit("error", {
+			message: `Connection rate limit exceeded. Try again in ${rateLimitResult.retryAfter} seconds.`,
 		});
 		socket.disconnect(true);
 		return;
@@ -240,16 +343,21 @@ io.on("connection", (socket) => {
 	socket.emit("userCount", { count: connectedUsers.size });
 
 	// Handle user identification
-	socket.on("identify", (data: { userId?: string; userName?: string; userImage?: string | null }) => {
+	socket.on("identify", (data: { userId?: string; userName?: string; userImage?: string | null; isMobile?: boolean }) => {
 		const userId = data.userId || `anonymous:${socket.id}`;
 		const userName = data.userName || userId;
-		
+
 		socket.data.userId = userId;
 		socket.data.userName = userName;
 		socket.data.userImage = data.userImage;
-		
-		socketUserMap.set(socket.id, { userId, userName });
-		
+		socket.data.isMobile = data.isMobile || false;
+
+		socketUserMap.set(socket.id, {
+			userId,
+			userName,
+			isMobile: data.isMobile || false,
+		});
+
 		// Increment connection count for this user
 		const currentCount = connectedUsers.get(userId) || 0;
 		connectedUsers.set(userId, currentCount + 1);
@@ -257,8 +365,8 @@ io.on("connection", (socket) => {
 		if (currentCount === 0) {
 			broadcastUserCount();
 		}
-		
-		console.log(`[Socket.io] User identified: ${userName} (${userId}) (socket: ${socket.id})`);
+
+		console.log(`[Socket.io] User identified: ${userName} (${userId}) (socket: ${socket.id}) (mobile: ${data.isMobile})`);
 		socket.emit("identified", { userId, userName });
 	});
 
@@ -267,6 +375,7 @@ io.on("connection", (socket) => {
 		const { roomId } = data;
 		const userId = socket.data.userId;
 		const userName = socket.data.userName || userId;
+		const isMobile = socket.data.isMobile || false;
 
 		if (!userId) {
 			socket.emit("room:error", { message: "Not authenticated" });
@@ -277,9 +386,9 @@ io.on("connection", (socket) => {
 		const joinLimiter = rateLimiter.forAction("room:join");
 		const rateLimitResult = joinLimiter.checkAndRecord(userId, RateLimits.ROOM_JOIN);
 		if (!rateLimitResult.allowed) {
-			socket.emit("room:error", { 
+			socket.emit("room:error", {
 				message: `You're joining rooms too quickly. Try again in ${rateLimitResult.retryAfter} seconds.`,
-				retryAfter: rateLimitResult.retryAfter
+				retryAfter: rateLimitResult.retryAfter,
 			});
 			return;
 		}
@@ -295,9 +404,9 @@ io.on("connection", (socket) => {
 		if (currentRoom) {
 			console.log(`[Room] User ${userId} leaving previous room ${currentRoom}`);
 			socket.leave(currentRoom);
-			const result = await removeParticipant(currentRoom, userId);
+			const result = await removeParticipant(currentRoom, userId, socketUserMap);
 			const participants = await getRoomParticipants(currentRoom);
-			
+
 			// Notify others in old room
 			broadcastToRoom(currentRoom, "room:user_left", {
 				userId,
@@ -313,6 +422,17 @@ io.on("connection", (socket) => {
 					newStreamerName,
 				});
 				sendSystemMessage(currentRoom, `${newStreamerName} is now the streamer`);
+
+				// Initiate WebRTC transfer if old streamer was streaming
+				const webrtcState = roomWebRTCState.get(currentRoom);
+				if (webrtcState && webrtcState.streamerId === userId) {
+					await initiateWebRTCTransfer(
+						currentRoom,
+						userId,
+						result.newStreamerId,
+						participants.map((p) => ({ userId: p.userId, userName: p.userName || "" })),
+					);
+				}
 			}
 		}
 
@@ -324,7 +444,7 @@ io.on("connection", (socket) => {
 
 			// Join Socket.io room
 			socket.join(roomId);
-			socketUserMap.set(socket.id, { userId, userName, roomId });
+			socketUserMap.set(socket.id, { userId, userName, roomId, isMobile });
 
 			// Get updated participants
 			const participants = await getRoomParticipants(roomId);
@@ -362,7 +482,7 @@ io.on("connection", (socket) => {
 			// If room status changed
 			if (result.newStatus) {
 				broadcastToRoom(roomId, "room:status_changed", { status: result.newStatus });
-				
+
 				const statusMessages: Record<string, string> = {
 					waiting: "Room is now waiting for participants",
 					preparing: "Room is preparing for stream",
@@ -377,14 +497,14 @@ io.on("connection", (socket) => {
 			console.log(`[Room] User ${userId} joined room ${roomId} (${participants.length} participants)`);
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : "Failed to join room";
-			
+
 			// Log expected errors (like "Room has ended") as warnings, not errors
 			if (errorMessage === "Room has ended") {
 				console.log(`[Room] User ${userId} attempted to join ended room ${roomId}`);
 			} else {
 				console.error(`[Room] Error joining room:`, error);
 			}
-			
+
 			socket.emit("room:error", { message: errorMessage });
 		}
 	});
@@ -404,9 +524,9 @@ io.on("connection", (socket) => {
 		const leaveLimiter = rateLimiter.forAction("room:leave");
 		const rateLimitResult = leaveLimiter.checkAndRecord(userId, RateLimits.ROOM_LEAVE);
 		if (!rateLimitResult.allowed) {
-			socket.emit("room:error", { 
+			socket.emit("room:error", {
 				message: `You're leaving rooms too quickly. Try again in ${rateLimitResult.retryAfter} seconds.`,
-				retryAfter: rateLimitResult.retryAfter
+				retryAfter: rateLimitResult.retryAfter,
 			});
 			return;
 		}
@@ -415,15 +535,15 @@ io.on("connection", (socket) => {
 			console.log(`[Room] User ${userId} leaving room ${roomId}`);
 
 			// Update database
-			const result = await removeParticipant(roomId, userId);
+			const result = await removeParticipant(roomId, userId, socketUserMap);
 
 			// Leave Socket.io room
 			socket.leave(roomId);
-			
+
 			// Update socket user map
 			const socketData = socketUserMap.get(socket.id);
 			if (socketData) {
-				socketUserMap.set(socket.id, { userId, userName });
+				socketUserMap.set(socket.id, { userId, userName, isMobile: socketData.isMobile });
 			}
 
 			// Get updated participants
@@ -450,12 +570,23 @@ io.on("connection", (socket) => {
 					newStreamerName,
 				});
 				sendSystemMessage(roomId, `${newStreamerName} is now the streamer`);
+
+				// Initiate WebRTC transfer
+				const webrtcState = roomWebRTCState.get(roomId);
+				if (webrtcState && webrtcState.streamerId === userId) {
+					await initiateWebRTCTransfer(
+						roomId,
+						userId,
+						result.newStreamerId,
+						participants.map((p) => ({ userId: p.userId, userName: p.userName || "" })),
+					);
+				}
 			}
 
 			// If room status changed
 			if (result.newStatus) {
 				broadcastToRoom(roomId, "room:status_changed", { status: result.newStatus });
-				
+
 				const statusMessages: Record<string, string> = {
 					waiting: "Room is now waiting for participants",
 					preparing: "Room is preparing for stream",
@@ -495,9 +626,9 @@ io.on("connection", (socket) => {
 		const chatLimiter = rateLimiter.forAction("chat:send");
 		const rateLimitResult = chatLimiter.checkAndRecord(userId, RateLimits.CHAT_SEND);
 		if (!rateLimitResult.allowed) {
-			socket.emit("chat:error", { 
+			socket.emit("chat:error", {
 				message: `You're sending messages too quickly. Try again in ${rateLimitResult.retryAfter} seconds.`,
-				retryAfter: rateLimitResult.retryAfter
+				retryAfter: rateLimitResult.retryAfter,
 			});
 			return;
 		}
@@ -521,7 +652,7 @@ io.on("connection", (socket) => {
 		};
 
 		console.log(`[Chat] Message from ${userName} in room ${roomId}: ${content}`);
-		
+
 		// Broadcast to all in room (including sender)
 		broadcastToRoom(roomId, "chat:message", message);
 	});
@@ -558,10 +689,155 @@ io.on("connection", (socket) => {
 			// Confirm to sender
 			socket.emit("streamer:transferred", { roomId, newStreamerId });
 
+			// Initiate WebRTC transfer
+			const participants = await getRoomParticipants(roomId);
+			await initiateWebRTCTransfer(
+				roomId,
+				userId,
+				newStreamerId,
+				participants.map((p) => ({ userId: p.userId, userName: p.userName || "" })),
+			);
+
 			console.log(`[Room] Streamer transferred in room ${roomId} to ${newStreamerId}`);
 		} catch (error) {
 			console.error(`[Room] Error transferring streamer:`, error);
 			socket.emit("room:error", { message: error instanceof Error ? error.message : "Failed to transfer streamer" });
+		}
+	});
+
+	// ============ WebRTC Signaling Events ============
+
+	// Streamer ready to broadcast
+	socket.on("webrtc:streamer_ready", (data: { roomId: string; audioConfig: string }) => {
+		const { roomId, audioConfig } = data;
+		const userId = socket.data.userId;
+
+		console.log(`[WebRTC] Streamer ${userId} ready in room ${roomId}`);
+
+		// Update room WebRTC state
+		const state = roomWebRTCState.get(roomId);
+		if (state) {
+			state.streamerId = userId;
+			state.streamerSocketId = socket.id;
+			state.transferInProgress = false;
+		}
+
+		// Notify all room members
+		broadcastToRoom(roomId, "webrtc:streamer_ready", {
+			streamerId: userId,
+			streamerName: socket.data.userName,
+			audioConfig,
+		});
+
+		// Trigger viewer reconnection after a delay
+		setTimeout(() => {
+			broadcastToRoom(roomId, "webrtc:reconnect_now", {
+				newStreamerId: userId,
+				newStreamerName: socket.data.userName,
+				streamerSocketId: socket.id,
+			});
+		}, 1000);
+	});
+
+	// Screen sharing ended
+	socket.on("webrtc:screen_share_ended", async (data: { roomId: string }) => {
+		const { roomId } = data;
+		const userId = socket.data.userId;
+
+		console.log(`[WebRTC] Screen share ended by ${userId} in room ${roomId}`);
+
+		// Get room to check if this user is streamer
+		const room = await getRoom(roomId);
+		if (!room || room.streamerId !== userId) {
+			return; // Not the streamer, ignore
+		}
+
+		// Clear WebRTC state
+		roomWebRTCState.delete(roomId);
+
+		// Handle as streamer leaving
+		const result = await removeParticipant(roomId, userId, socketUserMap);
+
+		if (result.skippedMobileUsers && result.skippedMobileUsers > 0) {
+			sendSystemMessage(roomId, `${result.skippedMobileUsers} mobile viewer(s) skipped for streaming`);
+		}
+
+		if (result.newStatus === "waiting") {
+			sendSystemMessage(roomId, "All viewers are on mobile - waiting for desktop user to stream");
+		}
+
+		// Notify of streamer change
+		if (result.newStreamerId) {
+			broadcastToRoom(roomId, "room:streamer_changed", {
+				newStreamerId: result.newStreamerId,
+				newStreamerName: result.newStreamerName || "Someone",
+			});
+			sendSystemMessage(roomId, `${result.newStreamerName || "Someone"} is now the streamer`);
+
+			// Initiate WebRTC transfer
+			const participants = await getRoomParticipants(roomId);
+			await initiateWebRTCTransfer(
+				roomId,
+				userId,
+				result.newStreamerId,
+				participants.map((p) => ({ userId: p.userId, userName: p.userName || "" })),
+			);
+		}
+
+		if (result.newStatus) {
+			broadcastToRoom(roomId, "room:status_changed", { status: result.newStatus });
+		}
+	});
+
+	// WebRTC offer from viewer
+	socket.on("webrtc:offer", (data: { roomId: string; toUserId: string; offer: RTCSessionDescriptionInit }) => {
+		const { roomId, toUserId, offer } = data;
+		const fromUserId = socket.data.userId;
+
+		// Find target socket
+		for (const [targetSocketId, userData] of socketUserMap.entries()) {
+			if (userData.userId === toUserId && userData.roomId === roomId) {
+				io.to(targetSocketId).emit("webrtc:offer", {
+					fromUserId,
+					fromUserName: socket.data.userName,
+					offer,
+				});
+				break;
+			}
+		}
+	});
+
+	// WebRTC answer from streamer
+	socket.on("webrtc:answer", (data: { roomId: string; toUserId: string; answer: RTCSessionDescriptionInit }) => {
+		const { roomId, toUserId, answer } = data;
+		const fromUserId = socket.data.userId;
+
+		// Find target socket
+		for (const [targetSocketId, userData] of socketUserMap.entries()) {
+			if (userData.userId === toUserId && userData.roomId === roomId) {
+				io.to(targetSocketId).emit("webrtc:answer", {
+					fromUserId,
+					answer,
+				});
+				break;
+			}
+		}
+	});
+
+	// ICE candidate exchange
+	socket.on("webrtc:ice_candidate", (data: { roomId: string; toUserId: string; candidate: RTCIceCandidateInit }) => {
+		const { roomId, toUserId, candidate } = data;
+		const fromUserId = socket.data.userId;
+
+		// Find target socket
+		for (const [targetSocketId, userData] of socketUserMap.entries()) {
+			if (userData.userId === toUserId && userData.roomId === roomId) {
+				io.to(targetSocketId).emit("webrtc:ice_candidate", {
+					fromUserId,
+					candidate,
+				});
+				break;
+			}
 		}
 	});
 
@@ -576,7 +852,7 @@ io.on("connection", (socket) => {
 		// If user was in a room, handle leave
 		if (roomId) {
 			try {
-				const result = await removeParticipant(roomId, userId);
+				const result = await removeParticipant(roomId, userId, socketUserMap);
 				const participants = await getRoomParticipants(roomId);
 
 				// Notify others in room
@@ -595,10 +871,25 @@ io.on("connection", (socket) => {
 						newStreamerName,
 					});
 					sendSystemMessage(roomId, `${newStreamerName} is now the streamer`);
+
+					// Initiate WebRTC transfer if old streamer was streaming
+					const webrtcState = roomWebRTCState.get(roomId);
+					if (webrtcState && webrtcState.streamerId === userId) {
+						await initiateWebRTCTransfer(
+							roomId,
+							userId,
+							result.newStreamerId,
+							participants.map((p) => ({ userId: p.userId, userName: p.userName || "" })),
+						);
+					}
 				}
 
 				if (result.newStatus) {
 					broadcastToRoom(roomId, "room:status_changed", { status: result.newStatus });
+				}
+
+				if (result.skippedMobileUsers && result.skippedMobileUsers > 0) {
+					sendSystemMessage(roomId, `${result.skippedMobileUsers} mobile viewer(s) skipped for streaming`);
 				}
 			} catch (error) {
 				console.error(`[Room] Error handling disconnect:`, error);
@@ -607,7 +898,7 @@ io.on("connection", (socket) => {
 
 		// Remove from socket user map
 		socketUserMap.delete(socket.id);
-		
+
 		// Decrement connection count for this user
 		const currentCount = connectedUsers.get(userId) || 0;
 		if (currentCount <= 1) {
