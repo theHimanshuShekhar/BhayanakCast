@@ -139,6 +139,7 @@ function VideoDisplay({ stream, streamerName }: VideoDisplayProps) {
 
 	return (
 		<div className="relative rounded-xl overflow-hidden bg-black aspect-video">
+			{/* biome-ignore lint/a11y/useMediaCaption: Screen sharing doesn't support captions */}
 			<video
 				ref={videoRef}
 				autoPlay
@@ -241,8 +242,8 @@ function RoomDetailPage() {
 	const { data: session } = authClient.useSession();
 	const userId = session?.user?.id;
 
-	// Device detection
-	const deviceCapabilities = useRef(detectDevice());
+	// Device detection - memoized once
+	detectDevice();
 
 	// Query for real-time room data
 	const { data: roomData, refetch } = useQuery({
@@ -259,14 +260,10 @@ function RoomDetailPage() {
 	const isPreparing = room?.status === "preparing";
 
 	// WebRTC hook for streaming
-	const {
-		localStream,
-		remoteStream,
-		isScreenSharing,
-		transferState,
-		transferInfo,
-		deviceCapabilities: webrtcDeviceCapabilities,
-	} = useWebRTC({ roomId, userId: userId || "" });
+	const { localStream, remoteStream, transferState, transferInfo } = useWebRTC({
+		roomId,
+		userId: userId || "",
+	});
 
 	// WebSocket for real-time updates
 	const { socket, isConnected } = useWebSocket();
