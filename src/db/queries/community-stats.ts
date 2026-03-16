@@ -13,7 +13,7 @@ export interface CommunityStats {
 	mostActiveStreamers: number;
 	newUsersThisWeek: number;
 	/** Total watch time in seconds (for accurate minute display) */
-	totalWatchSecondsThisWeek: number;
+	totalWatchSecondsThisWeek: number | string;
 }
 
 /**
@@ -79,17 +79,34 @@ async function calculateCommunityStats(): Promise<CommunityStats> {
 
 /**
  * Save calculated stats to database
+ * Uses a single record with fixed ID - updates if exists, inserts if not
  */
 async function saveCommunityStats(stats: CommunityStats): Promise<void> {
-	await db.insert(communityStatsSnapshots).values({
-		id: crypto.randomUUID(),
-		totalRegisteredUsers: stats.totalRegisteredUsers,
-		totalWatchHoursThisWeek: stats.totalWatchHoursThisWeek,
-		totalWatchSecondsThisWeek: stats.totalWatchSecondsThisWeek,
-		mostActiveStreamers: stats.mostActiveStreamers,
-		newUsersThisWeek: stats.newUsersThisWeek,
-		calculatedAt: new Date(),
-	});
+	const STATS_ID = "community-stats-single"; // Fixed ID for single record
+	const now = new Date();
+
+	await db
+		.insert(communityStatsSnapshots)
+		.values({
+			id: STATS_ID,
+			totalRegisteredUsers: stats.totalRegisteredUsers,
+			totalWatchHoursThisWeek: stats.totalWatchHoursThisWeek,
+			totalWatchSecondsThisWeek: String(stats.totalWatchSecondsThisWeek),
+			mostActiveStreamers: stats.mostActiveStreamers,
+			newUsersThisWeek: stats.newUsersThisWeek,
+			calculatedAt: now,
+		})
+		.onConflictDoUpdate({
+			target: communityStatsSnapshots.id,
+			set: {
+				totalRegisteredUsers: stats.totalRegisteredUsers,
+				totalWatchHoursThisWeek: stats.totalWatchHoursThisWeek,
+				totalWatchSecondsThisWeek: String(stats.totalWatchSecondsThisWeek),
+				mostActiveStreamers: stats.mostActiveStreamers,
+				newUsersThisWeek: stats.newUsersThisWeek,
+				calculatedAt: now,
+			},
+		});
 }
 
 /**
@@ -112,6 +129,15 @@ export async function initializeCommunityStats(): Promise<CommunityStats> {
 let cachedStats: CommunityStats | null = null;
 let lastCalculatedAt: number = 0;
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+/**
+ * Reset the in-memory cache
+ * Used in tests to ensure fresh calculations
+ */
+export function resetCommunityStatsCache(): void {
+	cachedStats = null;
+	lastCalculatedAt = 0;
+}
 
 /**
  * Get the most recent stats snapshot from database
@@ -153,7 +179,10 @@ export async function getCommunityStats(): Promise<CommunityStats> {
 	const stats = {
 		totalRegisteredUsers: snapshot[0].totalRegisteredUsers,
 		totalWatchHoursThisWeek: snapshot[0].totalWatchHoursThisWeek,
-		totalWatchSecondsThisWeek: snapshot[0].totalWatchSecondsThisWeek,
+		totalWatchSecondsThisWeek:
+			typeof snapshot[0].totalWatchSecondsThisWeek === "string"
+				? Number(snapshot[0].totalWatchSecondsThisWeek)
+				: snapshot[0].totalWatchSecondsThisWeek,
 		mostActiveStreamers: snapshot[0].mostActiveStreamers,
 		newUsersThisWeek: snapshot[0].newUsersThisWeek,
 	};
@@ -164,21 +193,12 @@ export async function getCommunityStats(): Promise<CommunityStats> {
 }
 
 /**
- * Cleanup old stats snapshots (keep only last 24 hours)
- * This can be run periodically to prevent table bloat
- */
-export async function cleanupOldStatsSnapshots(): Promise<void> {
-	const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-
-	await db
-		.delete(communityStatsSnapshots)
-		.where(sql`${communityStatsSnapshots.calculatedAt} < ${oneDayAgo}`);
-}
-
-/**
- * Clear all community stats snapshots
+ * Clear the single community stats record
  * Use this to force recalculation on server restart
  */
 export async function clearAllStatsSnapshots(): Promise<void> {
-	await db.delete(communityStatsSnapshots);
+	const STATS_ID = "community-stats-single";
+	await db
+		.delete(communityStatsSnapshots)
+		.where(sql`${communityStatsSnapshots.id} = ${STATS_ID}`);
 }

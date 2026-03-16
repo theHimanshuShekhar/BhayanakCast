@@ -6,6 +6,7 @@ import {
 	getTrendingRooms,
 } from "../../src/db/queries/stats";
 import { getTopRelationships } from "../../src/db/queries";
+import { resetCommunityStatsCache } from "../../src/db/queries/community-stats";
 import { users, streamingRooms, roomParticipants, userRelationships } from "../../src/db/schema";
 
 // Helper to create test data
@@ -114,6 +115,7 @@ async function createTestData() {
 describe("User Stats and Queries Integration", () => {
 	beforeEach(async () => {
 		await clearTables();
+		resetCommunityStatsCache(); // Reset cache to ensure fresh stats calculation
 		await createTestData();
 	});
 

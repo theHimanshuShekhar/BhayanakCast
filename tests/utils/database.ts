@@ -47,6 +47,9 @@ export async function clearTables() {
 	await db.delete(schema.sessions);
 	await db.delete(schema.verifications);
 	await db.delete(schema.users);
+	
+	// Also clear community stats so tests get fresh calculations
+	await db.delete(schema.communityStatsSnapshots);
 }
 
 // Note: We're not using transactions anymore since server functions

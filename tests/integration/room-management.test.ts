@@ -6,6 +6,7 @@ import {
 	getCommunityStats,
 	getGlobalStats,
 } from "../../src/db/queries/stats";
+import { resetCommunityStatsCache } from "../../src/db/queries/community-stats";
 import { users, streamingRooms, roomParticipants } from "../../src/db/schema";
 
 // Helper to create test data
@@ -26,6 +27,14 @@ async function createTestData() {
 			id: "test-user-2",
 			name: "Bob Johnson",
 			email: "bob@test.com",
+			emailVerified: true,
+			createdAt: new Date(),
+			updatedAt: new Date(),
+		},
+		{
+			id: "test-user-3",
+			name: "Carol Williams",
+			email: "carol@test.com",
 			emailVerified: true,
 			createdAt: new Date(),
 			updatedAt: new Date(),
@@ -78,6 +87,7 @@ async function createTestData() {
 describe("Room Management Integration (Direct DB Queries)", () => {
 	beforeEach(async () => {
 		await clearTables();
+		resetCommunityStatsCache(); // Reset cache to ensure fresh stats calculation
 		await createTestData();
 	});
 
