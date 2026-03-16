@@ -50,10 +50,7 @@ pnpm db:studio
 ### Testing
 
 ```bash
-# Setup test database (one-time)
-pnpm test:setup
-
-# Run all tests
+# Run all tests (auto-creates test database on first run)
 pnpm test
 
 # Run specific test file
@@ -61,6 +58,9 @@ pnpm vitest run tests/unit/rate-limiter.test.ts
 
 # Watch mode
 pnpm test:watch
+
+# With coverage
+pnpm test:coverage
 ```
 
 ### Code Quality

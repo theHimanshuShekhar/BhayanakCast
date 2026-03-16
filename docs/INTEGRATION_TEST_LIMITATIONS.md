@@ -111,8 +111,8 @@ const response = await fetch("http://localhost:3002/api/create-room", {
 We test the core business logic in unit tests:
 
 - **Rate Limiter:** 35 tests covering all backends and configurations
-- **Profanity Filter:** 49 tests covering all scenarios
-- **Components:** Tests for UI components with mocked data
+- **Profanity Filter:** 34 tests covering all scenarios
+- **Components:** 24 tests for UI components with mocked data
 
 ### 2. Database Query Tests ✅
 
@@ -244,8 +244,8 @@ When TanStack Start provides official testing support:
 
 While the 36 integration tests are skipped due to TanStack Start testing limitations, the application is still well-tested through:
 
-- **84 unit tests** covering core logic
-- **75 integration tests** covering database queries and components
+- **89 unit tests** covering core logic (rate limiter, profanity filter, components)
+- **66 integration tests** covering database queries and components (30 active, 36 skipped)
 - **End-to-end manual testing** during development
 
 The skipped tests are documented and ready to be enabled when proper testing infrastructure becomes available.
