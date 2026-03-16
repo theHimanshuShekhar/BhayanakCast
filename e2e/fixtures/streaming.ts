@@ -4,7 +4,7 @@
  * Shared utilities for streaming E2E tests
  */
 
-import { test as base, Page } from "@playwright/test";
+import { test as base, type Page, expect } from "@playwright/test";
 
 // Extend test with custom fixtures
 export const test = base.extend<{
