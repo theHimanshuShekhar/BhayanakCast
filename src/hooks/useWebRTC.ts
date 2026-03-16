@@ -290,7 +290,7 @@ export function useWebRTC({ roomId, userId }: UseWebRTCOptions) {
 					new RTCIceCandidate(candidate),
 				);
 			} catch (_e) {
-				console.warn("[WebRTC] Error adding ICE candidate:", e);
+				console.warn("[WebRTC] Error adding ICE candidate:", _e);
 			}
 		},
 		[],
