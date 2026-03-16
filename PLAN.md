@@ -9,7 +9,7 @@
 - [x] User profile sync from Discord
 - [x] 4 theme system (Purple-Blue, Misty-Blue, Onyx-Black, Blue-Gray)
 - [x] Real-time user count via WebSocket
-- [x] 159 comprehensive tests, 90%+ coverage
+- [x] 191 comprehensive tests (155 passing, 36 skipped), 90%+ coverage
 - [x] Docker containerization
 - [x] GitHub Actions CI/CD to GHCR
 - [x] Comprehensive documentation (11 docs)

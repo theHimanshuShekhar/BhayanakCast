@@ -22,8 +22,7 @@ pnpm db:push
 pnpm dev              # Runs web (3000) + WebSocket (3001)
 
 # 6. Run tests (in another terminal)
-pnpm test:setup       # One-time setup
-pnpm test             # Run all tests
+pnpm test             # Auto-creates test DB and runs all tests
 ```
 
 ## Commands
