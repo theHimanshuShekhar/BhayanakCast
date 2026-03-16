@@ -65,7 +65,7 @@ pnpm db:migrate       # Run migrations
 **Database:** PostgreSQL 16 + Drizzle ORM  
 **Real-time:** Socket.io WebSocket server (port 3001)  
 **Styling:** Tailwind CSS v4 with custom dark theme  
-**Testing:** Vitest v3 + jsdom (159 passing, 36 skipped, 195 total)  
+**Testing:** Vitest v3 + jsdom (155 passing, 36 skipped, 191 total)  
 **Formatter:** Biome (not Prettier)
 
 ### Key Features
@@ -79,10 +79,11 @@ pnpm db:migrate       # Run migrations
 
 ### Project Stats
 
-- **Tests:** 159 passing, 36 skipped (195 total)
+- **Tests:** 155 passing, 36 skipped (191 total)
 - **Coverage:** 90%+ threshold
 - **Rate Limits:** Room create (3/min), Join (10/min), Chat (30/15s), etc.
 - **Room States:** 4 lifecycle states (waiting → preparing → active → ended)
+- **Community Stats:** Single-record upsert pattern (no historical data)
 
 ## Coding Standards
 

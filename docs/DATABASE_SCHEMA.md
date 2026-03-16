@@ -146,18 +146,19 @@ Detailed tracking of when users overlapped in rooms.
 - `idx_overlaps_time` on overlapStart
 
 ### community_stats_snapshots
-Cached community statistics.
+Cached community statistics. Uses single-record pattern with fixed ID.
 
 | Column | Type | Notes |
 |--------|------|-------|
-| id | varchar(36) | Primary key |
+| id | varchar(36) | Primary key (fixed: `community-stats-single`) |
 | totalRegisteredUsers | integer | User count |
 | totalWatchHoursThisWeek | integer | Weekly watch hours |
-| totalWatchSecondsThisWeek | decimal | Precise weekly seconds |
+| totalWatchSecondsThisWeek | decimal(10,2) | Precise weekly seconds |
 | mostActiveStreamers | integer | Active streamer count |
 | newUsersThisWeek | integer | New registrations |
 | calculatedAt | timestamp | When stats computed |
-| createdAt | timestamp | Record creation |
+
+**Design Pattern:** Single record that gets updated via upsert (`INSERT ... ON CONFLICT DO UPDATE`). No historical data is stored. The record is updated in-place whenever stats are recalculated (every 30 minutes or on-demand).
 
 ## Entity Relationships
 

@@ -74,21 +74,33 @@ pnpm vitest run tests/unit/room-card.test.tsx --reporter=verbose
 
 ## Test Database
 
-Tests use an isolated PostgreSQL database:
+Tests use an isolated PostgreSQL database that is automatically created:
 
-**Database:** `bhayanak_cast_test`
-**Connection:** Uses DATABASE_URL from `.env.local`
+**Database:** `bhayanak_cast_test` (same server as main database)
+**Connection:** Derived from DATABASE_URL in `.env.local`
+**Auto-creation:** Database is created automatically if it doesn't exist
+**Migrations:** Schema is synced automatically using `drizzle-kit push`
 
 ### Setup
 
 ```bash
-# One-time setup (creates test database)
-pnpm test:setup
-
-# Or manually:
+# Start PostgreSQL (one-time)
 docker compose up -d postgres
+
+# That's it! Tests will auto-create the database and schema
+pnpm test
+```
+
+### Manual Setup (Optional)
+
+If you prefer manual control:
+
+```bash
+# Create test database manually
 docker exec bhayanak-postgres createdb -U postgres bhayanak_cast_test
-pnpm db:push
+
+# Push schema
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/bhayanak_cast_test" pnpm db:push
 ```
 
 ### Test Isolation
