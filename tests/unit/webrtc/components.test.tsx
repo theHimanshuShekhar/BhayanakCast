@@ -133,7 +133,7 @@ describe("StreamerControls", () => {
 	describe("Audio Configuration Display", () => {
 		it.each([
 			["system-and-mic", "System + Mic"],
-			["microphone-only", "Mic only"],
+			["system-only", "System only"],
 			["no-audio", ""],
 		])("displays correct audio config: %s", (audioConfig, expectedText) => {
 			(vi.mocked(useWebRTC) as ReturnType<typeof vi.fn>).mockReturnValue({
@@ -199,8 +199,8 @@ describe("AudioConfigModal", () => {
 
 			expect(screen.getByText("System audio + Microphone")).toBeInTheDocument();
 			expect(screen.getByText("Share your computer audio and voice")).toBeInTheDocument();
-			expect(screen.getByText("Microphone only")).toBeInTheDocument();
-			expect(screen.getByText("Share only your voice")).toBeInTheDocument();
+			expect(screen.getByText("System audio only")).toBeInTheDocument();
+			expect(screen.getByText("Share your computer audio without microphone")).toBeInTheDocument();
 			expect(screen.getByText("No audio")).toBeInTheDocument();
 			expect(screen.getByText("Silent stream")).toBeInTheDocument();
 		});
@@ -214,15 +214,15 @@ describe("AudioConfigModal", () => {
 				/>,
 			);
 
-			// Click microphone only option
-			fireEvent.click(screen.getByText("Microphone only"));
+			// Click system audio only option
+			fireEvent.click(screen.getByText("System audio only"));
 
 			// Start streaming
 			fireEvent.click(screen.getByText("Share Screen"));
 
 			expect(mockOnStart).toHaveBeenCalledWith(
 				expect.objectContaining({
-					audioConfig: "microphone-only",
+					audioConfig: "system-only",
 				}),
 			);
 		});
@@ -276,8 +276,8 @@ describe("AudioConfigModal", () => {
 				/>,
 			);
 
-			// Change audio to mic only
-			fireEvent.click(screen.getByText("Microphone only"));
+			// Change audio to system only
+			fireEvent.click(screen.getByText("System audio only"));
 
 			// Change cursor to never
 			fireEvent.click(screen.getByText("Never"));
@@ -286,7 +286,7 @@ describe("AudioConfigModal", () => {
 			fireEvent.click(screen.getByText("Share Screen"));
 
 			expect(mockOnStart).toHaveBeenCalledWith({
-				audioConfig: "microphone-only",
+				audioConfig: "system-only",
 				cursor: "never",
 				displaySurface: "default",
 			});

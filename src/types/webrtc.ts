@@ -7,7 +7,7 @@ import type { DeviceCapabilities } from "#/lib/device-detection";
 // Audio configuration options
 export type AudioConfig =
 	| "system-and-mic" // System audio + microphone
-	| "microphone-only" // Microphone only
+	| "system-only" // System audio only
 	| "no-audio"; // No audio
 
 // Screen sharing options

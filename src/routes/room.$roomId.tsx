@@ -164,7 +164,16 @@ function ScreenSharePreview({ stream }: ScreenSharePreviewProps) {
 
 	useEffect(() => {
 		if (videoRef.current && stream) {
+			console.log(
+				"[ScreenSharePreview] Setting stream:",
+				stream.id,
+				"Tracks:",
+				stream.getTracks().length,
+			);
 			videoRef.current.srcObject = stream;
+			videoRef.current.play().catch((err) => {
+				console.error("[ScreenSharePreview] Error playing video:", err);
+			});
 		}
 	}, [stream]);
 
@@ -260,7 +269,13 @@ function RoomDetailPage() {
 	const isPreparing = room?.status === "preparing";
 
 	// WebRTC hook for streaming
-	const { localStream, remoteStream, transferState, transferInfo } = useWebRTC({
+	const {
+		localStream,
+		remoteStream,
+		transferState,
+		transferInfo,
+		isStreamer: isStreamingLocally,
+	} = useWebRTC({
 		roomId,
 		userId: userId || "",
 	});
@@ -532,7 +547,16 @@ function RoomDetailPage() {
 
 							{/* Video Player with Transfer Overlay */}
 							<div className="relative">
-								{isStreamer ? (
+								{(() => {
+									console.log("[Room] Video render check:", {
+										isStreamer,
+										isStreamingLocally,
+										hasLocalStream: !!localStream,
+										hasRemoteStream: !!remoteStream,
+									});
+									return null;
+								})()}
+								{isStreamer || isStreamingLocally ? (
 									<ScreenSharePreview stream={localStream} />
 								) : (
 									<VideoDisplay
