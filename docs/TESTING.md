@@ -766,6 +766,120 @@ E2E tests complement unit/integration tests by:
 
 **Best Practice:** Use both! Unit tests for logic, E2E for critical user flows.
 
+## E2E Test Authentication System
+
+### Overview
+
+E2E tests use **UI-based authentication** to create test users programmatically without Discord OAuth.
+
+**How it works:**
+1. **Email/Password Auth** - Enabled only in `NODE_ENV=test`
+2. **Test API Endpoints** - Create users via `/api/test/auth/signup`
+3. **UI Login Flow** - Tests login through the actual UI (not cookies)
+4. **Automatic Cleanup** - Test users deleted after test suite
+
+### ⚠️ Critical: Login via UI Required
+
+**DO NOT use cookie-based authentication.** Better Auth's session management requires actual UI login flow.
+
+### Basic Pattern
+
+```typescript
+import { test, expect } from "../utils/auth";
+import { generateUniqueRoomName } from "../utils/test-helpers";
+
+const TEST_VIEWPORT = { width: 1200, height: 800 };
+
+async function loginUser(page: any, email: string) {
+  await page.goto("/auth/sign-in");
+  await page.waitForLoadState("networkidle");
+  await page.waitForTimeout(1000);
+
+  await page.fill('input[type="email"]', email);
+  await page.fill('input[type="password"]', "testpassword123");
+  await page.click('button[type="submit"]');
+
+  await page.waitForURL("http://localhost:3000/", { timeout: 10000 });
+  await page.waitForLoadState("networkidle");
+  await page.waitForTimeout(1000);
+}
+
+test("example", async ({ page, signupTestUser }) => {
+  const user = await signupTestUser("Test User");
+  await loginUser(page, user.email);
+  await page.setViewportSize(TEST_VIEWPORT); // AFTER login!
+  // ... test code
+});
+```
+
+### Critical Requirements
+
+1. **Always login via UI** - Never set cookies directly
+2. **Set viewport AFTER login** - Setting viewport before breaks the form
+3. **Use `force: true` for Create Room button** - May be hidden at viewports
+4. **Use `TEST_VIEWPORT`** - 1200x800 ensures button is visible
+5. **Use flexible regex for viewer counts** - Websocket sync takes time
+
+### Full Example: Multi-User Test
+
+```typescript
+test("streamer and viewer", async ({ browser, signupTestUser }) => {
+  const streamer = await signupTestUser("Streamer");
+  const viewer = await signupTestUser("Viewer");
+
+  const streamerCtx = await browser.newContext();
+  const viewerCtx = await browser.newContext();
+  const streamerPage = await streamerCtx.newPage();
+  const viewerPage = await viewerCtx.newPage();
+
+  try {
+    // Login both users
+    await loginUser(streamerPage, streamer.email);
+    await loginUser(viewerPage, viewer.email);
+
+    // Set viewports AFTER login
+    await streamerPage.setViewportSize(TEST_VIEWPORT);
+    await viewerPage.setViewportSize(TEST_VIEWPORT);
+
+    // Create room with force click
+    await streamerPage.locator('button:has-text("Create Room")').first().click({ force: true });
+    await streamerPage.fill('input[placeholder*="room name"]', "Test Room");
+    await streamerPage.click('button[type="submit"]:has-text("Create Room")');
+    await streamerPage.waitForURL(/\/room\/.+/, { timeout: 10000 });
+
+    // Viewer joins
+    await viewerPage.goto(streamerPage.url());
+    await viewerPage.waitForTimeout(2000); // Websocket sync
+
+    // Use flexible regex
+    await expect(streamerPage.locator("text=/\\d+ viewers?/")).toBeVisible();
+  } finally {
+    await streamerCtx.close();
+    await viewerCtx.close();
+  }
+});
+```
+
+### Common Issues
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| "Create Room button not found" | Wrong viewport | Set `TEST_VIEWPORT` after login |
+| "Test timeout on login" | Form not submitting | Check dev server is running with `NODE_ENV=test` |
+| "Viewer count not updating" | Websocket sync delay | Add `await page.waitForTimeout(2000)` |
+| "Cookie auth not working" | Better Auth requires UI | Use `loginUser()` helper pattern |
+
+### Test Auth Files
+
+- **e2e/utils/auth.ts** - Test authentication utilities
+- **e2e/utils/test-helpers.ts** - Helper functions
+- **e2e/tests/auth-flow.example.spec.ts** - Working examples
+- **e2e/setup/global-teardown.ts** - Cleanup test users
+
+### Documentation
+
+For complete E2E testing documentation, see [e2e/README.md](../e2e/README.md).
+
 ## See Also
 
 - [Integration Test Limitations](./INTEGRATION_TEST_LIMITATIONS.md) - Why some tests are skipped

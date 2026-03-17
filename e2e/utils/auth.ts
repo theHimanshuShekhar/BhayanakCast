@@ -93,7 +93,7 @@ export async function createAuthenticatedContext(
     storageState: {
       cookies: [
         {
-          name: "auth-token",
+          name: "better-auth.session_token",
           value: user.token,
           domain: "localhost",
           path: "/",
