@@ -694,7 +694,7 @@ function RoomDetailPage() {
 											.slice(0, 5)
 											.map((p) => (
 												<Link
-													key={p.participant.id}
+													key={p.userId}
 													to="/profile/$userId"
 													params={{ userId: p.userId }}
 													className="flex items-center gap-2 p-1.5 rounded hover:bg-depth-2 transition-colors"
@@ -749,7 +749,7 @@ function RoomDetailPage() {
 									.filter((p) => p.userId !== userId)
 									.map((p) => (
 										<button
-											key={p.participant.id}
+											key={p.userId}
 											type="button"
 											onClick={() => handleTransferStreamer(p.userId)}
 											className="w-full flex items-center gap-3 p-3 bg-depth-2 hover:bg-depth-3 rounded-lg transition-colors text-left"
@@ -917,7 +917,7 @@ function RoomDetailPage() {
 								)
 								.map((p, index) => (
 									<Link
-										key={p.participant.id}
+										key={p.userId}
 										to="/profile/$userId"
 										params={{ userId: p.userId }}
 										className="flex items-center gap-4 p-3 bg-depth-2 rounded-lg hover:bg-depth-3 transition-colors"
@@ -947,21 +947,18 @@ function RoomDetailPage() {
 												{p.userName}
 											</h3>
 											<p className="text-sm text-text-tertiary">
-												Joined <ClientDate date={p.participant.joinedAt} />
+												Joined <ClientDate date={p.joinedAt} />
 											</p>
 										</div>
 
-										{p.participant.totalTimeSeconds !== null &&
-											p.participant.totalTimeSeconds > 0 && (
-												<div className="text-right shrink-0">
-													<p className="text-base font-semibold text-accent">
-														{formatDuration(p.participant.totalTimeSeconds)}
-													</p>
-													<p className="text-xs text-text-tertiary">
-														watch time
-													</p>
-												</div>
-											)}
+										{p.totalTimeSeconds !== null && p.totalTimeSeconds > 0 && (
+											<div className="text-right shrink-0">
+												<p className="text-base font-semibold text-accent">
+													{formatDuration(p.totalTimeSeconds)}
+												</p>
+												<p className="text-xs text-text-tertiary">watch time</p>
+											</div>
+										)}
 									</Link>
 								))}
 						</div>
