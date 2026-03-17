@@ -31,6 +31,23 @@
 - [x] **Synchronous DB persistence** - Wait for confirmation before broadcasting
 - [x] **Auto-rejoin on reconnect** - Server restart recovery
 - [x] Create/join/leave rooms via WebSocket events
+
+#### Room Status State Machine
+**Status transitions:**
+1. **waiting** → **preparing**: Creator joins
+2. **preparing** → **active**: 2nd participant joins
+3. **active** → **preparing**: Streamer stops streaming (stays in room)
+4. **active** → **preparing**: Streamer leaves, eligible viewer exists
+5. **active** → **waiting**: Streamer leaves, no eligible viewers
+6. **waiting** → **ended**: Empty for 5+ minutes (cleanup job)
+
+**Key rules:**
+- Room does NOT end when stream ends
+- Room does NOT end when streamer leaves
+- Room only ends after being empty for 5+ minutes
+- Automatic streamer transfer (30s cooldown)
+- 3-hour visibility for ended streams
+
 - [x] 4 status states: waiting, preparing, active, ended
 - [x] Nullable streamer support
 - [x] Automatic streamer transfer when host leaves

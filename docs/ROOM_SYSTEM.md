@@ -25,8 +25,45 @@ Rooms progress through 4 states:
 |--------|-------------|--------|------------|
 | **waiting** | Room created, no streamer | Gray dot | Creator joins → preparing |
 | **preparing** | Streamer present, < 2 viewers | Yellow dot | 2nd join → active |
-| **active** | Live streaming (2+ people) | Green dot + LIVE | Last leave → waiting |
-| **ended** | Room closed | History icon | Empty 5min + old → ended |
+| **active** | Live streaming (2+ people) | Green dot + LIVE | Streamer leaves → preparing |
+| **ended** | Room closed | History icon | Waiting + empty 5min → ended |
+
+## Room Status Transitions (Business Rules)
+
+### Streamer Stops Streaming
+**Status → preparing**
+- Streamer clicks "Stop Streaming"
+- Streamer remains in room
+- Room stays in "preparing" status
+- Streamer can start streaming again
+
+### Streamer Leaves Room
+**Automatic transfer to next viewer:**
+1. Find oldest eligible viewer
+2. Transfer streamer ownership
+3. Status → **preparing**
+4. Notify all participants
+
+**No eligible viewers:**
+1. streamerId → null
+2. Status → **waiting**
+3. Room remains joinable
+
+### Room in "waiting" Status
+- **Not ended** - room is still active and joinable
+- Anyone can join and become streamer
+- Only ended after 5+ minutes empty
+
+### Room Ending Criteria
+**Room ONLY ends when ALL conditions met:**
+1. Status is "waiting" (no active streamer)
+2. No participants present for 5+ minutes
+3. Room created > 5 minutes ago
+
+**After ending:**
+- Status → "ended"
+- Visible in "Past Streams" for 3 hours
+- Cannot be rejoined
 
 ## Room Lifecycle
 

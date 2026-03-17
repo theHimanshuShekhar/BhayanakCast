@@ -122,12 +122,14 @@ This starts both the web app (port 3000) and WebSocket server (port 3001).
 
 ## 📖 Room Status Guide
 
-| Status | Meaning | Badge |
-|--------|---------|-------|
-| 🔘 **Waiting** | No streamer or viewers | Gray |
-| 🟡 **Preparing** | Streamer present, not streaming | Yellow |
-| 🟢 **Active** | Live streaming in progress | Green |
-| ⚫ **Ended** | Room cleaned up | History icon |
+| Status | Meaning | Badge | When it happens |
+|--------|---------|-------|-----------------|
+| 🔘 **Waiting** | Room active, no streamer | Gray | Streamer leaves with no viewers |
+| 🟡 **Preparing** | Streamer present, not streaming | Yellow | Streamer stops stream OR new streamer assigned |
+| 🟢 **Active** | Live streaming in progress | Green | 2+ participants with streamer |
+| ⚫ **Ended** | Room closed permanently | History icon | Empty for 5+ minutes |
+
+**Important:** Rooms do NOT end when the stream ends. They only end after being empty for 5+ minutes.
 
 ## 🎯 Usage
 
@@ -144,9 +146,14 @@ This starts both the web app (port 3000) and WebSocket server (port 3001).
 4. Your watch time is tracked!
 
 ### Streamer Features
-- **Transfer Stream**: Hand over hosting to any viewer
-- **Leave Room**: Automatic transfer or enters "waiting" state
+- **Start/Stop Streaming**: Toggle streaming without leaving room
+- **Transfer Stream**: Hand over hosting to any eligible viewer
+- **Leave Room**: 
+  - If viewers exist → automatic transfer to oldest viewer
+  - If no viewers → room enters "waiting" state (NOT ended)
 - **Room Stats**: See who's watching and for how long
+
+**Note:** When you stop streaming, the room stays in "preparing" status. The room only ends after being empty for 5+ minutes.
 
 ## 🧪 Development
 
