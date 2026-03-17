@@ -20,6 +20,7 @@ import {
 	transferStreamer,
 	runRoomCleanupJob,
 } from "./websocket-room-manager";
+import { setupRoomEventHandlers, runRoomCleanupJob as runNewRoomCleanupJob, handleSocketDisconnect } from "./room-events";
 import { initializeCommunityStats } from "../src/db/queries/community-stats";
 import { RateLimits, rateLimiter } from "../src/lib/rate-limiter";
 
@@ -368,6 +369,9 @@ io.on("connection", (socket) => {
 
 		console.log(`[Socket.io] User identified: ${userName} (${userId}) (socket: ${socket.id}) (mobile: ${data.isMobile})`);
 		socket.emit("identified", { userId, userName });
+
+		// Setup new WebSocket-first room event handlers
+		setupRoomEventHandlers(io, socket as any);
 	});
 
 	// Handle room join
