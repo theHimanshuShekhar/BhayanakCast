@@ -25,6 +25,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "#/components/ui/dialog";
+import { useRoom } from "#/hooks/useRoom";
 import { useWebRTC } from "#/hooks/useWebRTC";
 import { authClient } from "#/lib/auth-client";
 import { detectDevice } from "#/lib/device-detection";
@@ -254,19 +255,16 @@ function RoomDetailPage() {
 	// Device detection - memoized once
 	detectDevice();
 
-	// Query for real-time room data
-	const { data: roomData, refetch } = useQuery({
-		queryKey: ["room", roomId],
-		queryFn: () => getRoomDetails({ data: { roomId } }),
-		initialData,
-		refetchInterval: 5000, // Refresh every 5 seconds as fallback
-	});
-
-	const room = roomData?.room.room;
-	const streamer = roomData?.room.streamer;
-	const participants = roomData?.participants || [];
-	const isActive = room?.status === "active";
-	const isPreparing = room?.status === "preparing";
+	// WebSocket-first room state (replaces React Query polling)
+	const {
+		roomState,
+		isLoading: isRoomLoading,
+		isJoined,
+		isStreamer,
+		error: roomError,
+		leaveRoom,
+		transferStreamer,
+	} = useRoom(roomId);
 
 	// WebRTC hook for streaming
 	const {
@@ -280,54 +278,73 @@ function RoomDetailPage() {
 		userId: userId || "",
 	});
 
-	// WebSocket for real-time updates
-	const { socket, isConnected } = useWebSocket();
+	// WebSocket for real-time updates and room tracking
+	const { socket, isConnected, setCurrentRoomId } = useWebSocket();
 
-	// Track if user has joined the room via WebSocket
-	const hasJoinedRef = useRef(false);
-
-	// Join room via WebSocket
-	const handleJoinRoom = useCallback(() => {
-		if (!userId || !isActive || !socket || !isConnected) {
-			console.log("[Room] Cannot join - missing requirements");
-			return;
+	// Track current room for auto-rejoin on reconnect
+	useEffect(() => {
+		if (roomId) {
+			setCurrentRoomId(roomId);
 		}
-		console.log("[Room] Emitting room:join via WebSocket");
-		socket.emit("room:join", { roomId });
-	}, [userId, isActive, socket, isConnected, roomId]);
+		return () => {
+			setCurrentRoomId(null);
+		};
+	}, [roomId, setCurrentRoomId]);
 
-	// Leave room via WebSocket
+	// Extract data from roomState (WebSocket) with fallback to initialData (SSR)
+	const room = roomState || {
+		id: initialData?.room.room?.id || roomId,
+		name: initialData?.room.room?.name || "Loading...",
+		description: initialData?.room.room?.description || "",
+		status:
+			(initialData?.room.room?.status as
+				| "waiting"
+				| "preparing"
+				| "active"
+				| "ended") || "waiting",
+		streamerId: initialData?.room.room?.streamerId || null,
+		participants: [],
+		createdAt: initialData?.room.room?.createdAt || new Date(),
+	};
+
+	const isActive = room.status === "active";
+	const isPreparing = room.status === "preparing";
+	const isEnded = room.status === "ended";
+
+	// Get streamer info from initial data (for SSR) or from roomState
+	const streamer = initialData?.room.streamer;
+
+	// Participants from roomState (real-time via WebSocket)
+	const participants = room.participants || [];
+
+	// Leave room handler
 	const handleLeaveRoom = useCallback(() => {
-		if (!userId || !socket || !isConnected) {
+		if (!userId || !isConnected) {
 			console.log("[Room] Cannot leave - missing requirements");
 			return;
 		}
-		console.log("[Room] Emitting room:leave via WebSocket");
-		socket.emit("room:leave", { roomId });
-		hasJoinedRef.current = false;
+		console.log("[Room] Leaving room");
+		leaveRoom();
 		// Redirect to home page after leaving
 		void navigate({ to: "/" });
-	}, [userId, socket, isConnected, roomId, navigate]);
+	}, [userId, isConnected, leaveRoom, navigate]);
 
 	// Simple back navigation for ended rooms (no WebSocket required)
 	const handleBackToRooms = useCallback(() => {
 		void navigate({ to: "/" });
 	}, [navigate]);
 
-	// Auto-join room on mount - fires when user loads room page
-	useEffect(() => {
-		if (userId && !hasJoinedRef.current && socket && isConnected) {
-			hasJoinedRef.current = true;
-			console.log("[Room] Auto-joining room via WebSocket on page load");
-			socket.emit("room:join", { roomId });
+	// Join room handler (for manual join button)
+	const handleJoinRoom = useCallback(() => {
+		if (!userId || !isActive || !isConnected) {
+			console.log("[Room] Cannot join - missing requirements");
+			return;
 		}
-	}, [userId, socket, isConnected, roomId]);
+		console.log("[Room] Joining room");
+		// Join is handled automatically by useRoom, but we can trigger it here if needed
+	}, [userId, isActive, isConnected]);
 
-	// Reset hasJoinedRef when roomId changes (user navigates to different room)
-	// biome-ignore lint/correctness/useExhaustiveDependencies: intentional - reset when room changes
-	useEffect(() => {
-		hasJoinedRef.current = false;
-	}, [roomId]);
+	// Leave room when component unmounts (user leaves the page)
 
 	// Leave room when component unmounts (user leaves the page)
 	useEffect(() => {
