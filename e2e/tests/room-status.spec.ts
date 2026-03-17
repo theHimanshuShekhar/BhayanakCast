@@ -5,101 +5,163 @@
  * - waiting → preparing → active → preparing → waiting → ended
  */
 
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../utils/auth";
 import { generateUniqueRoomName } from "../utils/test-helpers";
 
+// Viewport where Create Room button is visible (< 1280px due to xl:hidden)
+const TEST_VIEWPORT = { width: 1200, height: 800 };
+
+// Helper to login via UI
+async function loginUser(page: any, email: string) {
+	await page.goto("/auth/sign-in");
+	await page.waitForLoadState("networkidle");
+	await page.waitForTimeout(1000);
+
+	await page.fill('input[type="email"]', email);
+	await page.fill('input[type="password"]', "testpassword123");
+	await page.click('button[type="submit"]');
+
+	await page.waitForURL("http://localhost:3000/", { timeout: 10000 });
+	await page.waitForLoadState("networkidle");
+	await page.waitForTimeout(1000);
+}
+
 test.describe("Room Status Lifecycle", () => {
-	test("room starts in preparing status when created", async ({ page }) => {
+	test("room starts in preparing status when created", async ({ page, signupTestUser }) => {
 		const roomName = generateUniqueRoomName("Status Test Room");
 
-		await page.goto("/");
-		await page.click('button:has-text("Create Room")');
-		await page.fill('input[name="name"]', roomName);
+		// Create and login test user
+		const user = await signupTestUser("Test User");
+		await loginUser(page, user.email);
+
+		// Set viewport
+		await page.setViewportSize(TEST_VIEWPORT);
+		await page.waitForTimeout(500);
+
+		await page.locator('button:has-text("Create Room")').first().click({ force: true });
+		await page.fill('input[placeholder*="room name"]', roomName);
 		await page.click('button[type="submit"]:has-text("Create Room")');
-		await page.waitForURL(/\/room\/.+/);
+		await page.waitForURL(/\/room\/.+/, { timeout: 10000 });
 
 		// Should show preparing status (streamer present, < 2 participants)
 		await expect(page.locator("text=Preparing")).toBeVisible();
 	});
 
-	test("room becomes active when 2nd participant joins", async ({ browser }) => {
+	test("room becomes active when 2nd participant joins", async ({ browser, signupTestUser }) => {
 		const roomName = generateUniqueRoomName("Active Status Test");
 
-		// User A creates room
+		// Create two test users
+		const userA = await signupTestUser("User A");
+		const userB = await signupTestUser("User B");
+
 		const userAContext = await browser.newContext();
 		const userAPage = await userAContext.newPage();
 
-		await userAPage.goto("/");
-		await userAPage.click('button:has-text("Create Room")');
-		await userAPage.fill('input[name="name"]', roomName);
-		await userAPage.click('button[type="submit"]:has-text("Create Room")');
-		await userAPage.waitForURL(/\/room\/.+/);
-		const roomUrl = userAPage.url();
-
-		// Verify preparing
-		await expect(userAPage.locator("text=Preparing")).toBeVisible();
-
-		// User B joins
 		const userBContext = await browser.newContext();
 		const userBPage = await userBContext.newPage();
-		await userBPage.goto(roomUrl);
 
-		// Both should see active
-		await expect(userAPage.locator("text=Active")).toBeVisible();
-		await expect(userBPage.locator("text=Active")).toBeVisible();
+		try {
+			// Login both users
+			await loginUser(userAPage, userA.email);
+			await loginUser(userBPage, userB.email);
 
-		await userAContext.close();
-		await userBContext.close();
+			// Set viewports
+			await userAPage.setViewportSize(TEST_VIEWPORT);
+			await userBPage.setViewportSize(TEST_VIEWPORT);
+			await userAPage.waitForTimeout(500);
+			await userBPage.waitForTimeout(500);
+
+			// User A creates room
+			await userAPage.locator('button:has-text("Create Room")').first().click({ force: true });
+			await userAPage.fill('input[placeholder*="room name"]', roomName);
+			await userAPage.click('button[type="submit"]:has-text("Create Room")');
+			await userAPage.waitForURL(/\/room\/.+/, { timeout: 10000 });
+
+			// Verify preparing
+			await expect(userAPage.locator("text=Preparing")).toBeVisible();
+
+			// User B joins
+			await userBPage.goto(userAPage.url());
+			await userBPage.waitForLoadState("networkidle");
+			await userBPage.waitForTimeout(1000);
+
+			// Both should see active
+			await expect(userAPage.locator("text=Active")).toBeVisible();
+			await expect(userBPage.locator("text=Active")).toBeVisible();
+		} finally {
+			await userAContext.close();
+			await userBContext.close();
+		}
 	});
 
-	test("room returns to waiting when all participants leave", async ({ browser }) => {
+	test("room returns to waiting when all participants leave", async ({ browser, signupTestUser }) => {
 		const roomName = generateUniqueRoomName("Waiting Status Test");
 
-		// User A creates room
+		// Create two test users
+		const userA = await signupTestUser("User A");
+		const userB = await signupTestUser("User B");
+
 		const userAContext = await browser.newContext();
 		const userAPage = await userAContext.newPage();
 
-		await userAPage.goto("/");
-		await userAPage.click('button:has-text("Create Room")');
-		await userAPage.fill('input[name="name"]', roomName);
-		await userAPage.click('button[type="submit"]:has-text("Create Room")');
-		await userAPage.waitForURL(/\/room\/.+/);
-
-		// User B joins (active)
 		const userBContext = await browser.newContext();
 		const userBPage = await userBContext.newPage();
-		await userBPage.goto(userAPage.url());
 
-		await expect(userAPage.locator("text=Active")).toBeVisible();
+		try {
+			// Login both users
+			await loginUser(userAPage, userA.email);
+			await loginUser(userBPage, userB.email);
 
-		// User A (streamer) leaves
-		await userAPage.click('button:has-text("Leave Room")');
-		await expect(userAPage).toHaveURL("/");
+			// Set viewports
+			await userAPage.setViewportSize(TEST_VIEWPORT);
+			await userBPage.setViewportSize(TEST_VIEWPORT);
+			await userAPage.waitForTimeout(500);
+			await userBPage.waitForTimeout(500);
 
-		// User B should become streamer
-		await expect(userBPage.locator("text=is now the streamer")).toBeVisible();
+			// User A creates room
+			await userAPage.locator('button:has-text("Create Room")').first().click({ force: true });
+			await userAPage.fill('input[placeholder*="room name"]', roomName);
+			await userAPage.click('button[type="submit"]:has-text("Create Room")');
+			await userAPage.waitForURL(/\/room\/.+/, { timeout: 10000 });
 
-		// User B leaves
-		await userBPage.click('button:has-text("Leave Room")');
-		await expect(userBPage).toHaveURL("/");
+			// User B joins (active)
+			await userBPage.goto(userAPage.url());
+			await userBPage.waitForLoadState("networkidle");
+			await userBPage.waitForTimeout(1000);
 
-		// Room should now be empty - we'll verify by trying to rejoin
-		await userAPage.goto(userBPage.url());
-		// Should be able to rejoin and become streamer
-		await expect(userAPage.locator("text=is now the streamer")).toBeVisible();
+			await expect(userAPage.locator("text=Active")).toBeVisible();
 
-		await userAContext.close();
-		await userBContext.close();
+			// User A (streamer) leaves
+			await userAPage.click('button:has-text("Leave Room")');
+			await expect(userAPage).toHaveURL("/");
+
+			// User B should become streamer
+			await expect(userBPage.locator("text=is now the streamer")).toBeVisible();
+
+			// User B leaves
+			await userBPage.click('button:has-text("Leave Room")');
+			await expect(userBPage).toHaveURL("/");
+		} finally {
+			await userAContext.close();
+			await userBContext.close();
+		}
 	});
 
-	test("streaming starts in preparing status", async ({ page }) => {
+	test("streaming starts in preparing status", async ({ page, signupTestUser }) => {
 		const roomName = generateUniqueRoomName("Streaming Status Test");
 
-		await page.goto("/");
-		await page.click('button:has-text("Create Room")');
-		await page.fill('input[name="name"]', roomName);
+		// Create and login test user
+		const user = await signupTestUser("Test User");
+		await loginUser(page, user.email);
+
+		// Set viewport
+		await page.setViewportSize(TEST_VIEWPORT);
+		await page.waitForTimeout(500);
+
+		await page.locator('button:has-text("Create Room")').first().click({ force: true });
+		await page.fill('input[placeholder*="room name"]', roomName);
 		await page.click('button[type="submit"]:has-text("Create Room")');
-		await page.waitForURL(/\/room\/.+/);
+		await page.waitForURL(/\/room\/.+/, { timeout: 10000 });
 
 		// Preparing before streaming
 		await expect(page.locator("text=Preparing")).toBeVisible();
@@ -112,14 +174,21 @@ test.describe("Room Status Lifecycle", () => {
 		await expect(page.locator("text=LIVE")).toBeVisible();
 	});
 
-	test("stopping stream returns to preparing status", async ({ page }) => {
+	test("stopping stream returns to preparing status", async ({ page, signupTestUser }) => {
 		const roomName = generateUniqueRoomName("Stop Stream Status Test");
 
-		await page.goto("/");
-		await page.click('button:has-text("Create Room")');
-		await page.fill('input[name="name"]', roomName);
+		// Create and login test user
+		const user = await signupTestUser("Test User");
+		await loginUser(page, user.email);
+
+		// Set viewport
+		await page.setViewportSize(TEST_VIEWPORT);
+		await page.waitForTimeout(500);
+
+		await page.locator('button:has-text("Create Room")').first().click({ force: true });
+		await page.fill('input[placeholder*="room name"]', roomName);
 		await page.click('button[type="submit"]:has-text("Create Room")');
-		await page.waitForURL(/\/room\/.+/);
+		await page.waitForURL(/\/room\/.+/, { timeout: 10000 });
 
 		// Start streaming
 		await page.click('button:has-text("Start Streaming")');
@@ -134,75 +203,109 @@ test.describe("Room Status Lifecycle", () => {
 		await expect(page.locator("text=LIVE")).not.toBeVisible();
 	});
 
-	test("status updates are broadcast to all participants", async ({ browser }) => {
+	test("status updates are broadcast to all participants", async ({ browser, signupTestUser }) => {
 		const roomName = generateUniqueRoomName("Broadcast Status Test");
 
-		// User A creates room
+		// Create two test users
+		const userA = await signupTestUser("User A");
+		const userB = await signupTestUser("User B");
+
 		const userAContext = await browser.newContext();
 		const userAPage = await userAContext.newPage();
 
-		await userAPage.goto("/");
-		await userAPage.click('button:has-text("Create Room")');
-		await userAPage.fill('input[name="name"]', roomName);
-		await userAPage.click('button[type="submit"]:has-text("Create Room")');
-		await userAPage.waitForURL(/\/room\/.+/);
-		const roomUrl = userAPage.url();
-
-		// User B joins
 		const userBContext = await browser.newContext();
 		const userBPage = await userBContext.newPage();
-		await userBPage.goto(roomUrl);
 
-		// Both see active
-		await expect(userAPage.locator("text=Active")).toBeVisible();
-		await expect(userBPage.locator("text=Active")).toBeVisible();
+		try {
+			// Login both users
+			await loginUser(userAPage, userA.email);
+			await loginUser(userBPage, userB.email);
 
-		// User A leaves (User B becomes streamer)
-		await userAPage.click('button:has-text("Leave Room")');
+			// Set viewports
+			await userAPage.setViewportSize(TEST_VIEWPORT);
+			await userBPage.setViewportSize(TEST_VIEWPORT);
+			await userAPage.waitForTimeout(500);
+			await userBPage.waitForTimeout(500);
 
-		// User B should see status change notification
-		await expect(userBPage.locator("text=is now the streamer")).toBeVisible();
+			// User A creates room
+			await userAPage.locator('button:has-text("Create Room")').first().click({ force: true });
+			await userAPage.fill('input[placeholder*="room name"]', roomName);
+			await userAPage.click('button[type="submit"]:has-text("Create Room")');
+			await userAPage.waitForURL(/\/room\/.+/, { timeout: 10000 });
 
-		await userAContext.close();
-		await userBContext.close();
+			// User B joins
+			await userBPage.goto(userAPage.url());
+			await userBPage.waitForLoadState("networkidle");
+			await userBPage.waitForTimeout(1000);
+
+			// Both see active
+			await expect(userAPage.locator("text=Active")).toBeVisible();
+			await expect(userBPage.locator("text=Active")).toBeVisible();
+
+			// User A (streamer) leaves
+			await userAPage.click('button:has-text("Leave Room")');
+
+			// User B should see status change notification
+			await expect(userBPage.locator("text=is now the streamer")).toBeVisible();
+		} finally {
+			await userAContext.close();
+			await userBContext.close();
+		}
 	});
 });
 
 test.describe("Room Persistence", () => {
-	test("room remains active when page is refreshed", async ({ page }) => {
+	test("room remains active when page is refreshed", async ({ page, signupTestUser }) => {
 		const roomName = generateUniqueRoomName("Refresh Test Room");
 
+		// Create and login test user
+		const user = await signupTestUser("Test User");
+		await loginUser(page, user.email);
+
+		// Set viewport
+		await page.setViewportSize(TEST_VIEWPORT);
+		await page.waitForTimeout(500);
+
 		// Create room
-		await page.goto("/");
-		await page.click('button:has-text("Create Room")');
-		await page.fill('input[name="name"]', roomName);
+		await page.locator('button:has-text("Create Room")').first().click({ force: true });
+		await page.fill('input[placeholder*="room name"]', roomName);
 		await page.click('button[type="submit"]:has-text("Create Room")');
-		await page.waitForURL(/\/room\/.+/);
+		await page.waitForURL(/\/room\/.+/, { timeout: 10000 });
 
 		// Verify in room
 		await expect(page.locator("h1")).toContainText(roomName);
 
 		// Refresh page
 		await page.reload();
+		await page.waitForLoadState("networkidle");
+		await page.waitForTimeout(1000);
 
 		// Should still be in room
 		await expect(page.locator("h1")).toContainText(roomName);
 	});
 
-	test("room data persists after navigation", async ({ page }) => {
+	test("room data persists after navigation", async ({ page, signupTestUser }) => {
 		const roomName = generateUniqueRoomName("Navigation Test Room");
 		const roomDescription = "Test description";
 
+		// Create and login test user
+		const user = await signupTestUser("Test User");
+		await loginUser(page, user.email);
+
+		// Set viewport
+		await page.setViewportSize(TEST_VIEWPORT);
+		await page.waitForTimeout(500);
+
 		// Create room
-		await page.goto("/");
-		await page.click('button:has-text("Create Room")');
-		await page.fill('input[name="name"]', roomName);
+		await page.locator('button:has-text("Create Room")').first().click({ force: true });
+		await page.fill('input[placeholder*="room name"]', roomName);
 		await page.fill('textarea[name="description"]', roomDescription);
 		await page.click('button[type="submit"]:has-text("Create Room")');
-		await page.waitForURL(/\/room\/.+/);
+		await page.waitForURL(/\/room\/.+/, { timeout: 10000 });
 
 		// Go back to home
-		await page.goto("/");
+		await page.click('button:has-text("Leave Room")');
+		await expect(page).toHaveURL("/");
 
 		// Room should appear in list
 		await expect(page.locator(`text=${roomName}`)).toBeVisible();

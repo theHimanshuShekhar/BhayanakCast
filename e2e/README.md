@@ -2,25 +2,147 @@
 
 End-to-end testing suite using Playwright for the WebRTC streaming platform.
 
-## Overview
+## Quick Start
 
-This directory contains comprehensive E2E tests for:
-- Room management (creation, joining, search)
-- WebRTC screen sharing
-- Streamer transfer (automatic and manual)
-- Real-time chat
-- Mobile restrictions
+```bash
+# Install Playwright browsers (one-time)
+pnpm exec playwright install
+
+# Run all E2E tests
+pnpm test:e2e
+
+# Run specific test file
+pnpm test:e2e e2e/tests/auth-flow.example.spec.ts
+
+# Run with UI mode for debugging
+pnpm test:e2e:ui
+```
+
+## ⚠️ Critical: Test Authentication System
+
+### Overview
+
+E2E tests use **UI-based authentication** to create test users programmatically without Discord OAuth.
+
+**How it works:**
+1. **Email/Password Auth** - Enabled only in `NODE_ENV=test`
+2. **Test API Endpoints** - Create users via `/api/test/auth/signup`
+3. **UI Login Flow** - Tests login through the actual UI (not cookies)
+4. **Automatic Cleanup** - Test users deleted after test suite
+
+### ⚠️ IMPORTANT: Login via UI Required
+
+**DO NOT use cookie-based authentication.** Better Auth's session management requires actual UI login flow.
+
+**Correct Pattern:**
+```typescript
+import { test, expect } from "../utils/auth";
+
+const TEST_VIEWPORT = { width: 1200, height: 800 };
+
+async function loginUser(page: any, email: string) {
+  await page.goto("/auth/sign-in");
+  await page.waitForLoadState("networkidle");
+  await page.waitForTimeout(1000);
+
+  await page.fill('input[type="email"]', email);
+  await page.fill('input[type="password"]', "testpassword123");
+  await page.click('button[type="submit"]');
+
+  await page.waitForURL("http://localhost:3000/", { timeout: 10000 });
+  await page.waitForLoadState("networkidle");
+  await page.waitForTimeout(1000);
+}
+
+test("example", async ({ page, signupTestUser }) => {
+  const user = await signupTestUser("Test User");
+  await loginUser(page, user.email);
+  await page.setViewportSize(TEST_VIEWPORT); // AFTER login!
+  // ... test code
+});
+```
+
+### Critical Requirements
+
+1. **Always login via UI** - Never set cookies directly
+2. **Set viewport AFTER login** - Setting viewport before login breaks the form
+3. **Use `force: true` for Create Room button** - Button may be hidden at certain viewports
+4. **Use `TEST_VIEWPORT`** - 1200x800 ensures Create Room button is visible
+
+### Complete Working Example
+
+```typescript
+import { test, expect } from "../utils/auth";
+import { generateUniqueRoomName } from "../utils/test-helpers";
+
+const TEST_VIEWPORT = { width: 1200, height: 800 };
+
+async function loginUser(page: any, email: string) {
+  await page.goto("/auth/sign-in");
+  await page.waitForLoadState("networkidle");
+  await page.waitForTimeout(1000);
+
+  await page.fill('input[type="email"]', email);
+  await page.fill('input[type="password"]', "testpassword123");
+  await page.click('button[type="submit"]');
+
+  await page.waitForURL("http://localhost:3000/", { timeout: 10000 });
+  await page.waitForLoadState("networkidle");
+  await page.waitForTimeout(1000);
+}
+
+test("streamer creates room and viewer joins", async ({ browser, signupTestUser }) => {
+  // Create test users
+  const streamer = await signupTestUser("Streamer");
+  const viewer = await signupTestUser("Viewer");
+
+  // Create contexts
+  const streamerCtx = await browser.newContext();
+  const viewerCtx = await browser.newContext();
+  const streamerPage = await streamerCtx.newPage();
+  const viewerPage = await viewerCtx.newPage();
+
+  try {
+    // Login via UI
+    await loginUser(streamerPage, streamer.email);
+    await loginUser(viewerPage, viewer.email);
+
+    // Set viewports AFTER login
+    await streamerPage.setViewportSize(TEST_VIEWPORT);
+    await viewerPage.setViewportSize(TEST_VIEWPORT);
+    await streamerPage.waitForTimeout(500);
+    await viewerPage.waitForTimeout(500);
+
+    // Create room with force click
+    await streamerPage.locator('button:has-text("Create Room")').first().click({ force: true });
+    await streamerPage.fill('input[placeholder*="room name"]', "Test Room");
+    await streamerPage.click('button[type="submit"]:has-text("Create Room")');
+    await streamerPage.waitForURL(/\/room\/.+/, { timeout: 10000 });
+
+    // Viewer joins
+    await viewerPage.goto(streamerPage.url());
+    await viewerPage.waitForLoadState("networkidle");
+    await viewerPage.waitForTimeout(1000);
+
+    // Verify with flexible regex (websocket sync takes time)
+    await expect(streamerPage.locator("text=/\\d+ viewers?/")).toBeVisible();
+    await expect(viewerPage.locator("text=/\\d+ viewers?/")).toBeVisible();
+  } finally {
+    await streamerCtx.close();
+    await viewerCtx.close();
+  }
+});
+```
 
 ## Test Structure
 
 ```
 e2e/
-├── fixtures/
-│   └── streaming.ts          # Test utilities and helpers
 ├── setup/
-│   └── global-teardown.ts    # Cleanup test users after suite
+│   └── global-teardown.ts        # Cleanup test users after suite
 ├── tests/
-│   ├── room-management.spec.ts    # Room CRUD operations
+│   ├── auth-flow.example.spec.ts # ⭐ Authentication examples
+│   ├── room-management.spec.ts   # Room CRUD operations
 │   ├── chat.spec.ts              # Real-time chat
 │   ├── room-leaving.spec.ts      # Room leaving and rejoining
 │   ├── room-status.spec.ts       # Status transitions
@@ -29,18 +151,21 @@ e2e/
 │   ├── room-list.spec.ts         # Home page and room list
 │   ├── user-presence.spec.ts     # User indicators
 │   ├── error-handling.spec.ts    # Error scenarios
-│   ├── auth-flow.example.spec.ts # Test auth examples
 │   └── webrtc/
 │       ├── screen-sharing.spec.ts     # WebRTC streaming
 │       └── streamer-transfer.spec.ts  # Streamer handoff
 ├── utils/
-│   ├── auth.ts                 # Test authentication utilities
-│   └── test-helpers.ts         # Test helpers
-├── example.spec.ts             # Playwright example
+│   ├── auth.ts                 # ⭐ Test authentication utilities
+│   └── test-helpers.ts         # Test helper functions
 └── README.md                   # This file
 ```
 
 ## Test Coverage
+
+### Authentication (2 tests in auth-flow.example.spec.ts)
+- ✅ Create test users via API
+- ✅ Login via UI flow
+- ✅ Multi-user authentication
 
 ### Room Management (6 tests)
 - ✅ Create new room
@@ -119,76 +244,6 @@ e2e/
 
 **Total: 53 E2E Tests**
 
-## Test Authentication
-
-E2E tests use programmatic test authentication to create users without Discord OAuth.
-
-### How It Works
-
-1. **Email/Password Auth Enabled** - Only in `NODE_ENV=test`
-2. **Test API Endpoints** - Create users via `/api/test/auth/signup`
-3. **Automatic Cleanup** - Test users deleted after test suite
-4. **Random Emails** - Format: `test-{random}@test.example.com`
-
-### Using Test Auth in Tests
-
-```typescript
-import { test, expect } from "../utils/auth";
-
-test("streamer and viewer interaction", async ({ browser, signupTestUser }) => {
-  // Create test users
-  const streamer = await signupTestUser("Test Streamer");
-  const viewer = await signupTestUser("Test Viewer");
-
-  // Create authenticated browser contexts
-  const streamerContext = await browser.newContext({
-    storageState: {
-      cookies: [{
-        name: "auth-token",
-        value: streamer.token,
-        domain: "localhost",
-        path: "/",
-        expires: Date.now() / 1000 + 3600,
-        httpOnly: true,
-        secure: false,
-        sameSite: "Lax",
-      }],
-      origins: [],
-    },
-  });
-
-  const streamerPage = await streamerContext.newPage();
-  
-  // Now streamer is logged in!
-  await streamerPage.goto("/");
-  await streamerPage.click('button:has-text("Create Room")');
-  // ... rest of test
-});
-```
-
-### Test Auth Utilities
-
-Located in `e2e/utils/auth.ts`:
-
-- `signupTestUser(name)` - Create new test user
-- `loginTestUser(email)` - Login existing test user  
-- `cleanupAllTestUsers()` - Delete all test users
-- `test` fixture - Extended Playwright test with auth helpers
-
-### Test User Details
-
-- **Email**: `test-{random}@test.example.com`
-- **Password**: `testpassword123` (handled automatically)
-- **Token**: JWT token returned from API
-- **Cleanup**: Automatic after test suite via `global-teardown.ts`
-
-### Security
-
-- ✅ Email/password auth only in `NODE_ENV=test`
-- ✅ API endpoints reject requests in production
-- ✅ Test users have "test" in email for easy identification
-- ✅ Global teardown ensures no test data persists
-
 ## Running Tests
 
 ### Prerequisites
@@ -196,9 +251,6 @@ Located in `e2e/utils/auth.ts`:
 ```bash
 # Install Playwright browsers
 pnpm exec playwright install
-
-# Install dependencies
-pnpm install
 
 # Start dev server (in another terminal)
 pnpm dev
@@ -214,22 +266,13 @@ pnpm test:e2e
 
 ```bash
 # Core functionality
+pnpm test:e2e e2e/tests/auth-flow.example.spec.ts
 pnpm test:e2e e2e/tests/room-management.spec.ts
 pnpm test:e2e e2e/tests/chat.spec.ts
 
-# Room lifecycle
-pnpm test:e2e e2e/tests/room-leaving.spec.ts
-pnpm test:e2e e2e/tests/room-status.spec.ts
-
-# WebRTC (in webrtc/ folder)
+# WebRTC tests
 pnpm test:e2e e2e/tests/webrtc/screen-sharing.spec.ts
 pnpm test:e2e e2e/tests/webrtc/streamer-transfer.spec.ts
-
-# Other features
-pnpm test:e2e e2e/tests/rate-limiting.spec.ts
-pnpm test:e2e e2e/tests/room-list.spec.ts
-pnpm test:e2e e2e/tests/user-presence.spec.ts
-pnpm test:e2e e2e/tests/error-handling.spec.ts
 ```
 
 ### Run with UI Mode
@@ -238,10 +281,78 @@ pnpm test:e2e e2e/tests/error-handling.spec.ts
 pnpm test:e2e:ui
 ```
 
-### Run in Headed Mode (see browser)
+## Best Practices
 
+### ✅ DO
+
+1. **Use `signupTestUser` fixture** to create test users
+2. **Login via UI** using the `loginUser` helper pattern
+3. **Set viewport AFTER login** (never before)
+4. **Use `force: true`** when clicking Create Room button
+5. **Use `TEST_VIEWPORT`** constant: `{ width: 1200, height: 800 }`
+6. **Close contexts in `finally` blocks** for cleanup
+7. **Use unique room names** via `generateUniqueRoomName()`
+8. **Wait for websocket sync** with `page.waitForTimeout(2000)` before checking viewer counts
+9. **Use flexible regex** for viewer counts: `page.locator("text=/\\d+ viewers?/")`
+
+### ❌ DON'T
+
+1. **Don't set cookies directly** - Use UI login instead
+2. **Don't set viewport before login** - Breaks the auth form
+3. **Don't rely on cookie names** - Better Auth uses `better-auth.session_token`
+4. **Don't use exact viewer counts** - Use regex patterns
+5. **Don't forget to close contexts** - Leads to resource exhaustion
+6. **Don't skip viewport setting** - Create Room button won't be visible
+
+## Common Issues & Solutions
+
+### Issue: "Create Room button not found"
+
+**Cause:** Viewport not set or button hidden
+
+**Solution:**
+```typescript
+await page.setViewportSize({ width: 1200, height: 800 });
+await page.waitForTimeout(500);
+await page.locator('button:has-text("Create Room")').first().click({ force: true });
+```
+
+### Issue: "Test timeout on login"
+
+**Cause:** Form not submitting or navigation not completing
+
+**Solution:**
+- Ensure dev server is running: `pnpm dev`
+- Check `NODE_ENV=test` is set in playwright.config.ts
+- Add explicit waits after navigation
+
+### Issue: "Viewer count not updating"
+
+**Cause:** Websocket hasn't synced yet
+
+**Solution:**
+```typescript
+await page.waitForTimeout(2000); // Wait for websocket sync
+await expect(page.locator("text=/\\d+ viewers?/")).toBeVisible();
+```
+
+### Issue: "Cookie auth not working"
+
+**Cause:** Better Auth requires UI login, not cookie injection
+
+**Solution:** Use the `loginUser()` helper pattern instead of setting cookies.
+
+### Issue: "Socket hang up during cleanup"
+
+**Cause:** Server crashed or not responding
+
+**Solution:**
 ```bash
-pnpm exec playwright test --headed
+# Check if server is running
+curl http://localhost:3000
+
+# Restart if needed
+pnpm dev
 ```
 
 ## Configuration
@@ -250,184 +361,13 @@ pnpm exec playwright test --headed
 
 Tests run on **Chromium** with screen sharing permissions enabled.
 
-### WebRTC Configuration
-
-Chrome is configured with flags for automated testing:
-- `--use-fake-device-for-media-stream` - Use fake media devices
-- `--use-fake-ui-for-media-stream` - Auto-accept permissions
-- `--auto-select-desktop-capture-source` - Auto-select screen
-
 ### Test Timeouts
 
 - **Test timeout:** 60 seconds
 - **Expect timeout:** 10 seconds
 - **Action timeout:** 10 seconds
 
-## Writing E2E Tests
-
-### Basic Structure
-
-```typescript
-import { test, expect } from "@playwright/test";
-
-test.describe("Feature Name", () => {
-  test("test description", async ({ page }) => {
-    // Test code
-  });
-});
-```
-
-### Multi-User Tests with Auth
-
-```typescript
-import { test, expect } from "../utils/auth";
-
-test("two users can chat", async ({ browser, signupTestUser }) => {
-  // Create authenticated users
-  const user1 = await signupTestUser("User 1");
-  const user2 = await signupTestUser("User 2");
-
-  // Create contexts with auth
-  const context1 = await browser.newContext({
-    storageState: {
-      cookies: [{ name: "auth-token", value: user1.token, /* ... */ }],
-      origins: [],
-    },
-  });
-  const context2 = await browser.newContext({
-    storageState: {
-      cookies: [{ name: "auth-token", value: user2.token, /* ... */ }],
-      origins: [],
-    },
-  });
-  
-  const page1 = await context1.newPage();
-  const page2 = await context2.newPage();
-  
-  try {
-    // Both users are now logged in!
-    await page1.goto("/");
-    await page2.goto("/");
-    // ... test interactions
-  } finally {
-    await context1.close();
-    await context2.close();
-  }
-});
-```
-
-### Using Test Helpers
-
-```typescript
-import { generateUniqueRoomName } from "../utils/test-helpers";
-
-// Creates unique room names to prevent conflicts
-const roomName = generateUniqueRoomName("Test Room");
-// Result: "Test Room-W0-1234567890"
-```
-
-## CI/CD Integration
-
-Tests run automatically via GitHub Actions:
-
-```yaml
-# .github/workflows/playwright.yml
-- name: Run Playwright tests
-  run: pnpm test:e2e
-```
-
-## Debugging
-
-### View Trace
-
-```bash
-# Run with trace
-pnpm exec playwright test --trace on
-
-# View trace
-pnpm exec playwright show-trace trace.zip
-```
-
-### View Report
-
-```bash
-# Generate and view HTML report
-pnpm exec playwright test
-pnpm exec playwright show-report
-```
-
-### Screenshot on Failure
-
-Screenshots are automatically captured on test failure:
-```
-test-results/
-  └── <test-name>-<browser>/
-      └── test-failed-1.png
-```
-
-### Video Recording
-
-Videos are recorded for failed tests:
-```
-test-results/
-  └── <test-name>-<browser>/
-      └── video.webm
-```
-
-## Best Practices
-
-1. **Use test auth fixtures** for authenticated tests:
-   ```typescript
-   import { test, expect } from "../utils/auth";
-   ```
-
-2. **Generate unique room names** to prevent conflicts:
-   ```typescript
-   const roomName = generateUniqueRoomName("Test Room");
-   ```
-
-3. **Clean up contexts** after multi-user tests:
-   ```typescript
-   await context.close();
-   ```
-
-4. **Use try/finally** for cleanup:
-   ```typescript
-   try {
-     // Test code
-   } finally {
-     await context.close();
-   }
-   ```
-
-5. **Avoid hardcoded timeouts** - Use expect timeouts instead
-
-## Common Issues
-
-### Tests Timing Out
-
-Increase timeout in `playwright.config.ts`:
-```typescript
-timeout: 90000,  // 90 seconds
-```
-
-### Port Already in Use
-
-Kill existing processes:
-```bash
-lsof -ti:3000 | xargs kill -9
-lsof -ti:3001 | xargs kill -9
-```
-
-### Authentication Failures
-
-Ensure dev server is running with `NODE_ENV=test`:
-```bash
-# In playwright.config.ts, webServer.env sets this automatically
-NODE_ENV=test pnpm dev
-```
-
-## Environment Variables
+### Environment Variables
 
 ```bash
 # Base URL for tests
@@ -435,11 +375,28 @@ BASE_URL=http://localhost:3000
 
 # Run in CI mode
 CI=true
+
+# Must be 'test' for email/password auth
+NODE_ENV=test
 ```
+
+## Test Utilities
+
+### `e2e/utils/auth.ts`
+
+- `signupTestUser(name)` - Create new test user via API
+- `loginUser(page, email)` - Login via UI (pattern to implement)
+- `cleanupAllTestUsers()` - Delete all test users
+- `test` fixture - Extended Playwright test with auth helpers
+
+### `e2e/utils/test-helpers.ts`
+
+- `generateUniqueRoomName(baseName)` - Generate unique room names
+- `generateUniqueUserName(baseName)` - Generate unique usernames
 
 ## See Also
 
+- [Test Auth Example](./tests/auth-flow.example.spec.ts) - Working examples
+- [Test Auth Utilities](./utils/auth.ts) - Authentication helpers
 - [Playwright Documentation](https://playwright.dev/)
-- [WebRTC Testing Guide](https://playwright.dev/docs/api/class-browser#browser-new-context-option-permissions)
 - [Main Testing Guide](../docs/TESTING.md)
-- [Test Auth Example](../e2e/tests/auth-flow.example.spec.ts)

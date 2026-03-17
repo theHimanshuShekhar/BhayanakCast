@@ -15,6 +15,7 @@ async function globalTeardown() {
     const apiContext = await request.newContext();
     
     const response = await apiContext.post(`${TEST_AUTH_BASE_URL}/api/test/auth/cleanup`, {
+      data: {},
       headers: {
         "Content-Type": "application/json",
       },

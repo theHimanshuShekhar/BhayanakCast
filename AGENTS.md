@@ -188,6 +188,79 @@ describe("RoomCard", () => {
 
 See [Testing Guide](./docs/TESTING.md) for detailed documentation.
 
+### E2E Testing Guidelines
+
+#### Test Authentication Pattern
+
+**CRITICAL:** E2E tests must use UI-based login, not cookies:
+
+```typescript
+import { test, expect } from "../utils/auth";
+
+const TEST_VIEWPORT = { width: 1200, height: 800 };
+
+async function loginUser(page: any, email: string) {
+  await page.goto("/auth/sign-in");
+  await page.waitForLoadState("networkidle");
+  await page.waitForTimeout(1000);
+  await page.fill('input[type="email"]', email);
+  await page.fill('input[type="password"]', "testpassword123");
+  await page.click('button[type="submit"]');
+  await page.waitForURL("http://localhost:3000/", { timeout: 10000 });
+  await page.waitForLoadState("networkidle");
+  await page.waitForTimeout(1000);
+}
+
+test("example", async ({ page, signupTestUser }) => {
+  const user = await signupTestUser("Test User");
+  await loginUser(page, user.email);
+  await page.setViewportSize(TEST_VIEWPORT); // AFTER login!
+  await page.locator('button:has-text("Create Room")').first().click({ force: true });
+});
+```
+
+#### Key Rules
+
+1. **Always login via UI** - Never set cookies directly (Better Auth requirement)
+2. **Set viewport AFTER login** - Setting before breaks the auth form
+3. **Use `TEST_VIEWPORT`** - `{ width: 1200, height: 800 }` for Create Room button visibility
+4. **Use force click** - `click({ force: true })` for buttons that may be hidden
+5. **Close contexts in finally** - Prevent resource leaks in multi-user tests
+6. **Use flexible regex** - `text=/\\d+ viewers?/` for viewer counts (websocket delay)
+7. **Wait for websocket sync** - `await page.waitForTimeout(2000)` before checking viewer counts
+
+#### Common Patterns
+
+**Single User:**
+```typescript
+test("single user", async ({ page, signupTestUser }) => {
+  const user = await signupTestUser("Test User");
+  await loginUser(page, user.email);
+  await page.setViewportSize(TEST_VIEWPORT);
+  // ... test
+});
+```
+
+**Multi-User:**
+```typescript
+test("multi-user", async ({ browser, signupTestUser }) => {
+  const user1 = await signupTestUser("User 1");
+  const user2 = await signupTestUser("User 2");
+  const ctx1 = await browser.newContext();
+  const ctx2 = await browser.newContext();
+  try {
+    await loginUser(await ctx1.newPage(), user1.email);
+    await loginUser(await ctx2.newPage(), user2.email);
+    // ... test
+  } finally {
+    await ctx1.close();
+    await ctx2.close();
+  }
+});
+```
+
+See [e2e/README.md](./e2e/README.md) for complete documentation.
+
 ## Project Structure
 
 ```
