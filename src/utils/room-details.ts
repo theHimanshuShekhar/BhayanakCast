@@ -1,11 +1,15 @@
 import { createServerFn } from "@tanstack/react-start";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { roomParticipants, streamingRooms, users } from "#/db/schema";
+import type { RoomParticipant } from "#/hooks/useRoom";
 
 /**
  * Get room details with participants
  * For ended rooms, returns all historical participants
  * For active/preparing/waiting rooms, returns only active participants
+ *
+ * Returns normalized participant structure matching WebSocket format:
+ * { userId, userName, userImage, joinedAt, isMobile, totalTimeSeconds }
  */
 export const getRoomDetails = createServerFn({ method: "GET" })
 	.inputValidator((data: { roomId: string }) => data)
@@ -33,26 +37,22 @@ export const getRoomDetails = createServerFn({ method: "GET" })
 
 		const isEnded = room[0].room.status === "ended";
 
-		let participants: Array<{
-			participant: typeof roomParticipants.$inferSelect;
-			user: {
-				id: string;
-				name: string;
-				image: string | null;
-			};
-		}>;
+		// Query participants and map to normalized structure
+		let participants: RoomParticipant[];
 		let participantCount: number;
 
 		if (isEnded) {
 			// For ended rooms, get ALL participants who joined (including those who left)
 			const allParticipants = await db
 				.select({
-					participant: roomParticipants,
-					user: {
-						id: users.id,
-						name: users.name,
-						image: users.image,
-					},
+					id: roomParticipants.id,
+					userId: roomParticipants.userId,
+					joinedAt: roomParticipants.joinedAt,
+					leftAt: roomParticipants.leftAt,
+					totalTimeSeconds: roomParticipants.totalTimeSeconds,
+					userName: users.name,
+					userImage: users.image,
+					isMobile: sql<boolean>`false`.as("is_mobile"), // Not tracked for historical
 				})
 				.from(roomParticipants)
 				.innerJoin(users, eq(roomParticipants.userId, users.id))
@@ -61,25 +61,37 @@ export const getRoomDetails = createServerFn({ method: "GET" })
 
 			// Deduplicate by user ID (keep the earliest participation)
 			const seenUsers = new Set<string>();
-			participants = allParticipants.filter((p) => {
-				if (seenUsers.has(p.user.id)) {
-					return false;
-				}
-				seenUsers.add(p.user.id);
-				return true;
-			});
+			participants = allParticipants
+				.filter((p) => {
+					if (seenUsers.has(p.userId)) {
+						return false;
+					}
+					seenUsers.add(p.userId);
+					return true;
+				})
+				.map((p) => ({
+					userId: p.userId,
+					userName: p.userName || "Unknown",
+					userImage: p.userImage ?? null,
+					joinedAt: p.joinedAt,
+					isMobile: p.isMobile,
+					totalTimeSeconds: p.totalTimeSeconds || 0,
+				}));
 
 			participantCount = participants.length;
 		} else {
 			// For active rooms, get only currently active participants
-			participants = await db
+			const activeParticipants = await db
 				.select({
-					participant: roomParticipants,
-					user: {
-						id: users.id,
-						name: users.name,
-						image: users.image,
-					},
+					userId: roomParticipants.userId,
+					joinedAt: roomParticipants.joinedAt,
+					userName: users.name,
+					userImage: users.image,
+					isMobile: sql<boolean>`false`.as("is_mobile"), // Will be updated via WebSocket
+					totalTimeSeconds:
+						sql<number>`EXTRACT(EPOCH FROM (NOW() - ${roomParticipants.joinedAt}))`.as(
+							"total_time_seconds",
+						),
 				})
 				.from(roomParticipants)
 				.innerJoin(users, eq(roomParticipants.userId, users.id))
@@ -90,6 +102,15 @@ export const getRoomDetails = createServerFn({ method: "GET" })
 					),
 				)
 				.orderBy(desc(roomParticipants.joinedAt));
+
+			participants = activeParticipants.map((p) => ({
+				userId: p.userId,
+				userName: p.userName || "Unknown",
+				userImage: p.userImage ?? null,
+				joinedAt: p.joinedAt,
+				isMobile: p.isMobile,
+				totalTimeSeconds: Math.round(p.totalTimeSeconds || 0),
+			}));
 
 			participantCount = participants.length;
 		}

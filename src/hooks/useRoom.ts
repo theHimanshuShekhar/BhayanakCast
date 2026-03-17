@@ -13,9 +13,10 @@ import { useWebSocket } from "#/lib/websocket-context";
 export interface RoomParticipant {
 	userId: string;
 	userName: string;
-	userImage?: string;
+	userImage: string | null;
 	joinedAt: Date;
 	isMobile: boolean;
+	totalTimeSeconds: number;
 }
 
 export interface RoomState {

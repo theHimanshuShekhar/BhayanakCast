@@ -31,9 +31,10 @@ export interface ParticipantState {
 export interface SerializedParticipant {
 	userId: string;
 	userName: string;
-	userImage?: string;
+	userImage: string | null;
 	joinedAt: Date;
 	isMobile: boolean;
+	totalTimeSeconds: number;
 }
 
 export interface SerializedRoomState {
@@ -282,9 +283,10 @@ export function serializeRoomState(
 		participants: Array.from(room.participants.values()).map((p) => ({
 			userId: p.userId,
 			userName: p.userName,
-			userImage: p.userImage,
+			userImage: p.userImage ?? null,
 			joinedAt: p.joinedAt,
 			isMobile: p.isMobile,
+			totalTimeSeconds: Math.floor((Date.now() - p.joinedAt.getTime()) / 1000),
 		})),
 		createdAt: room.createdAt,
 	};

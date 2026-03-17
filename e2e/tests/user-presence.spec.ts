@@ -3,12 +3,15 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { generateUniqueRoomName } from "../utils/test-helpers";
 
 test.describe("User Presence Indicators", () => {
 	test("shows streamer indicator when user is streamer", async ({ page }) => {
+		const roomName = generateUniqueRoomName("Streamer Indicator Test");
+
 		await page.goto("/");
 		await page.click('button:has-text("Create Room")');
-		await page.fill('input[name="name"]', "Streamer Indicator Test");
+		await page.fill('input[name="name"]', roomName);
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/);
 
@@ -17,12 +20,13 @@ test.describe("User Presence Indicators", () => {
 	});
 
 	test("shows participant list with usernames", async ({ browser }) => {
+		const roomName = generateUniqueRoomName("Participant List Test");
 		const context1 = await browser.newContext();
 		const page1 = await context1.newPage();
 
 		await page1.goto("/");
 		await page1.click('button:has-text("Create Room")');
-		await page1.fill('input[name="name"]', "Participant List Test");
+		await page1.fill('input[name="name"]', roomName);
 		await page1.click('button[type="submit"]:has-text("Create Room")');
 		await page1.waitForURL(/\/room\/.+/);
 
@@ -47,9 +51,11 @@ test.describe("User Presence Indicators", () => {
 
 test.describe("Connection Status", () => {
 	test("shows connection status indicator", async ({ page }) => {
+		const roomName = generateUniqueRoomName("Connection Test");
+
 		await page.goto("/");
 		await page.click('button:has-text("Create Room")');
-		await page.fill('input[name="name"]', "Connection Test");
+		await page.fill('input[name="name"]', roomName);
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/);
 
