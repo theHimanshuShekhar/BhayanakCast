@@ -404,13 +404,15 @@ export async function findRoomsToEnd() {
 		.where(
 			and(
 				eq(streamingRooms.status, "waiting"),
+				// Room must be at least 5 minutes old (prevent ending newly created rooms)
+				sql`${streamingRooms.createdAt} < ${fiveMinutesAgo}`,
 				// No active participants
 				sql`NOT EXISTS (
 					SELECT 1 FROM ${roomParticipants}
 					WHERE ${roomParticipants.roomId} = ${streamingRooms.id}
 					AND ${roomParticipants.leftAt} IS NULL
 				)`,
-				// Last participant left more than 5 minutes ago
+				// Last participant left more than 5 minutes ago (or has no participants ever)
 				sql`(
 					SELECT MAX(${roomParticipants.leftAt})
 					FROM ${roomParticipants}
@@ -435,7 +437,10 @@ export async function runRoomCleanupJob(
 		return;
 	}
 
-	console.log(`[RoomManager] Ending ${roomsToEnd.length} rooms`);
+	console.log(`[RoomManager] Found ${roomsToEnd.length} rooms to end:`);
+	for (const room of roomsToEnd) {
+		console.log(`[RoomManager]  - ${room.name} (${room.id})`);
+	}
 
 	for (const room of roomsToEnd) {
 		console.log(`[RoomManager] Ending room: ${room.name} (${room.id})`);
@@ -445,6 +450,8 @@ export async function runRoomCleanupJob(
 			broadcastRoomEnded(room.id);
 		}
 	}
+
+	console.log("[RoomManager] Cleanup job completed");
 }
 
 /**
