@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query";
 import {
 	createFileRoute,
 	Link,
@@ -256,15 +255,7 @@ function RoomDetailPage() {
 	detectDevice();
 
 	// WebSocket-first room state (replaces React Query polling)
-	const {
-		roomState,
-		isLoading: isRoomLoading,
-		isJoined,
-		isStreamer,
-		error: roomError,
-		leaveRoom,
-		transferStreamer,
-	} = useRoom(roomId);
+	const { roomState, leaveRoom } = useRoom(roomId);
 
 	// WebRTC hook for streaming
 	const {
@@ -309,7 +300,7 @@ function RoomDetailPage() {
 
 	const isActive = room.status === "active";
 	const isPreparing = room.status === "preparing";
-	const isEnded = room.status === "ended";
+	const _isEnded = room.status === "ended";
 
 	// Get streamer info from initial data (for SSR) or from roomState
 	const streamer = initialData?.room.streamer;
@@ -345,14 +336,11 @@ function RoomDetailPage() {
 	}, [userId, isActive, isConnected]);
 
 	// Leave room when component unmounts (user leaves the page)
-
-	// Leave room when component unmounts (user leaves the page)
 	useEffect(() => {
 		return () => {
-			if (hasJoinedRef.current && socket && isConnected) {
+			if (socket && isConnected) {
 				console.log("[Room] Component unmounting - leaving room");
 				socket.emit("room:leave", { roomId });
-				hasJoinedRef.current = false;
 			}
 		};
 	}, [socket, isConnected, roomId]);
@@ -389,7 +377,7 @@ function RoomDetailPage() {
 		: Math.floor((endTime.getTime() - startTime.getTime()) / 1000);
 
 	// Check if current user is a participant and if they're the streamer
-	const isParticipant = participants.some((p) => p.user.id === userId);
+	const isParticipant = participants.some((p) => p.userId === userId);
 	const isStreamer = streamer?.id === userId;
 
 	// Listen for WebSocket events
@@ -405,7 +393,7 @@ function RoomDetailPage() {
 			participantCount: number;
 		}) => {
 			console.log("[Room] User joined:", data);
-			refetch();
+			// Data update handled by useRoom hook
 		};
 
 		// User left the room
@@ -415,7 +403,7 @@ function RoomDetailPage() {
 			participantCount: number;
 		}) => {
 			console.log("[Room] User left:", data);
-			refetch();
+			// Data update handled by useRoom hook
 		};
 
 		// Streamer changed
@@ -424,13 +412,13 @@ function RoomDetailPage() {
 			newStreamerName: string;
 		}) => {
 			console.log("[Room] Streamer changed:", data);
-			refetch();
+			// Data update handled by useRoom hook
 		};
 
 		// Room status changed
 		const handleStatusChanged = (data: { status: string }) => {
 			console.log("[Room] Status changed:", data);
-			refetch();
+			// Data update handled by useRoom hook
 		};
 
 		// Room joined confirmation
@@ -444,7 +432,7 @@ function RoomDetailPage() {
 			alreadyInRoom?: boolean;
 		}) => {
 			console.log("[Room] Joined room:", data);
-			refetch();
+			// Data update handled by useRoom hook
 		};
 
 		// Room left confirmation
@@ -453,7 +441,6 @@ function RoomDetailPage() {
 			participantCount: number;
 		}) => {
 			console.log("[Room] Left room:", data);
-			hasJoinedRef.current = false;
 		};
 
 		// Error
@@ -480,7 +467,7 @@ function RoomDetailPage() {
 			socket.off("room:left", handleRoomLeft);
 			socket.off("room:error", handleRoomError);
 		};
-	}, [socket, isConnected, refetch, roomId]);
+	}, [socket, isConnected, roomId]);
 
 	// Transfer dialog state
 	const [showTransferDialog, setShowTransferDialog] = useState(false);
@@ -553,7 +540,7 @@ function RoomDetailPage() {
 										<Users className="h-4 w-4" />
 										<span>
 											{
-												participants.filter((p) => p.user.id !== streamer?.id)
+												participants.filter((p) => p.userId !== streamer?.id)
 													.length
 											}{" "}
 											viewers
@@ -700,44 +687,44 @@ function RoomDetailPage() {
 									<span className="text-text-tertiary">
 										(
 										{
-											participants.filter((p) => p.user.id !== streamer?.id)
+											participants.filter((p) => p.userId !== streamer?.id)
 												.length
 										}
 										)
 									</span>
 								</h3>
 								<div className="space-y-1 max-h-32 overflow-y-auto">
-									{participants.filter((p) => p.user.id !== streamer?.id)
+									{participants.filter((p) => p.userId !== streamer?.id)
 										.length === 0 ? (
 										<p className="text-xs text-text-tertiary italic">
 											No viewers yet
 										</p>
 									) : (
 										participants
-											.filter((p) => p.user.id !== streamer?.id)
+											.filter((p) => p.userId !== streamer?.id)
 											.slice(0, 5)
 											.map((p) => (
 												<Link
 													key={p.participant.id}
 													to="/profile/$userId"
-													params={{ userId: p.user.id }}
+													params={{ userId: p.userId }}
 													className="flex items-center gap-2 p-1.5 rounded hover:bg-depth-2 transition-colors"
 												>
-													{p.user.image ? (
+													{p.userImage ? (
 														<img
-															src={p.user.image}
-															alt={p.user.name}
+															src={p.userImage}
+															alt={p.userName}
 															className="h-6 w-6 rounded-full object-cover"
 														/>
 													) : (
 														<div className="h-6 w-6 rounded-full bg-surface-3 flex items-center justify-center">
 															<span className="text-xs font-medium text-text-primary">
-																{p.user.name.charAt(0).toUpperCase()}
+																{p.userName.charAt(0).toUpperCase()}
 															</span>
 														</div>
 													)}
 													<span className="text-sm text-text-secondary truncate">
-														{p.user.name}
+														{p.userName}
 													</span>
 												</Link>
 											))
@@ -770,36 +757,35 @@ function RoomDetailPage() {
 
 							<div className="space-y-2 max-h-64 overflow-y-auto mb-4">
 								{participants
-									.filter((p) => p.user.id !== userId)
+									.filter((p) => p.userId !== userId)
 									.map((p) => (
 										<button
 											key={p.participant.id}
 											type="button"
-											onClick={() => handleTransferStreamer(p.user.id)}
+											onClick={() => handleTransferStreamer(p.userId)}
 											className="w-full flex items-center gap-3 p-3 bg-depth-2 hover:bg-depth-3 rounded-lg transition-colors text-left"
 										>
-											{p.user.image ? (
+											{p.userImage ? (
 												<img
-													src={p.user.image}
-													alt={p.user.name}
+													src={p.userImage}
+													alt={p.userName}
 													className="h-10 w-10 rounded-full object-cover"
 												/>
 											) : (
 												<div className="h-10 w-10 rounded-full bg-surface-3 flex items-center justify-center">
 													<span className="text-sm font-medium text-text-primary">
-														{p.user.name.charAt(0).toUpperCase()}
+														{p.userName.charAt(0).toUpperCase()}
 													</span>
 												</div>
 											)}
 											<span className="flex-1 font-medium text-text-primary">
-												{p.user.name}
+												{p.userName}
 											</span>
 										</button>
 									))}
 							</div>
 
-							{participants.filter((p) => p.user.id !== userId).length ===
-								0 && (
+							{participants.filter((p) => p.userId !== userId).length === 0 && (
 								<p className="text-text-secondary text-center py-4">
 									No other viewers to transfer to.
 								</p>
@@ -901,7 +887,7 @@ function RoomDetailPage() {
 									<span>
 										Viewers:{" "}
 										{
-											participants.filter((p) => p.user.id !== streamer?.id)
+											participants.filter((p) => p.userId !== streamer?.id)
 												.length
 										}
 									</span>
@@ -944,7 +930,7 @@ function RoomDetailPage() {
 									<Link
 										key={p.participant.id}
 										to="/profile/$userId"
-										params={{ userId: p.user.id }}
+										params={{ userId: p.userId }}
 										className="flex items-center gap-4 p-3 bg-depth-2 rounded-lg hover:bg-depth-3 transition-colors"
 									>
 										<div className="shrink-0 w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center">
@@ -953,23 +939,23 @@ function RoomDetailPage() {
 											</span>
 										</div>
 
-										{p.user.image ? (
+										{p.userImage ? (
 											<img
-												src={p.user.image}
-												alt={p.user.name}
+												src={p.userImage}
+												alt={p.userName}
 												className="h-12 w-12 rounded-full object-cover"
 											/>
 										) : (
 											<div className="h-12 w-12 rounded-full bg-surface-3 flex items-center justify-center">
 												<span className="text-lg font-medium text-text-primary">
-													{p.user.name.charAt(0).toUpperCase()}
+													{p.userName.charAt(0).toUpperCase()}
 												</span>
 											</div>
 										)}
 
 										<div className="flex-1 min-w-0">
 											<h3 className="text-base font-medium text-text-primary truncate">
-												{p.user.name}
+												{p.userName}
 											</h3>
 											<p className="text-sm text-text-tertiary">
 												Joined <ClientDate date={p.participant.joinedAt} />
