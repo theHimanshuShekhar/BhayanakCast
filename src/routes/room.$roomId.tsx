@@ -294,7 +294,6 @@ function RoomDetailPage() {
 
 	const isActive = room.status === "active";
 	const isPreparing = room.status === "preparing";
-	const _isEnded = room.status === "ended";
 
 	// Get streamer info from initial data (for SSR) or from roomState
 	const streamer = initialData?.room.streamer;
@@ -365,10 +364,9 @@ function RoomDetailPage() {
 
 	const now = clientNow || new Date();
 	const startTime = room?.createdAt ? new Date(room.createdAt) : now;
-	const endTime = room?.endedAt ? new Date(room.endedAt) : now;
-	const totalDuration = isActive
-		? Math.floor((now.getTime() - startTime.getTime()) / 1000)
-		: Math.floor((endTime.getTime() - startTime.getTime()) / 1000);
+	const totalDuration = Math.floor(
+		(now.getTime() - startTime.getTime()) / 1000,
+	);
 
 	// Check if current user is a participant and if they're the streamer
 	const isParticipant = participants.some((p) => p.userId === userId);
@@ -881,13 +879,6 @@ function RoomDetailPage() {
 										}
 									</span>
 								</div>
-								{room?.endedAt && (
-									<div className="flex items-center gap-1.5">
-										<span>
-											Ended: <ClientDate date={room.endedAt} />
-										</span>
-									</div>
-								)}
 							</div>
 						</div>
 					</div>
@@ -912,8 +903,7 @@ function RoomDetailPage() {
 							{[...participants]
 								.sort(
 									(a, b) =>
-										(b.participant.totalTimeSeconds || 0) -
-										(a.participant.totalTimeSeconds || 0),
+										(b.totalTimeSeconds || 0) - (a.totalTimeSeconds || 0),
 								)
 								.map((p, index) => (
 									<Link

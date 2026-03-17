@@ -5,9 +5,13 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { generateUniqueRoomName } from "../utils/test-helpers";
 
 test.describe("Room Management", () => {
 	test("user can create a new room", async ({ page }) => {
+		const roomName = generateUniqueRoomName("E2E Test Room");
+		const roomDescription = "This is an E2E test room";
+
 		// Navigate to home
 		await page.goto("/");
 
@@ -15,8 +19,8 @@ test.describe("Room Management", () => {
 		await page.click('button:has-text("Create Room")');
 
 		// Fill room details
-		await page.fill('input[name="name"]', "E2E Test Room");
-		await page.fill('textarea[name="description"]', "This is an E2E test room");
+		await page.fill('input[name="name"]', roomName);
+		await page.fill('textarea[name="description"]', roomDescription);
 
 		// Submit form
 		await page.click('button[type="submit"]:has-text("Create Room")');
@@ -25,15 +29,17 @@ test.describe("Room Management", () => {
 		await page.waitForURL(/\/room\/.+/);
 
 		// Verify room was created
-		await expect(page.locator("h1")).toContainText("E2E Test Room");
-		await expect(page.locator("text=This is an E2E test room")).toBeVisible();
+		await expect(page.locator("h1")).toContainText(roomName);
+		await expect(page.locator(`text=${roomDescription}`)).toBeVisible();
 	});
 
 	test("user can browse and join existing rooms", async ({ page }) => {
+		const roomName = generateUniqueRoomName("Browse Test Room");
+
 		// First create a room
 		await page.goto("/");
 		await page.click('button:has-text("Create Room")');
-		await page.fill('input[name="name"]', "Browse Test Room");
+		await page.fill('input[name="name"]', roomName);
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/);
 		const roomUrl = page.url();
@@ -45,18 +51,20 @@ test.describe("Room Management", () => {
 		await page.waitForSelector("[data-testid='room-card']");
 
 		// Click on the room
-		await page.click('text=Browse Test Room');
+		await page.click(`text=${roomName}`);
 
 		// Verify we joined the room
 		await expect(page).toHaveURL(roomUrl);
-		await expect(page.locator("h1")).toContainText("Browse Test Room");
+		await expect(page.locator("h1")).toContainText(roomName);
 	});
 
 	test("room displays correct status indicators", async ({ page }) => {
+		const roomName = generateUniqueRoomName("Status Test Room");
+
 		// Create a room
 		await page.goto("/");
 		await page.click('button:has-text("Create Room")');
-		await page.fill('input[name="name"]', "Status Test Room");
+		await page.fill('input[name="name"]', roomName);
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/);
 
@@ -68,10 +76,12 @@ test.describe("Room Management", () => {
 	});
 
 	test("room shows participant count", async ({ page }) => {
+		const roomName = generateUniqueRoomName("Participant Count Test");
+
 		// Create a room
 		await page.goto("/");
 		await page.click('button:has-text("Create Room")');
-		await page.fill('input[name="name"]', "Participant Count Test");
+		await page.fill('input[name="name"]', roomName);
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/);
 
@@ -80,10 +90,12 @@ test.describe("Room Management", () => {
 	});
 
 	test("user can leave room and return to home", async ({ page }) => {
+		const roomName = generateUniqueRoomName("Leave Test Room");
+
 		// Create and join a room
 		await page.goto("/");
 		await page.click('button:has-text("Create Room")');
-		await page.fill('input[name="name"]', "Leave Test Room");
+		await page.fill('input[name="name"]', roomName);
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/);
 
@@ -96,31 +108,35 @@ test.describe("Room Management", () => {
 	});
 
 	test("room search filters rooms correctly", async ({ page }) => {
+		const gamingRoomName = generateUniqueRoomName("Gaming Room");
+		const codingRoomName = generateUniqueRoomName("Coding Room");
+		const searchTerm = gamingRoomName.split("-W")[0].toLowerCase(); // Extract "Gaming Room" part
+
 		// Create two rooms
 		await page.goto("/");
 		
 		// First room
 		await page.click('button:has-text("Create Room")');
-		await page.fill('input[name="name"]', "Gaming Room");
+		await page.fill('input[name="name"]', gamingRoomName);
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/);
 		
 		// Second room
 		await page.goto("/");
 		await page.click('button:has-text("Create Room")');
-		await page.fill('input[name="name"]', "Coding Room");
+		await page.fill('input[name="name"]', codingRoomName);
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/);
 
 		// Go back to home
 		await page.goto("/");
 
-		// Search for "gaming"
-		await page.fill('input[placeholder*="Search"]', "gaming");
+		// Search for unique gaming room identifier
+		await page.fill('input[placeholder*="Search"]', searchTerm);
 		await page.waitForTimeout(500); // Wait for debounce
 
 		// Should show Gaming Room but not Coding Room
-		await expect(page.locator('text=Gaming Room')).toBeVisible();
-		await expect(page.locator('text=Coding Room')).not.toBeVisible();
+		await expect(page.locator(`text=${gamingRoomName}`)).toBeVisible();
+		await expect(page.locator(`text=${codingRoomName}`)).not.toBeVisible();
 	});
 });

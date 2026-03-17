@@ -6,12 +6,15 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { generateUniqueRoomName } from "../utils/test-helpers";
 
 test.describe("Room Status Lifecycle", () => {
 	test("room starts in preparing status when created", async ({ page }) => {
+		const roomName = generateUniqueRoomName("Status Test Room");
+
 		await page.goto("/");
 		await page.click('button:has-text("Create Room")');
-		await page.fill('input[name="name"]', "Status Test Room");
+		await page.fill('input[name="name"]', roomName);
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/);
 
@@ -20,13 +23,15 @@ test.describe("Room Status Lifecycle", () => {
 	});
 
 	test("room becomes active when 2nd participant joins", async ({ browser }) => {
+		const roomName = generateUniqueRoomName("Active Status Test");
+
 		// User A creates room
 		const userAContext = await browser.newContext();
 		const userAPage = await userAContext.newPage();
 
 		await userAPage.goto("/");
 		await userAPage.click('button:has-text("Create Room")');
-		await userAPage.fill('input[name="name"]', "Active Status Test");
+		await userAPage.fill('input[name="name"]', roomName);
 		await userAPage.click('button[type="submit"]:has-text("Create Room")');
 		await userAPage.waitForURL(/\/room\/.+/);
 		const roomUrl = userAPage.url();
@@ -48,13 +53,15 @@ test.describe("Room Status Lifecycle", () => {
 	});
 
 	test("room returns to waiting when all participants leave", async ({ browser }) => {
+		const roomName = generateUniqueRoomName("Waiting Status Test");
+
 		// User A creates room
 		const userAContext = await browser.newContext();
 		const userAPage = await userAContext.newPage();
 
 		await userAPage.goto("/");
 		await userAPage.click('button:has-text("Create Room")');
-		await userAPage.fill('input[name="name"]', "Waiting Status Test");
+		await userAPage.fill('input[name="name"]', roomName);
 		await userAPage.click('button[type="submit"]:has-text("Create Room")');
 		await userAPage.waitForURL(/\/room\/.+/);
 
@@ -86,9 +93,11 @@ test.describe("Room Status Lifecycle", () => {
 	});
 
 	test("streaming starts in preparing status", async ({ page }) => {
+		const roomName = generateUniqueRoomName("Streaming Status Test");
+
 		await page.goto("/");
 		await page.click('button:has-text("Create Room")');
-		await page.fill('input[name="name"]', "Streaming Status Test");
+		await page.fill('input[name="name"]', roomName);
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/);
 
@@ -104,9 +113,11 @@ test.describe("Room Status Lifecycle", () => {
 	});
 
 	test("stopping stream returns to preparing status", async ({ page }) => {
+		const roomName = generateUniqueRoomName("Stop Stream Status Test");
+
 		await page.goto("/");
 		await page.click('button:has-text("Create Room")');
-		await page.fill('input[name="name"]', "Stop Stream Status Test");
+		await page.fill('input[name="name"]', roomName);
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/);
 
@@ -124,13 +135,15 @@ test.describe("Room Status Lifecycle", () => {
 	});
 
 	test("status updates are broadcast to all participants", async ({ browser }) => {
+		const roomName = generateUniqueRoomName("Broadcast Status Test");
+
 		// User A creates room
 		const userAContext = await browser.newContext();
 		const userAPage = await userAContext.newPage();
 
 		await userAPage.goto("/");
 		await userAPage.click('button:has-text("Create Room")');
-		await userAPage.fill('input[name="name"]', "Broadcast Status Test");
+		await userAPage.fill('input[name="name"]', roomName);
 		await userAPage.click('button[type="submit"]:has-text("Create Room")');
 		await userAPage.waitForURL(/\/room\/.+/);
 		const roomUrl = userAPage.url();
@@ -157,29 +170,34 @@ test.describe("Room Status Lifecycle", () => {
 
 test.describe("Room Persistence", () => {
 	test("room remains active when page is refreshed", async ({ page }) => {
+		const roomName = generateUniqueRoomName("Refresh Test Room");
+
 		// Create room
 		await page.goto("/");
 		await page.click('button:has-text("Create Room")');
-		await page.fill('input[name="name"]', "Refresh Test Room");
+		await page.fill('input[name="name"]', roomName);
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/);
 
 		// Verify in room
-		await expect(page.locator("h1")).toContainText("Refresh Test Room");
+		await expect(page.locator("h1")).toContainText(roomName);
 
 		// Refresh page
 		await page.reload();
 
 		// Should still be in room
-		await expect(page.locator("h1")).toContainText("Refresh Test Room");
+		await expect(page.locator("h1")).toContainText(roomName);
 	});
 
 	test("room data persists after navigation", async ({ page }) => {
+		const roomName = generateUniqueRoomName("Navigation Test Room");
+		const roomDescription = "Test description";
+
 		// Create room
 		await page.goto("/");
 		await page.click('button:has-text("Create Room")');
-		await page.fill('input[name="name"]', "Navigation Test Room");
-		await page.fill('textarea[name="description"]', "Test description");
+		await page.fill('input[name="name"]', roomName);
+		await page.fill('textarea[name="description"]', roomDescription);
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/);
 
@@ -187,13 +205,13 @@ test.describe("Room Persistence", () => {
 		await page.goto("/");
 
 		// Room should appear in list
-		await expect(page.locator("text=Navigation Test Room")).toBeVisible();
+		await expect(page.locator(`text=${roomName}`)).toBeVisible();
 
 		// Click on room
-		await page.click('text=Navigation Test Room');
+		await page.click(`text=${roomName}`);
 
 		// Should be back in room with data intact
-		await expect(page.locator("h1")).toContainText("Navigation Test Room");
-		await expect(page.locator("text=Test description")).toBeVisible();
+		await expect(page.locator("h1")).toContainText(roomName);
+		await expect(page.locator(`text=${roomDescription}`)).toBeVisible();
 	});
 });

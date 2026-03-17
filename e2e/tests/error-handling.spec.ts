@@ -3,6 +3,7 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { generateUniqueRoomName } from "../utils/test-helpers";
 
 test.describe("Error Handling", () => {
 	test("shows error when trying to join non-existent room", async ({ page }) => {
@@ -13,9 +14,11 @@ test.describe("Error Handling", () => {
 	});
 
 	test("handles server disconnection gracefully", async ({ page }) => {
+		const roomName = generateUniqueRoomName("Disconnect Test");
+
 		await page.goto("/");
 		await page.click('button:has-text("Create Room")');
-		await page.fill('input[name="name"]', "Disconnect Test");
+		await page.fill('input[name="name"]', roomName);
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/);
 

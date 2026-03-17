@@ -17,10 +17,10 @@ This directory contains comprehensive E2E tests for:
 e2e/
 ├── fixtures/
 │   └── streaming.ts          # Test utilities and helpers
+├── setup/
+│   └── global-teardown.ts    # Cleanup test users after suite
 ├── tests/
 │   ├── room-management.spec.ts    # Room CRUD operations
-│   ├── screen-sharing.spec.ts     # WebRTC streaming
-│   ├── streamer-transfer.spec.ts  # Streamer handoff
 │   ├── chat.spec.ts              # Real-time chat
 │   ├── room-leaving.spec.ts      # Room leaving and rejoining
 │   ├── room-status.spec.ts       # Status transitions
@@ -28,7 +28,14 @@ e2e/
 │   ├── rate-limiting.spec.ts     # Rate limiting enforcement
 │   ├── room-list.spec.ts         # Home page and room list
 │   ├── user-presence.spec.ts     # User indicators
-│   └── error-handling.spec.ts    # Error scenarios
+│   ├── error-handling.spec.ts    # Error scenarios
+│   ├── auth-flow.example.spec.ts # Test auth examples
+│   └── webrtc/
+│       ├── screen-sharing.spec.ts     # WebRTC streaming
+│       └── streamer-transfer.spec.ts  # Streamer handoff
+├── utils/
+│   ├── auth.ts                 # Test authentication utilities
+│   └── test-helpers.ts         # Test helpers
 ├── example.spec.ts             # Playwright example
 └── README.md                   # This file
 ```
@@ -42,20 +49,6 @@ e2e/
 - ✅ Participant count display
 - ✅ Leave room and return to home
 - ✅ Search and filter rooms
-
-### Screen Sharing (6 tests)
-- ✅ Start screen sharing
-- ✅ Audio configuration selection
-- ✅ Stop screen sharing
-- ✅ Viewer sees stream
-- ✅ Multiple viewers
-- ✅ Mobile restrictions
-
-### Streamer Transfer (4 tests)
-- ✅ Automatic transfer when streamer leaves
-- ✅ Manual transfer to viewer
-- ✅ Transfer cooldown (30s)
-- ✅ Room enters waiting state
 
 ### Chat (7 tests)
 - ✅ Send and receive messages
@@ -110,7 +103,91 @@ e2e/
 - ✅ Validates room name required
 - ✅ Validates room name minimum length
 
+### WebRTC - Screen Sharing (6 tests)
+- ✅ Start screen sharing
+- ✅ Audio configuration selection
+- ✅ Stop screen sharing
+- ✅ Viewer sees stream
+- ✅ Multiple viewers
+- ✅ Mobile restrictions
+
+### WebRTC - Streamer Transfer (4 tests)
+- ✅ Automatic transfer when streamer leaves
+- ✅ Manual transfer to viewer
+- ✅ Transfer cooldown (30s)
+- ✅ Room enters waiting state
+
 **Total: 53 E2E Tests**
+
+## Test Authentication
+
+E2E tests use programmatic test authentication to create users without Discord OAuth.
+
+### How It Works
+
+1. **Email/Password Auth Enabled** - Only in `NODE_ENV=test`
+2. **Test API Endpoints** - Create users via `/api/test/auth/signup`
+3. **Automatic Cleanup** - Test users deleted after test suite
+4. **Random Emails** - Format: `test-{random}@test.example.com`
+
+### Using Test Auth in Tests
+
+```typescript
+import { test, expect } from "../utils/auth";
+
+test("streamer and viewer interaction", async ({ browser, signupTestUser }) => {
+  // Create test users
+  const streamer = await signupTestUser("Test Streamer");
+  const viewer = await signupTestUser("Test Viewer");
+
+  // Create authenticated browser contexts
+  const streamerContext = await browser.newContext({
+    storageState: {
+      cookies: [{
+        name: "auth-token",
+        value: streamer.token,
+        domain: "localhost",
+        path: "/",
+        expires: Date.now() / 1000 + 3600,
+        httpOnly: true,
+        secure: false,
+        sameSite: "Lax",
+      }],
+      origins: [],
+    },
+  });
+
+  const streamerPage = await streamerContext.newPage();
+  
+  // Now streamer is logged in!
+  await streamerPage.goto("/");
+  await streamerPage.click('button:has-text("Create Room")');
+  // ... rest of test
+});
+```
+
+### Test Auth Utilities
+
+Located in `e2e/utils/auth.ts`:
+
+- `signupTestUser(name)` - Create new test user
+- `loginTestUser(email)` - Login existing test user  
+- `cleanupAllTestUsers()` - Delete all test users
+- `test` fixture - Extended Playwright test with auth helpers
+
+### Test User Details
+
+- **Email**: `test-{random}@test.example.com`
+- **Password**: `testpassword123` (handled automatically)
+- **Token**: JWT token returned from API
+- **Cleanup**: Automatic after test suite via `global-teardown.ts`
+
+### Security
+
+- ✅ Email/password auth only in `NODE_ENV=test`
+- ✅ API endpoints reject requests in production
+- ✅ Test users have "test" in email for easy identification
+- ✅ Global teardown ensures no test data persists
 
 ## Running Tests
 
@@ -122,39 +199,43 @@ pnpm exec playwright install
 
 # Install dependencies
 pnpm install
+
+# Start dev server (in another terminal)
+pnpm dev
 ```
 
 ### Run All E2E Tests
 
 ```bash
-pnpm exec playwright test
+pnpm test:e2e
 ```
 
 ### Run Specific Test File
 
 ```bash
 # Core functionality
-pnpm exec playwright test e2e/tests/room-management.spec.ts
-pnpm exec playwright test e2e/tests/screen-sharing.spec.ts
-pnpm exec playwright test e2e/tests/streamer-transfer.spec.ts
-pnpm exec playwright test e2e/tests/chat.spec.ts
+pnpm test:e2e e2e/tests/room-management.spec.ts
+pnpm test:e2e e2e/tests/chat.spec.ts
 
 # Room lifecycle
-pnpm exec playwright test e2e/tests/room-leaving.spec.ts
-pnpm exec playwright test e2e/tests/room-status.spec.ts
-pnpm exec playwright test e2e/tests/websocket-reconnect.spec.ts
+pnpm test:e2e e2e/tests/room-leaving.spec.ts
+pnpm test:e2e e2e/tests/room-status.spec.ts
 
-# Additional features
-pnpm exec playwright test e2e/tests/rate-limiting.spec.ts
-pnpm exec playwright test e2e/tests/room-list.spec.ts
-pnpm exec playwright test e2e/tests/user-presence.spec.ts
-pnpm exec playwright test e2e/tests/error-handling.spec.ts
+# WebRTC (in webrtc/ folder)
+pnpm test:e2e e2e/tests/webrtc/screen-sharing.spec.ts
+pnpm test:e2e e2e/tests/webrtc/streamer-transfer.spec.ts
+
+# Other features
+pnpm test:e2e e2e/tests/rate-limiting.spec.ts
+pnpm test:e2e e2e/tests/room-list.spec.ts
+pnpm test:e2e e2e/tests/user-presence.spec.ts
+pnpm test:e2e e2e/tests/error-handling.spec.ts
 ```
 
 ### Run with UI Mode
 
 ```bash
-pnpm exec playwright test --ui
+pnpm test:e2e:ui
 ```
 
 ### Run in Headed Mode (see browser)
@@ -163,21 +244,11 @@ pnpm exec playwright test --ui
 pnpm exec playwright test --headed
 ```
 
-### Run Specific Browser
-
-```bash
-pnpm exec playwright test --project=chromium
-pnpm exec playwright test --project=firefox
-```
-
 ## Configuration
 
 ### Browsers
 
-Tests run on:
-- **Chromium** (primary) - With screen sharing permissions
-- **Firefox** (secondary) - Alternative browser testing
-- **Mobile Chrome** - Mobile viewport testing
+Tests run on **Chromium** with screen sharing permissions enabled.
 
 ### WebRTC Configuration
 
@@ -206,25 +277,38 @@ test.describe("Feature Name", () => {
 });
 ```
 
-### Multi-User Tests
+### Multi-User Tests with Auth
 
 ```typescript
-test("two users can chat", async ({ browser }) => {
-  const context1 = await browser.newContext();
-  const page1 = await context1.newPage();
+import { test, expect } from "../utils/auth";
+
+test("two users can chat", async ({ browser, signupTestUser }) => {
+  // Create authenticated users
+  const user1 = await signupTestUser("User 1");
+  const user2 = await signupTestUser("User 2");
+
+  // Create contexts with auth
+  const context1 = await browser.newContext({
+    storageState: {
+      cookies: [{ name: "auth-token", value: user1.token, /* ... */ }],
+      origins: [],
+    },
+  });
+  const context2 = await browser.newContext({
+    storageState: {
+      cookies: [{ name: "auth-token", value: user2.token, /* ... */ }],
+      origins: [],
+    },
+  });
   
-  const context2 = await browser.newContext();
+  const page1 = await context1.newPage();
   const page2 = await context2.newPage();
   
   try {
-    // User 1 creates room
+    // Both users are now logged in!
     await page1.goto("/");
-    // ...
-    
-    // User 2 joins
-    await page2.goto(roomUrl);
-    // ...
-    
+    await page2.goto("/");
+    // ... test interactions
   } finally {
     await context1.close();
     await context2.close();
@@ -232,15 +316,14 @@ test("two users can chat", async ({ browser }) => {
 });
 ```
 
-### Using Fixtures
+### Using Test Helpers
 
 ```typescript
-import { test, expect } from "../fixtures/streaming";
+import { generateUniqueRoomName } from "../utils/test-helpers";
 
-test("streamer can share screen", async ({ streamerPage }) => {
-  await streamerPage.goto("/");
-  // Already has display-capture permission
-});
+// Creates unique room names to prevent conflicts
+const roomName = generateUniqueRoomName("Test Room");
+// Result: "Test Room-W0-1234567890"
 ```
 
 ## CI/CD Integration
@@ -250,7 +333,7 @@ Tests run automatically via GitHub Actions:
 ```yaml
 # .github/workflows/playwright.yml
 - name: Run Playwright tests
-  run: pnpm exec playwright test
+  run: pnpm test:e2e
 ```
 
 ## Debugging
@@ -293,14 +376,14 @@ test-results/
 
 ## Best Practices
 
-1. **Use data-testid attributes** for reliable selectors:
-   ```html
-   <div data-testid="room-container">
+1. **Use test auth fixtures** for authenticated tests:
+   ```typescript
+   import { test, expect } from "../utils/auth";
    ```
 
-2. **Wait for network idle** when loading pages:
+2. **Generate unique room names** to prevent conflicts:
    ```typescript
-   await page.goto("/", { waitUntil: "networkidle" });
+   const roomName = generateUniqueRoomName("Test Room");
    ```
 
 3. **Clean up contexts** after multi-user tests:
@@ -321,18 +404,6 @@ test-results/
 
 ## Common Issues
 
-### WebRTC Permissions Denied
-
-Ensure Chrome flags are set in `playwright.config.ts`:
-```typescript
-launchOptions: {
-  args: [
-    "--use-fake-device-for-media-stream",
-    "--use-fake-ui-for-media-stream",
-  ],
-}
-```
-
 ### Tests Timing Out
 
 Increase timeout in `playwright.config.ts`:
@@ -346,6 +417,14 @@ Kill existing processes:
 ```bash
 lsof -ti:3000 | xargs kill -9
 lsof -ti:3001 | xargs kill -9
+```
+
+### Authentication Failures
+
+Ensure dev server is running with `NODE_ENV=test`:
+```bash
+# In playwright.config.ts, webServer.env sets this automatically
+NODE_ENV=test pnpm dev
 ```
 
 ## Environment Variables
@@ -363,3 +442,4 @@ CI=true
 - [Playwright Documentation](https://playwright.dev/)
 - [WebRTC Testing Guide](https://playwright.dev/docs/api/class-browser#browser-new-context-option-permissions)
 - [Main Testing Guide](../docs/TESTING.md)
+- [Test Auth Example](../e2e/tests/auth-flow.example.spec.ts)

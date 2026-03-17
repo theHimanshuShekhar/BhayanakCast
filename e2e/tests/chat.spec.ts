@@ -5,9 +5,11 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { generateUniqueRoomName } from "../utils/test-helpers";
 
 test.describe("Chat Functionality", () => {
 	test("user can send and receive chat messages", async ({ browser }) => {
+		const roomName = generateUniqueRoomName("Chat Test Room");
 		const user1Context = await browser.newContext();
 		const user1Page = await user1Context.newPage();
 
@@ -18,7 +20,7 @@ test.describe("Chat Functionality", () => {
 			// User 1 creates room
 			await user1Page.goto("/");
 			await user1Page.click('button:has-text("Create Room")');
-			await user1Page.fill('input[name="name"]', "Chat Test Room");
+			await user1Page.fill('input[name="name"]', roomName);
 			await user1Page.click('button[type="submit"]:has-text("Create Room")');
 			await user1Page.waitForURL(/\/room\/.+/);
 			const roomUrl = user1Page.url();
@@ -49,10 +51,12 @@ test.describe("Chat Functionality", () => {
 	});
 
 	test("profanity filter blocks inappropriate messages", async ({ page }) => {
+		const roomName = generateUniqueRoomName("Profanity Test");
+
 		// Create room
 		await page.goto("/");
 		await page.click('button:has-text("Create Room")');
-		await page.fill('input[name="name"]', "Profanity Test");
+		await page.fill('input[name="name"]', roomName);
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/);
 
@@ -66,6 +70,7 @@ test.describe("Chat Functionality", () => {
 	});
 
 	test("system messages appear for room events", async ({ browser }) => {
+		const roomName = generateUniqueRoomName("System Messages Test");
 		const streamerContext = await browser.newContext();
 		const streamerPage = await streamerContext.newPage();
 
@@ -76,7 +81,7 @@ test.describe("Chat Functionality", () => {
 			// Streamer creates room
 			await streamerPage.goto("/");
 			await streamerPage.click('button:has-text("Create Room")');
-			await streamerPage.fill('input[name="name"]', "System Messages Test");
+			await streamerPage.fill('input[name="name"]', roomName);
 			await streamerPage.click('button[type="submit"]:has-text("Create Room")');
 			await streamerPage.waitForURL(/\/room\/.+/);
 			const roomUrl = streamerPage.url();
@@ -99,10 +104,12 @@ test.describe("Chat Functionality", () => {
 	});
 
 	test("chat input clears after sending message", async ({ page }) => {
+		const roomName = generateUniqueRoomName("Clear Input Test");
+
 		// Create room
 		await page.goto("/");
 		await page.click('button:has-text("Create Room")');
-		await page.fill('input[name="name"]', "Clear Input Test");
+		await page.fill('input[name="name"]', roomName);
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/);
 
@@ -116,10 +123,12 @@ test.describe("Chat Functionality", () => {
 	});
 
 	test("empty messages cannot be sent", async ({ page }) => {
+		const roomName = generateUniqueRoomName("Empty Message Test");
+
 		// Create room
 		await page.goto("/");
 		await page.click('button:has-text("Create Room")');
-		await page.fill('input[name="name"]', "Empty Message Test");
+		await page.fill('input[name="name"]', roomName);
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/);
 
@@ -134,6 +143,7 @@ test.describe("Chat Functionality", () => {
 	});
 
 	test("chat rate limiting prevents spam", async ({ browser }) => {
+		const roomName = generateUniqueRoomName("Rate Limit Test");
 		const userContext = await browser.newContext();
 		const userPage = await userContext.newPage();
 
@@ -141,7 +151,7 @@ test.describe("Chat Functionality", () => {
 			// Create room
 			await userPage.goto("/");
 			await userPage.click('button:has-text("Create Room")');
-			await userPage.fill('input[name="name"]', "Rate Limit Test");
+			await userPage.fill('input[name="name"]', roomName);
 			await userPage.click('button[type="submit"]:has-text("Create Room")');
 			await userPage.waitForURL(/\/room\/.+/);
 
@@ -161,10 +171,12 @@ test.describe("Chat Functionality", () => {
 	});
 
 	test("chat persists across room navigation", async ({ page }) => {
+		const roomName = generateUniqueRoomName("Persistence Test");
+
 		// Create room
 		await page.goto("/");
 		await page.click('button:has-text("Create Room")');
-		await page.fill('input[name="name"]', "Persistence Test");
+		await page.fill('input[name="name"]', roomName);
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/);
 		const roomUrl = page.url();

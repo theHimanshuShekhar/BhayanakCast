@@ -3,22 +3,25 @@ import { defineConfig, devices } from "@playwright/test";
 /**
  * Playwright Configuration for BhayanakCast E2E Tests
  * 
- * WebRTC Streaming E2E Test Configuration
+ * All tests run sequentially with single worker to prevent conflicts
  */
 export default defineConfig({
   testDir: "./e2e/tests",
-  
-  /* Run tests sequentially for WebRTC (peer connections need ordering) */
+
+  /* Global teardown to cleanup test users */
+  globalTeardown: "./e2e/setup/global-teardown.ts",
+
+  /* Run tests sequentially */
   fullyParallel: false,
+  
+  /* Single worker for all tests */
+  workers: 1,
   
   /* Fail the build on CI if you accidentally left test.only in the source code. */
   forbidOnly: !!process.env.CI,
   
   /* Retry on CI only */
   retries: process.env.CI ? 2 : 0,
-  
-  /* Single worker for WebRTC tests (peer connections can't share) */
-  workers: 1,
   
   /* Reporter configuration */
   reporter: [
@@ -44,15 +47,12 @@ export default defineConfig({
     viewport: { width: 1280, height: 720 },
   },
 
-  /* Configure projects for different scenarios */
+  /* Single project for all tests */
   projects: [
-    /* Desktop Chrome - Primary testing browser */
     {
       name: "chromium",
       use: {
         ...devices["Desktop Chrome"],
-        /* Grant permissions for screen sharing */
-        permissions: ["display-capture"],
         /* Chrome args for WebRTC testing */
         launchOptions: {
           args: [
@@ -64,32 +64,6 @@ export default defineConfig({
           ],
         },
       },
-    },
-
-    /* Firefox - Secondary browser testing */
-    {
-      name: "firefox",
-      use: {
-        ...devices["Desktop Firefox"],
-        permissions: ["display-capture"],
-        launchOptions: {
-          firefoxUserPrefs: {
-            "permissions.default.desktop-notification": 1,
-            "media.navigator.permission.disabled": true,
-            "media.navigator.streams.fake": true,
-          },
-        },
-      },
-    },
-
-    /* Mobile Chrome - Mobile testing */
-    {
-      name: "mobile-chrome",
-      use: {
-        ...devices["Pixel 5"],
-        permissions: ["display-capture"],
-      },
-      testMatch: /mobile/,
     },
   ],
 

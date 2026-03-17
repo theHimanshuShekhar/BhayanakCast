@@ -9,13 +9,16 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { generateUniqueRoomName } from "../utils/test-helpers";
 
 test.describe("Room Leaving", () => {
 	test("user can leave a room and return to home", async ({ page }) => {
+		const roomName = generateUniqueRoomName("Leave Test Room");
+
 		// Create and join a room
 		await page.goto("/");
 		await page.click('button:has-text("Create Room")');
-		await page.fill('input[name="name"]', "Leave Test Room");
+		await page.fill('input[name="name"]', roomName);
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/);
 
@@ -27,13 +30,15 @@ test.describe("Room Leaving", () => {
 	});
 
 	test("participant leaving reduces viewer count", async ({ browser }) => {
+		const roomName = generateUniqueRoomName("Viewer Count Test");
+
 		// Create room as User A
 		const userAContext = await browser.newContext();
 		const userAPage = await userAContext.newPage();
 
 		await userAPage.goto("/");
 		await userAPage.click('button:has-text("Create Room")');
-		await userAPage.fill('input[name="name"]', "Viewer Count Test");
+		await userAPage.fill('input[name="name"]', roomName);
 		await userAPage.click('button[type="submit"]:has-text("Create Room")');
 		await userAPage.waitForURL(/\/room\/.+/);
 		const roomUrl = userAPage.url();
@@ -58,13 +63,15 @@ test.describe("Room Leaving", () => {
 	});
 
 	test("streamer leaving triggers automatic transfer", async ({ browser }) => {
+		const roomName = generateUniqueRoomName("Transfer Test Room");
+
 		// Create room as User A (streamer)
 		const userAContext = await browser.newContext();
 		const userAPage = await userAContext.newPage();
 
 		await userAPage.goto("/");
 		await userAPage.click('button:has-text("Create Room")');
-		await userAPage.fill('input[name="name"]', "Transfer Test Room");
+		await userAPage.fill('input[name="name"]', roomName);
 		await userAPage.click('button[type="submit"]:has-text("Create Room")');
 		await userAPage.waitForURL(/\/room\/.+/);
 		const roomUrl = userAPage.url();
@@ -92,10 +99,12 @@ test.describe("Room Leaving", () => {
 	});
 
 	test("user can rejoin a room after leaving", async ({ page }) => {
+		const roomName = generateUniqueRoomName("Rejoin Test Room");
+
 		// Create and join a room
 		await page.goto("/");
 		await page.click('button:has-text("Create Room")');
-		await page.fill('input[name="name"]', "Rejoin Test Room");
+		await page.fill('input[name="name"]', roomName);
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/);
 		const roomUrl = page.url();
@@ -108,17 +117,19 @@ test.describe("Room Leaving", () => {
 		await page.goto(roomUrl);
 
 		// Verify back in the room
-		await expect(page.locator("h1")).toContainText("Rejoin Test Room");
+		await expect(page.locator("h1")).toContainText(roomName);
 	});
 
 	test("closing browser tab removes user from room", async ({ browser }) => {
+		const roomName = generateUniqueRoomName("Tab Close Test");
+
 		// Create room as User A
 		const userAContext = await browser.newContext();
 		const userAPage = await userAContext.newPage();
 
 		await userAPage.goto("/");
 		await userAPage.click('button:has-text("Create Room")');
-		await userAPage.fill('input[name="name"]', "Tab Close Test");
+		await userAPage.fill('input[name="name"]', roomName);
 		await userAPage.click('button[type="submit"]:has-text("Create Room")');
 		await userAPage.waitForURL(/\/room\/.+/);
 		const roomUrl = userAPage.url();
@@ -141,13 +152,15 @@ test.describe("Room Leaving", () => {
 	});
 
 	test("multiple users can join and leave independently", async ({ browser }) => {
+		const roomName = generateUniqueRoomName("Multi User Test");
+
 		// Create room
 		const userAContext = await browser.newContext();
 		const userAPage = await userAContext.newPage();
 
 		await userAPage.goto("/");
 		await userAPage.click('button:has-text("Create Room")');
-		await userAPage.fill('input[name="name"]', "Multi User Test");
+		await userAPage.fill('input[name="name"]', roomName);
 		await userAPage.click('button[type="submit"]:has-text("Create Room")');
 		await userAPage.waitForURL(/\/room\/.+/);
 		const roomUrl = userAPage.url();
@@ -186,13 +199,15 @@ test.describe("Room Leaving", () => {
 
 test.describe("Room Status Transitions", () => {
 	test("room status changes from preparing to active", async ({ browser }) => {
+		const roomName = generateUniqueRoomName("Status Transition Test");
+
 		// Create room (status: preparing)
 		const userAContext = await browser.newContext();
 		const userAPage = await userAContext.newPage();
 
 		await userAPage.goto("/");
 		await userAPage.click('button:has-text("Create Room")');
-		await userAPage.fill('input[name="name"]', "Status Transition Test");
+		await userAPage.fill('input[name="name"]', roomName);
 		await userAPage.click('button[type="submit"]:has-text("Create Room")');
 		await userAPage.waitForURL(/\/room\/.+/);
 
@@ -213,10 +228,12 @@ test.describe("Room Status Transitions", () => {
 	});
 
 	test("room returns to waiting when streamer leaves with no viewers", async ({ page }) => {
+		const roomName = generateUniqueRoomName("Waiting Status Test");
+
 		// Create and start streaming
 		await page.goto("/");
 		await page.click('button:has-text("Create Room")');
-		await page.fill('input[name="name"]', "Waiting Status Test");
+		await page.fill('input[name="name"]', roomName);
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/);
 

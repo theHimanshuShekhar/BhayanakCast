@@ -18,7 +18,6 @@ vi.mock("#/lib/webrtc-config");
 // Mock WebRTC APIs
 const mockGetDisplayMedia = vi.fn();
 const mockGetUserMedia = vi.fn();
-const mockRTCPeerConnection = vi.fn();
 
 // Create mock MediaStream
 const createMockMediaStream = (hasVideo = true, hasAudio = true) => {
@@ -106,7 +105,27 @@ describe("useWebRTC Hook", () => {
 			removeTrack: vi.fn(),
 		})) as unknown as typeof MediaStream;
 
-		globalThis.RTCPeerConnection = mockRTCPeerConnection as unknown as typeof RTCPeerConnection;
+		// Mock RTCPeerConnection with proper methods
+		globalThis.RTCPeerConnection = vi.fn().mockImplementation(() => ({
+			createOffer: vi.fn().mockResolvedValue({
+				type: "offer",
+				sdp: "mock-sdp-offer",
+			}),
+			createAnswer: vi.fn().mockResolvedValue({
+				type: "answer",
+				sdp: "mock-sdp-answer",
+			}),
+			setLocalDescription: vi.fn().mockResolvedValue(undefined),
+			setRemoteDescription: vi.fn().mockResolvedValue(undefined),
+			addIceCandidate: vi.fn().mockResolvedValue(undefined),
+			close: vi.fn(),
+			connectionState: "new",
+			onconnectionstatechange: null,
+			onicecandidate: null,
+			ontrack: null,
+			addTrack: vi.fn(),
+			removeTrack: vi.fn(),
+		})) as unknown as typeof RTCPeerConnection;
 	});
 
 	afterEach(() => {
