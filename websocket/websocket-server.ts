@@ -845,59 +845,25 @@ io.on("connection", (socket) => {
 		}
 	});
 
-	// Handle disconnect
+	// Handle disconnect using WebSocket-first architecture
 	socket.on("disconnect", async () => {
 		const socketData = socketUserMap.get(socket.id);
 		if (!socketData) return;
 
-		const { userId, userName, roomId } = socketData;
+		const { userId, userName } = socketData;
 		console.log(`[Socket.io] Client disconnected: ${socket.id} (user: ${userName})`);
 
-		// If user was in a room, handle leave
-		if (roomId) {
-			try {
-				const result = await removeParticipant(roomId, userId, socketUserMap);
-				const participants = await getRoomParticipants(roomId);
-
-				// Notify others in room
-				broadcastToRoom(roomId, "room:user_left", {
-					userId,
-					userName,
-					participantCount: participants.length,
-				});
-
-				sendSystemMessage(roomId, `${userName} left the room`);
-
-				if (result.newStreamerId) {
-					const newStreamerName = result.newStreamerName || "Someone";
-					broadcastToRoom(roomId, "room:streamer_changed", {
-						newStreamerId: result.newStreamerId,
-						newStreamerName,
-					});
-					sendSystemMessage(roomId, `${newStreamerName} is now the streamer`);
-
-					// Initiate WebRTC transfer if old streamer was streaming
-					const webrtcState = roomWebRTCState.get(roomId);
-					if (webrtcState && webrtcState.streamerId === userId) {
-						await initiateWebRTCTransfer(
-							roomId,
-							userId,
-							result.newStreamerId,
-							participants.map((p) => ({ userId: p.userId, userName: p.userName || "" })),
-						);
-					}
-				}
-
-				if (result.newStatus) {
-					broadcastToRoom(roomId, "room:status_changed", { status: result.newStatus });
-				}
-
-				if (result.skippedMobileUsers && result.skippedMobileUsers > 0) {
-					sendSystemMessage(roomId, `${result.skippedMobileUsers} mobile viewer(s) skipped for streaming`);
-				}
-			} catch (error) {
-				console.error(`[Room] Error handling disconnect:`, error);
-			}
+		// Use WebSocket-first handler to leave all rooms
+		try {
+			await handleSocketDisconnect(
+				io,
+				socket as any,
+				sendSystemMessage,
+				initiateWebRTCTransfer,
+				(roomId) => roomWebRTCState.get(roomId),
+			);
+		} catch (error) {
+			console.error(`[RoomEvents] Error in disconnect handler:`, error);
 		}
 
 		// Remove from socket user map

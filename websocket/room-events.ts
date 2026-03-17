@@ -660,6 +660,14 @@ export async function runRoomCleanupJob(
 export async function handleSocketDisconnect(
 	io: SocketIOServer,
 	socket: TypedSocket,
+	sendSystemMessage?: (roomId: string, content: string) => void,
+	initiateWebRTCTransfer?: (
+		roomId: string,
+		oldStreamerId: string,
+		newStreamerId: string,
+		participants: Array<{ userId: string; userName: string }>,
+	) => Promise<void>,
+	getWebRTCState?: (roomId: string) => { streamerId: string | null } | undefined,
 ): Promise<void> {
 	const userId = socket.data.userId;
 	if (!userId) return;
@@ -712,13 +720,38 @@ export async function handleSocketDisconnect(
 					roomState,
 				});
 
+				// Send system message
+				if (sendSystemMessage) {
+					sendSystemMessage(roomId, `${participant.userName} left the room`);
+				}
+
 				if (leaveResult.newStreamerId) {
+					const newStreamerName = room.participants.get(leaveResult.newStreamerId)?.userName || "Someone";
 					io.to(roomId).emit("room:streamer_changed", {
 						newStreamerId: leaveResult.newStreamerId,
-						newStreamerName: room.participants.get(
-							leaveResult.newStreamerId,
-						)?.userName,
+						newStreamerName,
 					});
+
+					// Send system message for streamer change
+					if (sendSystemMessage) {
+						sendSystemMessage(roomId, `${newStreamerName} is now the streamer`);
+					}
+
+					// Initiate WebRTC transfer if old streamer was streaming
+					if (initiateWebRTCTransfer && getWebRTCState) {
+						const webrtcState = getWebRTCState(roomId);
+						if (webrtcState && webrtcState.streamerId === userId) {
+							const participantsList = Array.from(room.participants.values()).map(
+								(p) => ({ userId: p.userId, userName: p.userName }),
+							);
+							await initiateWebRTCTransfer(
+								roomId,
+								userId,
+								leaveResult.newStreamerId,
+								participantsList,
+							);
+						}
+					}
 				}
 
 				if (getRoomState(roomId)?.status !== room.status) {
