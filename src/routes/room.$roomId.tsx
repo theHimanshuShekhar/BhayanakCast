@@ -446,7 +446,10 @@ function RoomDetailPage() {
 		// Error
 		const handleRoomError = (data: { message: string }) => {
 			console.error("[Room] Error:", data.message);
-			alert(data.message);
+			// Only show alert for critical errors, not for "Not in room" during navigation
+			if (data.message !== "Not in room") {
+				alert(data.message);
+			}
 		};
 
 		socket.on("room:user_joined", handleUserJoined);
