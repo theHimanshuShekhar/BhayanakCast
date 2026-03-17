@@ -124,8 +124,8 @@ export function StreamerControls({ roomId, userId }: StreamerControlsProps) {
 				<div className="text-xs text-text-tertiary">
 					{audioConfig === "system-and-mic"
 						? "System + Mic"
-						: audioConfig === "microphone-only"
-							? "Mic only"
+						: audioConfig === "system-only"
+							? "System only"
 							: ""}
 				</div>
 			)}

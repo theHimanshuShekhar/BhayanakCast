@@ -221,7 +221,7 @@ describe("useWebRTC Hook", () => {
 
 			await act(async () => {
 				await result.current.startScreenShare({
-					audioConfig: "microphone-only",
+					audioConfig: "system-only",
 					cursor: "always",
 					displaySurface: "monitor",
 				});
@@ -230,7 +230,7 @@ describe("useWebRTC Hook", () => {
 			expect(result.current.isScreenSharing).toBe(true);
 			expect(mockSocket.emit).toHaveBeenCalledWith("webrtc:streamer_ready", {
 				roomId: "test-room",
-				audioConfig: "microphone-only",
+				audioConfig: "system-only",
 			});
 		});
 

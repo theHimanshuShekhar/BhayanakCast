@@ -4,7 +4,7 @@
  * Shown before starting screen sharing to let user choose audio options
  */
 
-import { Mic, Monitor, Volume2, VolumeX } from "lucide-react";
+import { Monitor, Volume2, VolumeX } from "lucide-react";
 import { useState } from "react";
 import { Button } from "#/components/ui/button";
 import {
@@ -52,10 +52,10 @@ export function AudioConfigModal({
 			icon: <Volume2 className="h-5 w-5" />,
 		},
 		{
-			value: "microphone-only",
-			label: "Microphone only",
-			description: "Share only your voice",
-			icon: <Mic className="h-5 w-5" />,
+			value: "system-only",
+			label: "System audio only",
+			description: "Share your computer audio without microphone",
+			icon: <Volume2 className="h-5 w-5" />,
 		},
 		{
 			value: "no-audio",

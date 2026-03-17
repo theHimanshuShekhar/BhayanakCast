@@ -53,6 +53,7 @@ export function useWebRTC({ roomId, userId }: UseWebRTCOptions) {
 	// State
 	const [isScreenSharing, setIsScreenSharing] = useState(false);
 	const [audioConfig, setAudioConfig] = useState<AudioConfig>("system-and-mic");
+	const [localStream, setLocalStream] = useState<MediaStream | null>(null);
 	const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(
 		new Map(),
 	);
@@ -79,6 +80,7 @@ export function useWebRTC({ roomId, userId }: UseWebRTCOptions) {
 			track.stop();
 		});
 		localStreamRef.current = null;
+		setLocalStream(null);
 
 		// Close all peer connections
 		peerConnectionsRef.current.forEach((peerState) => {
@@ -118,7 +120,8 @@ export function useWebRTC({ roomId, userId }: UseWebRTCOptions) {
 					displaySurface: options.displaySurface,
 				});
 
-				let stream = await navigator.mediaDevices.getDisplayMedia(constraints);
+				const stream =
+					await navigator.mediaDevices.getDisplayMedia(constraints);
 
 				// Handle audio configuration
 				if (options.audioConfig === "system-and-mic") {
@@ -134,17 +137,10 @@ export function useWebRTC({ roomId, userId }: UseWebRTCOptions) {
 						console.warn("[WebRTC] Could not get microphone:", err);
 						// Continue with system audio only
 					}
-				} else if (options.audioConfig === "microphone-only") {
-					// Replace system audio with microphone only
-					const videoTrack = stream.getVideoTracks()[0];
-					stream.getTracks().forEach((t) => {
-						t.stop();
-					});
-
-					const micStream = await navigator.mediaDevices.getUserMedia(
-						getUserMediaConstraints(),
-					);
-					stream = new MediaStream([videoTrack, ...micStream.getAudioTracks()]);
+				} else if (options.audioConfig === "system-only") {
+					// Stream already has system audio from getDisplayMedia
+					// No microphone needed - keep as is
+					console.log("[WebRTC] Using system audio only (no microphone)");
 				}
 				// For "no-audio", we keep the stream as-is (remove audio tracks)
 				else if (options.audioConfig === "no-audio") {
@@ -155,6 +151,16 @@ export function useWebRTC({ roomId, userId }: UseWebRTCOptions) {
 				}
 
 				localStreamRef.current = stream;
+				setLocalStream(stream);
+				console.log(
+					"[WebRTC] Local stream set:",
+					stream.id,
+					"Tracks:",
+					stream
+						.getTracks()
+						.map((t) => `${t.kind}:${t.readyState}`)
+						.join(", "),
+				);
 
 				// CRITICAL: Listen for browser "Stop sharing" button
 				const videoTrack = stream.getVideoTracks()[0];
@@ -488,7 +494,7 @@ export function useWebRTC({ roomId, userId }: UseWebRTCOptions) {
 
 	return {
 		// State
-		localStream: localStreamRef.current,
+		localStream,
 		remoteStream,
 		isScreenSharing,
 		audioConfig,
