@@ -21,7 +21,14 @@ e2e/
 │   ├── room-management.spec.ts    # Room CRUD operations
 │   ├── screen-sharing.spec.ts     # WebRTC streaming
 │   ├── streamer-transfer.spec.ts  # Streamer handoff
-│   └── chat.spec.ts              # Real-time chat
+│   ├── chat.spec.ts              # Real-time chat
+│   ├── room-leaving.spec.ts      # Room leaving and rejoining
+│   ├── room-status.spec.ts       # Status transitions
+│   ├── websocket-reconnect.spec.ts # Reconnection handling
+│   ├── rate-limiting.spec.ts     # Rate limiting enforcement
+│   ├── room-list.spec.ts         # Home page and room list
+│   ├── user-presence.spec.ts     # User indicators
+│   └── error-handling.spec.ts    # Error scenarios
 ├── example.spec.ts             # Playwright example
 └── README.md                   # This file
 ```
@@ -59,7 +66,51 @@ e2e/
 - ✅ Rate limiting
 - ✅ Message persistence
 
-**Total: 23 E2E Tests**
+### Room Leaving (8 tests)
+- ✅ User can leave room
+- ✅ Participant count updates on leave
+- ✅ Automatic streamer transfer on leave
+- ✅ Rejoin room after leaving
+- ✅ Tab close removes user
+- ✅ Multiple users leave independently
+- ✅ Status changes on leave
+- ✅ Streamer transfer broadcast
+
+### Room Status (7 tests)
+- ✅ Room starts in preparing status
+- ✅ Room becomes active with 2nd participant
+- ✅ Room returns to waiting when empty
+- ✅ Streaming starts in preparing
+- ✅ Stopping stream returns to preparing
+- ✅ Status updates broadcast to all
+- ✅ Room data persists after navigation
+
+### WebSocket Reconnection (2 tests)
+- ✅ Reconnects after connection loss
+- ✅ Multiple users handle reconnection
+
+### Rate Limiting (2 tests)
+- ✅ Prevents rapid room creation
+- ✅ Allows creation after cooldown
+
+### Room List (4 tests)
+- ✅ Displays list of active rooms
+- ✅ Clicking room card navigates
+- ✅ Shows empty state
+- ✅ Create room button opens modal
+
+### User Presence (3 tests)
+- ✅ Shows streamer indicator
+- ✅ Shows participant list
+- ✅ Updates online user count
+
+### Error Handling (4 tests)
+- ✅ Shows error for non-existent room
+- ✅ Handles server disconnection
+- ✅ Validates room name required
+- ✅ Validates room name minimum length
+
+**Total: 53 E2E Tests**
 
 ## Running Tests
 
@@ -82,10 +133,22 @@ pnpm exec playwright test
 ### Run Specific Test File
 
 ```bash
+# Core functionality
 pnpm exec playwright test e2e/tests/room-management.spec.ts
 pnpm exec playwright test e2e/tests/screen-sharing.spec.ts
 pnpm exec playwright test e2e/tests/streamer-transfer.spec.ts
 pnpm exec playwright test e2e/tests/chat.spec.ts
+
+# Room lifecycle
+pnpm exec playwright test e2e/tests/room-leaving.spec.ts
+pnpm exec playwright test e2e/tests/room-status.spec.ts
+pnpm exec playwright test e2e/tests/websocket-reconnect.spec.ts
+
+# Additional features
+pnpm exec playwright test e2e/tests/rate-limiting.spec.ts
+pnpm exec playwright test e2e/tests/room-list.spec.ts
+pnpm exec playwright test e2e/tests/user-presence.spec.ts
+pnpm exec playwright test e2e/tests/error-handling.spec.ts
 ```
 
 ### Run with UI Mode
