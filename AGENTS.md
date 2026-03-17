@@ -255,21 +255,37 @@ docs/                    # Documentation (see below)
 - **active:** Live streaming, 2+ participants (green "LIVE" indicator)
 - **ended:** Room closed (history icon, visible for 3 hours)
 
-### Streamer Departure
-1. Streamer leaves → earliest viewer auto-becomes streamer
-2. No viewers → streamerId = null, status = waiting
-3. Transfer is automatic (no acceptance needed)
-4. **Cooldown:** 30 seconds between transfers
+### Room Status Transitions (CRITICAL)
+
+**Streamer stops streaming (but stays in room):**
+- Status → **preparing**
+- Streamer remains assigned
+
+**Streamer leaves room:**
+1. Eligible viewer exists → they become streamer → status = **preparing**
+2. No eligible viewers → streamerId = null → status = **waiting**
+
+**Room in "waiting" status:**
+- Empty for 5+ minutes → status = **ended**
+- Can be rejoined before 5 minutes
+
+**Transfer rules:**
+- Automatic (no acceptance needed)
+- 30 second cooldown between transfers
 
 ### Joining Rules
 - User can only be in ONE room at a time
 - Joining waiting room → auto-becomes streamer
 - 2nd participant joins → room becomes active
+- Can rejoin waiting rooms after leaving
 
-### Cleanup
-- Waiting rooms empty for 5 min → status = ended
+### Cleanup (Only Empty Rooms)
+**CRITICAL:** Room only ends when:
+1. Status is "waiting" (no active streamer)
+2. No participants present (empty for 5+ minutes)
+3. Room created > 5 minutes ago
 - Ended rooms visible for 3 hours in "Past Streams"
-- Cleanup job runs every minute
+- Cleanup job runs every 5 minutes
 
 ## Environment Variables
 

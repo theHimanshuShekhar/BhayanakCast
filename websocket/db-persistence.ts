@@ -148,7 +148,21 @@ export async function persistParticipantJoin(
 			.then((rows) => rows[0]);
 
 		if (existingParticipant) {
-			throw new Error("Already in this room");
+			// User was previously in room but may have disconnected abruptly
+			// Mark them as having left and allow rejoin
+			console.log(
+				`[DB] User ${data.userId} was already in room ${data.roomId}, marking as left and allowing rejoin`,
+			);
+			const timeInRoom = Math.floor(
+				(now.getTime() - existingParticipant.joinedAt.getTime()) / 1000,
+			);
+			await trx
+				.update(roomParticipants)
+				.set({
+					leftAt: now,
+					totalTimeSeconds: timeInRoom,
+				})
+				.where(eq(roomParticipants.id, existingParticipant.id));
 		}
 
 		// 3. Count current participants
@@ -367,19 +381,38 @@ export async function persistStreamerTransfer(
 
 /**
  * End a room (cleanup job)
+ * Also marks all active participants as having left
  */
 export async function persistRoomEnd(
 	roomId: string,
 ): Promise<boolean> {
 	const { db } = await import("../src/db/index");
+	const now = new Date();
 
-	await db
-		.update(streamingRooms)
-		.set({
-			status: "ended",
-			endedAt: new Date(),
-		})
-		.where(eq(streamingRooms.id, roomId));
+	await db.transaction(async (trx) => {
+		// 1. Mark all active participants as having left
+		await trx
+			.update(roomParticipants)
+			.set({
+				leftAt: now,
+				totalTimeSeconds: sql`EXTRACT(EPOCH FROM (${now} - ${roomParticipants.joinedAt}))`,
+			})
+			.where(
+				and(
+					eq(roomParticipants.roomId, roomId),
+					sql`${roomParticipants.leftAt} IS NULL`,
+				),
+			);
+
+		// 2. Update room status to ended
+		await trx
+			.update(streamingRooms)
+			.set({
+				status: "ended",
+				endedAt: now,
+			})
+			.where(eq(streamingRooms.id, roomId));
+	});
 
 	return true;
 }
