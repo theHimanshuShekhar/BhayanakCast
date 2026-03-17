@@ -258,13 +258,7 @@ function RoomDetailPage() {
 	const { roomState, leaveRoom } = useRoom(roomId);
 
 	// WebRTC hook for streaming
-	const {
-		localStream,
-		remoteStream,
-		transferState,
-		transferInfo,
-		isStreamer: isStreamingLocally,
-	} = useWebRTC({
+	const { localStream, remoteStream, transferState, transferInfo } = useWebRTC({
 		roomId,
 		userId: userId || "",
 	});
@@ -554,16 +548,8 @@ function RoomDetailPage() {
 
 							{/* Video Player with Transfer Overlay */}
 							<div className="relative">
-								{(() => {
-									console.log("[Room] Video render check:", {
-										isStreamer,
-										isStreamingLocally,
-										hasLocalStream: !!localStream,
-										hasRemoteStream: !!remoteStream,
-									});
-									return null;
-								})()}
-								{isStreamer || isStreamingLocally ? (
+								{/* Show local preview when actively streaming, otherwise show remote stream */}
+								{localStream ? (
 									<ScreenSharePreview stream={localStream} />
 								) : (
 									<VideoDisplay
