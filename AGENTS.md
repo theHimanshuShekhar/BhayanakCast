@@ -89,6 +89,38 @@ pnpm db:migrate       # Run migrations
 - **WebRTC:** P2P screen sharing with 3 audio modes
 - **Community Stats:** Single-record upsert pattern (no historical data)
 
+## WebSocket-First Architecture (NEW)
+
+All room operations now go through WebSocket. Database is secondary (persistence layer only).
+
+### Architecture
+```
+Frontend → WebSocket Server → Database (sync) → Broadcast
+              ↓
+         In-Memory State (primary)
+```
+
+### Key Rules
+1. **Frontend NEVER writes to database** - All room operations via WebSocket
+2. **Database writes are synchronous** - Wait for confirmation before broadcasting
+3. **WebSocket maintains primary state** - In-memory Map is source of truth during runtime
+4. **Auto-rejoin on reconnect** - Clients automatically recover after server restart
+
+### New Events
+- `room:create` - Create room (replaces HTTP server fn)
+- `room:join` - Join room (replaces HTTP server fn)
+- `room:leave` - Leave room (replaces HTTP server fn)
+- `room:rejoin` - Reconnect after server restart
+- `room:state_sync` - Full state for rejoins
+
+### Files
+- `websocket/room-state.ts` - In-memory state management
+- `websocket/room-events.ts` - Room event handlers
+- `websocket/db-persistence.ts` - DB write operations
+- `src/hooks/useRoom.ts` - Room state subscription
+
+See [WebSocket Architecture](./docs/WEBSOCKET_ARCHITECTURE.md) for details.
+
 ## Coding Standards
 
 ### Code Style
@@ -190,7 +222,10 @@ src/
 
 websocket/               # WebSocket server (separate process)
 ├── websocket-server.ts
-└── websocket-room-manager.ts
+├── websocket-room-manager.ts
+├── room-state.ts        # ⭐ In-memory state management (NEW)
+├── room-events.ts       # ⭐ Room event handlers (NEW)
+└── db-persistence.ts    # ⭐ Database persistence (NEW)
 
 tests/                   # Test files
 ├── unit/                # Unit tests
@@ -281,6 +316,7 @@ All detailed documentation is in the `/docs` directory:
 - [Database Schema](./docs/DATABASE_SCHEMA.md) - Table definitions and relationships
 - [Room System](./docs/ROOM_SYSTEM.md) - Room lifecycle and business logic
 - [WebSocket Events](./docs/WEBSOCKET_EVENTS.md) - Socket.io events reference
+- [WebSocket Architecture](./docs/WEBSOCKET_ARCHITECTURE.md) - WebSocket-first architecture guide ⭐ NEW
 - [Rate Limiting](./docs/RATE_LIMITING.md) - Rate limit configurations
 - [WebRTC Documentation](./docs/webrtc/) - WebRTC implementation guide (8 files)
 
