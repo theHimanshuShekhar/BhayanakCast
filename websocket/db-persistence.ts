@@ -78,17 +78,17 @@ export async function persistRoomCreation(
 	const roomId = await generateId();
 
 	await db.transaction(async (trx) => {
-		// 1. Create room
+		// 1. Create room with creator as streamer
 		await trx.insert(streamingRooms).values({
 			id: roomId,
 			name: data.name,
 			description: data.description,
-			status: "waiting",
-			streamerId: null, // Will be set when creator joins
+			status: "preparing",
+			streamerId: data.userId,
 			createdAt: now,
 		});
 
-		// 2. Add creator as participant (not streamer yet)
+		// 2. Add creator as participant
 		const participantId = await generateId();
 		await trx.insert(roomParticipants).values({
 			id: participantId,
@@ -102,7 +102,7 @@ export async function persistRoomCreation(
 		roomId,
 		name: data.name,
 		description: data.description,
-		status: "waiting",
+		status: "preparing" as const,
 		createdAt: now,
 	};
 }
