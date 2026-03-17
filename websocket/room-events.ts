@@ -114,29 +114,22 @@ function handleRoomCreate(socket: TypedSocket) {
 
 			confirmRoomInDB(roomResult.roomId);
 
-			// 3. Now auto-join the creator
-			const joinResult = await persistParticipantJoin({
-				roomId: roomResult.roomId,
-				userId,
-			});
-
-			// 4. Add to in-memory state
+			// 3. Add creator to in-memory state (already in DB from persistRoomCreation)
+			const now = new Date();
 			const participant: ParticipantState = {
 				userId,
 				userName: userName || "Unknown",
 				userImage: socket.data.userImage,
 				socketId: socket.id,
-				joinedAt: joinResult.joinedAt,
+				joinedAt: now,
 				isMobile: socket.data.isMobile || false,
 			};
 
 			addParticipantToRoom(roomResult.roomId, participant);
 
-			// Update streamer in memory
-			if (joinResult.becameStreamer) {
-				updateRoomStreamer(roomResult.roomId, userId);
-				updateRoomStatus(roomResult.roomId, "preparing");
-			}
+			// 4. Update room state - creator becomes streamer and room becomes "preparing"
+			updateRoomStreamer(roomResult.roomId, userId);
+			updateRoomStatus(roomResult.roomId, "preparing");
 
 			// 5. Join socket to room
 			socket.join(roomResult.roomId);
@@ -146,17 +139,17 @@ function handleRoomCreate(socket: TypedSocket) {
 				room: {
 					id: roomResult.roomId,
 					name: roomResult.name,
-					description: roomResult.description,
-					status: joinResult.becameStreamer ? "preparing" : roomResult.status,
-					streamerId: joinResult.becameStreamer ? userId : null,
-					createdAt: roomResult.createdAt,
-				},
-				participant: {
-					userId,
-					userName: participant.userName,
-					joinedAt: joinResult.joinedAt,
-					isStreamer: joinResult.becameStreamer,
-				},
+				description: roomResult.description,
+				status: "preparing",
+				streamerId: userId,
+				createdAt: roomResult.createdAt,
+			},
+			participant: {
+				userId,
+				userName: participant.userName,
+				joinedAt: now,
+				isStreamer: true,
+			},
 			});
 
 			console.log(
