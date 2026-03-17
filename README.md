@@ -17,7 +17,7 @@
 ### 🎥 **WebRTC Screen Sharing** ⭐ NEW
 - **P2P Screen Sharing** with 3 audio modes:
   - System audio + Microphone
-  - Microphone only
+  - System audio only
   - No audio
 - **Browser "Stop Sharing" Detection** - Automatic transfer when clicked
 - **Mobile Restrictions** - Mobile users can view but cannot stream
@@ -42,10 +42,12 @@
 - JetBrains Mono monospace font
 - Smooth transitions and animations
 
-### ⚡ **Real-Time Everything**
-- **WebRTC P2P Streaming** - Peer-to-peer screen sharing
+### ⚡ **WebSocket-First Architecture** ⭐ NEW
+- **In-Memory State** - WebSocket server is primary source of truth
+- **Synchronous DB Persistence** - All operations wait for DB confirmation
+- **Auto-Rejoin** - Automatic recovery after server restart
+- **Real-Time Updates** - No polling, instant state sync
 - Live user count via WebSocket
-- Instant room updates with Socket.io
 - Real-time chat with profanity filtering
 - Comprehensive rate limiting (8 action types)
 
@@ -149,38 +151,25 @@ This starts both the web app (port 3000) and WebSocket server (port 3001).
 ## 🧪 Development
 
 ```bash
-# Testing (238 tests, 90%+ coverage)
-pnpm test:setup     # One-time test DB setup
-pnpm test           # Run all tests
+# Testing (265 tests, 90%+ coverage)
+pnpm test           # All tests (unit + E2E, requires PostgreSQL)
+pnpm test:unit      # Unit and integration tests
+pnpm test:e2e       # Playwright E2E tests
 pnpm test:watch     # Watch mode
 pnpm test:coverage  # With coverage report
-
-# Code quality
-pnpm lint           # Check code style
-pnpm format         # Format code
-pnpm check          # Run all checks
-
-# Database operations
-pnpm db:push        # Push schema changes
-pnpm db:generate    # Generate migrations
-pnpm db:migrate     # Run migrations
-pnpm db:studio      # Open Drizzle Studio
-
-# Individual servers
-pnpm dev:web        # Web app only (port 3000)
-pnpm dev:ws         # WebSocket only (port 3001)
 ```
 
 ## 🗺️ Roadmap
 
 ### Completed ✅
+- [x] **WebSocket-First Architecture** - In-memory state with DB persistence
 - [x] **WebRTC Screen Sharing** - P2P streaming with audio configuration
 - [x] Real-time chat system with profanity filtering
 - [x] Comprehensive rate limiting (8 action types)
 - [x] Automatic streamer transfer with cooldown
-- [x] **238 tests** (191 + 47 WebRTC) with 90%+ coverage
-- [x] Complete documentation (11 docs + WebRTC docs)
-- [x] Playwright E2E test configuration
+- [x] **265 tests** (205 unit + 23 E2E + 37 skipped) with 90%+ coverage
+- [x] Complete documentation (14 docs + WebRTC docs)
+- [x] Playwright E2E test suite (23 tests)
 
 ### In Progress 🚧
 - [ ] E2E tests with Playwright (configuration ready)

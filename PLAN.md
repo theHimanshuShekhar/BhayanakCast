@@ -9,8 +9,8 @@
 - [x] User profile sync from Discord
 - [x] 4 theme system (Purple-Blue, Misty-Blue, Onyx-Black, Blue-Gray)
 - [x] Real-time user count via WebSocket
-- [x] 191 comprehensive tests (155 passing, 36 skipped), 90%+ coverage
-- [x] **47 additional WebRTC tests** - All passing
+- [x] **265 total tests** (205 unit/integration + 23 E2E + 37 skipped), 90%+ coverage
+- [x] **WebSocket-first architecture** - In-memory state with DB persistence
 - [x] Docker containerization
 - [x] GitHub Actions CI/CD to GHCR
 - [x] Comprehensive documentation (11 docs + 8 WebRTC docs)
@@ -25,8 +25,12 @@
 - [x] Streamer transfer: 1/30 seconds per room
 - [x] Profanity filter (Hindi + English)
 
-### Room System
-- [x] Create/join/leave rooms
+### Room System (WebSocket-First Architecture)
+- [x] **WebSocket-first room operations** - No direct DB writes from frontend
+- [x] **In-memory state management** - Primary source of truth during runtime
+- [x] **Synchronous DB persistence** - Wait for confirmation before broadcasting
+- [x] **Auto-rejoin on reconnect** - Server restart recovery
+- [x] Create/join/leave rooms via WebSocket events
 - [x] 4 status states: waiting, preparing, active, ended
 - [x] Nullable streamer support
 - [x] Automatic streamer transfer when host leaves
@@ -86,12 +90,19 @@ Create → preparing → active (multiple participants)
          streamer leaves + no viewers → waiting → ended (after 5min)
 ```
 
-### Data Flow
-1. **Client** emits WebSocket event
-2. **Server** updates database
-3. **Server** broadcasts to Socket.io room
-4. **Clients** refetch via React Query
-5. **UI** updates automatically
+### Data Flow (WebSocket-First)
+1. **Client** emits WebSocket event (e.g., `room:create`, `room:join`)
+2. **Server** updates database synchronously (waits for confirmation)
+3. **Server** updates in-memory state
+4. **Server** broadcasts to Socket.io room
+5. **Clients** receive event and update state directly (no refetch needed)
+
+**Server Restart Recovery:**
+- Client auto-reconnects via WebSocket
+- Context tracks `currentRoomId`
+- Emits `room:rejoin` automatically
+- Server rebuilds state from database
+- Client receives `room:state_sync` with full state
 
 ### Caching Strategy
 - Static data: 30 minutes
@@ -117,6 +128,14 @@ Single record design with fixed ID (`community-stats-single`):
 **Trigger:** Push to main or git tags (`v*.*.*`)
 
 ## Completed Architecture
+
+### WebSocket-First Architecture ✅
+- **In-Memory State**: `websocket/room-state.ts` manages room state in Maps
+- **Synchronous DB Persistence**: All writes wait for database confirmation
+- **Event-Based**: `room:create`, `room:join`, `room:leave`, `room:rejoin`, `streamer:transfer`
+- **State Recovery**: Automatic rebuild from database on `room:rejoin` after restart
+- **React Integration**: `useRoom()` hook for subscription-based state management
+- **Zero Polling**: No HTTP polling, all updates via WebSocket events
 
 ### WebRTC Implementation ✅
 - P2P mesh architecture (1 streamer → N viewers)

@@ -67,7 +67,7 @@ pnpm db:migrate       # Run migrations
 **Database:** PostgreSQL 16 + Drizzle ORM  
 **Real-time:** Socket.io WebSocket server (port 3001)  
 **Styling:** Tailwind CSS v4 with custom dark theme  
-**Testing:** Vitest v3 + jsdom (238 tests, 90%+ coverage) + Playwright E2E  
+**Testing:** Vitest v3 + jsdom (205 tests, 90%+ coverage) + Playwright E2E (23 tests)  
 **Formatter:** Biome (not Prettier)
 
 ### Key Features
