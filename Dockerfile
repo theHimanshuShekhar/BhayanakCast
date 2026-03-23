@@ -5,11 +5,14 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 
+# Install build dependencies for native modules
+RUN apk add --no-cache python3 make g++ pkgconfig
+
 # Install pnpm
 RUN npm install -g pnpm
 
 # Copy package files
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY package.json pnpm-lock.yaml ./
 
 # Install all dependencies (including dev for build)
 RUN pnpm install --frozen-lockfile
@@ -41,7 +44,6 @@ COPY --from=builder --chown=appuser:nodejs /app/.output ./.output
 COPY --from=builder --chown=appuser:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=appuser:nodejs /app/package.json ./package.json
 COPY --from=builder --chown=appuser:nodejs /app/pnpm-lock.yaml ./pnpm-lock.yaml
-COPY --from=builder --chown=appuser:nodejs /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
 COPY --from=builder --chown=appuser:nodejs /app/websocket ./websocket
 COPY --from=builder --chown=appuser:nodejs /app/src ./src
 COPY --from=builder --chown=appuser:nodejs /app/tsconfig.json ./tsconfig.json
