@@ -19,7 +19,6 @@ interface StreamerControlsProps {
 
 export function StreamerControls({ roomId, userId }: StreamerControlsProps) {
 	const [showAudioConfig, setShowAudioConfig] = useState(false);
-	const [isAudioEnabled, setIsAudioEnabled] = useState(true);
 
 	const {
 		isScreenSharing,
@@ -27,19 +26,14 @@ export function StreamerControls({ roomId, userId }: StreamerControlsProps) {
 		startScreenShare,
 		stopScreenShare,
 		audioConfig,
+		isAudioEnabled,
+		toggleAudio,
 	} = useWebRTC({ roomId, userId });
 
 	// Handle start streaming with options
 	const handleStartStream = (options: ScreenShareOptions) => {
 		startScreenShare(options);
 		setShowAudioConfig(false);
-	};
-
-	// Toggle audio mute/unmute
-	const toggleAudio = () => {
-		// This would need to be implemented in useWebRTC hook
-		// For now, just toggle the UI state
-		setIsAudioEnabled(!isAudioEnabled);
 	};
 
 	// Mobile users see disabled button

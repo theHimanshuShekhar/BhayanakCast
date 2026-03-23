@@ -41,6 +41,8 @@ export interface JoinRoomResult {
 export interface LeaveRoomData {
 	roomId: string;
 	userId: string;
+	/** List of user IDs eligible to become streamers (non-mobile users) */
+	eligibleStreamerIds?: string[];
 }
 
 export interface LeaveRoomResult {
@@ -274,7 +276,10 @@ export async function persistParticipantLeave(
 		let newStreamerId: string | undefined;
 
 		if (room.streamerId === data.userId) {
-			// Find next viewer (earliest joined)
+			// Find next viewer (earliest joined) who is eligible to stream
+			// Filter by eligibleStreamerIds if provided (to exclude mobile users)
+			const eligibleIds = data.eligibleStreamerIds;
+			
 			const nextViewer = await trx
 				.select()
 				.from(roomParticipants)
@@ -282,6 +287,10 @@ export async function persistParticipantLeave(
 					and(
 						eq(roomParticipants.roomId, data.roomId),
 						sql`${roomParticipants.leftAt} IS NULL`,
+						// Filter by eligible IDs if provided
+						eligibleIds && eligibleIds.length > 0
+							? sql`${roomParticipants.userId} IN (${eligibleIds.join(",")})`
+							: sql`1=1`,
 					),
 				)
 				.orderBy(sql`${roomParticipants.joinedAt} ASC`)
@@ -297,7 +306,7 @@ export async function persistParticipantLeave(
 					})
 					.where(eq(streamingRooms.id, data.roomId));
 			} else {
-				// No viewers left, clear streamer
+				// No eligible viewers left (all mobile or no viewers), clear streamer
 				await trx
 					.update(streamingRooms)
 					.set({

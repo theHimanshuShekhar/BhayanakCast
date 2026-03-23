@@ -393,6 +393,19 @@ export const RateLimits = {
 		windowMs: 5 * 60 * 1000,
 		maxAttempts: 3,
 	} as RateLimitConfig,
+
+	// ==================== WEBRTC SIGNALING ====================
+
+	/**
+	 * WebRTC signaling (offer/answer/ICE candidates): 60 per minute
+	 * Rationale: WebRTC setup involves multiple signaling messages:
+	 *   - Initial offer/answer exchange
+	 *   - Multiple ICE candidates (typically 5-20)
+	 *   - Potential renegotiation during connection
+	 * 60/min allows ~1 message/sec, sufficient for normal WebRTC setup
+	 * Impact: Server load from message relay, prevents signaling spam
+	 */
+	WEBRTC_SIGNALING: { windowMs: 60 * 1000, maxAttempts: 60 } as RateLimitConfig,
 } as const;
 
 /**

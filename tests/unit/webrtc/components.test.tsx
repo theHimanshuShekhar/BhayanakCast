@@ -38,6 +38,8 @@ describe("StreamerControls", () => {
 			startScreenShare: mockStartScreenShare,
 			stopScreenShare: mockStopScreenShare,
 			audioConfig: "system-and-mic",
+			isAudioEnabled: true,
+			toggleAudio: vi.fn(),
 		});
 	});
 
@@ -60,6 +62,8 @@ describe("StreamerControls", () => {
 	});
 
 	describe("Desktop User - Streaming", () => {
+		const mockToggleAudio = vi.fn();
+
 		beforeEach(() => {
 			(vi.mocked(useWebRTC) as ReturnType<typeof vi.fn>).mockReturnValue({
 				isScreenSharing: true,
@@ -68,6 +72,8 @@ describe("StreamerControls", () => {
 				startScreenShare: mockStartScreenShare,
 				stopScreenShare: mockStopScreenShare,
 				audioConfig: "system-and-mic",
+				isAudioEnabled: true,
+				toggleAudio: mockToggleAudio,
 			});
 		});
 
