@@ -367,10 +367,18 @@ function handleRoomLeave(io: SocketIOServer, socket: TypedSocket) {
 			const room = getRoomState(roomId);
 			const wasStreamer = room?.streamerId === userId;
 
+			// Get eligible streamer candidates (non-mobile users)
+			const eligibleStreamerIds = room
+				? Array.from(room.participants.values())
+						.filter((p) => p.userId !== userId && !p.isMobile)
+						.map((p) => p.userId)
+				: [];
+
 			// 1. Persist to database (SYNCHRONOUS)
 			const leaveResult = await persistParticipantLeave({
 				roomId,
 				userId,
+				eligibleStreamerIds,
 			});
 
 			// 2. Update in-memory state
@@ -585,6 +593,14 @@ function handleStreamerTransfer(io: SocketIOServer, socket: TypedSocket) {
 				return;
 			}
 
+			// Check if new streamer is on mobile (mobile users cannot stream)
+			if (newStreamer.isMobile) {
+				socket.emit("room:error", {
+					message: "Mobile users cannot be streamers",
+				});
+				return;
+			}
+
 			console.log(
 				`[RoomEvents] Transferring streamer in ${roomId} to ${newStreamer.userName}`,
 			);
@@ -676,21 +692,27 @@ export async function handleSocketDisconnect(
 	for (const roomId of socket.rooms) {
 		if (roomId === socket.id) continue; // Skip default room
 
-		const room = getRoomState(roomId);
-		if (!room) continue;
+			const room = getRoomState(roomId);
+			if (!room) continue;
 
-		const participant = room.participants.get(userId);
-		if (participant && participant.socketId === socket.id) {
-			console.log(
-				`[RoomEvents] User ${participant.userName} disconnected from ${roomId}`,
-			);
+			const participant = room.participants.get(userId);
+			if (participant && participant.socketId === socket.id) {
+				console.log(
+					`[RoomEvents] User ${participant.userName} disconnected from ${roomId}`,
+				);
 
-			try {
-				// Leave the room
-				const leaveResult = await persistParticipantLeave({
-					roomId,
-					userId,
-				});
+				try {
+					// Get eligible streamer candidates (non-mobile users)
+					const eligibleStreamerIds = Array.from(room.participants.values())
+						.filter((p) => p.userId !== userId && !p.isMobile)
+						.map((p) => p.userId);
+
+					// Leave the room
+					const leaveResult = await persistParticipantLeave({
+						roomId,
+						userId,
+						eligibleStreamerIds,
+					});
 
 				// Update in-memory state
 				removeParticipantFromRoom(roomId, userId);

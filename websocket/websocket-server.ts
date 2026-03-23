@@ -484,6 +484,29 @@ io.on("connection", (socket) => {
 		const { roomId, toUserId, offer } = data;
 		const fromUserId = socket.data.userId;
 
+		// Rate limit check
+		const rateLimitResult = rateLimiter.checkAndRecord(fromUserId, RateLimits.WEBRTC_SIGNALING);
+		if (!rateLimitResult.allowed) {
+			console.warn(`[WebRTC] Rate limit exceeded for user ${fromUserId}`);
+			return;
+		}
+
+		// Validate sender is in the room
+		const senderData = socketUserMap.get(socket.id);
+		if (!senderData || senderData.roomId !== roomId) {
+			console.warn(`[WebRTC] User ${fromUserId} attempted to send offer but is not in room ${roomId}`);
+			return;
+		}
+
+		// Validate target is the streamer (viewers send offers TO streamers)
+		const targetData = Array.from(socketUserMap.values()).find(
+			(u) => u.userId === toUserId && u.roomId === roomId
+		);
+		if (!targetData) {
+			console.warn(`[WebRTC] Target user ${toUserId} not found in room ${roomId}`);
+			return;
+		}
+
 		// Find target socket
 		for (const [targetSocketId, userData] of socketUserMap.entries()) {
 			if (userData.userId === toUserId && userData.roomId === roomId) {
@@ -502,6 +525,29 @@ io.on("connection", (socket) => {
 		const { roomId, toUserId, answer } = data;
 		const fromUserId = socket.data.userId;
 
+		// Rate limit check
+		const rateLimitResult = rateLimiter.checkAndRecord(fromUserId, RateLimits.WEBRTC_SIGNALING);
+		if (!rateLimitResult.allowed) {
+			console.warn(`[WebRTC] Rate limit exceeded for user ${fromUserId}`);
+			return;
+		}
+
+		// Validate sender is in the room
+		const senderData = socketUserMap.get(socket.id);
+		if (!senderData || senderData.roomId !== roomId) {
+			console.warn(`[WebRTC] User ${fromUserId} attempted to send answer but is not in room ${roomId}`);
+			return;
+		}
+
+		// Validate target is a viewer (streamers send answers TO viewers)
+		const targetData = Array.from(socketUserMap.values()).find(
+			(u) => u.userId === toUserId && u.roomId === roomId
+		);
+		if (!targetData) {
+			console.warn(`[WebRTC] Target user ${toUserId} not found in room ${roomId}`);
+			return;
+		}
+
 		// Find target socket
 		for (const [targetSocketId, userData] of socketUserMap.entries()) {
 			if (userData.userId === toUserId && userData.roomId === roomId) {
@@ -518,6 +564,29 @@ io.on("connection", (socket) => {
 	socket.on("webrtc:ice_candidate", (data: { roomId: string; toUserId: string; candidate: RTCIceCandidateInit }) => {
 		const { roomId, toUserId, candidate } = data;
 		const fromUserId = socket.data.userId;
+
+		// Rate limit check
+		const rateLimitResult = rateLimiter.checkAndRecord(fromUserId, RateLimits.WEBRTC_SIGNALING);
+		if (!rateLimitResult.allowed) {
+			console.warn(`[WebRTC] Rate limit exceeded for user ${fromUserId}`);
+			return;
+		}
+
+		// Validate sender is in the room
+		const senderData = socketUserMap.get(socket.id);
+		if (!senderData || senderData.roomId !== roomId) {
+			console.warn(`[WebRTC] User ${fromUserId} attempted to send ICE candidate but is not in room ${roomId}`);
+			return;
+		}
+
+		// Validate target is in the same room
+		const targetData = Array.from(socketUserMap.values()).find(
+			(u) => u.userId === toUserId && u.roomId === roomId
+		);
+		if (!targetData) {
+			console.warn(`[WebRTC] Target user ${toUserId} not found in room ${roomId}`);
+			return;
+		}
 
 		// Find target socket
 		for (const [targetSocketId, userData] of socketUserMap.entries()) {

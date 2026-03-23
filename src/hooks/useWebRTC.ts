@@ -54,6 +54,7 @@ export function useWebRTC({ roomId, userId }: UseWebRTCOptions) {
 	const [isScreenSharing, setIsScreenSharing] = useState(false);
 	const [audioConfig, setAudioConfig] = useState<AudioConfig>("system-and-mic");
 	const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+	const [isAudioEnabled, setIsAudioEnabled] = useState(true);
 	const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(
 		new Map(),
 	);
@@ -265,6 +266,24 @@ export function useWebRTC({ roomId, userId }: UseWebRTCOptions) {
 			};
 
 			peerConnectionsRef.current.set(fromUserId, peerState);
+
+			// Monitor connection state changes for ICE restart
+			pc.onconnectionstatechange = () => {
+				console.log(`[WebRTC] Connection state: ${pc.connectionState}`);
+				peerState.connectionState = pc.connectionState;
+
+				if (pc.connectionState === "failed") {
+					console.error(`[WebRTC] Connection failed with ${fromUserId}`);
+					setLastError("Connection lost. Attempting to reconnect...");
+					// Attempt ICE restart
+					pc.restartIce();
+				}
+			};
+
+			pc.oniceconnectionstatechange = () => {
+				console.log(`[WebRTC] ICE state: ${pc.iceConnectionState}`);
+				peerState.iceConnectionState = pc.iceConnectionState;
+			};
 		},
 		[isStreamer, roomId, socket],
 	);
@@ -366,6 +385,26 @@ export function useWebRTC({ roomId, userId }: UseWebRTCOptions) {
 
 				setStreamerId(targetStreamerId);
 				setConnectionStatus("connecting");
+
+				// Monitor connection state changes for ICE restart
+				pc.onconnectionstatechange = () => {
+					console.log(`[WebRTC] Connection state: ${pc.connectionState}`);
+					peerState.connectionState = pc.connectionState;
+
+					if (pc.connectionState === "failed") {
+						console.error(
+							`[WebRTC] Connection failed with streamer ${targetStreamerId}`,
+						);
+						setLastError("Connection lost. Attempting to reconnect...");
+						// Attempt ICE restart
+						pc.restartIce();
+					}
+				};
+
+				pc.oniceconnectionstatechange = () => {
+					console.log(`[WebRTC] ICE state: ${pc.iceConnectionState}`);
+					peerState.iceConnectionState = pc.iceConnectionState;
+				};
 			} catch (error) {
 				console.error("[WebRTC] Failed to connect to streamer:", error);
 				setLastError("Failed to connect to stream");
@@ -492,6 +531,24 @@ export function useWebRTC({ roomId, userId }: UseWebRTCOptions) {
 		return remoteStreams.values().next().value || null;
 	}, [remoteStreams]);
 
+	/**
+	 * Toggle audio mute/unmute
+	 */
+	const toggleAudio = useCallback(() => {
+		if (!localStreamRef.current) return;
+
+		const audioTracks = localStreamRef.current.getAudioTracks();
+		const hasEnabledTrack = audioTracks.some((track) => track.enabled);
+
+		// Toggle all audio tracks
+		audioTracks.forEach((track) => {
+			track.enabled = !hasEnabledTrack;
+		});
+
+		console.log(`[WebRTC] Audio ${hasEnabledTrack ? "muted" : "unmuted"}`);
+		setIsAudioEnabled(!hasEnabledTrack);
+	}, []);
+
 	return {
 		// State
 		localStream,
@@ -505,10 +562,12 @@ export function useWebRTC({ roomId, userId }: UseWebRTCOptions) {
 		connectionStatus,
 		lastError,
 		deviceCapabilities,
+		isAudioEnabled,
 
 		// Actions
 		startScreenShare,
 		stopScreenShare,
 		connectToStreamer,
+		toggleAudio,
 	};
 }
