@@ -6,6 +6,10 @@ import { db } from "#/db/index";
 import * as schema from "#/db/schema";
 import { users } from "#/db/schema";
 
+const isTestEnv = process.env.NODE_ENV === "test";
+const isDevEnv = process.env.NODE_ENV === "development";
+const isEmailAuthEnabled = isTestEnv || isDevEnv;
+
 export const auth = betterAuth({
 	database: drizzleAdapter(db, {
 		provider: "pg",
@@ -16,7 +20,6 @@ export const auth = betterAuth({
 		discord: {
 			clientId: process.env.DISCORD_CLIENT_ID as string,
 			clientSecret: process.env.DISCORD_CLIENT_SECRET as string,
-			// Map Discord profile to user data
 			getUserInfo: async (tokens) => {
 				const response = await fetch("https://discord.com/api/users/@me", {
 					headers: {
@@ -40,7 +43,14 @@ export const auth = betterAuth({
 			},
 		},
 	},
-	// Update user profile from Discord on every sign in
+	// Enable email/password auth in test and dev environments only
+	...(isEmailAuthEnabled && {
+		emailAndPassword: {
+			enabled: true,
+			autoSignIn: true,
+			requireEmailVerification: false,
+		},
+	}),
 	events: {
 		signIn: async (ctx: {
 			user: { id: string };
@@ -48,10 +58,8 @@ export const auth = betterAuth({
 		}) => {
 			const { user, account } = ctx;
 
-			// Only update for Discord OAuth
 			if (account?.providerId === "discord" && account.accessToken) {
 				try {
-					// Fetch fresh Discord data
 					const response = await fetch("https://discord.com/api/users/@me", {
 						headers: {
 							Authorization: `Bearer ${account.accessToken}`,
@@ -59,7 +67,6 @@ export const auth = betterAuth({
 					});
 					const profile = await response.json();
 
-					// Update user with latest Discord data
 					await db
 						.update(users)
 						.set({
@@ -80,3 +87,5 @@ export const auth = betterAuth({
 	},
 	plugins: [tanstackStartCookies()],
 });
+
+export { isEmailAuthEnabled, isTestEnv };

@@ -24,6 +24,19 @@ vi.mock("../../src/utils/home", () => ({
 	searchRooms: vi.fn(),
 }));
 
+// Mock WebSocket context
+vi.mock("#/lib/websocket-context", () => ({
+	useWebSocket: () => ({
+		socket: null,
+		isConnected: true,
+		userCount: 1,
+		userId: "test-user",
+		currentRoomId: null,
+		setCurrentRoomId: vi.fn(),
+		sendMessage: vi.fn(),
+	}),
+}));
+
 // Helper to create test data
 async function createTestData() {
 	const { db } = await getTestDatabase();
