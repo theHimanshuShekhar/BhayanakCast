@@ -4,26 +4,7 @@
  * Tests for automatic and manual streamer transfer
  */
 
-import { test, expect } from "../../utils/auth";
-import { generateUniqueRoomName } from "../../utils/test-helpers";
-
-// Viewport where Create Room button is visible (< 1280px due to xl:hidden)
-const TEST_VIEWPORT = { width: 1200, height: 800 };
-
-// Helper to login via UI
-async function loginUser(page: any, email: string) {
-	await page.goto("/auth/sign-in");
-	await page.waitForLoadState("networkidle");
-	await page.waitForTimeout(1000);
-
-	await page.fill('input[type="email"]', email);
-	await page.fill('input[type="password"]', "testpassword123");
-	await page.click('button[type="submit"]');
-
-	await page.waitForURL("http://localhost:3000/", { timeout: 10000 });
-	await page.waitForLoadState("networkidle");
-	await page.waitForTimeout(1000);
-}
+import { test, expect, loginUser, TEST_VIEWPORT } from "../../utils/auth";
 
 test.describe("Streamer Transfer", () => {
 	test("automatic transfer when streamer leaves", async ({ browser, signupTestUser }) => {
@@ -50,30 +31,39 @@ test.describe("Streamer Transfer", () => {
 			await streamerPage.waitForTimeout(500);
 			await viewerPage.waitForTimeout(500);
 
-			// Streamer creates room and starts streaming
+			// Streamer creates room
 			await streamerPage.locator('button:has-text("Create Room")').first().click({ force: true });
-			await streamerPage.fill('input[placeholder*="room name"]', "Transfer Test Room");
+			await streamerPage.waitForSelector("text=Create New Room", { state: "visible" });
+			await streamerPage.waitForTimeout(500);
+			await streamerPage.getByPlaceholder("Enter room name...").fill("Transfer Test Room");
 			await streamerPage.click('button[type="submit"]:has-text("Create Room")');
 			await streamerPage.waitForURL(/\/room\/.+/, { timeout: 10000 });
 			const roomUrl = streamerPage.url();
 
 			// Start streaming
 			await streamerPage.click('button:has-text("Start Streaming")');
+			await streamerPage.waitForTimeout(500);
 			await streamerPage.click('button:has-text("Share Screen")');
-			await expect(streamerPage.locator("text=LIVE")).toBeVisible({ timeout: 10000 });
+
+			// Wait for stream to start
+			await streamerPage.waitForTimeout(5000);
+			await expect(streamerPage.locator("text=LIVE").first()).toBeVisible({ timeout: 10000 });
 
 			// Viewer joins
 			await viewerPage.goto(roomUrl);
 			await viewerPage.waitForLoadState("networkidle");
 			await viewerPage.waitForTimeout(1000);
 
-			// Streamer leaves
-			await streamerPage.click('button:has-text("Leave Room")');
+			// Streamer leaves using back button
+			await streamerPage.getByRole("button", { name: /Back to rooms/i }).click();
 			await expect(streamerPage).toHaveURL("/");
 
+			// Wait for transfer
+			await viewerPage.waitForTimeout(3000);
+
 			// Viewer should become streamer
-			await expect(viewerPage.locator("button:has-text('Start Streaming')")).toBeVisible();
-			await expect(viewerPage.locator("text=is now the streamer")).toBeVisible();
+			await expect(viewerPage.locator("button:has-text('Start Streaming')").first()).toBeVisible();
+			await expect(viewerPage.locator("text=/now the streamer/i").first()).toBeVisible();
 		} finally {
 			await streamerContext.close();
 			await viewerContext.close();
@@ -106,7 +96,9 @@ test.describe("Streamer Transfer", () => {
 
 			// Desktop user creates room
 			await desktopPage.locator('button:has-text("Create Room")').first().click({ force: true });
-			await desktopPage.fill('input[placeholder*="room name"]', "Waiting State Test");
+			await desktopPage.waitForSelector("text=Create New Room", { state: "visible" });
+			await desktopPage.waitForTimeout(500);
+			await desktopPage.getByPlaceholder("Enter room name...").fill("Waiting State Test");
 			await desktopPage.click('button[type="submit"]:has-text("Create Room")');
 			await desktopPage.waitForURL(/\/room\/.+/, { timeout: 10000 });
 			const roomUrl = desktopPage.url();
@@ -116,11 +108,12 @@ test.describe("Streamer Transfer", () => {
 			await mobilePage.waitForLoadState("networkidle");
 			await mobilePage.waitForTimeout(1000);
 
-			// Desktop user leaves
-			await desktopPage.click('button:has-text("Leave Room")');
+			// Desktop user leaves using back button
+			await desktopPage.getByRole("button", { name: /Back to rooms/i }).click();
+			await desktopPage.waitForTimeout(2000);
 
 			// Mobile user should see waiting state
-			await expect(mobilePage.locator("text=Waiting")).toBeVisible();
+			await expect(mobilePage.locator("text=/Waiting|waiting/i").first()).toBeVisible();
 		} finally {
 			await desktopContext.close();
 			await mobileContext.close();

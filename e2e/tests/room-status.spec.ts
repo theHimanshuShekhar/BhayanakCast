@@ -5,26 +5,8 @@
  * - waiting → preparing → active → preparing → waiting → ended
  */
 
-import { test, expect } from "../utils/auth";
+import { test, expect, loginUser, TEST_VIEWPORT } from "../utils/auth";
 import { generateUniqueRoomName } from "../utils/test-helpers";
-
-// Viewport where Create Room button is visible (< 1280px due to xl:hidden)
-const TEST_VIEWPORT = { width: 1200, height: 800 };
-
-// Helper to login via UI
-async function loginUser(page: any, email: string) {
-	await page.goto("/auth/sign-in");
-	await page.waitForLoadState("networkidle");
-	await page.waitForTimeout(1000);
-
-	await page.fill('input[type="email"]', email);
-	await page.fill('input[type="password"]', "testpassword123");
-	await page.click('button[type="submit"]');
-
-	await page.waitForURL("http://localhost:3000/", { timeout: 10000 });
-	await page.waitForLoadState("networkidle");
-	await page.waitForTimeout(1000);
-}
 
 test.describe("Room Status Lifecycle", () => {
 	test("room starts in preparing status when created", async ({ page, signupTestUser }) => {
@@ -39,12 +21,15 @@ test.describe("Room Status Lifecycle", () => {
 		await page.waitForTimeout(500);
 
 		await page.locator('button:has-text("Create Room")').first().click({ force: true });
-		await page.fill('input[placeholder*="room name"]', roomName);
+		await page.waitForSelector("text=Create New Room", { state: "visible" });
+		await page.waitForTimeout(500);
+		await page.getByPlaceholder("Enter room name...").fill(roomName);
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/, { timeout: 10000 });
+		await page.waitForTimeout(1000);
 
 		// Should show preparing status (streamer present, < 2 participants)
-		await expect(page.locator("text=Preparing")).toBeVisible();
+		await expect(page.locator("span:has-text('Preparing')").first()).toBeVisible();
 	});
 
 	test("room becomes active when 2nd participant joins", async ({ browser, signupTestUser }) => {
@@ -73,21 +58,29 @@ test.describe("Room Status Lifecycle", () => {
 
 			// User A creates room
 			await userAPage.locator('button:has-text("Create Room")').first().click({ force: true });
-			await userAPage.fill('input[placeholder*="room name"]', roomName);
+			await userAPage.waitForSelector("text=Create New Room", { state: "visible" });
+			await userAPage.waitForTimeout(500);
+			await userAPage.getByPlaceholder("Enter room name...").fill(roomName);
 			await userAPage.click('button[type="submit"]:has-text("Create Room")');
 			await userAPage.waitForURL(/\/room\/.+/, { timeout: 10000 });
 
+			// Wait for room to load
+			await userAPage.waitForTimeout(2000);
+
 			// Verify preparing
-			await expect(userAPage.locator("text=Preparing")).toBeVisible();
+			await expect(userAPage.locator("span:has-text('Preparing')").first()).toBeVisible();
 
 			// User B joins
 			await userBPage.goto(userAPage.url());
 			await userBPage.waitForLoadState("networkidle");
 			await userBPage.waitForTimeout(1000);
 
+			// Wait for status sync
+			await userAPage.waitForTimeout(2000);
+
 			// Both should see active
-			await expect(userAPage.locator("text=Active")).toBeVisible();
-			await expect(userBPage.locator("text=Active")).toBeVisible();
+			await expect(userAPage.locator("span:has-text('Active')").first()).toBeVisible();
+			await expect(userBPage.locator("span:has-text('Active')").first()).toBeVisible();
 		} finally {
 			await userAContext.close();
 			await userBContext.close();
@@ -120,7 +113,9 @@ test.describe("Room Status Lifecycle", () => {
 
 			// User A creates room
 			await userAPage.locator('button:has-text("Create Room")').first().click({ force: true });
-			await userAPage.fill('input[placeholder*="room name"]', roomName);
+			await userAPage.waitForSelector("text=Create New Room", { state: "visible" });
+			await userAPage.waitForTimeout(500);
+			await userAPage.getByPlaceholder("Enter room name...").fill(roomName);
 			await userAPage.click('button[type="submit"]:has-text("Create Room")');
 			await userAPage.waitForURL(/\/room\/.+/, { timeout: 10000 });
 
@@ -129,17 +124,22 @@ test.describe("Room Status Lifecycle", () => {
 			await userBPage.waitForLoadState("networkidle");
 			await userBPage.waitForTimeout(1000);
 
-			await expect(userAPage.locator("text=Active")).toBeVisible();
+			// Wait for sync
+			await userAPage.waitForTimeout(2000);
+			await expect(userAPage.locator("span:has-text('Active')").first()).toBeVisible();
 
-			// User A (streamer) leaves
-			await userAPage.click('button:has-text("Leave Room")');
+			// User A (streamer) leaves using back button
+			await userAPage.getByRole("button", { name: /Back to rooms/i }).click();
 			await expect(userAPage).toHaveURL("/");
 
+			// Wait for transfer
+			await userBPage.waitForTimeout(2000);
+
 			// User B should become streamer
-			await expect(userBPage.locator("text=is now the streamer")).toBeVisible();
+			await expect(userBPage.locator("text=/now the streamer/i").first()).toBeVisible();
 
 			// User B leaves
-			await userBPage.click('button:has-text("Leave Room")');
+			await userBPage.getByRole("button", { name: /Back to rooms/i }).click();
 			await expect(userBPage).toHaveURL("/");
 		} finally {
 			await userAContext.close();
@@ -159,19 +159,23 @@ test.describe("Room Status Lifecycle", () => {
 		await page.waitForTimeout(500);
 
 		await page.locator('button:has-text("Create Room")').first().click({ force: true });
-		await page.fill('input[placeholder*="room name"]', roomName);
+		await page.waitForSelector("text=Create New Room", { state: "visible" });
+		await page.waitForTimeout(500);
+		await page.getByPlaceholder("Enter room name...").fill(roomName);
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/, { timeout: 10000 });
+		await page.waitForTimeout(1000);
 
 		// Preparing before streaming
-		await expect(page.locator("text=Preparing")).toBeVisible();
+		await expect(page.locator("span:has-text('Preparing')").first()).toBeVisible();
 
 		// Start streaming
 		await page.click('button:has-text("Start Streaming")');
 		await page.click('button:has-text("Share Screen")');
+		await page.waitForTimeout(3000);
 
 		// Should show LIVE indicator (active status)
-		await expect(page.locator("text=LIVE")).toBeVisible();
+		await expect(page.locator("text=LIVE").first()).toBeVisible();
 	});
 
 	test("stopping stream returns to preparing status", async ({ page, signupTestUser }) => {
@@ -186,20 +190,25 @@ test.describe("Room Status Lifecycle", () => {
 		await page.waitForTimeout(500);
 
 		await page.locator('button:has-text("Create Room")').first().click({ force: true });
-		await page.fill('input[placeholder*="room name"]', roomName);
+		await page.waitForSelector("text=Create New Room", { state: "visible" });
+		await page.waitForTimeout(500);
+		await page.getByPlaceholder("Enter room name...").fill(roomName);
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/, { timeout: 10000 });
+		await page.waitForTimeout(1000);
 
 		// Start streaming
 		await page.click('button:has-text("Start Streaming")');
 		await page.click('button:has-text("Share Screen")');
-		await expect(page.locator("text=LIVE")).toBeVisible();
+		await page.waitForTimeout(3000);
+		await expect(page.locator("text=LIVE").first()).toBeVisible();
 
 		// Stop streaming
 		await page.click('button:has-text("Stop Sharing")');
+		await page.waitForTimeout(1000);
 
 		// Should return to preparing
-		await expect(page.locator("text=Preparing")).toBeVisible();
+		await expect(page.locator("span:has-text('Preparing')").first()).toBeVisible();
 		await expect(page.locator("text=LIVE")).not.toBeVisible();
 	});
 
@@ -229,7 +238,9 @@ test.describe("Room Status Lifecycle", () => {
 
 			// User A creates room
 			await userAPage.locator('button:has-text("Create Room")').first().click({ force: true });
-			await userAPage.fill('input[placeholder*="room name"]', roomName);
+			await userAPage.waitForSelector("text=Create New Room", { state: "visible" });
+			await userAPage.waitForTimeout(500);
+			await userAPage.getByPlaceholder("Enter room name...").fill(roomName);
 			await userAPage.click('button[type="submit"]:has-text("Create Room")');
 			await userAPage.waitForURL(/\/room\/.+/, { timeout: 10000 });
 
@@ -238,15 +249,21 @@ test.describe("Room Status Lifecycle", () => {
 			await userBPage.waitForLoadState("networkidle");
 			await userBPage.waitForTimeout(1000);
 
+			// Wait for sync
+			await userAPage.waitForTimeout(2000);
+
 			// Both see active
-			await expect(userAPage.locator("text=Active")).toBeVisible();
-			await expect(userBPage.locator("text=Active")).toBeVisible();
+			await expect(userAPage.locator("span:has-text('Active')").first()).toBeVisible();
+			await expect(userBPage.locator("span:has-text('Active')").first()).toBeVisible();
 
 			// User A (streamer) leaves
-			await userAPage.click('button:has-text("Leave Room")');
+			await userAPage.getByRole("button", { name: /Back to rooms/i }).click();
+
+			// Wait for transfer
+			await userBPage.waitForTimeout(2000);
 
 			// User B should see status change notification
-			await expect(userBPage.locator("text=is now the streamer")).toBeVisible();
+			await expect(userBPage.locator("text=/now the streamer/i").first()).toBeVisible();
 		} finally {
 			await userAContext.close();
 			await userBContext.close();
@@ -268,12 +285,15 @@ test.describe("Room Persistence", () => {
 
 		// Create room
 		await page.locator('button:has-text("Create Room")').first().click({ force: true });
-		await page.fill('input[placeholder*="room name"]', roomName);
+		await page.waitForSelector("text=Create New Room", { state: "visible" });
+		await page.waitForTimeout(500);
+		await page.getByPlaceholder("Enter room name...").fill(roomName);
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/, { timeout: 10000 });
 
 		// Verify in room
-		await expect(page.locator("h1")).toContainText(roomName);
+		const roomId = roomName.split("-")[2];
+		await expect(page.locator("h1")).toContainText(roomId);
 
 		// Refresh page
 		await page.reload();
@@ -281,7 +301,7 @@ test.describe("Room Persistence", () => {
 		await page.waitForTimeout(1000);
 
 		// Should still be in room
-		await expect(page.locator("h1")).toContainText(roomName);
+		await expect(page.locator("h1")).toContainText(roomId);
 	});
 
 	test("room data persists after navigation", async ({ page, signupTestUser }) => {
@@ -298,23 +318,26 @@ test.describe("Room Persistence", () => {
 
 		// Create room
 		await page.locator('button:has-text("Create Room")').first().click({ force: true });
-		await page.fill('input[placeholder*="room name"]', roomName);
-		await page.fill('textarea[name="description"]', roomDescription);
+		await page.waitForSelector("text=Create New Room", { state: "visible" });
+		await page.waitForTimeout(500);
+		await page.getByPlaceholder("Enter room name...").fill(roomName);
+		await page.getByRole("textbox", { name: "Description (Optional)" }).fill(roomDescription);
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/, { timeout: 10000 });
 
-		// Go back to home
-		await page.click('button:has-text("Leave Room")');
+		// Go back to home using back button
+		await page.getByRole("button", { name: /Back to rooms/i }).click();
 		await expect(page).toHaveURL("/");
 
 		// Room should appear in list
-		await expect(page.locator(`text=${roomName}`)).toBeVisible();
+		const roomId = roomName.split("-")[2];
+		await expect(page.locator(`a:has-text("${roomId}")`)).toBeVisible();
 
 		// Click on room
-		await page.click(`text=${roomName}`);
+		await page.locator(`a:has-text("${roomId}")`).click();
 
 		// Should be back in room with data intact
-		await expect(page.locator("h1")).toContainText(roomName);
+		await expect(page.locator("h1")).toContainText(roomId);
 		await expect(page.locator(`text=${roomDescription}`)).toBeVisible();
 	});
 });

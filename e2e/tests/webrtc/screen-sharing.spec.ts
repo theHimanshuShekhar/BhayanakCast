@@ -4,26 +4,7 @@
  * Tests for WebRTC screen sharing functionality
  */
 
-import { test, expect } from "../../utils/auth";
-import { generateUniqueRoomName } from "../../utils/test-helpers";
-
-// Viewport where Create Room button is visible (< 1280px due to xl:hidden)
-const TEST_VIEWPORT = { width: 1200, height: 800 };
-
-// Helper to login via UI
-async function loginUser(page: any, email: string) {
-	await page.goto("/auth/sign-in");
-	await page.waitForLoadState("networkidle");
-	await page.waitForTimeout(1000);
-
-	await page.fill('input[type="email"]', email);
-	await page.fill('input[type="password"]', "testpassword123");
-	await page.click('button[type="submit"]');
-
-	await page.waitForURL("http://localhost:3000/", { timeout: 10000 });
-	await page.waitForLoadState("networkidle");
-	await page.waitForTimeout(1000);
-}
+import { test, expect, loginUser, TEST_VIEWPORT } from "../../utils/auth";
 
 test.describe("Screen Sharing", () => {
 	test("streamer can start screen sharing", async ({ page, signupTestUser }) => {
@@ -33,15 +14,23 @@ test.describe("Screen Sharing", () => {
 		await page.waitForTimeout(500);
 
 		await page.locator('button:has-text("Create Room")').first().click({ force: true });
-		await page.fill('input[placeholder*="room name"]', "Screen Share Test");
+		await page.waitForSelector("text=Create New Room", { state: "visible" });
+		await page.waitForTimeout(500);
+		await page.getByPlaceholder("Enter room name...").fill("Screen Share Test");
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/, { timeout: 10000 });
+		await page.waitForTimeout(1000);
 
+		// Click start streaming
 		await page.click('button:has-text("Start Streaming")');
-		await expect(page.locator("text=Start Screen Sharing")).toBeVisible();
+		await page.waitForTimeout(500);
+		await expect(page.locator("text=Start Screen Sharing").first()).toBeVisible();
 		await page.click('button:has-text("Share Screen")');
-		await expect(page.locator("text=LIVE")).toBeVisible({ timeout: 10000 });
-		await expect(page.locator("text=Stop Sharing")).toBeVisible();
+
+		// Wait for stream to start
+		await page.waitForTimeout(5000);
+		await expect(page.locator("text=LIVE").first()).toBeVisible({ timeout: 10000 });
+		await expect(page.locator("text=Stop Sharing").first()).toBeVisible();
 	});
 
 	test("streamer can select different audio configurations", async ({ page, signupTestUser }) => {
@@ -51,16 +40,23 @@ test.describe("Screen Sharing", () => {
 		await page.waitForTimeout(500);
 
 		await page.locator('button:has-text("Create Room")').first().click({ force: true });
-		await page.fill('input[placeholder*="room name"]', "Audio Config Test");
+		await page.waitForSelector("text=Create New Room", { state: "visible" });
+		await page.waitForTimeout(500);
+		await page.getByPlaceholder("Enter room name...").fill("Audio Config Test");
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/, { timeout: 10000 });
+		await page.waitForTimeout(1000);
 
 		await page.click('button:has-text("Start Streaming")');
-		await expect(page.locator("text=Start Screen Sharing")).toBeVisible();
+		await page.waitForTimeout(500);
+		await expect(page.locator("text=Start Screen Sharing").first()).toBeVisible();
 		await page.click('text=Microphone only');
 		await page.click('button:has-text("Share Screen")');
-		await expect(page.locator("text=LIVE")).toBeVisible({ timeout: 10000 });
-		await expect(page.locator("text=Mic only")).toBeVisible();
+
+		// Wait for stream to start
+		await page.waitForTimeout(5000);
+		await expect(page.locator("text=LIVE").first()).toBeVisible({ timeout: 10000 });
+		await expect(page.locator("text=Mic only").first()).toBeVisible();
 	});
 
 	test("streamer can stop screen sharing", async ({ page, signupTestUser }) => {
@@ -70,17 +66,26 @@ test.describe("Screen Sharing", () => {
 		await page.waitForTimeout(500);
 
 		await page.locator('button:has-text("Create Room")').first().click({ force: true });
-		await page.fill('input[placeholder*="room name"]', "Stop Stream Test");
+		await page.waitForSelector("text=Create New Room", { state: "visible" });
+		await page.waitForTimeout(500);
+		await page.getByPlaceholder("Enter room name...").fill("Stop Stream Test");
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/, { timeout: 10000 });
+		await page.waitForTimeout(1000);
 
 		await page.click('button:has-text("Start Streaming")');
+		await page.waitForTimeout(500);
 		await page.click('button:has-text("Share Screen")');
-		await expect(page.locator("text=LIVE")).toBeVisible({ timeout: 10000 });
+
+		// Wait for stream to start
+		await page.waitForTimeout(5000);
+		await expect(page.locator("text=LIVE").first()).toBeVisible({ timeout: 10000 });
 
 		await page.click('button:has-text("Stop Sharing")');
-		await expect(page.locator("button:has-text('Start Streaming')")).toBeVisible();
-		await expect(page.locator("text=LIVE")).not.toBeVisible();
+		await page.waitForTimeout(1000);
+
+		await expect(page.locator("button:has-text('Start Streaming')").first()).toBeVisible();
+		await expect(page.locator("text=LIVE").first()).not.toBeVisible();
 	});
 
 	test("mobile user cannot start streaming", async ({ page, signupTestUser }) => {
@@ -89,13 +94,16 @@ test.describe("Screen Sharing", () => {
 		await page.setViewportSize({ width: 375, height: 667 });
 
 		await page.locator('button:has-text("Create Room")').first().click({ force: true });
-		await page.fill('input[placeholder*="room name"]', "Mobile Test");
+		await page.waitForSelector("text=Create New Room", { state: "visible" });
+		await page.waitForTimeout(500);
+		await page.getByPlaceholder("Enter room name...").fill("Mobile Test");
 		await page.click('button[type="submit"]:has-text("Create Room")');
 		await page.waitForURL(/\/room\/.+/, { timeout: 10000 });
+		await page.waitForTimeout(1000);
 
-		const startButton = page.locator('button:has-text("Start Streaming")');
+		const startButton = page.locator('button:has-text("Start Streaming")').first();
 		await expect(startButton).toBeVisible();
 		await expect(startButton).toBeDisabled();
-		await expect(page.locator("text=Mobile devices cannot stream")).toBeVisible();
+		await expect(page.locator("text=Mobile devices cannot stream").first()).toBeVisible();
 	});
 });
