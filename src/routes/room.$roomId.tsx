@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query";
 import {
 	createFileRoute,
 	Link,
@@ -17,6 +16,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Chat } from "#/components/Chat";
+import { StreamerControls } from "#/components/StreamerControls";
 import {
 	Dialog,
 	DialogContent,
@@ -24,7 +24,10 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "#/components/ui/dialog";
+import { useRoom } from "#/hooks/useRoom";
+import { useWebRTC } from "#/hooks/useWebRTC";
 import { authClient } from "#/lib/auth-client";
+import { detectDevice } from "#/lib/device-detection";
 import { censorText } from "#/lib/profanity-filter";
 import {
 	OG_IMAGE_URL,
@@ -105,36 +108,137 @@ export const Route = createFileRoute("/room/$roomId")({
 	},
 });
 
-// Video player placeholder component
-interface VideoPlayerPlaceholderProps {
-	isStreamer: boolean;
+// Video display component for viewers
+interface VideoDisplayProps {
+	stream: MediaStream | null;
 	streamerName?: string | null;
 }
 
-function VideoPlayerPlaceholder({
-	isStreamer,
-	streamerName,
-}: VideoPlayerPlaceholderProps) {
+function VideoDisplay({ stream, streamerName }: VideoDisplayProps) {
+	const videoRef = useRef<HTMLVideoElement>(null);
+
+	useEffect(() => {
+		if (videoRef.current && stream) {
+			videoRef.current.srcObject = stream;
+		}
+	}, [stream]);
+
+	if (!stream) {
+		return (
+			<div className="bg-depth-2 rounded-xl aspect-video flex flex-col items-center justify-center border-2 border-dashed border-border-subtle">
+				<Video className="h-16 w-16 text-text-tertiary mb-4" />
+				<p className="text-text-secondary text-lg mb-2">Waiting for Stream</p>
+				<p className="text-text-tertiary text-sm">
+					{streamerName
+						? `${streamerName} will start streaming soon`
+						: "No streamer yet"}
+				</p>
+			</div>
+		);
+	}
+
 	return (
-		<div className="bg-depth-2 rounded-xl aspect-video flex flex-col items-center justify-center border-2 border-dashed border-border-subtle">
-			{isStreamer ? (
-				<>
-					<Monitor className="h-16 w-16 text-text-tertiary mb-4" />
-					<p className="text-text-secondary text-lg mb-2">Start Streaming</p>
-					<p className="text-text-tertiary text-sm">
-						Screen share will appear here
-					</p>
-				</>
-			) : (
-				<>
-					<Video className="h-16 w-16 text-text-tertiary mb-4" />
-					<p className="text-text-secondary text-lg mb-2">Waiting for Stream</p>
-					<p className="text-text-tertiary text-sm">
-						{streamerName
-							? `${streamerName} will start streaming soon`
-							: "No streamer yet"}
-					</p>
-				</>
+		<div className="relative rounded-xl overflow-hidden bg-black aspect-video">
+			{/* biome-ignore lint/a11y/useMediaCaption: Screen sharing doesn't support captions */}
+			<video
+				ref={videoRef}
+				autoPlay
+				playsInline
+				className="w-full h-full object-contain"
+			/>
+			<div className="absolute top-4 left-4 px-3 py-1 rounded bg-black/70 text-white text-sm flex items-center gap-2">
+				<Monitor className="h-4 w-4" />
+				{streamerName ? `${streamerName}'s Screen` : "Screen Share"}
+			</div>
+		</div>
+	);
+}
+
+// Screen share preview component for streamers
+interface ScreenSharePreviewProps {
+	stream: MediaStream | null;
+}
+
+function ScreenSharePreview({ stream }: ScreenSharePreviewProps) {
+	const videoRef = useRef<HTMLVideoElement>(null);
+
+	useEffect(() => {
+		if (videoRef.current && stream) {
+			console.log(
+				"[ScreenSharePreview] Setting stream:",
+				stream.id,
+				"Tracks:",
+				stream.getTracks().length,
+			);
+			videoRef.current.srcObject = stream;
+			videoRef.current.play().catch((err) => {
+				console.error("[ScreenSharePreview] Error playing video:", err);
+			});
+		}
+	}, [stream]);
+
+	if (!stream) {
+		return (
+			<div className="bg-depth-2 rounded-xl aspect-video flex flex-col items-center justify-center border-2 border-dashed border-border-subtle">
+				<Monitor className="h-16 w-16 text-text-tertiary mb-4" />
+				<p className="text-text-secondary text-lg mb-2">Ready to Stream</p>
+				<p className="text-text-tertiary text-sm">
+					Click "Start Streaming" to begin
+				</p>
+			</div>
+		);
+	}
+
+	return (
+		<div className="relative rounded-xl overflow-hidden bg-black aspect-video">
+			<video
+				ref={videoRef}
+				autoPlay
+				playsInline
+				muted
+				className="w-full h-full object-contain"
+			/>
+			<div className="absolute top-4 left-4 px-3 py-1 rounded bg-red-500/90 text-white text-sm flex items-center gap-2">
+				<span className="relative flex h-2 w-2">
+					<span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75" />
+					<span className="relative inline-flex rounded-full h-2 w-2 bg-white" />
+				</span>
+				LIVE - Your Screen
+			</div>
+		</div>
+	);
+}
+
+// Transfer overlay component
+interface TransferOverlayProps {
+	transferState: string;
+	transferInfo: { newStreamerName?: string } | null;
+}
+
+function TransferOverlay({
+	transferState,
+	transferInfo,
+}: TransferOverlayProps) {
+	if (transferState === "idle" || transferState === "connected") return null;
+
+	const messages: Record<string, string> = {
+		initiating: "Streamer is leaving...",
+		cleaning_up: "Disconnecting...",
+		waiting_for_streamer: `Waiting for ${transferInfo?.newStreamerName || "new streamer"}...`,
+		reconnecting: "Reconnecting to new streamer...",
+		failed: "Connection failed. Retrying...",
+	};
+
+	return (
+		<div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center z-50 backdrop-blur-sm">
+			<div className="w-12 h-12 border-3 border-white/10 border-t-accent rounded-full animate-spin mb-4" />
+			<p className="text-white text-lg font-medium">
+				{messages[transferState] || "Connecting..."}
+			</p>
+			{transferState === "reconnecting" && (
+				<p className="text-white/60 text-sm mt-2">
+					Setting up peer-to-peer connection
+				</p>
 			)}
 		</div>
 	);
@@ -147,79 +251,105 @@ function RoomDetailPage() {
 	const { data: session } = authClient.useSession();
 	const userId = session?.user?.id;
 
-	// Query for real-time room data
-	const { data: roomData, refetch } = useQuery({
-		queryKey: ["room", roomId],
-		queryFn: () => getRoomDetails({ data: { roomId } }),
-		initialData,
-		refetchInterval: 5000, // Refresh every 5 seconds as fallback
+	// Device detection - memoized once
+	detectDevice();
+
+	// WebSocket-first room state (replaces React Query polling)
+	const { roomState, leaveRoom } = useRoom(roomId);
+
+	// WebRTC hook for streaming
+	const { localStream, remoteStream, transferState, transferInfo } = useWebRTC({
+		roomId,
+		userId: userId || "",
 	});
 
-	const room = roomData?.room.room;
-	const streamer = roomData?.room.streamer;
-	const participants = roomData?.participants || [];
-	const isActive = room?.status === "active";
-	const isPreparing = room?.status === "preparing";
+	// WebSocket for real-time updates and room tracking
+	const { socket, isConnected, setCurrentRoomId } = useWebSocket();
 
-	// WebSocket for real-time updates
-	const { socket, isConnected } = useWebSocket();
-
-	// Track if user has joined the room via WebSocket
-	const hasJoinedRef = useRef(false);
-
-	// Join room via WebSocket
-	const handleJoinRoom = useCallback(() => {
-		if (!userId || !isActive || !socket || !isConnected) {
-			console.log("[Room] Cannot join - missing requirements");
-			return;
+	// Track current room for auto-rejoin on reconnect
+	useEffect(() => {
+		if (roomId) {
+			setCurrentRoomId(roomId);
 		}
-		console.log("[Room] Emitting room:join via WebSocket");
-		socket.emit("room:join", { roomId });
-	}, [userId, isActive, socket, isConnected, roomId]);
+		return () => {
+			setCurrentRoomId(null);
+		};
+	}, [roomId, setCurrentRoomId]);
 
-	// Leave room via WebSocket
+	// Extract data from roomState (WebSocket) with fallback to initialData (SSR)
+	const room = roomState || {
+		id: initialData?.room.room?.id || roomId,
+		name: initialData?.room.room?.name || "Loading...",
+		description: initialData?.room.room?.description || "",
+		status:
+			(initialData?.room.room?.status as
+				| "waiting"
+				| "preparing"
+				| "active"
+				| "ended") || "waiting",
+		streamerId: initialData?.room.room?.streamerId || null,
+		participants: [],
+		createdAt: initialData?.room.room?.createdAt || new Date(),
+	};
+
+	const isActive = room.status === "active";
+	const isPreparing = room.status === "preparing";
+
+	// Get streamer info from initial data (for SSR) or from roomState
+	const streamer = initialData?.room.streamer;
+
+	// Participants from roomState (real-time via WebSocket)
+	const participants = room.participants || [];
+
+	// Leave room handler
 	const handleLeaveRoom = useCallback(() => {
-		if (!userId || !socket || !isConnected) {
+		if (!userId || !isConnected) {
 			console.log("[Room] Cannot leave - missing requirements");
 			return;
 		}
-		console.log("[Room] Emitting room:leave via WebSocket");
-		socket.emit("room:leave", { roomId });
-		hasJoinedRef.current = false;
+		console.log("[Room] Leaving room");
+		leaveRoom();
 		// Redirect to home page after leaving
 		void navigate({ to: "/" });
-	}, [userId, socket, isConnected, roomId, navigate]);
+	}, [userId, isConnected, leaveRoom, navigate]);
 
 	// Simple back navigation for ended rooms (no WebSocket required)
 	const handleBackToRooms = useCallback(() => {
 		void navigate({ to: "/" });
 	}, [navigate]);
 
-	// Auto-join room on mount - fires when user loads room page
-	useEffect(() => {
-		if (userId && !hasJoinedRef.current && socket && isConnected) {
-			hasJoinedRef.current = true;
-			console.log("[Room] Auto-joining room via WebSocket on page load");
-			socket.emit("room:join", { roomId });
+	// Join room handler (for manual join button)
+	const handleJoinRoom = useCallback(() => {
+		if (!userId || !isActive || !isConnected) {
+			console.log("[Room] Cannot join - missing requirements");
+			return;
 		}
-	}, [userId, socket, isConnected, roomId]);
-
-	// Reset hasJoinedRef when roomId changes (user navigates to different room)
-	// biome-ignore lint/correctness/useExhaustiveDependencies: intentional - reset when room changes
-	useEffect(() => {
-		hasJoinedRef.current = false;
-	}, [roomId]);
+		console.log("[Room] Joining room");
+		// Join is handled automatically by useRoom, but we can trigger it here if needed
+	}, [userId, isActive, isConnected]);
 
 	// Leave room when component unmounts (user leaves the page)
 	useEffect(() => {
 		return () => {
-			if (hasJoinedRef.current && socket && isConnected) {
+			if (socket && isConnected) {
 				console.log("[Room] Component unmounting - leaving room");
 				socket.emit("room:leave", { roomId });
-				hasJoinedRef.current = false;
 			}
 		};
 	}, [socket, isConnected, roomId]);
+
+	// Send device info on identify
+	useEffect(() => {
+		if (socket && isConnected && userId) {
+			const device = detectDevice();
+			socket.emit("identify", {
+				userId,
+				userName: session?.user?.name,
+				userImage: session?.user?.image,
+				isMobile: device.isMobile,
+			});
+		}
+	}, [socket, isConnected, userId, session?.user?.name, session?.user?.image]);
 
 	// Calculate duration - use client-only time to avoid hydration mismatch
 	const [clientNow, setClientNow] = useState<Date | null>(null);
@@ -234,13 +364,12 @@ function RoomDetailPage() {
 
 	const now = clientNow || new Date();
 	const startTime = room?.createdAt ? new Date(room.createdAt) : now;
-	const endTime = room?.endedAt ? new Date(room.endedAt) : now;
-	const totalDuration = isActive
-		? Math.floor((now.getTime() - startTime.getTime()) / 1000)
-		: Math.floor((endTime.getTime() - startTime.getTime()) / 1000);
+	const totalDuration = Math.floor(
+		(now.getTime() - startTime.getTime()) / 1000,
+	);
 
 	// Check if current user is a participant and if they're the streamer
-	const isParticipant = participants.some((p) => p.user.id === userId);
+	const isParticipant = participants.some((p) => p.userId === userId);
 	const isStreamer = streamer?.id === userId;
 
 	// Listen for WebSocket events
@@ -256,7 +385,7 @@ function RoomDetailPage() {
 			participantCount: number;
 		}) => {
 			console.log("[Room] User joined:", data);
-			refetch();
+			// Data update handled by useRoom hook
 		};
 
 		// User left the room
@@ -266,7 +395,7 @@ function RoomDetailPage() {
 			participantCount: number;
 		}) => {
 			console.log("[Room] User left:", data);
-			refetch();
+			// Data update handled by useRoom hook
 		};
 
 		// Streamer changed
@@ -275,13 +404,13 @@ function RoomDetailPage() {
 			newStreamerName: string;
 		}) => {
 			console.log("[Room] Streamer changed:", data);
-			refetch();
+			// Data update handled by useRoom hook
 		};
 
 		// Room status changed
 		const handleStatusChanged = (data: { status: string }) => {
 			console.log("[Room] Status changed:", data);
-			refetch();
+			// Data update handled by useRoom hook
 		};
 
 		// Room joined confirmation
@@ -295,7 +424,7 @@ function RoomDetailPage() {
 			alreadyInRoom?: boolean;
 		}) => {
 			console.log("[Room] Joined room:", data);
-			refetch();
+			// Data update handled by useRoom hook
 		};
 
 		// Room left confirmation
@@ -304,13 +433,15 @@ function RoomDetailPage() {
 			participantCount: number;
 		}) => {
 			console.log("[Room] Left room:", data);
-			hasJoinedRef.current = false;
 		};
 
 		// Error
 		const handleRoomError = (data: { message: string }) => {
 			console.error("[Room] Error:", data.message);
-			alert(data.message);
+			// Only show alert for critical errors, not for "Not in room" during navigation
+			if (data.message !== "Not in room") {
+				alert(data.message);
+			}
 		};
 
 		socket.on("room:user_joined", handleUserJoined);
@@ -331,7 +462,7 @@ function RoomDetailPage() {
 			socket.off("room:left", handleRoomLeft);
 			socket.off("room:error", handleRoomError);
 		};
-	}, [socket, isConnected, refetch, roomId]);
+	}, [socket, isConnected, roomId]);
 
 	// Transfer dialog state
 	const [showTransferDialog, setShowTransferDialog] = useState(false);
@@ -404,7 +535,7 @@ function RoomDetailPage() {
 										<Users className="h-4 w-4" />
 										<span>
 											{
-												participants.filter((p) => p.user.id !== streamer?.id)
+												participants.filter((p) => p.userId !== streamer?.id)
 													.length
 											}{" "}
 											viewers
@@ -413,15 +544,27 @@ function RoomDetailPage() {
 								</div>
 							</div>
 
-							{/* Video Player */}
-							<VideoPlayerPlaceholder
-								isStreamer={isStreamer}
-								streamerName={streamer?.name}
-							/>
+							{/* Video Player with Transfer Overlay */}
+							<div className="relative">
+								{/* Show local preview when actively streaming, otherwise show remote stream */}
+								{localStream ? (
+									<ScreenSharePreview stream={localStream} />
+								) : (
+									<VideoDisplay
+										stream={remoteStream}
+										streamerName={streamer?.name}
+									/>
+								)}
+								<TransferOverlay
+									transferState={transferState}
+									transferInfo={transferInfo}
+								/>
+							</div>
 
 							{/* Streamer Controls */}
 							{userId && isStreamer && (
 								<div className="flex items-center gap-3 pt-2">
+									<StreamerControls roomId={roomId} userId={userId} />
 									<button
 										type="button"
 										onClick={() => setShowTransferDialog(true)}
@@ -531,44 +674,44 @@ function RoomDetailPage() {
 									<span className="text-text-tertiary">
 										(
 										{
-											participants.filter((p) => p.user.id !== streamer?.id)
+											participants.filter((p) => p.userId !== streamer?.id)
 												.length
 										}
 										)
 									</span>
 								</h3>
 								<div className="space-y-1 max-h-32 overflow-y-auto">
-									{participants.filter((p) => p.user.id !== streamer?.id)
+									{participants.filter((p) => p.userId !== streamer?.id)
 										.length === 0 ? (
 										<p className="text-xs text-text-tertiary italic">
 											No viewers yet
 										</p>
 									) : (
 										participants
-											.filter((p) => p.user.id !== streamer?.id)
+											.filter((p) => p.userId !== streamer?.id)
 											.slice(0, 5)
 											.map((p) => (
 												<Link
-													key={p.participant.id}
+													key={p.userId}
 													to="/profile/$userId"
-													params={{ userId: p.user.id }}
+													params={{ userId: p.userId }}
 													className="flex items-center gap-2 p-1.5 rounded hover:bg-depth-2 transition-colors"
 												>
-													{p.user.image ? (
+													{p.userImage ? (
 														<img
-															src={p.user.image}
-															alt={p.user.name}
+															src={p.userImage}
+															alt={p.userName}
 															className="h-6 w-6 rounded-full object-cover"
 														/>
 													) : (
 														<div className="h-6 w-6 rounded-full bg-surface-3 flex items-center justify-center">
 															<span className="text-xs font-medium text-text-primary">
-																{p.user.name.charAt(0).toUpperCase()}
+																{p.userName.charAt(0).toUpperCase()}
 															</span>
 														</div>
 													)}
 													<span className="text-sm text-text-secondary truncate">
-														{p.user.name}
+														{p.userName}
 													</span>
 												</Link>
 											))
@@ -601,36 +744,35 @@ function RoomDetailPage() {
 
 							<div className="space-y-2 max-h-64 overflow-y-auto mb-4">
 								{participants
-									.filter((p) => p.user.id !== userId)
+									.filter((p) => p.userId !== userId)
 									.map((p) => (
 										<button
-											key={p.participant.id}
+											key={p.userId}
 											type="button"
-											onClick={() => handleTransferStreamer(p.user.id)}
+											onClick={() => handleTransferStreamer(p.userId)}
 											className="w-full flex items-center gap-3 p-3 bg-depth-2 hover:bg-depth-3 rounded-lg transition-colors text-left"
 										>
-											{p.user.image ? (
+											{p.userImage ? (
 												<img
-													src={p.user.image}
-													alt={p.user.name}
+													src={p.userImage}
+													alt={p.userName}
 													className="h-10 w-10 rounded-full object-cover"
 												/>
 											) : (
 												<div className="h-10 w-10 rounded-full bg-surface-3 flex items-center justify-center">
 													<span className="text-sm font-medium text-text-primary">
-														{p.user.name.charAt(0).toUpperCase()}
+														{p.userName.charAt(0).toUpperCase()}
 													</span>
 												</div>
 											)}
 											<span className="flex-1 font-medium text-text-primary">
-												{p.user.name}
+												{p.userName}
 											</span>
 										</button>
 									))}
 							</div>
 
-							{participants.filter((p) => p.user.id !== userId).length ===
-								0 && (
+							{participants.filter((p) => p.userId !== userId).length === 0 && (
 								<p className="text-text-secondary text-center py-4">
 									No other viewers to transfer to.
 								</p>
@@ -732,18 +874,11 @@ function RoomDetailPage() {
 									<span>
 										Viewers:{" "}
 										{
-											participants.filter((p) => p.user.id !== streamer?.id)
+											participants.filter((p) => p.userId !== streamer?.id)
 												.length
 										}
 									</span>
 								</div>
-								{room?.endedAt && (
-									<div className="flex items-center gap-1.5">
-										<span>
-											Ended: <ClientDate date={room.endedAt} />
-										</span>
-									</div>
-								)}
 							</div>
 						</div>
 					</div>
@@ -768,14 +903,13 @@ function RoomDetailPage() {
 							{[...participants]
 								.sort(
 									(a, b) =>
-										(b.participant.totalTimeSeconds || 0) -
-										(a.participant.totalTimeSeconds || 0),
+										(b.totalTimeSeconds || 0) - (a.totalTimeSeconds || 0),
 								)
 								.map((p, index) => (
 									<Link
-										key={p.participant.id}
+										key={p.userId}
 										to="/profile/$userId"
-										params={{ userId: p.user.id }}
+										params={{ userId: p.userId }}
 										className="flex items-center gap-4 p-3 bg-depth-2 rounded-lg hover:bg-depth-3 transition-colors"
 									>
 										<div className="shrink-0 w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center">
@@ -784,40 +918,37 @@ function RoomDetailPage() {
 											</span>
 										</div>
 
-										{p.user.image ? (
+										{p.userImage ? (
 											<img
-												src={p.user.image}
-												alt={p.user.name}
+												src={p.userImage}
+												alt={p.userName}
 												className="h-12 w-12 rounded-full object-cover"
 											/>
 										) : (
 											<div className="h-12 w-12 rounded-full bg-surface-3 flex items-center justify-center">
 												<span className="text-lg font-medium text-text-primary">
-													{p.user.name.charAt(0).toUpperCase()}
+													{p.userName.charAt(0).toUpperCase()}
 												</span>
 											</div>
 										)}
 
 										<div className="flex-1 min-w-0">
 											<h3 className="text-base font-medium text-text-primary truncate">
-												{p.user.name}
+												{p.userName}
 											</h3>
 											<p className="text-sm text-text-tertiary">
-												Joined <ClientDate date={p.participant.joinedAt} />
+												Joined <ClientDate date={p.joinedAt} />
 											</p>
 										</div>
 
-										{p.participant.totalTimeSeconds !== null &&
-											p.participant.totalTimeSeconds > 0 && (
-												<div className="text-right shrink-0">
-													<p className="text-base font-semibold text-accent">
-														{formatDuration(p.participant.totalTimeSeconds)}
-													</p>
-													<p className="text-xs text-text-tertiary">
-														watch time
-													</p>
-												</div>
-											)}
+										{p.totalTimeSeconds !== null && p.totalTimeSeconds > 0 && (
+											<div className="text-right shrink-0">
+												<p className="text-base font-semibold text-accent">
+													{formatDuration(p.totalTimeSeconds)}
+												</p>
+												<p className="text-xs text-text-tertiary">watch time</p>
+											</div>
+										)}
 									</Link>
 								))}
 						</div>

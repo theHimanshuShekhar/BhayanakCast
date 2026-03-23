@@ -14,7 +14,17 @@
 
 ## ✨ Features
 
-### 🎥 **Smart Room System**
+### 🎥 **WebRTC Screen Sharing** ⭐ NEW
+- **P2P Screen Sharing** with 3 audio modes:
+  - System audio + Microphone
+  - System audio only
+  - No audio
+- **Browser "Stop Sharing" Detection** - Automatic transfer when clicked
+- **Mobile Restrictions** - Mobile users can view but cannot stream
+- **Adaptive Quality** - Simulcast for best viewing experience
+- **Graceful Transfers** - 8-15 second handoff between streamers
+
+### 📺 **Smart Room System**
 - **4-State Room Lifecycle**: `waiting` → `preparing` → `active` → `ended`
 - Automatic streamer transfer when hosts leave
 - Rooms persist without streamers (enters "waiting" state)
@@ -32,9 +42,12 @@
 - JetBrains Mono monospace font
 - Smooth transitions and animations
 
-### ⚡ **Real-Time Everything**
+### ⚡ **WebSocket-First Architecture** ⭐ NEW
+- **In-Memory State** - WebSocket server is primary source of truth
+- **Synchronous DB Persistence** - All operations wait for DB confirmation
+- **Auto-Rejoin** - Automatic recovery after server restart
+- **Real-Time Updates** - No polling, instant state sync
 - Live user count via WebSocket
-- Instant room updates with Socket.io
 - Real-time chat with profanity filtering
 - Comprehensive rate limiting (8 action types)
 
@@ -53,7 +66,8 @@
 | **State** | TanStack Query v5 |
 | **Auth** | Better Auth |
 | **Database** | PostgreSQL 16 + Drizzle ORM |
-| **Real-time** | Socket.io |
+| **Real-time** | Socket.io + WebRTC |
+| **Streaming** | WebRTC P2P (Simple-Peer pattern) |
 | **Styling** | Tailwind CSS v4 |
 | **UI Components** | shadcn/ui |
 
@@ -108,12 +122,14 @@ This starts both the web app (port 3000) and WebSocket server (port 3001).
 
 ## 📖 Room Status Guide
 
-| Status | Meaning | Badge |
-|--------|---------|-------|
-| 🔘 **Waiting** | No streamer or viewers | Gray |
-| 🟡 **Preparing** | Streamer present, not streaming | Yellow |
-| 🟢 **Active** | Live streaming in progress | Green |
-| ⚫ **Ended** | Room cleaned up | History icon |
+| Status | Meaning | Badge | When it happens |
+|--------|---------|-------|-----------------|
+| 🔘 **Waiting** | Room active, no streamer | Gray | Streamer leaves with no viewers |
+| 🟡 **Preparing** | Streamer present, not streaming | Yellow | Streamer stops stream OR new streamer assigned |
+| 🟢 **Active** | Live streaming in progress | Green | 2+ participants with streamer |
+| ⚫ **Ended** | Room closed permanently | History icon | Empty for 5+ minutes |
+
+**Important:** Rooms do NOT end when the stream ends. They only end after being empty for 5+ minutes.
 
 ## 🎯 Usage
 
@@ -130,52 +146,46 @@ This starts both the web app (port 3000) and WebSocket server (port 3001).
 4. Your watch time is tracked!
 
 ### Streamer Features
-- **Transfer Stream**: Hand over hosting to any viewer
-- **Leave Room**: Automatic transfer or enters "waiting" state
+- **Start/Stop Streaming**: Toggle streaming without leaving room
+- **Transfer Stream**: Hand over hosting to any eligible viewer
+- **Leave Room**: 
+  - If viewers exist → automatic transfer to oldest viewer
+  - If no viewers → room enters "waiting" state (NOT ended)
 - **Room Stats**: See who's watching and for how long
+
+**Note:** When you stop streaming, the room stays in "preparing" status. The room only ends after being empty for 5+ minutes.
 
 ## 🧪 Development
 
 ```bash
-# Testing (159 tests, 90%+ coverage)
-pnpm test:setup     # One-time test DB setup
-pnpm test           # Run all tests
+# Testing (265 tests, 90%+ coverage)
+pnpm test           # All tests (unit + E2E, requires PostgreSQL)
+pnpm test:unit      # Unit and integration tests
+pnpm test:e2e       # Playwright E2E tests
 pnpm test:watch     # Watch mode
-
-# Code quality
-pnpm lint           # Check code style
-pnpm format         # Format code
-pnpm check          # Run all checks
-
-# Database operations
-pnpm db:push        # Push schema changes
-pnpm db:generate    # Generate migrations
-pnpm db:migrate     # Run migrations
-pnpm db:studio      # Open Drizzle Studio
-
-# Individual servers
-pnpm dev:web        # Web app only (port 3000)
-pnpm dev:ws         # WebSocket only (port 3001)
+pnpm test:coverage  # With coverage report
 ```
 
 ## 🗺️ Roadmap
 
 ### Completed ✅
+- [x] **WebSocket-First Architecture** - In-memory state with DB persistence
+- [x] **WebRTC Screen Sharing** - P2P streaming with audio configuration
 - [x] Real-time chat system with profanity filtering
 - [x] Comprehensive rate limiting (8 action types)
 - [x] Automatic streamer transfer with cooldown
-- [x] 159 tests with 90%+ coverage
-- [x] Complete documentation (11 docs)
+- [x] **265 tests** (205 unit + 23 E2E + 37 skipped) with 90%+ coverage
+- [x] Complete documentation (14 docs + WebRTC docs)
+- [x] Playwright E2E test suite (23 tests)
 
 ### In Progress 🚧
-- [ ] WebRTC video/audio streaming
-- [ ] E2E tests with Playwright
+- [ ] E2E tests with Playwright (configuration ready)
 
 ### Planned 📋
 - [ ] Room categories/tags
 - [ ] User profiles & following
 - [ ] Notifications system
-- [ ] Screen sharing
+- [ ] Stream recording/replay
 - [ ] Mobile app (PWA)
 - [ ] Virtual gifts & donations
 
@@ -191,6 +201,7 @@ Comprehensive documentation is available in the `/docs` directory:
 - **[docs/WEBSOCKET_EVENTS.md](docs/WEBSOCKET_EVENTS.md)** - Socket.io events reference
 - **[docs/TESTING.md](docs/TESTING.md)** - Testing guide
 - **[docs/RATE_LIMITING.md](docs/RATE_LIMITING.md)** - Rate limit configuration
+- **[docs/webrtc/README.md](docs/webrtc/README.md)** - WebRTC streaming documentation
 - **[PLAN.md](PLAN.md)** - Roadmap and features
 
 ## 🤝 Contributing

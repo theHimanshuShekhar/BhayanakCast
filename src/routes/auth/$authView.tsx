@@ -22,7 +22,25 @@ function RouteComponent() {
 		);
 	}
 
-	// For sign-in and other auth views, use custom Discord-only UI
+	// For sign-in and other auth views, use custom Discord-only UI (or email/password in test mode)
+	return <AuthViewWrapper view={authView} />;
+}
+
+function AuthViewWrapper({ view }: { view: string }) {
+	const isTestMode = process.env.NODE_ENV === "test";
+
+	// In test mode, use Better Auth's default UI which includes email/password
+	if (isTestMode && (view === "sign-in" || view === "sign-up")) {
+		return (
+			<main className="flex h-full w-full items-center justify-center bg-depth-0 p-4">
+				<div className="w-full max-w-md rounded-xl border border-border-subtle bg-depth-1 p-8">
+					<AuthView pathname={view} />
+				</div>
+			</main>
+		);
+	}
+
+	// In production, use Discord-only UI
 	return <DiscordAuthView />;
 }
 

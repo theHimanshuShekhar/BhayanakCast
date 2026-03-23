@@ -17,6 +17,9 @@ interface WebSocketContextType {
 	socket: Socket | null;
 	isConnected: boolean;
 	userCount: number;
+	userId: string | null;
+	currentRoomId: string | null;
+	setCurrentRoomId: (roomId: string | null) => void;
 	sendMessage: (message: unknown) => void;
 }
 
@@ -54,6 +57,8 @@ function getEffectiveUserId(sessionUserId: string | undefined): string {
 export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 	const [isConnected, setIsConnected] = useState(false);
 	const [userCount, setUserCount] = useState(0);
+	const [userId, setUserId] = useState<string | null>(null);
+	const [currentRoomId, setCurrentRoomId] = useState<string | null>(null);
 	const socketRef = useRef<Socket | null>(null);
 	const debouncedUpdateRef = useRef<((count: number) => void) | null>(null);
 	const { data: session } = authClient.useSession();
@@ -94,12 +99,22 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 		socket.on("connect", () => {
 			setIsConnected(true);
 			// Identify the user after connection
-			const userId = getEffectiveUserId(session?.user?.id);
+			const effectiveUserId = getEffectiveUserId(session?.user?.id);
+			setUserId(effectiveUserId);
 			socket.emit("identify", {
-				userId,
-				userName: session?.user?.name || userId,
+				userId: effectiveUserId,
+				userName: session?.user?.name || effectiveUserId,
 				userImage: session?.user?.image,
 			});
+
+			// Auto-rejoin room if we were in one before disconnect
+			if (currentRoomId && effectiveUserId) {
+				console.log("[WebSocket] Auto-rejoining room:", currentRoomId);
+				socket.emit("room:rejoin", {
+					roomId: currentRoomId,
+					userId: effectiveUserId,
+				});
+			}
 		});
 
 		socket.on("disconnect", () => {
@@ -113,7 +128,13 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 		return () => {
 			socket.disconnect();
 		};
-	}, [wsUrl, session?.user?.id, session?.user?.name, session?.user?.image]);
+	}, [
+		wsUrl,
+		session?.user?.id,
+		session?.user?.name,
+		session?.user?.image,
+		currentRoomId,
+	]);
 
 	// Re-identify when session changes (user logs in/out)
 	useEffect(() => {
@@ -140,6 +161,9 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 				socket: socketRef.current,
 				isConnected,
 				userCount,
+				userId,
+				currentRoomId,
+				setCurrentRoomId,
 				sendMessage,
 			}}
 		>

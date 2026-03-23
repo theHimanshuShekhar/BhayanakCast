@@ -175,7 +175,7 @@ export function RoomList({ initialRooms, userId }: RoomListProps) {
 					/>
 				</div>
 				{userId && (
-					<CreateRoomModal userId={userId}>
+					<CreateRoomModal>
 						<button
 							type="button"
 							className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-accent hover:bg-accent-hover text-bg-primary font-bold transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-accent/20 whitespace-nowrap xl:hidden"

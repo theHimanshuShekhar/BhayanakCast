@@ -1,15 +1,12 @@
-import { TanStackDevtools } from "@tanstack/react-devtools";
 import type { QueryClient } from "@tanstack/react-query";
 import {
 	createRootRouteWithContext,
 	HeadContent,
 	Scripts,
 } from "@tanstack/react-router";
-import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import Header from "../components/Header";
 import { AuthProviders } from "../integrations/better-auth/providers";
 import PostHogProvider from "../integrations/posthog/provider";
-import TanStackQueryDevtools from "../integrations/tanstack-query/devtools";
 import TanStackQueryProvider from "../integrations/tanstack-query/root-provider";
 import { ThemeProvider } from "../lib/theme-context";
 import { WebSocketProvider } from "../lib/websocket-context";
@@ -66,18 +63,6 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 									<div className="flex-1 overflow-auto bg-depth-0">
 										{children}
 									</div>
-									<TanStackDevtools
-										config={{
-											position: "bottom-right",
-										}}
-										plugins={[
-											{
-												name: "Tanstack Router",
-												render: <TanStackRouterDevtoolsPanel />,
-											},
-											TanStackQueryDevtools,
-										]}
-									/>
 								</WebSocketProvider>
 							</PostHogProvider>
 						</AuthProviders>

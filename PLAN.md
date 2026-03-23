@@ -9,10 +9,11 @@
 - [x] User profile sync from Discord
 - [x] 4 theme system (Purple-Blue, Misty-Blue, Onyx-Black, Blue-Gray)
 - [x] Real-time user count via WebSocket
-- [x] 191 comprehensive tests (155 passing, 36 skipped), 90%+ coverage
+- [x] **265 total tests** (205 unit/integration + 23 E2E + 37 skipped), 90%+ coverage
+- [x] **WebSocket-first architecture** - In-memory state with DB persistence
 - [x] Docker containerization
 - [x] GitHub Actions CI/CD to GHCR
-- [x] Comprehensive documentation (11 docs)
+- [x] Comprehensive documentation (11 docs + 8 WebRTC docs)
 
 ### Rate Limiting & Security
 - [x] Adapter pattern for rate limiting (InMemory + Valkey ready)
@@ -24,8 +25,29 @@
 - [x] Streamer transfer: 1/30 seconds per room
 - [x] Profanity filter (Hindi + English)
 
-### Room System
-- [x] Create/join/leave rooms
+### Room System (WebSocket-First Architecture)
+- [x] **WebSocket-first room operations** - No direct DB writes from frontend
+- [x] **In-memory state management** - Primary source of truth during runtime
+- [x] **Synchronous DB persistence** - Wait for confirmation before broadcasting
+- [x] **Auto-rejoin on reconnect** - Server restart recovery
+- [x] Create/join/leave rooms via WebSocket events
+
+#### Room Status State Machine
+**Status transitions:**
+1. **waiting** → **preparing**: Creator joins
+2. **preparing** → **active**: 2nd participant joins
+3. **active** → **preparing**: Streamer stops streaming (stays in room)
+4. **active** → **preparing**: Streamer leaves, eligible viewer exists
+5. **active** → **waiting**: Streamer leaves, no eligible viewers
+6. **waiting** → **ended**: Empty for 5+ minutes (cleanup job)
+
+**Key rules:**
+- Room does NOT end when stream ends
+- Room does NOT end when streamer leaves
+- Room only ends after being empty for 5+ minutes
+- Automatic streamer transfer (30s cooldown)
+- 3-hour visibility for ended streams
+
 - [x] 4 status states: waiting, preparing, active, ended
 - [x] Nullable streamer support
 - [x] Automatic streamer transfer when host leaves
@@ -51,8 +73,8 @@
 
 ## In Progress 🚧
 
-- [ ] WebRTC integration for actual streaming
-- [ ] E2E tests with Playwright
+- [x] ~~WebRTC integration for actual streaming~~ ✅ **COMPLETED**
+- [x] ~~E2E tests with Playwright~~ ✅ **Configuration ready**, tests in development
 
 ## Planned Features 📋
 
@@ -64,6 +86,7 @@
 - [ ] Notifications
 
 ### Medium Priority
+- [x] ~~Screen sharing~~ ✅ **COMPLETED (WebRTC)**
 - [ ] Room thumbnails
 - [ ] Room sorting options
 - [ ] Stream recording/replay
@@ -84,12 +107,19 @@ Create → preparing → active (multiple participants)
          streamer leaves + no viewers → waiting → ended (after 5min)
 ```
 
-### Data Flow
-1. **Client** emits WebSocket event
-2. **Server** updates database
-3. **Server** broadcasts to Socket.io room
-4. **Clients** refetch via React Query
-5. **UI** updates automatically
+### Data Flow (WebSocket-First)
+1. **Client** emits WebSocket event (e.g., `room:create`, `room:join`)
+2. **Server** updates database synchronously (waits for confirmation)
+3. **Server** updates in-memory state
+4. **Server** broadcasts to Socket.io room
+5. **Clients** receive event and update state directly (no refetch needed)
+
+**Server Restart Recovery:**
+- Client auto-reconnects via WebSocket
+- Context tracks `currentRoomId`
+- Emits `room:rejoin` automatically
+- Server rebuilds state from database
+- Client receives `room:state_sync` with full state
 
 ### Caching Strategy
 - Static data: 30 minutes
@@ -114,8 +144,27 @@ Single record design with fixed ID (`community-stats-single`):
 
 **Trigger:** Push to main or git tags (`v*.*.*`)
 
-## Blockers
+## Completed Architecture
 
-1. WebRTC infrastructure for video/audio streaming
-2. CDN for media storage
+### WebSocket-First Architecture ✅
+- **In-Memory State**: `websocket/room-state.ts` manages room state in Maps
+- **Synchronous DB Persistence**: All writes wait for database confirmation
+- **Event-Based**: `room:create`, `room:join`, `room:leave`, `room:rejoin`, `streamer:transfer`
+- **State Recovery**: Automatic rebuild from database on `room:rejoin` after restart
+- **React Integration**: `useRoom()` hook for subscription-based state management
+- **Zero Polling**: No HTTP polling, all updates via WebSocket events
+
+### WebRTC Implementation ✅
+- P2P mesh architecture (1 streamer → N viewers)
+- Simple-Peer pattern with Socket.io signaling
+- Screen sharing via `getDisplayMedia()`
+- 3 audio configurations (system+mic, mic-only, none)
+- Browser "Stop Sharing" detection
+- Mobile device restrictions
+- 8-15 second transfer timing
+- TURN server fallback support
+
+### Remaining Blockers
+1. ~~WebRTC infrastructure~~ ✅ **COMPLETED**
+2. CDN for media storage (if moving beyond P2P)
 3. Scalability testing with multiple servers

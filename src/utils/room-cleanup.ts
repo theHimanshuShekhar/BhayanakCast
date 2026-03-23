@@ -16,6 +16,7 @@ export async function findRoomsToEnd() {
 
 	// Find waiting rooms (no streamer) with no active participants
 	// where the last participant left more than 5 minutes ago
+	// AND room was created more than 5 minutes ago (safety check)
 	const roomsToEnd = await db
 		.select({
 			id: streamingRooms.id,
@@ -25,6 +26,8 @@ export async function findRoomsToEnd() {
 		.where(
 			and(
 				eq(streamingRooms.status, "waiting"),
+				// Room must be at least 5 minutes old (prevent ending newly created rooms)
+				sql`${streamingRooms.createdAt} < ${gracePeriodAgo}`,
 				// No active participants in this room
 				sql`NOT EXISTS (
 					SELECT 1 FROM ${roomParticipants}

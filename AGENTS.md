@@ -21,8 +21,8 @@ pnpm db:push
 # 5. Start development
 pnpm dev              # Runs web (3000) + WebSocket (3001)
 
-# 6. Run tests (in another terminal)
-pnpm test             # Auto-creates test DB and runs all tests
+# 6. Run tests (in another terminal, requires dev server running)
+pnpm test             # Auto-creates test DB and runs all tests (unit + E2E)
 ```
 
 ## Commands
@@ -36,9 +36,12 @@ pnpm dev:ws           # WebSocket only
 
 ### Testing
 ```bash
-pnpm test             # All tests (requires PostgreSQL)
-pnpm test:watch       # Watch mode
+pnpm test             # All tests (unit + integration + E2E, requires PostgreSQL)
+pnpm test:unit        # Unit and integration tests only
+pnpm test:e2e         # Playwright E2E tests only
+pnpm test:watch       # Watch mode (unit tests)
 pnpm test:coverage    # With coverage report
+pnpm test:e2e:ui      # E2E tests with UI mode
 pnpm vitest run path/to/test.ts
 ```
 
@@ -64,25 +67,59 @@ pnpm db:migrate       # Run migrations
 **Database:** PostgreSQL 16 + Drizzle ORM  
 **Real-time:** Socket.io WebSocket server (port 3001)  
 **Styling:** Tailwind CSS v4 with custom dark theme  
-**Testing:** Vitest v3 + jsdom (155 passing, 36 skipped, 191 total)  
+**Testing:** Vitest v3 + jsdom (205 tests, 90%+ coverage) + Playwright E2E (23 tests)  
 **Formatter:** Biome (not Prettier)
 
 ### Key Features
 
-🎥 **Real-time Streaming** - WebSocket-powered rooms with live chat  
+🎥 **WebRTC Screen Sharing** - P2P streaming with audio configuration  
 🔄 **Automatic Streamer Transfer** - Ownership transfers to earliest viewer  
 ⏱️ **Watch Time Tracking** - Community statistics and user relationships  
 🛡️ **Rate Limiting** - 8 different action types protected  
 🎨 **Discord-inspired UI** - Dark theme with depth-based styling  
 🔒 **Discord OAuth** - Secure authentication  
+🧪 **Comprehensive Testing** - 238 unit/integration + 23 E2E tests  
 
 ### Project Stats
 
-- **Tests:** 155 passing, 36 skipped (191 total)
+- **Tests:** 238 unit/integration + 23 E2E (261 total)
 - **Coverage:** 90%+ threshold
 - **Rate Limits:** Room create (3/min), Join (10/min), Chat (30/15s), etc.
 - **Room States:** 4 lifecycle states (waiting → preparing → active → ended)
+- **WebRTC:** P2P screen sharing with 3 audio modes
 - **Community Stats:** Single-record upsert pattern (no historical data)
+
+## WebSocket-First Architecture (NEW)
+
+All room operations now go through WebSocket. Database is secondary (persistence layer only).
+
+### Architecture
+```
+Frontend → WebSocket Server → Database (sync) → Broadcast
+              ↓
+         In-Memory State (primary)
+```
+
+### Key Rules
+1. **Frontend NEVER writes to database** - All room operations via WebSocket
+2. **Database writes are synchronous** - Wait for confirmation before broadcasting
+3. **WebSocket maintains primary state** - In-memory Map is source of truth during runtime
+4. **Auto-rejoin on reconnect** - Clients automatically recover after server restart
+
+### New Events
+- `room:create` - Create room (replaces HTTP server fn)
+- `room:join` - Join room (replaces HTTP server fn)
+- `room:leave` - Leave room (replaces HTTP server fn)
+- `room:rejoin` - Reconnect after server restart
+- `room:state_sync` - Full state for rejoins
+
+### Files
+- `websocket/room-state.ts` - In-memory state management
+- `websocket/room-events.ts` - Room event handlers
+- `websocket/db-persistence.ts` - DB write operations
+- `src/hooks/useRoom.ts` - Room state subscription
+
+See [WebSocket Architecture](./docs/WEBSOCKET_ARCHITECTURE.md) for details.
 
 ## Coding Standards
 
@@ -151,40 +188,136 @@ describe("RoomCard", () => {
 
 See [Testing Guide](./docs/TESTING.md) for detailed documentation.
 
+### E2E Testing Guidelines
+
+#### Test Authentication Pattern
+
+**CRITICAL:** E2E tests must use UI-based login, not cookies:
+
+```typescript
+import { test, expect } from "../utils/auth";
+
+const TEST_VIEWPORT = { width: 1200, height: 800 };
+
+async function loginUser(page: any, email: string) {
+  await page.goto("/auth/sign-in");
+  await page.waitForLoadState("networkidle");
+  await page.waitForTimeout(1000);
+  await page.fill('input[type="email"]', email);
+  await page.fill('input[type="password"]', "testpassword123");
+  await page.click('button[type="submit"]');
+  await page.waitForURL("http://localhost:3000/", { timeout: 10000 });
+  await page.waitForLoadState("networkidle");
+  await page.waitForTimeout(1000);
+}
+
+test("example", async ({ page, signupTestUser }) => {
+  const user = await signupTestUser("Test User");
+  await loginUser(page, user.email);
+  await page.setViewportSize(TEST_VIEWPORT); // AFTER login!
+  await page.locator('button:has-text("Create Room")').first().click({ force: true });
+});
+```
+
+#### Key Rules
+
+1. **Always login via UI** - Never set cookies directly (Better Auth requirement)
+2. **Set viewport AFTER login** - Setting before breaks the auth form
+3. **Use `TEST_VIEWPORT`** - `{ width: 1200, height: 800 }` for Create Room button visibility
+4. **Use force click** - `click({ force: true })` for buttons that may be hidden
+5. **Close contexts in finally** - Prevent resource leaks in multi-user tests
+6. **Use flexible regex** - `text=/\\d+ viewers?/` for viewer counts (websocket delay)
+7. **Wait for websocket sync** - `await page.waitForTimeout(2000)` before checking viewer counts
+
+#### Common Patterns
+
+**Single User:**
+```typescript
+test("single user", async ({ page, signupTestUser }) => {
+  const user = await signupTestUser("Test User");
+  await loginUser(page, user.email);
+  await page.setViewportSize(TEST_VIEWPORT);
+  // ... test
+});
+```
+
+**Multi-User:**
+```typescript
+test("multi-user", async ({ browser, signupTestUser }) => {
+  const user1 = await signupTestUser("User 1");
+  const user2 = await signupTestUser("User 2");
+  const ctx1 = await browser.newContext();
+  const ctx2 = await browser.newContext();
+  try {
+    await loginUser(await ctx1.newPage(), user1.email);
+    await loginUser(await ctx2.newPage(), user2.email);
+    // ... test
+  } finally {
+    await ctx1.close();
+    await ctx2.close();
+  }
+});
+```
+
+See [e2e/README.md](./e2e/README.md) for complete documentation.
+
 ## Project Structure
 
 ```
 src/
-├── components/      # UI components (RoomCard, Chat, Header, etc.)
-├── db/             # Database layer (SERVER-ONLY)
-│   ├── schema.ts   # Drizzle ORM table definitions
-│   └── queries/    # Query functions (stats, etc.)
-├── lib/            # Core utilities
-│   ├── auth.ts     # Better Auth configuration
+├── components/           # UI components (RoomCard, Chat, Header, etc.)
+│   ├── AudioConfigModal.tsx
+│   ├── StreamerControls.tsx
+│   └── ...
+├── db/                  # Database layer (SERVER-ONLY)
+│   ├── schema.ts        # Drizzle ORM table definitions
+│   └── queries/         # Query functions (stats, etc.)
+├── hooks/               # React hooks
+│   └── useWebRTC.ts     # WebRTC streaming hook
+├── lib/                 # Core utilities
+│   ├── auth.ts          # Better Auth configuration
+│   ├── device-detection.ts  # Mobile/desktop detection
 │   ├── rate-limiter.ts  # Rate limiting system
 │   ├── profanity-filter.ts
+│   ├── webrtc-config.ts # WebRTC configuration
 │   └── websocket-context.tsx
-├── routes/         # TanStack Router file-based routes
-│   ├── index.tsx   # Home page
+├── routes/              # TanStack Router file-based routes
+│   ├── index.tsx        # Home page
 │   ├── room.$roomId.tsx
-│   └── api/        # API routes
-├── utils/          # Server utility functions
-│   ├── rooms.ts    # Room CRUD operations
-│   ├── home.ts     # Home page data
+│   └── api/             # API routes
+├── types/               # TypeScript types
+│   └── webrtc.ts        # WebRTC type definitions
+├── utils/               # Server utility functions
+│   ├── rooms.ts         # Room CRUD operations
+│   ├── home.ts          # Home page data
 │   └── websocket-client.ts
-└── styles.css      # Global styles with theme system
+└── styles.css           # Global styles with theme system
 
-websocket/          # WebSocket server (separate process)
+websocket/               # WebSocket server (separate process)
 ├── websocket-server.ts
-└── websocket-room-manager.ts
+├── websocket-room-manager.ts
+├── room-state.ts        # ⭐ In-memory state management (NEW)
+├── room-events.ts       # ⭐ Room event handlers (NEW)
+└── db-persistence.ts    # ⭐ Database persistence (NEW)
 
-tests/              # Test files
-├── unit/           # Unit tests
-├── integration/    # Integration tests
-├── fixtures/       # Test data
-└── utils/          # Test utilities
+tests/                   # Test files
+├── unit/                # Unit tests
+│   └── webrtc/          # WebRTC tests (47 tests)
+├── integration/         # Integration tests
+│   └── webrtc/          # WebRTC integration tests
+├── fixtures/            # Test data
+└── utils/               # Test utilities
 
-docs/               # Documentation (see below)
+e2e/                     # E2E tests (Playwright)
+├── fixtures/
+├── tests/
+│   ├── room-management.spec.ts
+│   ├── screen-sharing.spec.ts
+│   ├── streamer-transfer.spec.ts
+│   └── chat.spec.ts
+└── README.md
+
+docs/                    # Documentation (see below)
 ```
 
 ## Room System Business Logic
@@ -195,21 +328,37 @@ docs/               # Documentation (see below)
 - **active:** Live streaming, 2+ participants (green "LIVE" indicator)
 - **ended:** Room closed (history icon, visible for 3 hours)
 
-### Streamer Departure
-1. Streamer leaves → earliest viewer auto-becomes streamer
-2. No viewers → streamerId = null, status = waiting
-3. Transfer is automatic (no acceptance needed)
-4. **Cooldown:** 30 seconds between transfers
+### Room Status Transitions (CRITICAL)
+
+**Streamer stops streaming (but stays in room):**
+- Status → **preparing**
+- Streamer remains assigned
+
+**Streamer leaves room:**
+1. Eligible viewer exists → they become streamer → status = **preparing**
+2. No eligible viewers → streamerId = null → status = **waiting**
+
+**Room in "waiting" status:**
+- Empty for 5+ minutes → status = **ended**
+- Can be rejoined before 5 minutes
+
+**Transfer rules:**
+- Automatic (no acceptance needed)
+- 30 second cooldown between transfers
 
 ### Joining Rules
 - User can only be in ONE room at a time
 - Joining waiting room → auto-becomes streamer
 - 2nd participant joins → room becomes active
+- Can rejoin waiting rooms after leaving
 
-### Cleanup
-- Waiting rooms empty for 5 min → status = ended
+### Cleanup (Only Empty Rooms)
+**CRITICAL:** Room only ends when:
+1. Status is "waiting" (no active streamer)
+2. No participants present (empty for 5+ minutes)
+3. Room created > 5 minutes ago
 - Ended rooms visible for 3 hours in "Past Streams"
-- Cleanup job runs every minute
+- Cleanup job runs every 5 minutes
 
 ## Environment Variables
 
@@ -240,6 +389,9 @@ See [Environment Variables](./docs/ENVIRONMENT_VARIABLES.md) for complete guide.
 - **Stats queries:** `src/db/queries/stats.ts`
 - **Rate limiter:** `src/lib/rate-limiter.ts`
 - **Room utilities:** `src/utils/rooms.ts`
+- **WebRTC hook:** `src/hooks/useWebRTC.ts`
+- **Device detection:** `src/lib/device-detection.ts`
+- **WebRTC config:** `src/lib/webrtc-config.ts`
 
 ## Documentation Index
 
@@ -253,7 +405,9 @@ All detailed documentation is in the `/docs` directory:
 - [Database Schema](./docs/DATABASE_SCHEMA.md) - Table definitions and relationships
 - [Room System](./docs/ROOM_SYSTEM.md) - Room lifecycle and business logic
 - [WebSocket Events](./docs/WEBSOCKET_EVENTS.md) - Socket.io events reference
+- [WebSocket Architecture](./docs/WEBSOCKET_ARCHITECTURE.md) - WebSocket-first architecture guide ⭐ NEW
 - [Rate Limiting](./docs/RATE_LIMITING.md) - Rate limit configurations
+- [WebRTC Documentation](./docs/webrtc/) - WebRTC implementation guide (8 files)
 
 ### Development Guides
 - [Project Structure](./docs/PROJECT_STRUCTURE.md) - Directory organization

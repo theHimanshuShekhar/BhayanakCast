@@ -1,7 +1,6 @@
-import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Loader2, Plus } from "lucide-react";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import {
 	Dialog,
 	DialogContent,
@@ -12,47 +11,83 @@ import {
 	DialogTrigger,
 } from "#/components/ui/dialog";
 import { Input } from "#/components/ui/input";
-import { createRoom } from "#/utils/rooms";
+import { useWebSocket } from "#/lib/websocket-context";
 
 interface CreateRoomModalProps {
-	userId: string;
 	children?: React.ReactNode;
 }
 
-export function CreateRoomModal({ userId, children }: CreateRoomModalProps) {
+export function CreateRoomModal({ children }: CreateRoomModalProps) {
 	const [open, setOpen] = useState(false);
 	const [name, setName] = useState("");
 	const [description, setDescription] = useState("");
 	const [error, setError] = useState<string | null>(null);
+	const [isCreating, setIsCreating] = useState(false);
 	const navigate = useNavigate();
+	const { socket, setCurrentRoomId } = useWebSocket();
 	const nameId = useId();
 	const descriptionId = useId();
 
-	const createRoomMutation = useMutation({
-		mutationFn: async () => {
-			return createRoom({
-				data: {
-					name: name.trim(),
-					description: description.trim() || undefined,
-					userId,
-				},
-			});
-		},
-		onSuccess: (data) => {
+	// Listen for room creation response
+	useEffect(() => {
+		if (!socket) return;
+
+		const handleRoomCreated = (data: {
+			room: {
+				id: string;
+				name: string;
+				description?: string;
+				status: string;
+				streamerId: string | null;
+				createdAt: Date;
+			};
+			participant: {
+				userId: string;
+				userName: string;
+				joinedAt: Date;
+				isStreamer: boolean;
+			};
+		}) => {
+			console.log("[CreateRoomModal] Room created:", data.room.name);
+			setIsCreating(false);
 			setOpen(false);
 			setName("");
 			setDescription("");
 			setError(null);
+
+			// Track current room for auto-rejoin
+			setCurrentRoomId(data.room.id);
+
 			// Navigate to the new room
-			void navigate({ to: "/room/$roomId", params: { roomId: data.room.id } });
-		},
-		onError: (err: Error) => {
-			setError(err.message || "Failed to create room");
-		},
-	});
+			void navigate({
+				to: "/room/$roomId",
+				params: { roomId: data.room.id },
+			});
+		};
+
+		const handleRoomCreateError = (data: { message: string }) => {
+			console.error("[CreateRoomModal] Room creation failed:", data.message);
+			setIsCreating(false);
+			setError(data.message);
+		};
+
+		socket.on("room:created", handleRoomCreated);
+		socket.on("room:create_error", handleRoomCreateError);
+
+		return () => {
+			socket.off("room:created", handleRoomCreated);
+			socket.off("room:create_error", handleRoomCreateError);
+		};
+	}, [socket, navigate, setCurrentRoomId]);
 
 	const handleSubmit = (e: React.FormEvent) => {
 		e.preventDefault();
+
+		if (!socket) {
+			setError("Not connected to server");
+			return;
+		}
+
 		if (name.trim().length < 3) {
 			setError("Room name must be at least 3 characters");
 			return;
@@ -65,7 +100,19 @@ export function CreateRoomModal({ userId, children }: CreateRoomModalProps) {
 			setError("Description must be less than 500 characters");
 			return;
 		}
-		createRoomMutation.mutate();
+
+		setIsCreating(true);
+		setError(null);
+
+		console.log("[CreateRoomModal] Emitting room:create", {
+			name: name.trim(),
+		});
+
+		// Emit WebSocket event to create room
+		socket.emit("room:create", {
+			name: name.trim(),
+			description: description.trim() || undefined,
+		});
 	};
 
 	return (
@@ -135,16 +182,16 @@ export function CreateRoomModal({ userId, children }: CreateRoomModalProps) {
 							type="button"
 							onClick={() => setOpen(false)}
 							className="px-4 py-2 rounded-lg bg-depth-2 text-text-secondary hover:bg-depth-3 transition-colors"
-							disabled={createRoomMutation.isPending}
+							disabled={isCreating}
 						>
 							Cancel
 						</button>
 						<button
 							type="submit"
-							disabled={createRoomMutation.isPending || !name.trim()}
+							disabled={isCreating || !name.trim() || !socket}
 							className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-accent hover:bg-accent-hover text-bg-primary font-bold transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
 						>
-							{createRoomMutation.isPending ? (
+							{isCreating ? (
 								<>
 									<Loader2 className="h-4 w-4 animate-spin" />
 									<span>Creating...</span>
