@@ -13,9 +13,9 @@ import {
 const CACHE_TTL = 30 * 60 * 1000;
 
 /**
- * Short Cache TTL: 2 minutes for frequently changing stats (in milliseconds)
+ * Short Cache TTL: 5 seconds for live room data (minimal cache for real-time updates)
  */
-const SHORT_CACHE_TTL = 2 * 60 * 1000;
+const SHORT_CACHE_TTL = 5 * 1000;
 
 /**
  * Simple in-memory cache with TTL

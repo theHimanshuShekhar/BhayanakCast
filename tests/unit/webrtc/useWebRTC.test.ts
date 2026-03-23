@@ -182,18 +182,20 @@ describe("useWebRTC Hook", () => {
 
 			unmount();
 
-			// Verify off was called for each event type (6 events)
-			expect(mockSocket.off).toHaveBeenCalledTimes(6);
-			
+			// Verify off was called for each event type (8 events)
+			expect(mockSocket.off).toHaveBeenCalledTimes(8);
+
 			// Verify specific event names were cleaned up
 			const offCalls = mockSocket.off.mock.calls;
 			const eventNames = offCalls.map((call) => call[0]);
 			expect(eventNames).toContain("webrtc:offer");
 			expect(eventNames).toContain("webrtc:answer");
 			expect(eventNames).toContain("webrtc:ice_candidate");
+			expect(eventNames).toContain("webrtc:streamer_ready");
 			expect(eventNames).toContain("webrtc:transfer_initiating");
 			expect(eventNames).toContain("webrtc:become_streamer");
 			expect(eventNames).toContain("webrtc:reconnect_now");
+			expect(eventNames).toContain("webrtc:screen_share_ended");
 		});
 	});
 
@@ -468,6 +470,76 @@ describe("useWebRTC Hook", () => {
 			await waitFor(() => {
 				expect(result.current.transferState).toBe("reconnecting");
 				expect(result.current.streamerId).toBe("user-1");
+			});
+		});
+	});
+
+	describe("Streamer Ready Event", () => {
+		it("connects to streamer when streamer_ready event is received", async () => {
+			const { result } = renderHook(() =>
+				useWebRTC({ roomId: "test-room", userId: "user-2" }),
+			);
+
+			// Get the streamer_ready handler
+			const streamerReadyHandler = mockSocket.on.mock.calls.find(
+				(call) => call[0] === "webrtc:streamer_ready",
+			)?.[1];
+
+			act(() => {
+				streamerReadyHandler({
+					streamerId: "user-1",
+					streamerName: "User 1",
+					audioConfig: "system-and-mic",
+				});
+			});
+
+			await waitFor(() => {
+				expect(result.current.streamerId).toBe("user-1");
+				expect(result.current.connectionStatus).toBe("connecting");
+			});
+		});
+
+		it("does not connect when current user is the streamer", async () => {
+			const { result } = renderHook(() =>
+				useWebRTC({ roomId: "test-room", userId: "user-1" }),
+			);
+
+			// Get the streamer_ready handler
+			const streamerReadyHandler = mockSocket.on.mock.calls.find(
+				(call) => call[0] === "webrtc:streamer_ready",
+			)?.[1];
+
+			act(() => {
+				streamerReadyHandler({
+					streamerId: "user-1",
+					streamerName: "User 1",
+					audioConfig: "system-and-mic",
+				});
+			});
+
+			// Should not change streamerId since we are the streamer
+			expect(result.current.streamerId).toBeNull();
+		});
+	});
+
+	describe("Screen Share Ended Event", () => {
+		it("clears remote streams when screen_share_ended event is received", async () => {
+			const { result } = renderHook(() =>
+				useWebRTC({ roomId: "test-room", userId: "user-2" }),
+			);
+
+			// Get the screen_share_ended handler
+			const screenShareEndedHandler = mockSocket.on.mock.calls.find(
+				(call) => call[0] === "webrtc:screen_share_ended",
+			)?.[1];
+
+			act(() => {
+				screenShareEndedHandler();
+			});
+
+			await waitFor(() => {
+				expect(result.current.remoteStream).toBeNull();
+				expect(result.current.connectionStatus).toBe("idle");
 			});
 		});
 	});

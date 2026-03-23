@@ -255,7 +255,7 @@ function RoomDetailPage() {
 	detectDevice();
 
 	// WebSocket-first room state (replaces React Query polling)
-	const { roomState, leaveRoom } = useRoom(roomId);
+	const { roomState, leaveRoom, isJoined } = useRoom(roomId);
 
 	// WebRTC hook for streaming
 	const { localStream, remoteStream, transferState, transferInfo } = useWebRTC({
@@ -328,15 +328,30 @@ function RoomDetailPage() {
 		// Join is handled automatically by useRoom, but we can trigger it here if needed
 	}, [userId, isActive, isConnected]);
 
+	// Refs to track latest values for cleanup
+	const socketRef = useRef(socket);
+	const isConnectedRef = useRef(isConnected);
+	const roomIdRef = useRef(roomId);
+	const isJoinedRef = useRef(isJoined);
+
+	// Update refs when values change
+	useEffect(() => {
+		socketRef.current = socket;
+		isConnectedRef.current = isConnected;
+		roomIdRef.current = roomId;
+		isJoinedRef.current = isJoined;
+	}, [socket, isConnected, roomId, isJoined]);
+
 	// Leave room when component unmounts (user leaves the page)
 	useEffect(() => {
 		return () => {
-			if (socket && isConnected) {
+			// Only leave if we actually joined the room
+			if (socketRef.current && isConnectedRef.current && isJoinedRef.current) {
 				console.log("[Room] Component unmounting - leaving room");
-				socket.emit("room:leave", { roomId });
+				socketRef.current.emit("room:leave", { roomId: roomIdRef.current });
 			}
 		};
-	}, [socket, isConnected, roomId]);
+	}, []); // Empty deps - only run cleanup on unmount
 
 	// Send device info on identify
 	useEffect(() => {
