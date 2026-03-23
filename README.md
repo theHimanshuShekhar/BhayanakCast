@@ -8,7 +8,9 @@
 [![Tailwind](https://img.shields.io/badge/Tailwind-v4-38B2AC.svg)](https://tailwindcss.com/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791.svg)](https://www.postgresql.org/)
 
-**BhayanakCast** is a real-time streaming platform with a Discord-inspired dark aesthetic, built for creators who want to connect with their audience in a more intimate, community-focused way.
+**Live Production Site:** [cast.bhayanak.net](https://cast.bhayanak.net)
+
+**BhayanakCast** is a real-time streaming platform with a modern dark aesthetic, built for creators who want to connect with their audience in a more intimate, community-focused way.
 
 ![BhayanakCast Preview](https://via.placeholder.com/800x400/1a1b1e/5865f2?text=BhayanakCast+Preview)
 
@@ -38,7 +40,7 @@
 - Community stats with live participant counts
 - Anonymous browsing for non-logged-in users
 
-### 🎨 **Discord-Inspired Design**
+### 🎨 **Modern Dark Design**
 - 4 beautiful themes: Purple-Blue, Misty-Blue, Onyx-Black, Blue-Gray
 - Depth-based elevation system
 - JetBrains Mono monospace font
@@ -258,7 +260,6 @@ MIT License - see [LICENSE](LICENSE) file for details.
 - [Drizzle ORM](https://orm.drizzle.team) for type-safe database operations
 - [Socket.io](https://socket.io) for real-time communication
 - [shadcn/ui](https://ui.shadcn.com) for UI components
-- The Discord design team for inspiration
 
 ---
 
