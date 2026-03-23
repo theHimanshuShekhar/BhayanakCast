@@ -14,21 +14,23 @@
 
 ## ✨ Features
 
-### 🎥 **WebRTC Screen Sharing** ⭐ NEW
+### 🎥 **WebRTC Screen Sharing**
 - **P2P Screen Sharing** with 3 audio modes:
   - System audio + Microphone
   - System audio only
   - No audio
 - **Browser "Stop Sharing" Detection** - Automatic transfer when clicked
 - **Mobile Restrictions** - Mobile users can view but cannot stream
-- **Adaptive Quality** - Simulcast for best viewing experience
-- **Graceful Transfers** - 8-15 second handoff between streamers
+- **Connection Recovery** - ICE restart on connection failure
+- **Audio Toggle** - Mute/unmute during streaming
+- **Graceful Transfers** - Automatic streamer handoff with cooldown
 
 ### 📺 **Smart Room System**
 - **4-State Room Lifecycle**: `waiting` → `preparing` → `active` → `ended`
 - Automatic streamer transfer when hosts leave
 - Rooms persist without streamers (enters "waiting" state)
 - 5-minute grace period before cleanup
+- Mobile users excluded from streamer eligibility
 
 ### 👥 **Community First**
 - Track time spent with other users automatically
@@ -42,20 +44,25 @@
 - JetBrains Mono monospace font
 - Smooth transitions and animations
 
-### ⚡ **WebSocket-First Architecture** ⭐ NEW
+### ⚡ **WebSocket-First Architecture**
 - **In-Memory State** - WebSocket server is primary source of truth
 - **Synchronous DB Persistence** - All operations wait for DB confirmation
 - **Auto-Rejoin** - Automatic recovery after server restart
 - **Real-Time Updates** - No polling, instant state sync
 - Live user count via WebSocket
 - Real-time chat with profanity filtering
-- Comprehensive rate limiting (8 action types)
+- Comprehensive rate limiting (9 action types)
 
 ### 🔐 **Secure Authentication**
 - Discord OAuth (production ready)
 - Email/Password (development only)
 - Session management with Better Auth
 - Protected routes
+
+### 🐳 **Docker Support**
+- Multi-stage Dockerfile for optimized builds
+- Combined web app + WebSocket server in single container
+- Automatic CI/CD deployment to GitHub Container Registry
 
 ## 🚀 Tech Stack
 
@@ -67,9 +74,10 @@
 | **Auth** | Better Auth |
 | **Database** | PostgreSQL 16 + Drizzle ORM |
 | **Real-time** | Socket.io + WebRTC |
-| **Streaming** | WebRTC P2P (Simple-Peer pattern) |
+| **Streaming** | WebRTC P2P |
 | **Styling** | Tailwind CSS v4 |
 | **UI Components** | shadcn/ui |
+| **Container** | Docker + GitHub Container Registry |
 
 ## 🛠️ Quick Start
 
@@ -120,6 +128,39 @@ pnpm dev
 
 This starts both the web app (port 3000) and WebSocket server (port 3001).
 
+## 🐳 Docker Deployment
+
+### Build and Run Locally
+
+```bash
+# Build the Docker image
+docker compose build
+
+# Run with Docker Compose (includes PostgreSQL)
+docker compose up -d
+```
+
+The app will be available at:
+- Web App: http://localhost:3000
+- WebSocket: http://localhost:3001
+
+### Production Deployment
+
+The Docker image is automatically built and pushed to GitHub Container Registry on pushes to `main` and version tags.
+
+```bash
+# Pull from GHCR
+docker pull ghcr.io/yourusername/bhayanak-cast:latest
+
+# Run with environment variables
+docker run -p 3000:3000 -p 3001:3001 \
+  -e DATABASE_URL=postgresql://... \
+  -e BETTER_AUTH_SECRET=... \
+  -e DISCORD_CLIENT_ID=... \
+  -e DISCORD_CLIENT_SECRET=... \
+  ghcr.io/yourusername/bhayanak-cast:latest
+```
+
 ## 📖 Room Status Guide
 
 | Status | Meaning | Badge | When it happens |
@@ -155,31 +196,33 @@ This starts both the web app (port 3000) and WebSocket server (port 3001).
 
 **Note:** When you stop streaming, the room stays in "preparing" status. The room only ends after being empty for 5+ minutes.
 
-## 🧪 Development
+## 🧪 Testing
 
 ```bash
-# Testing (265 tests, 90%+ coverage)
-pnpm test           # All tests (unit + E2E, requires PostgreSQL)
-pnpm test:unit      # Unit and integration tests
-pnpm test:e2e       # Playwright E2E tests
+# Unit and integration tests (204 tests, 90%+ coverage)
+pnpm test:unit      # Run Vitest tests
 pnpm test:watch     # Watch mode
 pnpm test:coverage  # With coverage report
+
+# E2E tests (23 tests) - Run locally only, requires dev server
+pnpm test:e2e       # Playwright E2E tests
 ```
+
+**Note:** E2E tests are NOT run in CI (GitHub Actions) as they require the development server running. They should be run locally before major releases.
 
 ## 🗺️ Roadmap
 
 ### Completed ✅
 - [x] **WebSocket-First Architecture** - In-memory state with DB persistence
 - [x] **WebRTC Screen Sharing** - P2P streaming with audio configuration
+- [x] **265 tests** (204 unit/integration + 23 E2E + 38 skipped) with 90%+ coverage
+- [x] **Playwright E2E test suite** (23 tests)
 - [x] Real-time chat system with profanity filtering
-- [x] Comprehensive rate limiting (8 action types)
+- [x] Comprehensive rate limiting (9 action types)
 - [x] Automatic streamer transfer with cooldown
-- [x] **265 tests** (205 unit + 23 E2E + 37 skipped) with 90%+ coverage
 - [x] Complete documentation (14 docs + WebRTC docs)
-- [x] Playwright E2E test suite (23 tests)
-
-### In Progress 🚧
-- [ ] E2E tests with Playwright (configuration ready)
+- [x] Docker containerization with GHCR deployment
+- [x] CI/CD with GitHub Actions
 
 ### Planned 📋
 - [ ] Room categories/tags
@@ -203,10 +246,6 @@ Comprehensive documentation is available in the `/docs` directory:
 - **[docs/RATE_LIMITING.md](docs/RATE_LIMITING.md)** - Rate limit configuration
 - **[docs/webrtc/README.md](docs/webrtc/README.md)** - WebRTC streaming documentation
 - **[PLAN.md](PLAN.md)** - Roadmap and features
-
-## 🤝 Contributing
-
-Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) for details.
 
 ## 📝 License
 

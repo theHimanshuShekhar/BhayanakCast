@@ -290,7 +290,7 @@ These tests verify WebRTC signaling through WebSocket:
 
 When TanStack Start provides official testing support:
 
-1. Re-enable all skipped server function tests (36 tests)
+1. Re-enable all skipped server function tests (38 tests)
 2. Consider running WebSocket signaling tests against a test server instance
 3. Achieve 90%+ coverage across all layers
 
@@ -325,7 +325,9 @@ When TanStack Start provides official testing support:
 | rooms.test.ts | 0 | 20 |
 | websocket-signaling.test.ts | 0 | 2 |
 
-### E2E Tests: 23 implemented ✅
+### E2E Tests: 23 implemented ✅ (Run Locally Only)
+
+**Note:** E2E tests are NOT run in CI as they require the development server running. Run them locally before major releases.
 
 | Suite | Tests |
 |-------|-------|
@@ -344,18 +346,18 @@ When TanStack Start provides official testing support:
 ## Running Tests
 
 ```bash
-# All tests (unit + E2E)
-pnpm test
-
-# Unit tests only
+# Unit and integration tests (204 tests) - Run in CI
 pnpm test:unit
 
-# E2E tests only
-pnpm test:e2e
+# E2E tests (23 tests) - Run locally only, requires dev server
+pnpm dev        # Terminal 1
+pnpm test:e2e   # Terminal 2
 
-# E2E tests with UI
+# E2E tests with UI mode
 pnpm test:e2e:ui
 ```
+
+**Note:** E2E tests are NOT executed in CI. They require the development server running and should be run locally before major releases.
 
 ## Conclusion
 

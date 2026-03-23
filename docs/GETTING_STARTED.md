@@ -50,8 +50,8 @@ pnpm db:studio
 ### Testing
 
 ```bash
-# Run all tests (auto-creates test database on first run)
-pnpm test
+# Run unit and integration tests (204 tests)
+pnpm test:unit
 
 # Run specific test file
 pnpm vitest run tests/unit/rate-limiter.test.ts
@@ -61,7 +61,12 @@ pnpm test:watch
 
 # With coverage
 pnpm test:coverage
+
+# Run E2E tests (requires dev server, run locally only)
+pnpm test:e2e
 ```
+
+**Note:** E2E tests are NOT run in CI. Run them locally before major releases.
 
 ### Code Quality
 
@@ -69,6 +74,57 @@ pnpm test:coverage
 pnpm lint        # Check code style
 pnpm format      # Format code
 pnpm check       # Run all checks (lint + format)
+```
+
+## Docker Build
+
+### Build and Run Locally
+
+```bash
+# Build the Docker image
+docker compose build
+
+# Run with Docker Compose (includes PostgreSQL)
+docker compose up -d
+
+# View logs
+docker compose logs -f
+
+# Stop services
+docker compose down
+```
+
+The app will be available at:
+- Web App: http://localhost:3000
+- WebSocket: http://localhost:3001
+
+### Production Deployment
+
+The Docker image is automatically built and pushed to GitHub Container Registry on pushes to `main` and version tags.
+
+```bash
+# Pull from GHCR
+docker pull ghcr.io/yourusername/bhayanak-cast:latest
+
+# Run with environment variables
+docker run -p 3000:3000 -p 3001:3001 \
+  -e DATABASE_URL=postgresql://... \
+  -e BETTER_AUTH_SECRET=... \
+  -e DISCORD_CLIENT_ID=... \
+  -e DISCORD_CLIENT_SECRET=... \
+  ghcr.io/yourusername/bhayanak-cast:latest
+```
+
+### Testing Production Build Locally
+
+```bash
+# Build production image
+docker build -t bhayanak-cast:test .
+
+# Run with test environment
+docker run -p 3000:3000 -p 3001:3001 \
+  --env-file .env.local \
+  bhayanak-cast:test
 ```
 
 ## First Time Setup
