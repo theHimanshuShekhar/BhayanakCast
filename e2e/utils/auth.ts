@@ -3,11 +3,37 @@
  *
  * Helper functions for creating and managing test users in E2E tests.
  * Each test can create its own independent test users.
+ *
+ * ⚠️ IMPORTANT: All authentication must use UI-based login.
+ * Better Auth requires actual UI login flow - cookie injection does not work.
+ *
+ * @example
+ * ```typescript
+ * import { test, expect, loginUser, TEST_VIEWPORT } from "../utils/auth";
+ *
+ * test("example", async ({ page, signupTestUser }) => {
+ *   const user = await signupTestUser("Test User");
+ *   await loginUser(page, user.email);
+ *   await page.setViewportSize(TEST_VIEWPORT);
+ *   // ... test code
+ * });
+ * ```
  */
 
 import { test as baseTest, type Page, type APIRequestContext } from "@playwright/test";
 
 const TEST_AUTH_BASE_URL = process.env.BASE_URL || "http://localhost:3000";
+
+/**
+ * Standard viewport for E2E tests.
+ * Set AFTER login to ensure Create Room button is visible.
+ */
+export const TEST_VIEWPORT = { width: 1200, height: 800 };
+
+/**
+ * Default password for all test users
+ */
+export const TEST_USER_PASSWORD = "testpassword123";
 
 export interface TestUser {
   userId: string;
@@ -36,7 +62,7 @@ export async function signupTestUser(
   }
 
   const data = await response.json();
-  
+
   if (!data.success) {
     throw new Error(`Signup failed: ${data.error || "Unknown error"}`);
   }
@@ -69,7 +95,7 @@ export async function loginTestUser(
   }
 
   const data = await response.json();
-  
+
   if (!data.success) {
     throw new Error(`Login failed: ${data.error || "Unknown error"}`);
   }
@@ -83,33 +109,38 @@ export async function loginTestUser(
 }
 
 /**
- * Create an authenticated page context for a test user
+ * Login a test user via UI.
+ *
+ * ⚠️ CRITICAL: This must be used instead of cookie-based auth.
+ * Better Auth requires actual UI login flow.
+ *
+ * @param page - Playwright page object
+ * @param email - Test user email
+ * @param password - Test user password (defaults to TEST_USER_PASSWORD)
+ *
+ * @example
+ * ```typescript
+ * const user = await signupTestUser("Test User");
+ * await loginUser(page, user.email);
+ * await page.setViewportSize(TEST_VIEWPORT); // Set AFTER login
+ * ```
  */
-export async function createAuthenticatedContext(
-  browser: any,
-  user: TestUser
-): Promise<{ context: any; page: Page }> {
-  const context = await browser.newContext({
-    storageState: {
-      cookies: [
-        {
-          name: "better-auth.session_token",
-          value: user.token,
-          domain: "localhost",
-          path: "/",
-          expires: Date.now() / 1000 + 3600, // 1 hour
-          httpOnly: true,
-          secure: false,
-          sameSite: "Lax",
-        },
-      ],
-      origins: [],
-    },
-  });
+export async function loginUser(
+  page: Page,
+  email: string,
+  password: string = TEST_USER_PASSWORD
+): Promise<void> {
+  await page.goto("/auth/sign-in");
+  await page.waitForLoadState("networkidle");
+  await page.waitForTimeout(1000); // Wait for React hydration
 
-  const page = await context.newPage();
-  
-  return { context, page };
+  await page.fill('input[type="email"]', email);
+  await page.fill('input[type="password"]', password);
+  await page.click('button[type="submit"]');
+
+  await page.waitForURL("http://localhost:3000/", { timeout: 10000 });
+  await page.waitForLoadState("networkidle");
+  await page.waitForTimeout(1000); // Wait for React hydration
 }
 
 /**
@@ -143,7 +174,7 @@ export const test = baseTest.extend<{
   signupTestUser: async ({ request }, use) => {
     await use((name: string) => signupTestUser(request, name));
   },
-  
+
   // Provide cleanup function as fixture
   cleanupTestUsers: async ({ request }, use) => {
     await use(() => cleanupAllTestUsers(request));
