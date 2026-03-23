@@ -40,6 +40,8 @@ export const Route = createFileRoute("/")({
 		return { ...homeData, session };
 	},
 	pendingComponent: HomePageSkeleton,
+	// Disable caching - always fetch fresh data from database
+	staleTime: 0,
 });
 
 function App() {

@@ -267,12 +267,17 @@ export function useWebRTC({ roomId, userId }: UseWebRTCOptions) {
 
 			peerConnectionsRef.current.set(fromUserId, peerState);
 
-			// Monitor connection state changes for ICE restart
+			// Monitor connection state changes
 			pc.onconnectionstatechange = () => {
 				console.log(`[WebRTC] Connection state: ${pc.connectionState}`);
 				peerState.connectionState = pc.connectionState;
 
-				if (pc.connectionState === "failed") {
+				if (pc.connectionState === "connected") {
+					console.log(
+						`[WebRTC] Successfully connected to viewer ${fromUserId}`,
+					);
+					setLastError(undefined);
+				} else if (pc.connectionState === "failed") {
 					console.error(`[WebRTC] Connection failed with ${fromUserId}`);
 					setLastError("Connection lost. Attempting to reconnect...");
 					// Attempt ICE restart
@@ -391,7 +396,12 @@ export function useWebRTC({ roomId, userId }: UseWebRTCOptions) {
 					console.log(`[WebRTC] Connection state: ${pc.connectionState}`);
 					peerState.connectionState = pc.connectionState;
 
-					if (pc.connectionState === "failed") {
+					if (pc.connectionState === "connected") {
+						// Reset transfer state on successful connection
+						setTransferState("idle");
+						setConnectionStatus("connected");
+						setLastError(undefined);
+					} else if (pc.connectionState === "failed") {
 						console.error(
 							`[WebRTC] Connection failed with streamer ${targetStreamerId}`,
 						);
@@ -495,6 +505,22 @@ export function useWebRTC({ roomId, userId }: UseWebRTCOptions) {
 			handleIceCandidate(data.fromUserId, data.candidate);
 		});
 
+		// Streamer ready - viewers should connect
+		socket.on(
+			"webrtc:streamer_ready",
+			(data: {
+				streamerId: string;
+				streamerName: string;
+				audioConfig: AudioConfig;
+			}) => {
+				console.log("[WebRTC] Streamer ready:", data.streamerId);
+				// Connect to streamer if we're a viewer
+				if (!isStreamer && data.streamerId !== userId) {
+					connectToStreamer(data.streamerId);
+				}
+			},
+		);
+
 		// Transfer events
 		socket.on("webrtc:transfer_initiating", (data: TransferInitiatingEvent) => {
 			handleTransferInitiating(data);
@@ -508,19 +534,41 @@ export function useWebRTC({ roomId, userId }: UseWebRTCOptions) {
 			handleReconnectNow(data);
 		});
 
+		// Screen share ended
+		socket.on("webrtc:screen_share_ended", () => {
+			console.log("[WebRTC] Screen share ended by streamer");
+			// Clear remote streams
+			setRemoteStreams(new Map());
+			setConnectionStatus("idle");
+			// Close all peer connections
+			peerConnectionsRef.current.forEach((peerState) => {
+				try {
+					peerState.connection.close();
+				} catch (_e) {
+					// Ignore errors during cleanup
+				}
+			});
+			peerConnectionsRef.current.clear();
+		});
+
 		return () => {
 			socket.off("webrtc:offer");
 			socket.off("webrtc:answer");
 			socket.off("webrtc:ice_candidate");
+			socket.off("webrtc:streamer_ready");
 			socket.off("webrtc:transfer_initiating");
 			socket.off("webrtc:become_streamer");
 			socket.off("webrtc:reconnect_now");
+			socket.off("webrtc:screen_share_ended");
 		};
 	}, [
 		socket,
+		userId,
+		isStreamer,
 		handleOffer,
 		handleAnswer,
 		handleIceCandidate,
+		connectToStreamer,
 		handleTransferInitiating,
 		handleBecomeStreamer,
 		handleReconnectNow,

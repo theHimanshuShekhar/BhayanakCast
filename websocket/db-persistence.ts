@@ -485,6 +485,49 @@ export async function getActiveParticipantsFromDB(
 }
 
 /**
+ * Find stale rooms from database (waiting status, no participants for 5+ minutes)
+ */
+export async function findStaleRoomsFromDB(
+	maxAgeMinutes: number = 5,
+): Promise<Array<{ id: string; name: string }>> {
+	const { db } = await import("../src/db/index");
+	const now = new Date();
+	const cutoff = new Date(now.getTime() - maxAgeMinutes * 60 * 1000);
+
+	const staleRooms = await db
+		.select({
+			id: streamingRooms.id,
+			name: streamingRooms.name,
+		})
+		.from(streamingRooms)
+		.where(
+			and(
+				eq(streamingRooms.status, "waiting"),
+				// Room must be at least 5 minutes old
+				sql`${streamingRooms.createdAt} < ${cutoff}`,
+				// No active participants
+				sql`NOT EXISTS (
+					SELECT 1 FROM ${roomParticipants}
+					WHERE ${roomParticipants.roomId} = ${streamingRooms.id}
+					AND ${roomParticipants.leftAt} IS NULL
+				)`,
+				// No participants have joined recently (last activity > 5 min ago)
+				sql`(
+					SELECT MAX(${roomParticipants.joinedAt})
+					FROM ${roomParticipants}
+					WHERE ${roomParticipants.roomId} = ${streamingRooms.id}
+				) < ${cutoff} OR NOT EXISTS (
+					SELECT 1 FROM ${roomParticipants}
+					WHERE ${roomParticipants.roomId} = ${streamingRooms.id}
+				)
+			`,
+			),
+		);
+
+	return staleRooms;
+}
+
+/**
  * Check if user is in any active room
  */
 export async function getUserActiveRoom(

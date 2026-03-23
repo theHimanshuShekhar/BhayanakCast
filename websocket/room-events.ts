@@ -24,6 +24,7 @@ import {
 	findStaleRooms,
 	type ParticipantState,
 } from "./room-state";
+import { socketUserMap } from "./websocket-server";
 import {
 	persistRoomCreation,
 	persistParticipantJoin,
@@ -32,7 +33,9 @@ import {
 	persistRoomEnd,
 	getRoomFromDB,
 	getActiveParticipantsFromDB,
+	findStaleRoomsFromDB,
 } from "./db-persistence";
+import { RateLimits, rateLimiter } from "../src/lib/rate-limiter";
 
 // Types for socket data
 interface SocketUserData {
@@ -55,7 +58,7 @@ export function setupRoomEventHandlers(
 	socket: TypedSocket,
 ): void {
 	// Room creation
-	socket.on("room:create", handleRoomCreate(socket));
+	socket.on("room:create", handleRoomCreate(io, socket));
 
 	// Room join
 	socket.on("room:join", handleRoomJoin(io, socket));
@@ -73,15 +76,15 @@ export function setupRoomEventHandlers(
 /**
  * Handle room:create event
  */
-function handleRoomCreate(socket: TypedSocket) {
+function handleRoomCreate(io: SocketIOServer, socket: TypedSocket) {
 	return async (data: { name: string; description?: string }) => {
 		try {
 			const userId = socket.data.userId;
 			const userName = socket.data.userName;
 
-			if (!userId) {
+			if (!userId || userId.startsWith("anonymous:")) {
 				socket.emit("room:create_error", {
-					message: "Not authenticated",
+					message: "You must be logged in to create rooms",
 				});
 				return;
 			}
@@ -134,7 +137,7 @@ function handleRoomCreate(socket: TypedSocket) {
 			// 5. Join socket to room
 			socket.join(roomResult.roomId);
 
-			// 6. Emit success
+			// 6. Emit success to creator
 			socket.emit("room:created", {
 				room: {
 					id: roomResult.roomId,
@@ -177,9 +180,9 @@ function handleRoomJoin(io: SocketIOServer, socket: TypedSocket) {
 			const userName = socket.data.userName;
 			const { roomId } = data;
 
-			if (!userId) {
+			if (!userId || userId.startsWith("anonymous:")) {
 				socket.emit("room:join_error", {
-					message: "Not authenticated",
+					message: "You must be logged in to join rooms",
 				});
 				return;
 			}
@@ -263,6 +266,14 @@ function handleRoomJoin(io: SocketIOServer, socket: TypedSocket) {
 				return;
 			}
 
+			// Check if room is confirmed in database before allowing joins
+			if (!room.dbConfirmed) {
+				socket.emit("room:join_error", {
+					message: "Room is still being created, please try again",
+				});
+				return;
+			}
+
 			// 1. Persist to database (SYNCHRONOUS)
 			const joinResult = await persistParticipantJoin({
 				roomId,
@@ -295,10 +306,15 @@ function handleRoomJoin(io: SocketIOServer, socket: TypedSocket) {
 				updateRoomStatus(roomId, "active");
 			}
 
-			// 3. Join socket to room
-			socket.join(roomId);
+		// 3. Join socket to room and update socketUserMap
+		socket.join(roomId);
+		const socketData = socketUserMap.get(socket.id);
+		if (socketData) {
+			socketData.roomId = roomId;
+			socketUserMap.set(socket.id, socketData);
+		}
 
-			// 4. Emit success to joining user (full state)
+		// 4. Emit success to joining user (full state)
 			const roomState = serializeRoomState(roomId);
 			socket.emit("room:joined", {
 				roomId,
@@ -396,10 +412,15 @@ function handleRoomLeave(io: SocketIOServer, socket: TypedSocket) {
 				updateRoomStatus(roomId, leaveResult.roomStatus);
 			}
 
-			// 3. Leave socket room
-			socket.leave(roomId);
+		// 3. Leave socket room and clear roomId from socketUserMap
+		socket.leave(roomId);
+		const socketData = socketUserMap.get(socket.id);
+		if (socketData) {
+			delete socketData.roomId;
+			socketUserMap.set(socket.id, socketData);
+		}
 
-			// 4. Get updated state
+		// 4. Get updated state
 			const participantCount = getParticipantCount(roomId);
 			const roomState = serializeRoomState(roomId);
 
@@ -456,7 +477,16 @@ function handleRoomRejoin(io: SocketIOServer, socket: TypedSocket) {
 	return async (data: { roomId: string; userId: string }) => {
 		try {
 			const { roomId, userId } = data;
+			const socketUserId = socket.data.userId;
 			const userName = socket.data.userName || "Unknown";
+
+			// Check if socket is authenticated and matches provided userId
+			if (!socketUserId || socketUserId.startsWith("anonymous:") || socketUserId !== userId) {
+				socket.emit("room:join_error", {
+					message: "You must be logged in to rejoin rooms",
+				});
+				return;
+			}
 
 			console.log(`[RoomEvents] User ${userName} rejoining room ${roomId}`);
 
@@ -520,10 +550,15 @@ function handleRoomRejoin(io: SocketIOServer, socket: TypedSocket) {
 
 			room.participants.set(userId, participant);
 
-			// 3. Join socket to room
-			socket.join(roomId);
+		// 3. Join socket to room and update socketUserMap
+		socket.join(roomId);
+		const rejoinSocketData = socketUserMap.get(socket.id);
+		if (rejoinSocketData) {
+			rejoinSocketData.roomId = roomId;
+			socketUserMap.set(socket.id, rejoinSocketData);
+		}
 
-			// 4. Emit full state to rejoining user
+		// 4. Emit full state to rejoining user
 			const roomState = serializeRoomState(roomId);
 			socket.emit("room:state_sync", {
 				roomId,
@@ -565,8 +600,21 @@ function handleStreamerTransfer(io: SocketIOServer, socket: TypedSocket) {
 			const userId = socket.data.userId;
 			const { roomId, newStreamerId } = data;
 
-			if (!userId) {
-				socket.emit("room:error", { message: "Not authenticated" });
+			if (!userId || userId.startsWith("anonymous:")) {
+				socket.emit("room:error", { message: "You must be logged in to transfer streamer" });
+				return;
+			}
+
+			// Check rate limit for streamer transfers (30 second cooldown)
+			const transferLimiter = rateLimiter.forAction("streamer:transfer");
+			const rateLimitResult = transferLimiter.checkAndRecord(
+				userId,
+				RateLimits.STREAMER_TRANSFER,
+			);
+			if (!rateLimitResult.allowed) {
+				socket.emit("room:error", {
+					message: `Transfer cooldown: ${rateLimitResult.retryAfter}s remaining`,
+				});
 				return;
 			}
 
@@ -634,40 +682,57 @@ function handleStreamerTransfer(io: SocketIOServer, socket: TypedSocket) {
 
 /**
  * Run cleanup job - end stale rooms
+ * Only ends rooms that have been empty (no participants) for more than 5 minutes
  */
 export async function runRoomCleanupJob(
 	io: SocketIOServer,
 ): Promise<number> {
 	console.log("[RoomEvents] Running cleanup job...");
 
-	const staleRooms = findStaleRooms(5);
+	// Check both in-memory rooms and database for stale rooms
+	const inMemoryStaleRooms = findStaleRooms(5);
+	const dbStaleRooms = await findStaleRoomsFromDB(5);
 
-	if (staleRooms.length === 0) {
+	// Combine and deduplicate
+	const allStaleRoomIds = new Set([
+		...inMemoryStaleRooms.map((r) => r.id),
+		...dbStaleRooms.map((r) => r.id),
+	]);
+
+	if (allStaleRoomIds.size === 0) {
 		console.log("[RoomEvents] No stale rooms to clean up");
 		return 0;
 	}
 
-	console.log(`[RoomEvents] Found ${staleRooms.length} stale rooms`);
+	console.log(
+		`[RoomEvents] Found ${allStaleRoomIds.size} stale rooms to clean up`,
+	);
 
-	for (const { id, name } of staleRooms) {
+	for (const roomId of allStaleRoomIds) {
 		try {
-			console.log(`[RoomEvents] Ending room: ${name} (${id})`);
+			// Get room name from memory or DB
+			const room = getRoomState(roomId);
+			const roomName = room?.name || roomId;
+
+			console.log(`[RoomEvents] Ending room: ${roomName} (${roomId})`);
 
 			// 1. Persist to database
-			await persistRoomEnd(id);
+			await persistRoomEnd(roomId);
 
 			// 2. Remove from memory
-			deleteRoomState(id);
+			deleteRoomState(roomId);
 
 			// 3. Notify any connected clients
-			io.to(id).emit("room:ended", { roomId: id });
+			io.to(roomId).emit("room:ended", { roomId });
+
+			console.log(`[RoomEvents] Room ended: ${roomName} (${roomId})`);
 		} catch (error) {
-			console.error(`[RoomEvents] Failed to end room ${id}:`, error);
+			console.error(`[RoomEvents] Failed to end room ${roomId}:`, error);
 		}
 	}
 
 	console.log("[RoomEvents] Cleanup job completed");
-	return staleRooms.length;
+	return allStaleRoomIds.size;
 }
 
 /**

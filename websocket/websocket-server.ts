@@ -163,12 +163,15 @@ const io = new Server(httpServer, {
 });
 
 // Track socket -> user mapping for presence
-interface SocketUserData {
+export interface SocketUserData {
 	userId: string;
 	userName: string;
 	roomId?: string;
 	isMobile: boolean;
 }
+
+// Export socketUserMap for room-events.ts to update
+export { socketUserMap };
 
 const socketUserMap = new Map<string, SocketUserData>();
 
