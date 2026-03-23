@@ -62,10 +62,10 @@ e2e/                             # E2E tests (Playwright)
 
 | Category | Count | Status |
 |----------|-------|--------|
-| **Unit Tests** | 204 | ✅ All passing |
-| **Integration Tests** | 66 active, 38 skipped | ✅ Active passing |
-| **E2E Tests** | 23 | ✅ All passing |
-| **Total** | **265** (204 + 23 E2E) | ✅ Comprehensive coverage |
+| **Unit Tests** | ~120 | ✅ All passing |
+| **Integration Tests** | 84 (46 active + 38 skipped) | ✅ Active passing |
+| **E2E Tests** | 23 | ✅ All passing (local only) |
+| **Total** | **265** (204 unit/integration + 23 E2E + 38 skipped) | ✅ Comprehensive coverage |
 
 ## WebRTC Test Summary
 
@@ -86,58 +86,6 @@ Located in `e2e/tests/`:
 ### Skipped WebRTC Tests (2 tests)
 - **websocket-signaling.test.ts (2 tests)** - Requires full WebSocket server infrastructure
   - See [Integration Test Limitations](./INTEGRATION_TEST_LIMITATIONS.md) for details
-tests/
-├── unit/                          # Unit tests
-│   ├── rate-limiter.test.ts      # Rate limiting logic (35 tests)
-│   ├── profanity-filter.test.ts  # Content filtering (49 tests)
-│   ├── RoomCard.test.tsx         # Component tests
-│   ├── CreateRoomModal.test.tsx
-│   ├── CommunityStatsCard.test.tsx
-│   └── webrtc/                   # WebRTC streaming tests (47 tests)
-│       ├── device-detection.test.ts      # 16 tests
-│       ├── useWebRTC.test.ts             # 13 tests
-│       └── components.test.tsx           # 18 tests
-│
-├── integration/                  # Integration tests
-│   ├── room-management.test.ts   # DB queries (15 tests)
-│   ├── user-stats.test.ts        # Stats queries (14 tests)
-│   ├── room-list.test.tsx        # Component + DB
-│   ├── rate-limiting.test.ts     # Skipped (needs server context)
-│   ├── rooms.test.ts             # Skipped (needs server context)
-│   ├── websocket-rate-limiting.test.ts  # WS rate limiting
-│   └── webrtc/                   # WebRTC integration tests
-│       ├── websocket-signaling.test.ts
-│       ├── mobile-restrictions.test.ts
-│       └── streamer-transfer.test.ts
-│
-├── fixtures/                     # Test data
-│   ├── users.ts                 # 3 test users
-│   ├── rooms.ts                 # 5 test rooms
-│   ├── participants.ts          # Participation records
-│   └── relationships.ts         # User relationships
-│
-└── utils/                        # Test utilities
-    ├── database.ts              # Test DB connection
-    ├── render.tsx               # React Query wrapper
-    └── mocks.ts                 # Mock utilities
-
-## WebRTC Test Summary
-
-**Total WebRTC Tests: 47**
-
-### Unit Tests (47 tests)
-- **device-detection.test.ts (16 tests)** - Mobile/desktop detection
-- **useWebRTC.test.ts (13 tests)** - Screen sharing and transfer handling
-- **components.test.tsx (18 tests)** - UI components and interactions
-
-### E2E Tests (Playwright)
-Located in `e2e/tests/streaming/`:
-- Screen sharing flow
-- Viewer joining
-- Streamer transfer
-- Mobile restrictions
-- Audio configuration
-```
 
 ## Running Tests
 
@@ -583,17 +531,36 @@ it("tests async", () => {
 
 ## CI/CD Testing
 
-Tests run automatically on:
-- Pull requests
-- Pushes to main branch
+**Unit and integration tests** run automatically in CI on pull requests and pushes to main.
+
+**E2E tests are NOT run in CI** - they require the development server running and are executed locally before major releases.
+
+### Current CI Pipeline
+
+The GitHub Actions workflow (`.github/workflows/docker-build.yml`) only builds and pushes Docker images. It does NOT run tests.
 
 ```yaml
-# .github/workflows/test.yml
-- name: Run tests
-  run: |
-    pnpm test:setup
-    pnpm test
-    pnpm test:coverage
+# Build Docker image (no tests)
+- name: Build Docker image
+  uses: docker/build-push-action@v5
+  with:
+    context: .
+    push: true
+    tags: ${{ steps.meta.outputs.tags }}
+```
+
+### Running Tests Locally
+
+```bash
+# Run all unit and integration tests (204 tests)
+pnpm test:unit
+
+# Run with coverage
+pnpm test:coverage
+
+# Run E2E tests (requires dev server)
+pnpm dev        # Terminal 1
+pnpm test:e2e   # Terminal 2
 ```
 
 ## WebRTC Testing
@@ -741,18 +708,7 @@ E2E tests complement unit/integration tests by:
 2. **Testing the full stack** - Frontend, WebSocket, database
 3. **Catching integration issues** - That unit tests miss
 4. **Validating user flows** - End-to-end scenarios
-5. **Replacing skipped integration tests** - 23 E2E tests cover what 36 skipped tests would test
-
-### Running E2E Tests in CI
-
-```yaml
-# .github/workflows/playwright.yml
-- name: Run Playwright tests
-  run: |
-    pnpm dev &
-    sleep 5  # Wait for server
-    pnpm test:e2e
-```
+5. **Replacing skipped integration tests** - 23 E2E tests cover what 38 skipped tests would test
 
 ### E2E vs Integration Tests
 

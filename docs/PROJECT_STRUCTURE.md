@@ -12,7 +12,13 @@ BhayanakCast/
 │   │   ├── RoomCard.tsx        # Room display card
 │   │   ├── RoomList.tsx        # Room listing page
 │   │   ├── Header.tsx          # Navigation header
+│   │   ├── StreamerControls.tsx # Streaming controls
+│   │   ├── AudioConfigModal.tsx # Audio configuration modal
 │   │   └── ...                 # Other components
+│   │
+│   ├── hooks/                   # React hooks
+│   │   ├── useWebRTC.ts        # WebRTC streaming hook
+│   │   └── useRoom.ts          # Room state subscription
 │   │
 │   ├── db/                      # Database layer (SERVER-ONLY)
 │   │   ├── schema.ts           # Drizzle ORM table definitions
@@ -49,7 +55,10 @@ BhayanakCast/
 │
 ├── websocket/                   # WebSocket server (separate process)
 │   ├── websocket-server.ts     # Socket.io server entry
-│   └── websocket-room-manager.ts # Room state management
+│   ├── websocket-room-manager.ts # Legacy room state management
+│   ├── room-state.ts           # ⭐ In-memory state management
+│   ├── room-events.ts          # ⭐ Room event handlers
+│   └── db-persistence.ts       # ⭐ Database persistence layer
 │
 ├── tests/                       # Test files
 │   ├── unit/                   # Unit tests
@@ -122,11 +131,27 @@ Components are organized by feature:
 
 ## WebSocket Architecture
 
-WebSocket server runs as a separate process:
+WebSocket server runs as a separate process with in-memory state management:
 
+### Core Files
 - **websocket-server.ts:** Entry point, Socket.io setup
-- **websocket-room-manager.ts:** Business logic for rooms
-- Communication via Socket.io rooms and events
+- **room-state.ts:** ⭐ In-memory state management (primary source of truth)
+- **room-events.ts:** ⭐ WebSocket event handlers for room operations
+- **db-persistence.ts:** ⭐ Synchronous database persistence layer
+- **websocket-room-manager.ts:** Legacy room state management (being phased out)
+
+### Architecture Pattern
+```
+Frontend → WebSocket Server → Database (sync) → Broadcast
+              ↓
+         In-Memory State (primary)
+```
+
+### Key Principles
+1. **WebSocket-first:** All room operations go through WebSocket events
+2. **In-memory primary:** Room state is maintained in Maps during runtime
+3. **Sync DB writes:** Database operations complete before broadcasting
+4. **Auto-rejoin:** Clients automatically recover after server restart
 
 ## See Also
 

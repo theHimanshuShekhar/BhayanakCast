@@ -21,8 +21,9 @@ pnpm db:push
 # 5. Start development
 pnpm dev              # Runs web (3000) + WebSocket (3001)
 
-# 6. Run tests (in another terminal, requires dev server running)
-pnpm test             # Auto-creates test DB and runs all tests (unit + E2E)
+# 6. Run tests
+pnpm test:unit        # Run unit/integration tests
+# E2E tests require dev server running - run locally only
 ```
 
 ## Commands
@@ -36,14 +37,15 @@ pnpm dev:ws           # WebSocket only
 
 ### Testing
 ```bash
-pnpm test             # All tests (unit + integration + E2E, requires PostgreSQL)
-pnpm test:unit        # Unit and integration tests only
-pnpm test:e2e         # Playwright E2E tests only
+pnpm test:unit        # Unit and integration tests (204 tests, 90%+ coverage)
+pnpm test:e2e         # Playwright E2E tests (23 tests) - run locally only
 pnpm test:watch       # Watch mode (unit tests)
 pnpm test:coverage    # With coverage report
 pnpm test:e2e:ui      # E2E tests with UI mode
 pnpm vitest run path/to/test.ts
 ```
+
+**Note:** E2E tests require the dev server running and are NOT executed in CI. Run them locally before major releases.
 
 ### Code Quality
 ```bash
@@ -67,7 +69,7 @@ pnpm db:migrate       # Run migrations
 **Database:** PostgreSQL 16 + Drizzle ORM  
 **Real-time:** Socket.io WebSocket server (port 3001)  
 **Styling:** Tailwind CSS v4 with custom dark theme  
-**Testing:** Vitest v3 + jsdom (205 tests, 90%+ coverage) + Playwright E2E (23 tests)  
+**Testing:** Vitest v3 + jsdom (204 unit/integration tests, 90%+ coverage) + Playwright E2E (23 tests)  
 **Formatter:** Biome (not Prettier)
 
 ### Key Features
@@ -75,19 +77,20 @@ pnpm db:migrate       # Run migrations
 🎥 **WebRTC Screen Sharing** - P2P streaming with audio configuration  
 🔄 **Automatic Streamer Transfer** - Ownership transfers to earliest viewer  
 ⏱️ **Watch Time Tracking** - Community statistics and user relationships  
-🛡️ **Rate Limiting** - 8 different action types protected  
+🛡️ **Rate Limiting** - 9 different action types protected  
 🎨 **Discord-inspired UI** - Dark theme with depth-based styling  
 🔒 **Discord OAuth** - Secure authentication  
-🧪 **Comprehensive Testing** - 238 unit/integration + 23 E2E tests  
+🧪 **Comprehensive Testing** - 265 total tests (204 unit/integration + 23 E2E + 38 skipped)  
 
 ### Project Stats
 
-- **Tests:** 238 unit/integration + 23 E2E (261 total)
+- **Tests:** 265 total (204 unit/integration + 23 E2E + 38 skipped)
 - **Coverage:** 90%+ threshold
-- **Rate Limits:** Room create (3/min), Join (10/min), Chat (30/15s), etc.
+- **Rate Limits:** 9 types including Room create, Join, Chat, WebRTC signaling, etc.
 - **Room States:** 4 lifecycle states (waiting → preparing → active → ended)
-- **WebRTC:** P2P screen sharing with 3 audio modes
+- **WebRTC:** P2P screen sharing with 3 audio modes + connection recovery
 - **Community Stats:** Single-record upsert pattern (no historical data)
+- **CI/CD:** GitHub Actions builds and deploys Docker images to GHCR
 
 ## WebSocket-First Architecture (NEW)
 
@@ -120,6 +123,38 @@ Frontend → WebSocket Server → Database (sync) → Broadcast
 - `src/hooks/useRoom.ts` - Room state subscription
 
 See [WebSocket Architecture](./docs/WEBSOCKET_ARCHITECTURE.md) for details.
+
+## Docker & CI/CD
+
+### Local Docker Development
+```bash
+# Build and run with Docker Compose (includes PostgreSQL)
+docker compose up -d
+
+# View logs
+docker compose logs -f
+
+# Stop services
+docker compose down
+```
+
+### Production Deployment
+The Docker image is automatically built and pushed to GitHub Container Registry:
+- **On push to main:** Builds and tags with `main`, `sha-xxx`, `latest`
+- **On version tags:** Builds and tags with version numbers
+
+```bash
+# Pull and run from GHCR
+docker pull ghcr.io/yourusername/bhayanak-cast:latest
+docker run -p 3000:3000 -p 3001:3001 \
+  -e DATABASE_URL=... \
+  -e BETTER_AUTH_SECRET=... \
+  ghcr.io/yourusername/bhayanak-cast:latest
+```
+
+### CI/CD Workflows
+- **`.github/workflows/docker-build.yml`** - Builds and pushes Docker images to GHCR
+- **E2E tests** - Run locally only (require dev server), not in CI
 
 ## Coding Standards
 
@@ -189,6 +224,8 @@ describe("RoomCard", () => {
 See [Testing Guide](./docs/TESTING.md) for detailed documentation.
 
 ### E2E Testing Guidelines
+
+**Important:** E2E tests are NOT run in CI and should be executed locally before major releases.
 
 #### Test Authentication Pattern
 
