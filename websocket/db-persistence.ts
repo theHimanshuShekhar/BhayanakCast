@@ -7,7 +7,7 @@
  * @module websocket/db-persistence
  */
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { roomParticipants, streamingRooms, users } from "../src/db/schema";
 
 // Types
@@ -287,9 +287,9 @@ export async function persistParticipantLeave(
 					and(
 						eq(roomParticipants.roomId, data.roomId),
 						sql`${roomParticipants.leftAt} IS NULL`,
-						// Filter by eligible IDs if provided
+						// Filter by eligible IDs if provided (safe parameterized query)
 						eligibleIds && eligibleIds.length > 0
-							? sql`${roomParticipants.userId} IN (${eligibleIds.join(",")})`
+							? inArray(roomParticipants.userId, eligibleIds)
 							: sql`1=1`,
 					),
 				)
