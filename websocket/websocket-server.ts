@@ -208,6 +208,11 @@ io.on("connection", (socket: Socket) => {
 	// Send current user count on connection
 	socket.emit("userCount", { count: connectedUsers.size });
 
+	// Setup module-specific event handlers ONCE per connection
+	setupRoomEventHandlers(io, socket as any);
+	setupChatHandlers(io, socket as any, socketUserMap);
+	setupStreamingHandlers(io, socket as any, socketUserMap);
+
 	// Handle user identification
 	socket.on("identify", (data: { userId?: string; userName?: string; userImage?: string | null; isMobile?: boolean }) => {
 		const userId = data.userId || `anonymous:${socket.id}`;
@@ -238,11 +243,6 @@ io.on("connection", (socket: Socket) => {
 
 		console.log(`[Socket.io] User identified: ${userName} (${userId}) (socket: ${socket.id}) (mobile: ${data.isMobile})`);
 		socket.emit("identified", { userId, userName });
-
-		// Setup module-specific event handlers
-		setupRoomEventHandlers(io, socket as any);
-		setupChatHandlers(io, socket as any, socketUserMap);
-		setupStreamingHandlers(io, socket as any, socketUserMap);
 	});
 
 	// Handle disconnect
