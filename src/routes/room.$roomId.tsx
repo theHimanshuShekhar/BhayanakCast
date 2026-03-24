@@ -24,8 +24,8 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "#/components/ui/dialog";
+import { usePeerJS } from "#/hooks/usePeerJS";
 import { useRoom } from "#/hooks/useRoom";
-import { useWebRTC } from "#/hooks/useWebRTC";
 import { authClient } from "#/lib/auth-client";
 import { detectDevice } from "#/lib/device-detection";
 import { censorText } from "#/lib/profanity-filter";
@@ -209,39 +209,11 @@ function ScreenSharePreview({ stream }: ScreenSharePreviewProps) {
 	);
 }
 
-// Transfer overlay component
-interface TransferOverlayProps {
-	transferState: string;
-	transferInfo: { newStreamerName?: string } | null;
-}
-
-function TransferOverlay({
-	transferState,
-	transferInfo,
-}: TransferOverlayProps) {
-	if (transferState === "idle" || transferState === "connected") return null;
-
-	const messages: Record<string, string> = {
-		initiating: "Streamer is leaving...",
-		cleaning_up: "Disconnecting...",
-		waiting_for_streamer: `Waiting for ${transferInfo?.newStreamerName || "new streamer"}...`,
-		reconnecting: "Reconnecting to new streamer...",
-		failed: "Connection failed. Retrying...",
-	};
-
-	return (
-		<div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center z-50 backdrop-blur-sm">
-			<div className="w-12 h-12 border-3 border-white/10 border-t-accent rounded-full animate-spin mb-4" />
-			<p className="text-white text-lg font-medium">
-				{messages[transferState] || "Connecting..."}
-			</p>
-			{transferState === "reconnecting" && (
-				<p className="text-white/60 text-sm mt-2">
-					Setting up peer-to-peer connection
-				</p>
-			)}
-		</div>
-	);
+// Transfer overlay component (simplified for PeerJS)
+// PeerJS handles transfers automatically, so this is minimal
+function TransferOverlay() {
+	// PeerJS handles reconnection automatically
+	return null;
 }
 
 function RoomDetailPage() {
@@ -257,8 +229,8 @@ function RoomDetailPage() {
 	// WebSocket-first room state (replaces React Query polling)
 	const { roomState, leaveRoom, isJoined } = useRoom(roomId);
 
-	// WebRTC hook for streaming
-	const { localStream, remoteStream, transferState, transferInfo } = useWebRTC({
+	// PeerJS hook for streaming
+	const { localStream, remoteStream } = usePeerJS({
 		roomId,
 		userId: userId || "",
 	});
@@ -570,10 +542,7 @@ function RoomDetailPage() {
 										streamerName={streamer?.name}
 									/>
 								)}
-								<TransferOverlay
-									transferState={transferState}
-									transferInfo={transferInfo}
-								/>
+								<TransferOverlay />
 							</div>
 
 							{/* Streamer Controls */}
