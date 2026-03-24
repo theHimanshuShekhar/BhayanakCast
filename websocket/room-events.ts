@@ -134,8 +134,14 @@ function handleRoomCreate(io: SocketIOServer, socket: TypedSocket) {
 			updateRoomStreamer(roomResult.roomId, userId);
 			updateRoomStatus(roomResult.roomId, "preparing");
 
-			// 5. Join socket to room
+			// 5. Join socket to room and update socketUserMap
 			socket.join(roomResult.roomId);
+			const socketData = socketUserMap.get(socket.id);
+			if (socketData) {
+				socketData.roomId = roomResult.roomId;
+				socketUserMap.set(socket.id, socketData);
+				console.log(`[RoomEvents Debug] Updated socketUserMap for creator ${userId}, roomId: ${roomResult.roomId}`);
+			}
 
 			// 6. Emit success to creator
 			socket.emit("room:created", {
@@ -179,6 +185,8 @@ function handleRoomJoin(io: SocketIOServer, socket: TypedSocket) {
 			const userId = socket.data.userId;
 			const userName = socket.data.userName;
 			const { roomId } = data;
+
+			console.log(`[RoomEvents Debug] handleRoomJoin called for user ${userId}, room ${roomId}`);
 
 			if (!userId || userId.startsWith("anonymous:")) {
 				socket.emit("room:join_error", {
@@ -312,6 +320,17 @@ function handleRoomJoin(io: SocketIOServer, socket: TypedSocket) {
 		if (socketData) {
 			socketData.roomId = roomId;
 			socketUserMap.set(socket.id, socketData);
+			console.log(`[RoomEvents Debug] Updated socketUserMap for ${userId}, roomId: ${roomId}`);
+		} else {
+			// Socket data not found - create it
+			socketUserMap.set(socket.id, {
+				userId,
+				userName: userName || "Unknown",
+				roomId,
+				isMobile: socket.data.isMobile || false,
+				peerId: undefined,
+			});
+			console.log(`[RoomEvents Debug] Created socketUserMap for ${userId}, roomId: ${roomId}`);
 		}
 
 		// 4. Emit success to joining user (full state)
@@ -556,6 +575,17 @@ function handleRoomRejoin(io: SocketIOServer, socket: TypedSocket) {
 		if (rejoinSocketData) {
 			rejoinSocketData.roomId = roomId;
 			socketUserMap.set(socket.id, rejoinSocketData);
+			console.log(`[RoomEvents Debug] Updated socketUserMap for rejoining user ${userId}, roomId: ${roomId}`);
+		} else {
+			// Socket data not found - create it
+			socketUserMap.set(socket.id, {
+				userId,
+				userName,
+				roomId,
+				isMobile: socket.data.isMobile || false,
+				peerId: undefined,
+			});
+			console.log(`[RoomEvents Debug] Created socketUserMap for rejoining user ${userId}, roomId: ${roomId}`);
 		}
 
 		// 4. Emit full state to rejoining user
@@ -742,13 +772,11 @@ export async function handleSocketDisconnect(
 	io: SocketIOServer,
 	socket: TypedSocket,
 	sendSystemMessage?: (roomId: string, content: string) => void,
-	initiateWebRTCTransfer?: (
+	initiateStreamerTransfer?: (
 		roomId: string,
-		oldStreamerId: string,
 		newStreamerId: string,
 		participants: Array<{ userId: string; userName: string }>,
 	) => Promise<void>,
-	getWebRTCState?: (roomId: string) => { streamerId: string | null } | undefined,
 ): Promise<void> {
 	const userId = socket.data.userId;
 	if (!userId) return;
@@ -824,21 +852,17 @@ export async function handleSocketDisconnect(
 						sendSystemMessage(roomId, `${newStreamerName} is now the streamer`);
 					}
 
-					// Initiate WebRTC transfer if old streamer was streaming
-					if (initiateWebRTCTransfer && getWebRTCState) {
-						const webrtcState = getWebRTCState(roomId);
-						if (webrtcState && webrtcState.streamerId === userId) {
-							const participantsList = Array.from(room.participants.values()).map(
-								(p) => ({ userId: p.userId, userName: p.userName }),
-							);
-							await initiateWebRTCTransfer(
-								roomId,
-								userId,
-								leaveResult.newStreamerId,
-								participantsList,
-							);
-						}
-					}
+				// Initiate streamer transfer for PeerJS
+				if (initiateStreamerTransfer) {
+					const participantsList = Array.from(room.participants.values()).map(
+						(p) => ({ userId: p.userId, userName: p.userName }),
+					);
+					await initiateStreamerTransfer(
+						roomId,
+						leaveResult.newStreamerId,
+						participantsList,
+					);
+				}
 				}
 
 				if (getRoomState(roomId)?.status !== room.status) {

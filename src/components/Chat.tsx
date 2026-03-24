@@ -46,10 +46,23 @@ export function Chat({ roomId, userId, userName, userImage }: ChatProps) {
 
 	// Listen for chat messages
 	useEffect(() => {
-		if (!socket || !isConnected) return;
+		if (!socket || !isConnected) {
+			console.log("[Chat Debug] Socket not ready:", {
+				socket: !!socket,
+				isConnected,
+			});
+			return;
+		}
+
+		console.log(
+			"[Chat Debug] Setting up chat:message listener for room",
+			roomId,
+		);
 
 		const handleChatMessage = (message: ChatMessage) => {
+			console.log("[Chat Debug] Received chat:message:", message);
 			if (message.roomId === roomId) {
+				console.log("[Chat Debug] Adding message to state");
 				setMessages((prev) => [...prev, message]);
 			}
 		};
@@ -66,10 +79,20 @@ export function Chat({ roomId, userId, userName, userImage }: ChatProps) {
 		(e: React.FormEvent) => {
 			e.preventDefault();
 
+			console.log("[Chat Debug] Attempting to send message:", {
+				socket: !!socket,
+				isConnected,
+				inputMessage: inputMessage.trim(),
+				userId,
+				roomId,
+			});
+
 			if (!socket || !isConnected || !inputMessage.trim() || !userId) {
+				console.log("[Chat Debug] Cannot send - missing requirements");
 				return;
 			}
 
+			console.log("[Chat Debug] Emitting chat:send");
 			socket.emit("chat:send", {
 				roomId,
 				content: inputMessage.trim(),

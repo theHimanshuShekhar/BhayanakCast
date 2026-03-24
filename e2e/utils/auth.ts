@@ -126,21 +126,30 @@ export async function loginTestUser(
  * ```
  */
 export async function loginUser(
-  page: Page,
-  email: string,
-  password: string = TEST_USER_PASSWORD
+	page: Page,
+	email: string,
+	password: string = TEST_USER_PASSWORD
 ): Promise<void> {
-  await page.goto("/auth/sign-in");
-  await page.waitForLoadState("networkidle");
-  await page.waitForTimeout(1000); // Wait for React hydration
+	await page.goto("/auth/sign-in");
+	await page.waitForLoadState("networkidle");
+	await page.waitForTimeout(1000); // Wait for React hydration
 
-  await page.fill('input[type="email"]', email);
-  await page.fill('input[type="password"]', password);
-  await page.click('button[type="submit"]');
+	// Try multiple selectors - Better Auth uses shadcn/ui components
+	// which may not have standard type attributes
+	const emailInput = page.locator('input').first();
+	const passwordInput = page.locator('input').nth(1);
+	const submitButton = page.locator('button:has-text("Login")');
 
-  await page.waitForURL("http://localhost:3000/", { timeout: 10000 });
-  await page.waitForLoadState("networkidle");
-  await page.waitForTimeout(1000); // Wait for React hydration
+	await emailInput.waitFor({ state: "visible", timeout: 5000 });
+	await emailInput.fill(email);
+	await passwordInput.fill(password);
+	await submitButton.click();
+
+	// Wait for navigation to home page after successful login
+	// Use a longer timeout as auth can be slow
+	await page.waitForURL("http://localhost:3000/", { timeout: 15000 });
+	await page.waitForLoadState("networkidle");
+	await page.waitForTimeout(1000); // Wait for React hydration
 }
 
 /**

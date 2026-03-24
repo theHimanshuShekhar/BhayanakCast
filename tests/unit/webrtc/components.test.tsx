@@ -8,11 +8,11 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { StreamerControls } from "#/components/StreamerControls";
 import { AudioConfigModal } from "#/components/AudioConfigModal";
-import { useWebRTC } from "#/hooks/useWebRTC";
+import { usePeerJS } from "#/hooks/usePeerJS";
 import { detectDevice } from "#/lib/device-detection";
 
 // Mock dependencies
-vi.mock("#/hooks/useWebRTC");
+vi.mock("#/hooks/usePeerJS");
 vi.mock("#/lib/device-detection");
 
 describe("StreamerControls", () => {
@@ -31,7 +31,7 @@ describe("StreamerControls", () => {
 			userAgent: "Desktop",
 		});
 
-		(vi.mocked(useWebRTC) as ReturnType<typeof vi.fn>).mockReturnValue({
+		(vi.mocked(usePeerJS) as ReturnType<typeof vi.fn>).mockReturnValue({
 			isScreenSharing: false,
 			isStreamer: false,
 			deviceCapabilities: { isMobile: false, canStream: true },
@@ -65,7 +65,7 @@ describe("StreamerControls", () => {
 		const mockToggleAudio = vi.fn();
 
 		beforeEach(() => {
-			(vi.mocked(useWebRTC) as ReturnType<typeof vi.fn>).mockReturnValue({
+			(vi.mocked(usePeerJS) as ReturnType<typeof vi.fn>).mockReturnValue({
 				isScreenSharing: true,
 				isStreamer: true,
 				deviceCapabilities: { isMobile: false, canStream: true },
@@ -114,7 +114,7 @@ describe("StreamerControls", () => {
 				userAgent: "Mobile",
 			});
 
-			(vi.mocked(useWebRTC) as ReturnType<typeof vi.fn>).mockReturnValue({
+			(vi.mocked(usePeerJS) as ReturnType<typeof vi.fn>).mockReturnValue({
 				isScreenSharing: false,
 				deviceCapabilities: { isMobile: true, canStream: false },
 				startScreenShare: mockStartScreenShare,
@@ -142,7 +142,7 @@ describe("StreamerControls", () => {
 			["system-only", "System only"],
 			["no-audio", ""],
 		])("displays correct audio config: %s", (audioConfig, expectedText) => {
-			(vi.mocked(useWebRTC) as ReturnType<typeof vi.fn>).mockReturnValue({
+			(vi.mocked(usePeerJS) as ReturnType<typeof vi.fn>).mockReturnValue({
 				isScreenSharing: true,
 				deviceCapabilities: { isMobile: false },
 				startScreenShare: mockStartScreenShare,

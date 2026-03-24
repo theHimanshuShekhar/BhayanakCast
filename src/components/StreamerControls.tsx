@@ -9,7 +9,7 @@ import { Mic, MicOff, Monitor, Smartphone, StopCircle } from "lucide-react";
 import { useState } from "react";
 import { AudioConfigModal } from "#/components/AudioConfigModal";
 import { Button } from "#/components/ui/button";
-import { useWebRTC } from "#/hooks/useWebRTC";
+import { usePeerJS } from "#/hooks/usePeerJS";
 import type { ScreenShareOptions } from "#/types/webrtc";
 
 interface StreamerControlsProps {
@@ -28,7 +28,7 @@ export function StreamerControls({ roomId, userId }: StreamerControlsProps) {
 		audioConfig,
 		isAudioEnabled,
 		toggleAudio,
-	} = useWebRTC({ roomId, userId });
+	} = usePeerJS({ roomId, userId });
 
 	// Handle start streaming with options
 	const handleStartStream = (options: ScreenShareOptions) => {
