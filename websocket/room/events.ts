@@ -23,8 +23,8 @@ import {
 	serializeRoomState,
 	findStaleRooms,
 	type ParticipantState,
-} from "./room-state";
-import { socketUserMap } from "./websocket-server";
+} from "./state";
+import { socketUserMap } from "../websocket-server";
 import {
 	persistRoomCreation,
 	persistParticipantJoin,
@@ -34,8 +34,8 @@ import {
 	getRoomFromDB,
 	getActiveParticipantsFromDB,
 	findStaleRoomsFromDB,
-} from "./db-persistence";
-import { RateLimits, rateLimiter } from "../src/lib/rate-limiter";
+} from "./persistence";
+import { RateLimits, rateLimiter } from "../../src/lib/rate-limiter";
 
 // Types for socket data
 interface SocketUserData {

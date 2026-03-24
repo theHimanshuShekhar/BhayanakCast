@@ -16,7 +16,7 @@ import {
 	clearAllRoomStates,
 	roomStates,
 	type ParticipantState,
-} from "../../websocket/room-state";
+} from "../../websocket/room/state";
 
 describe("Room State Management", () => {
 	beforeEach(() => {

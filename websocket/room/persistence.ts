@@ -8,7 +8,7 @@
  */
 
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { roomParticipants, streamingRooms, users } from "../src/db/schema";
+import { roomParticipants, streamingRooms, users } from "../../src/db/schema";
 
 // Types
 export interface CreateRoomData {
@@ -75,7 +75,7 @@ async function generateId(): Promise<string> {
 export async function persistRoomCreation(
 	data: CreateRoomData,
 ): Promise<CreateRoomResult> {
-	const { db } = await import("../src/db/index");
+	const { db } = await import("../../src/db/index");
 	const now = new Date();
 	const roomId = await generateId();
 
@@ -115,7 +115,7 @@ export async function persistRoomCreation(
 export async function persistParticipantJoin(
 	data: JoinRoomData,
 ): Promise<JoinRoomResult> {
-	const { db } = await import("../src/db/index");
+	const { db } = await import("../../src/db/index");
 	const now = new Date();
 	const participantId = await generateId();
 
@@ -226,7 +226,7 @@ export async function persistParticipantJoin(
 export async function persistParticipantLeave(
 	data: LeaveRoomData,
 ): Promise<LeaveRoomResult> {
-	const { db } = await import("../src/db/index");
+	const { db } = await import("../../src/db/index");
 	const now = new Date();
 
 	return await db.transaction(async (trx) => {
@@ -356,7 +356,7 @@ export async function persistStreamerTransfer(
 	roomId: string,
 	newStreamerId: string,
 ): Promise<boolean> {
-	const { db } = await import("../src/db/index");
+	const { db } = await import("../../src/db/index");
 
 	return await db.transaction(async (trx) => {
 		// 1. Verify new streamer is in room
@@ -395,7 +395,7 @@ export async function persistStreamerTransfer(
 export async function persistRoomEnd(
 	roomId: string,
 ): Promise<boolean> {
-	const { db } = await import("../src/db/index");
+	const { db } = await import("../../src/db/index");
 	const now = new Date();
 
 	await db.transaction(async (trx) => {
@@ -439,7 +439,7 @@ export async function getRoomFromDB(
 	streamerId: string | null;
 	createdAt: Date;
 } | null> {
-	const { db } = await import("../src/db/index");
+	const { db } = await import("../../src/db/index");
 
 	const room = await db
 		.select()
@@ -463,7 +463,7 @@ export async function getActiveParticipantsFromDB(
 		joinedAt: Date;
 	}>
 > {
-	const { db } = await import("../src/db/index");
+	const { db } = await import("../../src/db/index");
 
 	const participants = await db
 		.select({
@@ -490,7 +490,7 @@ export async function getActiveParticipantsFromDB(
 export async function findStaleRoomsFromDB(
 	maxAgeMinutes: number = 5,
 ): Promise<Array<{ id: string; name: string }>> {
-	const { db } = await import("../src/db/index");
+	const { db } = await import("../../src/db/index");
 	const now = new Date();
 	const cutoff = new Date(now.getTime() - maxAgeMinutes * 60 * 1000);
 
@@ -533,7 +533,7 @@ export async function findStaleRoomsFromDB(
 export async function getUserActiveRoom(
 	userId: string,
 ): Promise<string | null> {
-	const { db } = await import("../src/db/index");
+	const { db } = await import("../../src/db/index");
 
 	const participant = await db
 		.select({ roomId: roomParticipants.roomId })
@@ -559,7 +559,7 @@ export async function getUserActiveRoom(
  * Leave all rooms (for single-room enforcement)
  */
 export async function leaveAllRooms(userId: string): Promise<string[]> {
-	const { db } = await import("../src/db/index");
+	const { db } = await import("../../src/db/index");
 	const now = new Date();
 
 	// Get all active participations
