@@ -89,6 +89,20 @@ function handleRoomCreate(io: SocketIOServer, socket: TypedSocket) {
 				return;
 			}
 
+			// Check rate limit for room creation
+			const createLimiter = rateLimiter.forAction("room:create");
+			const rateLimitResult = createLimiter.checkAndRecord(
+				userId,
+				RateLimits.ROOM_CREATE,
+			);
+			if (!rateLimitResult.allowed) {
+				socket.emit("room:create_error", {
+					message: `You're creating rooms too quickly. Try again in ${rateLimitResult.retryAfter} seconds.`,
+					retryAfter: rateLimitResult.retryAfter,
+				});
+				return;
+			}
+
 			if (!data.name || data.name.trim().length < 3) {
 				socket.emit("room:create_error", {
 					message: "Room name must be at least 3 characters",
@@ -191,6 +205,20 @@ function handleRoomJoin(io: SocketIOServer, socket: TypedSocket) {
 			if (!userId || userId.startsWith("anonymous:")) {
 				socket.emit("room:join_error", {
 					message: "You must be logged in to join rooms",
+				});
+				return;
+			}
+
+			// Check rate limit for room joins
+			const joinLimiter = rateLimiter.forAction("room:join");
+			const rateLimitResult = joinLimiter.checkAndRecord(
+				userId,
+				RateLimits.ROOM_JOIN,
+			);
+			if (!rateLimitResult.allowed) {
+				socket.emit("room:join_error", {
+					message: `You're joining rooms too quickly. Try again in ${rateLimitResult.retryAfter} seconds.`,
+					retryAfter: rateLimitResult.retryAfter,
 				});
 				return;
 			}
@@ -308,9 +336,10 @@ function handleRoomJoin(io: SocketIOServer, socket: TypedSocket) {
 				updateRoomStreamer(roomId, userId);
 			}
 
-			// Check if room became active
+			// Check if room became active (use getRoomState to get current status after DB update)
 			const participantCount = getParticipantCount(roomId);
-			if (room.status === "preparing" && participantCount >= 2) {
+			const currentRoomStatus = getRoomState(roomId)?.status;
+			if (currentRoomStatus === "preparing" && participantCount >= 2) {
 				updateRoomStatus(roomId, "active");
 			}
 
@@ -389,6 +418,20 @@ function handleRoomLeave(io: SocketIOServer, socket: TypedSocket) {
 
 			if (!userId) {
 				socket.emit("room:error", { message: "Not authenticated" });
+				return;
+			}
+
+			// Check rate limit for room leaves
+			const leaveLimiter = rateLimiter.forAction("room:leave");
+			const rateLimitResult = leaveLimiter.checkAndRecord(
+				userId,
+				RateLimits.ROOM_LEAVE,
+			);
+			if (!rateLimitResult.allowed) {
+				socket.emit("room:error", {
+					message: `You're leaving rooms too quickly. Try again in ${rateLimitResult.retryAfter} seconds.`,
+					retryAfter: rateLimitResult.retryAfter,
+				});
 				return;
 			}
 
