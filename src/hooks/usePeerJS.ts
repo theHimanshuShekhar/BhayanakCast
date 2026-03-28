@@ -7,10 +7,11 @@
  * - Much simpler than manual RTCPeerConnection management
  */
 
-import Peer, { type MediaConnection } from "peerjs";
+import { type MediaConnection } from "peerjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ConnectionRetryManager } from "#/lib/connection-retry";
 import { detectDevice } from "#/lib/device-detection";
+import { usePeerJSContext } from "#/lib/peerjs-context";
 import { useWebSocket } from "#/lib/websocket-context";
 import type {
 	AudioConfig,
@@ -21,10 +22,13 @@ import type {
 interface UsePeerJSOptions {
 	roomId: string;
 	userId: string;
+	/** Peer ID of the current streamer, from room state. Used for late-joiner auto-connect. */
+	streamerPeerId?: string | null;
 }
 
-export function usePeerJS({ roomId, userId }: UsePeerJSOptions) {
+export function usePeerJS({ roomId, userId, streamerPeerId }: UsePeerJSOptions) {
 	const { socket } = useWebSocket();
+	const { getOrCreatePeer, destroyPeer: contextDestroyPeer } = usePeerJSContext();
 
 	// Device capabilities
 	const deviceCapabilities = useMemo(() => detectDevice(), []);
@@ -59,11 +63,8 @@ export function usePeerJS({ roomId, userId }: UsePeerJSOptions) {
 		// Generate unique peer ID with timestamp for reconnections
 		const newPeerId = `${roomId}-${userId}-${Date.now()}`;
 
-		// Create PeerJS instance using cloud server (free tier)
-		// For production, consider self-hosted PeerServer
-		const peer = new Peer(newPeerId, {
-			debug: 2, // 0: none, 1: errors, 2: warnings, 3: all
-		});
+		// Use context singleton to prevent duplicate peer instances
+		const peer = getOrCreatePeer(newPeerId);
 
 		peer.on("open", (id) => {
 			console.log("[PeerJS] Peer opened with ID:", id);
@@ -123,7 +124,7 @@ export function usePeerJS({ roomId, userId }: UsePeerJSOptions) {
 		});
 
 		peerRef.current = peer;
-	}, [roomId, userId, socket, isStreamer]);
+	}, [roomId, userId, socket, isStreamer, getOrCreatePeer]);
 
 	/**
 	 * Cleanup PeerJS and streams
@@ -151,11 +152,9 @@ export function usePeerJS({ roomId, userId }: UsePeerJSOptions) {
 		localStreamRef.current = null;
 		setLocalStream(null);
 
-		// Destroy peer
-		if (peerRef.current) {
-			peerRef.current.destroy();
-			peerRef.current = null;
-		}
+		// Destroy peer via context (clears singleton)
+		contextDestroyPeer();
+		peerRef.current = null;
 		setPeerId(null);
 
 		// Reset state
@@ -165,7 +164,7 @@ export function usePeerJS({ roomId, userId }: UsePeerJSOptions) {
 		setConnectionStatus("idle");
 
 		isCleaningUpRef.current = false;
-	}, []);
+	}, [contextDestroyPeer]);
 
 	/**
 	 * Start screen sharing
@@ -466,6 +465,20 @@ export function usePeerJS({ roomId, userId }: UsePeerJSOptions) {
 			cleanup();
 		};
 	}, [socket, initPeer, cleanup]);
+
+	/**
+	 * Auto-connect late joiners when streamerPeerId appears in room state.
+	 * This handles the case where a viewer joins after the streamer is already ready,
+	 * so no new peerjs:streamer_ready event will fire for them.
+	 */
+	useEffect(() => {
+		if (!streamerPeerId || isStreamer) return;
+		// Don't reconnect if already connected to this peer
+		if (streamerId === streamerPeerId && connectionStatus === "connected") return;
+
+		console.log("[PeerJS] Late join: auto-connecting to streamer:", streamerPeerId);
+		void connectToStreamer(streamerPeerId);
+	}, [streamerPeerId, isStreamer, streamerId, connectionStatus, connectToStreamer]);
 
 	/**
 	 * Toggle audio mute/unmute

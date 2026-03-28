@@ -8,6 +8,7 @@ import Header from "../components/Header";
 import { AuthProviders } from "../integrations/better-auth/providers";
 import PostHogProvider from "../integrations/posthog/provider";
 import TanStackQueryProvider from "../integrations/tanstack-query/root-provider";
+import { PeerJSProvider } from "../lib/peerjs-context";
 import { ThemeProvider } from "../lib/theme-context";
 import { WebSocketProvider } from "../lib/websocket-context";
 import appCss from "../styles.css?url";
@@ -59,10 +60,12 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 						<AuthProviders>
 							<PostHogProvider>
 								<WebSocketProvider>
-									<Header />
-									<div className="flex-1 overflow-auto bg-depth-0">
-										{children}
-									</div>
+									<PeerJSProvider>
+										<Header />
+										<div className="flex-1 overflow-auto bg-depth-0">
+											{children}
+										</div>
+									</PeerJSProvider>
 								</WebSocketProvider>
 							</PostHogProvider>
 						</AuthProviders>

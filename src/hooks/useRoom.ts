@@ -25,6 +25,7 @@ export interface RoomState {
 	description?: string;
 	status: "waiting" | "preparing" | "active" | "ended";
 	streamerId: string | null;
+	streamerPeerId: string | null;
 	participants: RoomParticipant[];
 	createdAt: Date;
 }
