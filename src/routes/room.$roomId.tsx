@@ -10,13 +10,14 @@ import {
 	Clock,
 	Crown,
 	DoorOpen,
-	Monitor,
 	Users,
-	Video,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Chat } from "#/components/Chat";
 import { StreamerControls } from "#/components/StreamerControls";
+import { StreamingErrorBoundary } from "#/components/StreamingErrorBoundary";
+import { TransferOverlay } from "#/components/TransferOverlay";
+import { VideoDisplay } from "#/components/VideoDisplay";
 import {
 	Dialog,
 	DialogContent,
@@ -108,51 +109,6 @@ export const Route = createFileRoute("/room/$roomId")({
 	},
 });
 
-// Video display component for viewers
-interface VideoDisplayProps {
-	stream: MediaStream | null;
-	streamerName?: string | null;
-}
-
-function VideoDisplay({ stream, streamerName }: VideoDisplayProps) {
-	const videoRef = useRef<HTMLVideoElement>(null);
-
-	useEffect(() => {
-		if (videoRef.current && stream) {
-			videoRef.current.srcObject = stream;
-		}
-	}, [stream]);
-
-	if (!stream) {
-		return (
-			<div className="bg-depth-2 rounded-xl aspect-video flex flex-col items-center justify-center border-2 border-dashed border-border-subtle">
-				<Video className="h-16 w-16 text-text-tertiary mb-4" />
-				<p className="text-text-secondary text-lg mb-2">Waiting for Stream</p>
-				<p className="text-text-tertiary text-sm">
-					{streamerName
-						? `${streamerName} will start streaming soon`
-						: "No streamer yet"}
-				</p>
-			</div>
-		);
-	}
-
-	return (
-		<div className="relative rounded-xl overflow-hidden bg-black aspect-video">
-			{/* biome-ignore lint/a11y/useMediaCaption: Screen sharing doesn't support captions */}
-			<video
-				ref={videoRef}
-				autoPlay
-				playsInline
-				className="w-full h-full object-contain"
-			/>
-			<div className="absolute top-4 left-4 px-3 py-1 rounded bg-black/70 text-white text-sm flex items-center gap-2">
-				<Monitor className="h-4 w-4" />
-				{streamerName ? `${streamerName}'s Screen` : "Screen Share"}
-			</div>
-		</div>
-	);
-}
 
 // Screen share preview component for streamers
 interface ScreenSharePreviewProps {
@@ -209,12 +165,6 @@ function ScreenSharePreview({ stream }: ScreenSharePreviewProps) {
 	);
 }
 
-// Transfer overlay component (simplified for PeerJS)
-// PeerJS handles transfers automatically, so this is minimal
-function TransferOverlay() {
-	// PeerJS handles reconnection automatically
-	return null;
-}
 
 function RoomDetailPage() {
 	const navigate = useNavigate();
@@ -229,10 +179,11 @@ function RoomDetailPage() {
 	// WebSocket-first room state (replaces React Query polling)
 	const { roomState, leaveRoom, isJoined } = useRoom(roomId);
 
-	// PeerJS hook for streaming
-	const { localStream, remoteStream } = usePeerJS({
+	// PeerJS hook for streaming (pass streamerPeerId so late joiners auto-connect)
+	const { localStream, remoteStream, connectionStatus } = usePeerJS({
 		roomId,
 		userId: userId || "",
+		streamerPeerId: roomState?.streamerPeerId ?? null,
 	});
 
 	// WebSocket for real-time updates and room tracking
@@ -443,16 +394,22 @@ function RoomDetailPage() {
 
 							{/* Video Player with Transfer Overlay */}
 							<div className="relative">
-								{/* Show local preview when actively streaming, otherwise show remote stream */}
-								{localStream ? (
-									<ScreenSharePreview stream={localStream} />
-								) : (
-									<VideoDisplay
-										stream={remoteStream}
-										streamerName={streamer?.name}
+								<StreamingErrorBoundary>
+									{/* Show local preview when actively streaming, otherwise show remote stream */}
+									{localStream ? (
+										<ScreenSharePreview stream={localStream} />
+									) : (
+										<VideoDisplay
+											stream={remoteStream}
+											streamerName={streamer?.name}
+											connectionStatus={connectionStatus}
+										/>
+									)}
+									<TransferOverlay
+										isTransferring={false}
+										newStreamerName={streamer?.name ?? undefined}
 									/>
-								)}
-								<TransferOverlay />
+								</StreamingErrorBoundary>
 							</div>
 
 							{/* Streamer Controls */}
