@@ -853,6 +853,10 @@ export async function handleSocketDisconnect(
 				// Update in-memory state
 				removeParticipantFromRoom(roomId, userId);
 
+				// Remove peer ID tracking for this user
+				const { removePeerId } = await import("../streaming/events");
+				removePeerId(roomId, userId);
+
 				if (leaveResult.newStreamerId) {
 					updateRoomStreamer(roomId, leaveResult.newStreamerId);
 				} else if (room.streamerId === userId) {

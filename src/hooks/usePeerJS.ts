@@ -9,6 +9,7 @@
 
 import Peer, { type MediaConnection } from "peerjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ConnectionRetryManager } from "#/lib/connection-retry";
 import { detectDevice } from "#/lib/device-detection";
 import { useWebSocket } from "#/lib/websocket-context";
 import type {
@@ -33,6 +34,8 @@ export function usePeerJS({ roomId, userId }: UsePeerJSOptions) {
 	const localStreamRef = useRef<MediaStream | null>(null);
 	const currentCallRef = useRef<MediaConnection | null>(null);
 	const isCleaningUpRef = useRef(false);
+	const pendingStreamerConfigRef = useRef<AudioConfig | null>(null);
+	const retryManagerRef = useRef<ConnectionRetryManager | null>(null);
 
 	// State
 	const [isScreenSharing, setIsScreenSharing] = useState(false);
@@ -71,6 +74,16 @@ export function usePeerJS({ roomId, userId }: UsePeerJSOptions) {
 				roomId,
 				peerId: id,
 			});
+
+			// If we're a streamer with pending config, emit ready
+			if (pendingStreamerConfigRef.current) {
+				socket?.emit("peerjs:streamer_ready", {
+					roomId,
+					peerId: id,
+					audioConfig: pendingStreamerConfigRef.current,
+				});
+				pendingStreamerConfigRef.current = null;
+			}
 		});
 
 		peer.on("error", (error) => {
@@ -211,9 +224,20 @@ export function usePeerJS({ roomId, userId }: UsePeerJSOptions) {
 					};
 				}
 
+				// Store config for emission when peer opens
+				pendingStreamerConfigRef.current = options.audioConfig;
+
 				// Initialize PeerJS if not already
 				if (!peerRef.current) {
 					initPeer();
+				} else if (peerRef.current?.id) {
+					// Peer already open, emit immediately
+					socket?.emit("peerjs:streamer_ready", {
+						roomId,
+						peerId: peerRef.current.id,
+						audioConfig: options.audioConfig,
+					});
+					pendingStreamerConfigRef.current = null;
 				}
 
 				// Update state
@@ -221,16 +245,6 @@ export function usePeerJS({ roomId, userId }: UsePeerJSOptions) {
 				setAudioConfig(options.audioConfig);
 				setIsStreamer(true);
 				setConnectionStatus("connected");
-
-				// Notify server
-				// We emit this after peer is ready (handled in initPeer callback)
-				if (peerRef.current?.id) {
-					socket?.emit("peerjs:streamer_ready", {
-						roomId,
-						peerId: peerRef.current.id,
-						audioConfig: options.audioConfig,
-					});
-				}
 
 				console.log("[PeerJS] Screen sharing started");
 			} catch (error) {
@@ -255,69 +269,110 @@ export function usePeerJS({ roomId, userId }: UsePeerJSOptions) {
 	}, [cleanup, roomId, socket]);
 
 	/**
-	 * Connect to streamer (viewer initiates)
+	 * Connect to streamer (viewer initiates) with retry logic
 	 */
 	const connectToStreamer = useCallback(
 		async (targetStreamerPeerId: string): Promise<void> => {
 			if (isStreamer) return;
 
-			console.log("[PeerJS] Connecting to streamer:", targetStreamerPeerId);
+			// Initialize retry manager if needed
+			if (!retryManagerRef.current) {
+				retryManagerRef.current = new ConnectionRetryManager({
+					maxRetries: 5,
+					initialDelayMs: 1000,
+					maxDelayMs: 30000,
+					backoffMultiplier: 2,
+					jitterFactor: 0.1,
+				});
+			}
 
-			try {
-				// Initialize PeerJS if not already
-				if (!peerRef.current) {
-					initPeer();
-					// Wait for peer to be ready
-					await new Promise<void>((resolve) => {
-						const checkPeer = setInterval(() => {
-							if (peerRef.current?.id) {
+			const retryManager = retryManagerRef.current;
+
+			while (retryManager.shouldRetry()) {
+				try {
+					console.log("[PeerJS] Connecting to streamer:", targetStreamerPeerId);
+					retryManager.markConnecting();
+
+					// Initialize PeerJS if not already
+					if (!peerRef.current) {
+						initPeer();
+						// Wait for peer to be ready
+						await new Promise<void>((resolve) => {
+							const checkPeer = setInterval(() => {
+								if (peerRef.current?.id) {
+									clearInterval(checkPeer);
+									resolve();
+								}
+							}, 100);
+							// Timeout after 5 seconds
+							setTimeout(() => {
 								clearInterval(checkPeer);
 								resolve();
-							}
-						}, 100);
-						// Timeout after 5 seconds
-						setTimeout(() => {
-							clearInterval(checkPeer);
-							resolve();
-						}, 5000);
+							}, 5000);
+						});
+					}
+
+					if (!peerRef.current) {
+						throw new Error("PeerJS not initialized");
+					}
+
+					// Call the streamer
+					const call = peerRef.current.call(
+						targetStreamerPeerId,
+						new MediaStream(),
+					);
+					currentCallRef.current = call;
+
+					// Set up stream handler
+					call.on("stream", (remoteStream) => {
+						console.log("[PeerJS] Received stream from streamer");
+						setRemoteStream(remoteStream);
+						setConnectionStatus("connected");
+						setLastError(undefined);
+						retryManager.markSuccess();
 					});
-				}
 
-				if (!peerRef.current) {
-					throw new Error("PeerJS not initialized");
-				}
+					call.on("close", () => {
+						console.log("[PeerJS] Call closed");
+						setRemoteStream(null);
+						setConnectionStatus("idle");
+					});
 
-				// Call the streamer
-				const call = peerRef.current.call(
-					targetStreamerPeerId,
-					new MediaStream(),
-				);
-				currentCallRef.current = call;
+					call.on("error", (error) => {
+						console.error("[PeerJS] Call error:", error);
+						setLastError("Connection error");
+						setConnectionStatus("failed");
+						retryManager.recordError(error.message);
+					});
 
-				call.on("stream", (remoteStream) => {
-					console.log("[PeerJS] Received stream from streamer");
-					setRemoteStream(remoteStream);
-					setConnectionStatus("connected");
-					setLastError(undefined);
-				});
+					setStreamerId(targetStreamerPeerId);
+					setConnectionStatus("connecting");
 
-				call.on("close", () => {
-					console.log("[PeerJS] Call closed");
-					setRemoteStream(null);
-					setConnectionStatus("idle");
-				});
-
-				call.on("error", (error) => {
-					console.error("[PeerJS] Call error:", error);
-					setLastError("Connection error");
+					// Wait for connection to establish
+					return;
+				} catch (error) {
+					const errorMessage =
+						error instanceof Error ? error.message : String(error);
+					console.error(
+						`[PeerJS] Connection attempt ${retryManager.getState().attempt} failed:`,
+						errorMessage,
+					);
+					setLastError(`Connection failed: ${errorMessage}`);
 					setConnectionStatus("failed");
-				});
+					retryManager.recordError(errorMessage);
 
-				setStreamerId(targetStreamerPeerId);
-				setConnectionStatus("connecting");
-			} catch (error) {
-				console.error("[PeerJS] Failed to connect to streamer:", error);
-				setLastError("Failed to connect to stream");
+					// Try again if we haven't exceeded max retries
+					if (retryManager.shouldRetry()) {
+						const shouldContinue = await retryManager.waitForRetry();
+						if (!shouldContinue) {
+							console.log("[PeerJS] Retry aborted");
+							break;
+						}
+					} else {
+						console.error("[PeerJS] Max retries exceeded");
+						break;
+					}
+				}
 			}
 		},
 		[isStreamer, initPeer],

@@ -571,6 +571,7 @@ describe("Room State Management", () => {
 				name: "Test Room",
 				description: "Test Description",
 				streamerId: "user-1",
+				streamerPeerId: null,
 				status: "active",
 				participants: [
 					{
