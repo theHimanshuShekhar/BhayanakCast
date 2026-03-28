@@ -47,7 +47,7 @@ export function setupStreamingHandlers(
 	});
 
 	// Streamer ready to broadcast
-	socket.on("peerjs:streamer_ready", (data: StreamerReadyData) => {
+	socket.on("peerjs:streamer_ready", async (data: StreamerReadyData) => {
 		const { roomId, peerId, audioConfig } = data;
 		const userId = socket.data.userId;
 
@@ -65,6 +65,22 @@ export function setupStreamingHandlers(
 			roomPeerJSIds.set(roomId, new Map());
 		}
 		roomPeerJSIds.get(roomId)?.set(userId, peerId);
+
+		// Update room state with streamer peer ID
+		const { getRoomState, serializeRoomState } = await import("../room/state");
+		const room = getRoomState(roomId);
+		if (room && room.streamerId === userId) {
+			room.streamerPeerId = peerId;
+
+			// Broadcast updated room state to all members
+			const roomState = serializeRoomState(roomId);
+			if (roomState) {
+				io.to(roomId).emit("room:state_sync", {
+					roomId,
+					roomState,
+				});
+			}
+		}
 
 		// Notify all room members to connect to this streamer
 		io.to(roomId).emit("peerjs:streamer_ready", {
