@@ -8,8 +8,8 @@
  * @module components/StreamingErrorBoundary
  */
 
-import { Component, type ReactNode, type ErrorInfo } from "react";
 import { AlertTriangle } from "lucide-react";
+import { Component, type ErrorInfo, type ReactNode } from "react";
 
 interface Props {
 	children: ReactNode;

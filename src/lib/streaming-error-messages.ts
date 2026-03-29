@@ -25,15 +25,16 @@ export const streamingErrorMessages: Record<StreamingErrorType, string> = {
 		"Failed to switch to new streamer. Waiting for stream...",
 	[StreamingErrorType.STREAM_ENDED_UNEXPECTEDLY]:
 		"Stream ended unexpectedly. Waiting for it to resume...",
-	[StreamingErrorType.PEERJS_ERROR]:
-		"Streaming service error. Reconnecting...",
-	[StreamingErrorType.UNKNOWN]:
-		"An unexpected error occurred. Retrying...",
+	[StreamingErrorType.PEERJS_ERROR]: "Streaming service error. Reconnecting...",
+	[StreamingErrorType.UNKNOWN]: "An unexpected error occurred. Retrying...",
 };
 
 /**
  * Get a user-friendly message for a streaming error type.
  */
 export function getStreamingErrorMessage(type: StreamingErrorType): string {
-	return streamingErrorMessages[type] ?? streamingErrorMessages[StreamingErrorType.UNKNOWN];
+	return (
+		streamingErrorMessages[type] ??
+		streamingErrorMessages[StreamingErrorType.UNKNOWN]
+	);
 }

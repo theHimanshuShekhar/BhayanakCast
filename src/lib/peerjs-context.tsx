@@ -8,8 +8,8 @@
  * @module lib/peerjs-context
  */
 
-import { createContext, useCallback, useContext, useRef } from "react";
 import Peer from "peerjs";
+import { createContext, useCallback, useContext, useRef } from "react";
 
 interface PeerJSContextType {
 	/** Get the current peer instance (null if not initialized) */
@@ -28,7 +28,10 @@ export function PeerJSProvider({ children }: { children: React.ReactNode }) {
 	const getOrCreatePeer = useCallback((peerId: string): Peer => {
 		// Reuse existing peer if still alive
 		if (peerRef.current && !peerRef.current.destroyed) {
-			console.log("[PeerJS] Reusing existing peer instance:", peerRef.current.id);
+			console.log(
+				"[PeerJS] Reusing existing peer instance:",
+				peerRef.current.id,
+			);
 			return peerRef.current;
 		}
 

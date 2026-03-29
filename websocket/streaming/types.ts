@@ -38,8 +38,8 @@ export interface ScreenShareEndedData {
  * Streamer changed event data (outgoing)
  */
 export interface StreamerChangedData {
-	/** New streamer's PeerJS peer ID */
-	newStreamerPeerId: string;
+	/** New streamer's PeerJS peer ID, or null if not yet registered */
+	newStreamerPeerId: string | null;
 	/** New streamer's name */
 	newStreamerName: string;
 }

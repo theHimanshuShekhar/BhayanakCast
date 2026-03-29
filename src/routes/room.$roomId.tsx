@@ -14,10 +14,10 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Chat } from "#/components/Chat";
+import { ScreenSharePreview } from "#/components/ScreenSharePreview";
 import { StreamerControls } from "#/components/StreamerControls";
 import { StreamingErrorBoundary } from "#/components/StreamingErrorBoundary";
 import { TransferOverlay } from "#/components/TransferOverlay";
-import { VideoDisplay } from "#/components/VideoDisplay";
 import {
 	Dialog,
 	DialogContent,
@@ -25,6 +25,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "#/components/ui/dialog";
+import { VideoDisplay } from "#/components/VideoDisplay";
 import { usePeerJS } from "#/hooks/usePeerJS";
 import { useRoom } from "#/hooks/useRoom";
 import { authClient } from "#/lib/auth-client";
@@ -109,63 +110,6 @@ export const Route = createFileRoute("/room/$roomId")({
 	},
 });
 
-
-// Screen share preview component for streamers
-interface ScreenSharePreviewProps {
-	stream: MediaStream | null;
-}
-
-function ScreenSharePreview({ stream }: ScreenSharePreviewProps) {
-	const videoRef = useRef<HTMLVideoElement>(null);
-
-	useEffect(() => {
-		if (videoRef.current && stream) {
-			console.log(
-				"[ScreenSharePreview] Setting stream:",
-				stream.id,
-				"Tracks:",
-				stream.getTracks().length,
-			);
-			videoRef.current.srcObject = stream;
-			videoRef.current.play().catch((err) => {
-				console.error("[ScreenSharePreview] Error playing video:", err);
-			});
-		}
-	}, [stream]);
-
-	if (!stream) {
-		return (
-			<div className="bg-depth-2 rounded-xl aspect-video flex flex-col items-center justify-center border-2 border-dashed border-border-subtle">
-				<Monitor className="h-16 w-16 text-text-tertiary mb-4" />
-				<p className="text-text-secondary text-lg mb-2">Ready to Stream</p>
-				<p className="text-text-tertiary text-sm">
-					Click "Start Streaming" to begin
-				</p>
-			</div>
-		);
-	}
-
-	return (
-		<div className="relative rounded-xl overflow-hidden bg-black aspect-video">
-			<video
-				ref={videoRef}
-				autoPlay
-				playsInline
-				muted
-				className="w-full h-full object-contain"
-			/>
-			<div className="absolute top-4 left-4 px-3 py-1 rounded bg-red-500/90 text-white text-sm flex items-center gap-2">
-				<span className="relative flex h-2 w-2">
-					<span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75" />
-					<span className="relative inline-flex rounded-full h-2 w-2 bg-white" />
-				</span>
-				LIVE - Your Screen
-			</div>
-		</div>
-	);
-}
-
-
 function RoomDetailPage() {
 	const navigate = useNavigate();
 	const { roomId } = Route.useParams();
@@ -177,14 +121,15 @@ function RoomDetailPage() {
 	detectDevice();
 
 	// WebSocket-first room state (replaces React Query polling)
-	const { roomState, leaveRoom, isJoined } = useRoom(roomId);
+	const { roomState, leaveRoom, joinRoom, isJoined } = useRoom(roomId);
 
 	// PeerJS hook for streaming (pass streamerPeerId so late joiners auto-connect)
-	const { localStream, remoteStream, connectionStatus } = usePeerJS({
-		roomId,
-		userId: userId || "",
-		streamerPeerId: roomState?.streamerPeerId ?? null,
-	});
+	const { localStream, remoteStream, connectionStatus, retryAttempt } =
+		usePeerJS({
+			roomId,
+			userId: userId || "",
+			streamerPeerId: roomState?.streamerPeerId ?? null,
+		});
 
 	// WebSocket for real-time updates and room tracking
 	const { socket, isConnected, setCurrentRoomId } = useWebSocket();
@@ -241,15 +186,35 @@ function RoomDetailPage() {
 		void navigate({ to: "/" });
 	}, [navigate]);
 
-	// Join room handler (for manual join button)
-	const handleJoinRoom = useCallback(() => {
-		if (!userId || !isActive || !isConnected) {
-			console.log("[Room] Cannot join - missing requirements");
-			return;
+	// Transfer overlay state (shown while streamer is changing)
+	const [isTransferring, setIsTransferring] = useState(false);
+	const [previousStreamerName, setPreviousStreamerName] = useState<
+		string | undefined
+	>(undefined);
+
+	// Show TransferOverlay when streamer changes; auto-hide once new stream arrives
+	useEffect(() => {
+		if (!socket) return;
+		const handleStreamerChanged = (_data: {
+			newStreamerId: string;
+			newStreamerName: string;
+		}) => {
+			setPreviousStreamerName(streamer?.name ?? undefined);
+			setIsTransferring(true);
+		};
+		socket.on("room:streamer_changed", handleStreamerChanged);
+		return () => {
+			socket.off("room:streamer_changed", handleStreamerChanged);
+		};
+	}, [socket, streamer?.name]);
+
+	// Hide TransferOverlay once remote stream arrives
+	useEffect(() => {
+		if (remoteStream) {
+			setIsTransferring(false);
+			setPreviousStreamerName(undefined);
 		}
-		console.log("[Room] Joining room");
-		// Join is handled automatically by useRoom, but we can trigger it here if needed
-	}, [userId, isActive, isConnected]);
+	}, [remoteStream]);
 
 	// Refs to track latest values for cleanup
 	const socketRef = useRef(socket);
@@ -328,6 +293,43 @@ function RoomDetailPage() {
 		[socket, isConnected, roomId],
 	);
 
+	const isWaiting = room.status === "waiting";
+
+	// Waiting room layout — host hasn't started yet
+	if (isWaiting) {
+		return (
+			<div className="h-full w-full bg-depth-0 flex flex-col items-center justify-center p-8">
+				<div className="max-w-md w-full text-center space-y-6">
+					<button
+						type="button"
+						onClick={handleBackToRooms}
+						className="inline-flex items-center gap-2 text-text-secondary hover:text-text-primary transition-colors mb-4"
+					>
+						<ArrowLeft className="h-4 w-4" />
+						<span>Back to rooms</span>
+					</button>
+					<div className="bg-depth-1 rounded-xl p-8 border border-border-subtle space-y-4">
+						<div className="flex justify-center">
+							<Clock className="h-16 w-16 text-text-tertiary" />
+						</div>
+						<h1 className="text-2xl font-bold text-text-primary">
+							{censorText(room.name)}
+						</h1>
+						<p className="text-text-secondary">
+							Waiting for the host to start the stream.
+						</p>
+						{streamer && (
+							<p className="text-text-tertiary text-sm">
+								Hosted by{" "}
+								<span className="text-text-primary">{streamer.name}</span>
+							</p>
+						)}
+					</div>
+				</div>
+			</div>
+		);
+	}
+
 	// Active room layout with two columns
 	if (isActive || isPreparing) {
 		return (
@@ -394,7 +396,11 @@ function RoomDetailPage() {
 
 							{/* Video Player with Transfer Overlay */}
 							<div className="relative">
-								<StreamingErrorBoundary>
+								<StreamingErrorBoundary
+									onReset={() => {
+										setIsTransferring(false);
+									}}
+								>
 									{/* Show local preview when actively streaming, otherwise show remote stream */}
 									{localStream ? (
 										<ScreenSharePreview stream={localStream} />
@@ -403,10 +409,12 @@ function RoomDetailPage() {
 											stream={remoteStream}
 											streamerName={streamer?.name}
 											connectionStatus={connectionStatus}
+											retryAttempt={retryAttempt}
 										/>
 									)}
 									<TransferOverlay
-										isTransferring={false}
+										isTransferring={isTransferring}
+										oldStreamerName={previousStreamerName}
 										newStreamerName={streamer?.name ?? undefined}
 									/>
 								</StreamingErrorBoundary>
@@ -454,7 +462,7 @@ function RoomDetailPage() {
 								<div className="flex items-center gap-3 pt-2">
 									<button
 										type="button"
-										onClick={handleJoinRoom}
+										onClick={joinRoom}
 										className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent hover:bg-accent-hover text-bg-primary font-bold transition-colors"
 									>
 										<span>Join Room</span>

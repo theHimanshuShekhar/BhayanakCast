@@ -7,6 +7,10 @@
  * @module lib/connection-retry
  */
 
+import type { ConnectionStatus } from "#/types/webrtc";
+
+export type { ConnectionStatus } from "#/types/webrtc";
+
 export interface RetryConfig {
 	maxRetries: number;
 	initialDelayMs: number;
@@ -22,13 +26,6 @@ export const DEFAULT_RETRY_CONFIG: RetryConfig = {
 	backoffMultiplier: 2,
 	jitterFactor: 0.1,
 };
-
-export type ConnectionStatus =
-	| "idle"
-	| "connecting"
-	| "connected"
-	| "reconnecting"
-	| "failed";
 
 export interface RetryState {
 	attempt: number;
@@ -259,5 +256,7 @@ export async function retryWithBackoff<T>(
 	}
 
 	const lastError = manager.getState().lastError;
-	throw new Error(`Failed after ${finalConfig.maxRetries} attempts${lastError ? `: ${lastError}` : ""}`);
+	throw new Error(
+		`Failed after ${finalConfig.maxRetries} attempts${lastError ? `: ${lastError}` : ""}`,
+	);
 }

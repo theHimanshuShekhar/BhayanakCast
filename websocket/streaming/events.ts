@@ -7,6 +7,7 @@
  */
 
 import type { Server as SocketIOServer, Socket } from "socket.io";
+import { RateLimits, rateLimiter } from "../../src/lib/rate-limiter";
 import type { SocketUserData } from "../websocket-server";
 import type {
 	PeerJSReadyData,
@@ -31,8 +32,24 @@ export function setupStreamingHandlers(
 	socket: TypedSocket,
 	socketUserMap: Map<string, SocketUserData>,
 ): void {
+	// Helper to check WebRTC signaling rate limit
+	const checkSignalingLimit = (): boolean => {
+		const userId = socket.data.userId;
+		if (!userId) return false;
+		const signalingLimiter = rateLimiter.forAction("webrtc:signaling");
+		const result = signalingLimiter.checkAndRecord(userId, RateLimits.WEBRTC_SIGNALING);
+		if (!result.allowed) {
+			socket.emit("room:error", {
+				message: `Signaling rate limit exceeded. Try again in ${result.retryAfter} seconds.`,
+			});
+			return false;
+		}
+		return true;
+	};
+
 	// Track PeerJS IDs for users in rooms
 	socket.on("peerjs:ready", (data: PeerJSReadyData) => {
+		if (!checkSignalingLimit()) return;
 		const { peerId } = data;
 		const userId = socket.data.userId;
 
@@ -48,6 +65,7 @@ export function setupStreamingHandlers(
 
 	// Streamer ready to broadcast
 	socket.on("peerjs:streamer_ready", async (data: StreamerReadyData) => {
+		if (!checkSignalingLimit()) return;
 		const { roomId, peerId, audioConfig } = data;
 		const userId = socket.data.userId;
 
@@ -92,6 +110,7 @@ export function setupStreamingHandlers(
 
 	// Screen sharing ended
 	socket.on("peerjs:screen_share_ended", async (data: ScreenShareEndedData) => {
+		if (!checkSignalingLimit()) return;
 		const { roomId } = data;
 		const userId = socket.data.userId;
 
@@ -129,22 +148,20 @@ export async function initiateStreamerTransfer(
 ): Promise<void> {
 	console.log(`[PeerJS] Initiating streamer transfer in room ${roomId}`);
 
-	// Get room's peer ID mapping
-	const roomPeers = roomPeerJSIds.get(roomId);
-	if (!roomPeers) return;
-
-	// Find new streamer's peer ID
-	const newStreamerPeerId = roomPeers.get(newStreamerId);
-	if (!newStreamerPeerId) return;
-
 	const newStreamerName = participants.find(p => p.userId === newStreamerId)?.userName || "Someone";
 
-	// Notify all clients about the new streamer
+	// Get new streamer's peer ID if already registered (may be null if they haven't called peerjs:streamer_ready yet)
+	const newStreamerPeerId = roomPeerJSIds.get(roomId)?.get(newStreamerId) ?? null;
+
+	// Always notify all clients about the streamer change.
+	// If newStreamerPeerId is null, viewers will show reconnecting state and wait
+	// for the subsequent room:state_sync once the new streamer calls peerjs:streamer_ready.
 	const data: StreamerChangedData = {
 		newStreamerPeerId,
 		newStreamerName,
 	};
 	io.to(roomId).emit("peerjs:streamer_changed", data);
+	console.log(`[PeerJS] Streamer change notified. New streamer peer ID: ${newStreamerPeerId ?? "not yet registered"}`);
 
 	console.log(`[PeerJS] Streamer transfer notification sent for ${newStreamerName}`);
 }

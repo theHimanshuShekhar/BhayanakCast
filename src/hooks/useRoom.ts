@@ -198,6 +198,8 @@ export function useRoom(roomId: string | undefined): UseRoomReturn {
 					? {
 							...prev,
 							streamerId: data.newStreamerId,
+							// Reset streamerPeerId — new streamer will set it via peerjs:streamer_ready
+							streamerPeerId: null,
 						}
 					: null,
 			);

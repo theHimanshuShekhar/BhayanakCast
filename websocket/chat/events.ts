@@ -7,6 +7,7 @@
  */
 
 import type { Server as SocketIOServer, Socket } from "socket.io";
+import { censorText } from "../../src/lib/profanity-filter";
 import { RateLimits, rateLimiter } from "../../src/lib/rate-limiter";
 import type { SocketUserData } from "../websocket-server";
 import type { ChatMessage } from "./types";
@@ -41,13 +42,24 @@ export function setupChatHandlers(
 			return;
 		}
 
-		// Check rate limit
+		// Check sustained rate limit (30 messages per 15 seconds)
 		const chatLimiter = rateLimiter.forAction("chat:send");
 		const rateLimitResult = chatLimiter.checkAndRecord(userId, RateLimits.CHAT_SEND);
 		if (!rateLimitResult.allowed) {
 			socket.emit("chat:error", {
 				message: `You're sending messages too quickly. Try again in ${rateLimitResult.retryAfter} seconds.`,
 				retryAfter: rateLimitResult.retryAfter,
+			});
+			return;
+		}
+
+		// Check rapid-fire rate limit (5 messages per 3 seconds) — catches micro-bursts
+		const rapidLimiter = rateLimiter.forAction("chat:rapid");
+		const rapidResult = rapidLimiter.checkAndRecord(userId, RateLimits.CHAT_RAPID);
+		if (!rapidResult.allowed) {
+			socket.emit("chat:error", {
+				message: `Slow down! Try again in ${rapidResult.retryAfter} seconds.`,
+				retryAfter: rapidResult.retryAfter,
 			});
 			return;
 		}
@@ -65,7 +77,7 @@ export function setupChatHandlers(
 			userId,
 			userName,
 			userImage,
-			content: content.trim(),
+			content: censorText(content.trim()),
 			timestamp: Date.now(),
 			type: "user",
 		};

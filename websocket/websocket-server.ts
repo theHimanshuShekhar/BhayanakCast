@@ -168,6 +168,7 @@ const io = new Server(httpServer, {
 export interface SocketUserData {
 	userId: string;
 	userName: string;
+	userImage?: string;
 	roomId?: string;
 	isMobile: boolean;
 	peerId?: string; // PeerJS ID for WebRTC connections
