@@ -7,9 +7,9 @@
  * - Much simpler than manual RTCPeerConnection management
  */
 
-import { type MediaConnection } from "peerjs";
+import type { MediaConnection } from "peerjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ConnectionRetryManager } from "#/lib/connection-retry";
+import { ConnectionRetryManager } from "#/lib/connection-retry";
 import { detectDevice } from "#/lib/device-detection";
 import { usePeerJSContext } from "#/lib/peerjs-context";
 import { useWebSocket } from "#/lib/websocket-context";
@@ -26,9 +26,14 @@ interface UsePeerJSOptions {
 	streamerPeerId?: string | null;
 }
 
-export function usePeerJS({ roomId, userId, streamerPeerId }: UsePeerJSOptions) {
+export function usePeerJS({
+	roomId,
+	userId,
+	streamerPeerId,
+}: UsePeerJSOptions) {
 	const { socket } = useWebSocket();
-	const { getOrCreatePeer, destroyPeer: contextDestroyPeer } = usePeerJSContext();
+	const { getOrCreatePeer, destroyPeer: contextDestroyPeer } =
+		usePeerJSContext();
 
 	// Device capabilities
 	const deviceCapabilities = useMemo(() => detectDevice(), []);
@@ -53,6 +58,7 @@ export function usePeerJS({ roomId, userId, streamerPeerId }: UsePeerJSOptions) 
 		useState<ConnectionStatus>("idle");
 	const [lastError, setLastError] = useState<string | undefined>();
 	const [peerId, setPeerId] = useState<string | null>(null);
+	const [retryAttempt, setRetryAttempt] = useState(0);
 
 	/**
 	 * Initialize PeerJS peer
@@ -134,6 +140,10 @@ export function usePeerJS({ roomId, userId, streamerPeerId }: UsePeerJSOptions) 
 		isCleaningUpRef.current = true;
 
 		console.log("[PeerJS] Cleaning up...");
+
+		// Abort any in-progress retry to prevent state updates after unmount
+		retryManagerRef.current?.abort();
+		retryManagerRef.current = null;
 
 		// Close current call
 		if (currentCallRef.current) {
@@ -328,6 +338,7 @@ export function usePeerJS({ roomId, userId, streamerPeerId }: UsePeerJSOptions) 
 						setRemoteStream(remoteStream);
 						setConnectionStatus("connected");
 						setLastError(undefined);
+						setRetryAttempt(0);
 						retryManager.markSuccess();
 					});
 
@@ -362,6 +373,7 @@ export function usePeerJS({ roomId, userId, streamerPeerId }: UsePeerJSOptions) 
 
 					// Try again if we haven't exceeded max retries
 					if (retryManager.shouldRetry()) {
+						setRetryAttempt(retryManager.getState().attempt);
 						const shouldContinue = await retryManager.waitForRetry();
 						if (!shouldContinue) {
 							console.log("[PeerJS] Retry aborted");
@@ -404,8 +416,11 @@ export function usePeerJS({ roomId, userId, streamerPeerId }: UsePeerJSOptions) 
 		// Streamer changed - reconnect to new streamer
 		socket.on(
 			"peerjs:streamer_changed",
-			(data: { newStreamerPeerId: string; newStreamerName: string }) => {
-				console.log("[PeerJS] Streamer changed to:", data.newStreamerPeerId);
+			(data: { newStreamerPeerId: string | null; newStreamerName: string }) => {
+				console.log(
+					"[PeerJS] Streamer changed to:",
+					data.newStreamerPeerId ?? "(not yet registered)",
+				);
 
 				// Close existing call
 				if (currentCallRef.current) {
@@ -419,8 +434,9 @@ export function usePeerJS({ roomId, userId, streamerPeerId }: UsePeerJSOptions) 
 
 				setRemoteStream(null);
 
-				// Connect to new streamer if not us
-				if (data.newStreamerPeerId !== peerId) {
+				// Connect to new streamer if peer ID is known and it's not us
+				// If null, wait for room:state_sync once new streamer calls peerjs:streamer_ready
+				if (data.newStreamerPeerId && data.newStreamerPeerId !== peerId) {
 					connectToStreamer(data.newStreamerPeerId);
 				}
 			},
@@ -474,11 +490,21 @@ export function usePeerJS({ roomId, userId, streamerPeerId }: UsePeerJSOptions) 
 	useEffect(() => {
 		if (!streamerPeerId || isStreamer) return;
 		// Don't reconnect if already connected to this peer
-		if (streamerId === streamerPeerId && connectionStatus === "connected") return;
+		if (streamerId === streamerPeerId && connectionStatus === "connected")
+			return;
 
-		console.log("[PeerJS] Late join: auto-connecting to streamer:", streamerPeerId);
+		console.log(
+			"[PeerJS] Late join: auto-connecting to streamer:",
+			streamerPeerId,
+		);
 		void connectToStreamer(streamerPeerId);
-	}, [streamerPeerId, isStreamer, streamerId, connectionStatus, connectToStreamer]);
+	}, [
+		streamerPeerId,
+		isStreamer,
+		streamerId,
+		connectionStatus,
+		connectToStreamer,
+	]);
 
 	/**
 	 * Toggle audio mute/unmute
@@ -510,6 +536,7 @@ export function usePeerJS({ roomId, userId, streamerPeerId }: UsePeerJSOptions) 
 		deviceCapabilities,
 		isAudioEnabled,
 		peerId,
+		retryAttempt,
 
 		// Actions
 		startScreenShare,

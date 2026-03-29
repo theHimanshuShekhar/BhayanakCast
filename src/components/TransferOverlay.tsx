@@ -28,11 +28,11 @@ export function TransferOverlay({
 			data-testid="transfer-overlay"
 		>
 			<ArrowLeftRight className="h-12 w-12 text-accent mb-4" />
-			<h3 className="text-white text-xl font-semibold mb-2">Streamer Changed</h3>
+			<h3 className="text-white text-xl font-semibold mb-2">
+				Streamer Changed
+			</h3>
 			{oldStreamerName && (
-				<p className="text-gray-300 text-sm mb-1">
-					{oldStreamerName} has left
-				</p>
+				<p className="text-gray-300 text-sm mb-1">{oldStreamerName} has left</p>
 			)}
 			{newStreamerName && (
 				<p className="text-gray-300 text-sm mb-4">

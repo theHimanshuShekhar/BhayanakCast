@@ -36,14 +36,7 @@ import {
 	findStaleRoomsFromDB,
 } from "./persistence";
 import { RateLimits, rateLimiter } from "../../src/lib/rate-limiter";
-
-// Types for socket data
-interface SocketUserData {
-	userId?: string;
-	userName?: string;
-	userImage?: string;
-	isMobile?: boolean;
-}
+import type { SocketUserData } from "../websocket-server";
 
 // Extend Socket type
 type TypedSocket = Socket & {
@@ -76,7 +69,7 @@ export function setupRoomEventHandlers(
 /**
  * Handle room:create event
  */
-function handleRoomCreate(io: SocketIOServer, socket: TypedSocket) {
+function handleRoomCreate(_io: SocketIOServer, socket: TypedSocket) {
 	return async (data: { name: string; description?: string }) => {
 		try {
 			const userId = socket.data.userId;
@@ -678,10 +671,10 @@ function handleStreamerTransfer(io: SocketIOServer, socket: TypedSocket) {
 				return;
 			}
 
-			// Check rate limit for streamer transfers (30 second cooldown)
+			// Check rate limit for streamer transfers (30 second cooldown, keyed per room)
 			const transferLimiter = rateLimiter.forAction("streamer:transfer");
 			const rateLimitResult = transferLimiter.checkAndRecord(
-				userId,
+				`${roomId}:${userId}`,
 				RateLimits.STREAMER_TRANSFER,
 			);
 			if (!rateLimitResult.allowed) {

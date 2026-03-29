@@ -36,10 +36,13 @@ export function VideoDisplay({
 	if (!stream) {
 		return (
 			<div className="bg-depth-2 rounded-xl aspect-video flex flex-col items-center justify-center border-2 border-dashed border-border-subtle">
-				{connectionStatus === "connecting" || connectionStatus === "reconnecting" ? (
+				{connectionStatus === "connecting" ||
+				connectionStatus === "reconnecting" ? (
 					<>
 						<RefreshCw className="h-16 w-16 text-accent mb-4 animate-spin" />
-						<p className="text-text-secondary text-lg mb-2">Connecting to stream...</p>
+						<p className="text-text-secondary text-lg mb-2">
+							Connecting to stream...
+						</p>
 						{retryAttempt > 0 && (
 							<p className="text-text-tertiary text-sm">
 								Retry attempt {retryAttempt}
@@ -49,13 +52,19 @@ export function VideoDisplay({
 				) : connectionStatus === "failed" ? (
 					<>
 						<WifiOff className="h-16 w-16 text-danger mb-4" />
-						<p className="text-text-secondary text-lg mb-2">Connection failed</p>
-						<p className="text-text-tertiary text-sm">Attempting to reconnect...</p>
+						<p className="text-text-secondary text-lg mb-2">
+							Connection failed
+						</p>
+						<p className="text-text-tertiary text-sm">
+							Attempting to reconnect...
+						</p>
 					</>
 				) : (
 					<>
 						<Video className="h-16 w-16 text-text-tertiary mb-4" />
-						<p className="text-text-secondary text-lg mb-2">Waiting for Stream</p>
+						<p className="text-text-secondary text-lg mb-2">
+							Waiting for Stream
+						</p>
 						<p className="text-text-tertiary text-sm">
 							{streamerName
 								? `${streamerName} will start streaming soon`

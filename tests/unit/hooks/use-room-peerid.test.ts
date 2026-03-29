@@ -142,6 +142,32 @@ describe("useRoom - streamerPeerId", () => {
 		expect(result.current.roomState?.streamerPeerId).toBeNull();
 	});
 
+	it("resets streamerPeerId to null when room:streamer_changed fires", () => {
+		const { result } = renderHook(() => useRoom("room-1"));
+
+		// First, set initial state with a streamerPeerId
+		const handleStateSync = getHandler("room:state_sync");
+		act(() => {
+			handleStateSync({
+				roomId: "room-1",
+				roomState: { ...baseRoomState, streamerPeerId: "old-streamer-peer-id" },
+			});
+		});
+		expect(result.current.roomState?.streamerPeerId).toBe("old-streamer-peer-id");
+
+		// Streamer changes — streamerPeerId must be reset to null
+		const handleStreamerChanged = getHandler("room:streamer_changed");
+		act(() => {
+			handleStreamerChanged({
+				newStreamerId: "new-streamer-user",
+				newStreamerName: "New Streamer",
+			});
+		});
+
+		expect(result.current.roomState?.streamerId).toBe("new-streamer-user");
+		expect(result.current.roomState?.streamerPeerId).toBeNull();
+	});
+
 	it("updates streamerPeerId when user_joined brings fresh roomState", () => {
 		const { result } = renderHook(() => useRoom("room-1"));
 
