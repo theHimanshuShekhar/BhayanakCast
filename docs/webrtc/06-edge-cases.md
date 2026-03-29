@@ -1,3 +1,5 @@
+> **Historical planning document.** This describes a manual RTCPeerConnection architecture that was never implemented. The actual implementation uses PeerJS — see [README.md](./README.md).
+
 ## 10. Edge Cases & Solutions
 
 ### Edge Case 1: New Streamer Fails to Initialize

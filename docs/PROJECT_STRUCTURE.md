@@ -1,160 +1,121 @@
 # Project Structure
 
-Overview of the BhayanakCast codebase organization.
-
 ## Directory Layout
 
 ```
 BhayanakCast/
-├── src/                          # Main application source
-│   ├── components/              # React UI components
-│   │   ├── Chat.tsx            # Chat interface
-│   │   ├── RoomCard.tsx        # Room display card
-│   │   ├── RoomList.tsx        # Room listing page
-│   │   ├── Header.tsx          # Navigation header
-│   │   ├── StreamerControls.tsx # Streaming controls
-│   │   ├── AudioConfigModal.tsx # Audio configuration modal
-│   │   └── ...                 # Other components
+├── src/
+│   ├── components/               # React UI components
+│   │   ├── Chat.tsx
+│   │   ├── CreateRoomModal.tsx
+│   │   ├── Header.tsx
+│   │   ├── RoomCard.tsx
+│   │   ├── RoomList.tsx
+│   │   ├── ScreenSharePreview.tsx  # Streamer local preview
+│   │   ├── StreamerControls.tsx
+│   │   ├── StreamingErrorBoundary.tsx
+│   │   ├── TransferOverlay.tsx
+│   │   ├── VideoDisplay.tsx        # Viewer video + connection status
+│   │   └── ui/                     # shadcn/ui primitives
 │   │
-│   ├── hooks/                   # React hooks
-│   │   ├── useWebRTC.ts        # WebRTC streaming hook
-│   │   └── useRoom.ts          # Room state subscription
+│   ├── hooks/
+│   │   ├── usePeerJS.ts            # PeerJS streaming (streamer + viewer)
+│   │   └── useRoom.ts              # Room state via WebSocket events
 │   │
-│   ├── db/                      # Database layer (SERVER-ONLY)
-│   │   ├── schema.ts           # Drizzle ORM table definitions
-│   │   ├── index.ts            # Database connection
-│   │   └── queries/            # Query functions
-│   │       ├── stats.ts        # Statistics queries
-│   │       └── community-stats.ts
+│   ├── lib/
+│   │   ├── auth.ts / auth-client.ts / auth-guard.ts
+│   │   ├── connection-retry.ts     # Exponential backoff retry manager
+│   │   ├── device-detection.ts     # Mobile detection (mobile = view only)
+│   │   ├── peerjs-context.tsx      # PeerJS singleton (prevents duplicate instances)
+│   │   ├── profanity-filter.ts
+│   │   ├── rate-limiter.ts         # InMemoryBackend + RateLimits constants
+│   │   ├── streaming-error-messages.ts
+│   │   └── websocket-context.tsx   # Socket.io connection + auto-rejoin
 │   │
-│   ├── lib/                     # Core utilities and configurations
-│   │   ├── auth.ts             # Better Auth configuration
-│   │   ├── auth-guard.ts       # Authentication guards
-│   │   ├── rate-limiter.ts     # Rate limiting system
-│   │   ├── profanity-filter.ts # Content filtering
-│   │   ├── websocket-context.tsx # WebSocket React context
-│   │   └── utils.ts            # General utilities
+│   ├── routes/
+│   │   ├── __root.tsx              # Root layout (WebSocketProvider, PeerJSProvider)
+│   │   ├── index.tsx               # Home page — room browser
+│   │   ├── room.$roomId.tsx        # Room page
+│   │   ├── profile.$userId.tsx     # User profile (read-only, Discord identity)
+│   │   └── api/                    # Auth callbacks + test auth endpoint
 │   │
-│   ├── routes/                  # TanStack Router file-based routes
-│   │   ├── __root.tsx          # Root layout
-│   │   ├── index.tsx           # Home page (/)
-│   │   ├── room.$roomId.tsx    # Room detail page (/room/:id)
-│   │   └── api/                # API routes
-│   │       └── auth/
-│   │           └── $.ts        # Auth callback handler
+│   ├── types/
+│   │   ├── webrtc.ts               # ConnectionStatus (single canonical definition)
+│   │   └── streaming-errors.ts     # StreamingErrorType enum
 │   │
-│   ├── utils/                   # Server utility functions
-│   │   ├── rooms.ts            # Room CRUD operations
-│   │   ├── home.ts             # Home page data
-│   │   ├── profile.ts          # Profile operations
-│   │   ├── websocket-client.ts # WebSocket client utilities
-│   │   └── room-cleanup.ts     # Cleanup job logic
+│   ├── db/                         # SERVER-ONLY — never import at module level in client
+│   │   ├── schema.ts               # Drizzle table definitions
+│   │   ├── index.ts                # DB connection
+│   │   └── queries/                # stats.ts, community-stats.ts
 │   │
-│   ├── styles.css              # Global styles with theme system
-│   └── routeTree.gen.ts        # Auto-generated route tree
+│   └── utils/                      # Server functions (createServerFn)
+│       ├── rooms.ts                # Room CRUD
+│       ├── home.ts                 # Home page loader
+│       ├── profile.ts              # Profile data
+│       └── room-cleanup.ts         # Cleanup job logic
 │
-├── websocket/                   # WebSocket server (separate process)
-│   ├── websocket-server.ts     # Socket.io server entry
-│   ├── websocket-room-manager.ts # Legacy room state management
-│   ├── room-state.ts           # ⭐ In-memory state management
-│   ├── room-events.ts          # ⭐ Room event handlers
-│   └── db-persistence.ts       # ⭐ Database persistence layer
+├── websocket/                      # WebSocket server (separate Node.js process)
+│   ├── websocket-server.ts         # Entry point, SocketUserData type, socket lifecycle
+│   ├── room/
+│   │   ├── state.ts                # In-memory room state (Maps), serialization
+│   │   ├── events.ts               # room:create/join/leave/rejoin/transfer handlers
+│   │   └── persistence.ts          # All DB write operations for rooms
+│   ├── streaming/
+│   │   ├── events.ts               # peerjs:ready/streamer_ready/screen_share_ended
+│   │   └── types.ts                # Streaming event payload types
+│   └── chat/
+│       ├── events.ts               # chat:send handler
+│       └── types.ts
 │
-├── tests/                       # Test files
-│   ├── unit/                   # Unit tests
-│   ├── integration/            # Integration tests
-│   ├── fixtures/               # Test data fixtures
-│   └── utils/                  # Test utilities
+├── tests/
+│   ├── unit/                       # Vitest unit tests
+│   ├── integration/                # DB query + WebSocket tests
+│   └── fixtures/                   # Test data (users, rooms, participants)
 │
-├── docs/                        # Documentation
-├── drizzle/                     # Database migrations
-├── public/                      # Static assets
-└── Configuration files
-    ├── tanstack-start.config.ts
-    ├── drizzle.config.ts
-    ├── vitest.config.ts
-    └── biome.json
+├── e2e/                            # Playwright E2E tests (run locally only)
+├── docs/                           # Documentation
+├── drizzle/                        # DB migrations
+└── public/                         # Static assets
 ```
 
-## Key Principles
+## Critical Rules
 
-### Server-Only Code
-
-The `src/db/` directory is **SERVER-ONLY**. Never import it in client-side code:
-
+### Server-Only Database Imports
+`src/db/` uses Node.js-only modules. Never import at module level in client files:
 ```typescript
-// ✅ CORRECT - Dynamic import inside server function
-const myFn = createServerFn({ method: "GET" })
-  .handler(async () => {
-    const { db } = await import("#/db/index");
-    return db.query.users.findMany();
-  });
+// ✅ Inside a server function
+export const fn = createServerFn({ method: "GET" }).handler(async () => {
+  const { db } = await import("#/db/index");
+  return db.query.users.findMany();
+});
 
-// ❌ WRONG - Will cause Buffer error in browser
+// ❌ Will crash the browser
 import { db } from "#/db/index";
 ```
 
-### Import Aliases
-
-Always use the `#/` alias for src imports:
-
+### Import Alias
+Always use `#/` for `src/` imports:
 ```typescript
-// ✅ CORRECT
-import { RoomCard } from "#/components/RoomCard";
-import { users } from "#/db/schema";
-
-// ❌ WRONG - Relative imports
-import { RoomCard } from "../components/RoomCard";
+import { usePeerJS } from "#/hooks/usePeerJS";   // ✅
+import { usePeerJS } from "../hooks/usePeerJS";   // ❌
 ```
 
-### File Naming
-
-- Components: PascalCase (`RoomCard.tsx`)
-- Utilities: camelCase (`rate-limiter.ts`)
-- Routes: Follow TanStack Router conventions (`room.$roomId.tsx`)
-- Tests: `.test.ts` or `.test.tsx` suffix
-
-## Component Organization
-
-Components are organized by feature:
-
-- **Layout components:** Header, Footer, Layout
-- **Room components:** RoomCard, RoomList, RoomGrid
-- **Chat components:** Chat, ChatMessage, ChatInput
-- **User components:** UserAvatar, UserStatsCard
-
-## Database Organization
-
-- **Schema:** All table definitions in `schema.ts`
-- **Queries:** Organized by feature in `queries/` directory
-- **Relations:** Defined in schema using Drizzle relations
-
-## WebSocket Architecture
-
-WebSocket server runs as a separate process with in-memory state management:
-
-### Core Files
-- **websocket-server.ts:** Entry point, Socket.io setup
-- **room-state.ts:** ⭐ In-memory state management (primary source of truth)
-- **room-events.ts:** ⭐ WebSocket event handlers for room operations
-- **db-persistence.ts:** ⭐ Synchronous database persistence layer
-- **websocket-room-manager.ts:** Legacy room state management (being phased out)
-
-### Architecture Pattern
+### WebSocket Architecture
 ```
-Frontend → WebSocket Server → Database (sync) → Broadcast
-              ↓
-         In-Memory State (primary)
+Frontend → WebSocket Server → DB (sync write) → Broadcast to room
+                ↓
+          In-Memory Maps (primary runtime state)
 ```
+- All room operations go through WebSocket events — never via HTTP/server functions
+- `SocketUserData` (exported from `websocket/websocket-server.ts`) is the canonical socket data type
 
-### Key Principles
-1. **WebSocket-first:** All room operations go through WebSocket events
-2. **In-memory primary:** Room state is maintained in Maps during runtime
-3. **Sync DB writes:** Database operations complete before broadcasting
-4. **Auto-rejoin:** Clients automatically recover after server restart
+### PeerJS Streaming
+- `PeerJSProvider` in `__root.tsx` holds a singleton `Peer` instance
+- `usePeerJS` consumes context via `usePeerJSContext()`
+- `ConnectionStatus` type defined only in `src/types/webrtc.ts`
 
 ## See Also
-
-- [Getting Started](./GETTING_STARTED.md) - Development setup
-- [Database Schema](./DATABASE_SCHEMA.md) - Table definitions
-- [Coding Standards](./CODING_STANDARDS.md) - Code style guide
+- [Getting Started](./GETTING_STARTED.md)
+- [Database Schema](./DATABASE_SCHEMA.md)
+- [WebSocket Events](./WEBSOCKET_EVENTS.md)
+- [Coding Standards](./CODING_STANDARDS.md)
