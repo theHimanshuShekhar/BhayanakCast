@@ -3,21 +3,19 @@
  *
  * Shows streaming controls for desktop users
  * Mobile users see disabled button with explanation
+ *
+ * Uses StreamingContext (not a local hook) so state is shared
+ * with the room page's video display.
  */
 
 import { Mic, MicOff, Monitor, Smartphone, StopCircle } from "lucide-react";
 import { useState } from "react";
 import { AudioConfigModal } from "#/components/AudioConfigModal";
 import { Button } from "#/components/ui/button";
-import { usePeerJS } from "#/hooks/usePeerJS";
+import { useStreaming } from "#/lib/streaming-context";
 import type { ScreenShareOptions } from "#/types/webrtc";
 
-interface StreamerControlsProps {
-	roomId: string;
-	userId: string;
-}
-
-export function StreamerControls({ roomId, userId }: StreamerControlsProps) {
+export function StreamerControls() {
 	const [showAudioConfig, setShowAudioConfig] = useState(false);
 
 	const {
@@ -28,7 +26,7 @@ export function StreamerControls({ roomId, userId }: StreamerControlsProps) {
 		audioConfig,
 		isAudioEnabled,
 		toggleAudio,
-	} = usePeerJS({ roomId, userId });
+	} = useStreaming();
 
 	// Handle start streaming with options
 	const handleStartStream = (options: ScreenShareOptions) => {

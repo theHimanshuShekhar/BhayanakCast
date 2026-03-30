@@ -125,12 +125,20 @@ export function setupStreamingHandlers(
 
 		// Streamer stopped streaming but stays in room
 		// Status changes to preparing, but participant stays
-		const { updateRoomStatus } = await import("../room/state");
+		const { updateRoomStatus, serializeRoomState } = await import("../room/state");
 		updateRoomStatus(roomId, "preparing");
 
-		// Broadcast status change
+		// Clear the streamer's PeerJS ID so viewers don't try to reconnect to stale peer
+		room.streamerPeerId = null;
+
+		// Broadcast status change and updated room state
 		io.to(roomId).emit("room:status_changed", { status: "preparing" });
 		io.to(roomId).emit("peerjs:screen_share_ended", { streamerId: userId });
+
+		const roomState = serializeRoomState(roomId);
+		if (roomState) {
+			io.to(roomId).emit("room:state_sync", { roomId, roomState });
+		}
 
 		console.log(`[PeerJS] Screen share ended in room ${roomId}, status changed to preparing`);
 	});

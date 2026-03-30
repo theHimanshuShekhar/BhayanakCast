@@ -20,12 +20,22 @@ const { mockPeerInstance, MockPeer } = vi.hoisted(() => {
 		reconnect: vi.fn(),
 		call: vi.fn(),
 	};
-	const MockPeer = vi.fn(() => mockPeerInstance);
+	// MockPeer sets the instance id to match the constructor argument
+	const MockPeer = vi.fn((peerId: string) => {
+		mockPeerInstance.id = peerId;
+		return mockPeerInstance;
+	});
 	return { mockPeerInstance, MockPeer };
 });
 
 vi.mock("peerjs", () => ({
 	default: MockPeer,
+}));
+
+vi.mock("#/lib/webrtc-config", () => ({
+	getRTCConfiguration: () => ({
+		iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+	}),
 }));
 
 function wrapper({ children }: { children: React.ReactNode }) {
@@ -47,10 +57,15 @@ describe("PeerJSProvider", () => {
 				result.current.getOrCreatePeer("room-user-123");
 			});
 
-			expect(MockPeer).toHaveBeenCalledWith("room-user-123", { debug: 2 });
+			expect(MockPeer).toHaveBeenCalledWith("room-user-123", {
+				debug: 2,
+				config: {
+					iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+				},
+			});
 		});
 
-		it("reuses existing peer if not destroyed", () => {
+		it("reuses existing peer if same ID and not destroyed", () => {
 			const { result } = renderHook(() => usePeerJSContext(), { wrapper });
 
 			let peer1: ReturnType<typeof result.current.getOrCreatePeer>;
@@ -58,12 +73,30 @@ describe("PeerJSProvider", () => {
 
 			act(() => {
 				peer1 = result.current.getOrCreatePeer("peer-id-1");
-				peer2 = result.current.getOrCreatePeer("peer-id-2");
+			});
+			// Same ID — reuses
+			act(() => {
+				peer2 = result.current.getOrCreatePeer("peer-id-1");
 			});
 
-			// Should only create one peer (reuse for second call)
 			expect(MockPeer).toHaveBeenCalledTimes(1);
 			expect(peer1).toBe(peer2);
+		});
+
+		it("destroys old peer and creates new one on ID mismatch", () => {
+			const { result } = renderHook(() => usePeerJSContext(), { wrapper });
+
+			act(() => {
+				result.current.getOrCreatePeer("peer-id-1");
+			});
+
+			act(() => {
+				result.current.getOrCreatePeer("peer-id-2");
+			});
+
+			// Should destroy old peer and create new one
+			expect(mockPeerInstance.destroy).toHaveBeenCalledTimes(1);
+			expect(MockPeer).toHaveBeenCalledTimes(2);
 		});
 
 		it("creates new peer if existing one is destroyed", () => {

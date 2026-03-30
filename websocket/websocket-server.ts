@@ -127,8 +127,18 @@ const httpServer = createServer((req, res) => {
 		return;
 	}
 
-	// Handle broadcast endpoint for server functions
+	// Handle broadcast endpoint for server functions.
+	// Protected by a shared secret in the Authorization header so that only
+	// the web server (running server functions) can call this endpoint.
 	if (req.url === "/api/broadcast" && req.method === "POST") {
+		const broadcastSecret = process.env.BROADCAST_SECRET;
+		const authHeader = req.headers["authorization"];
+		if (!broadcastSecret || authHeader !== `Bearer ${broadcastSecret}`) {
+			res.writeHead(401, { "Content-Type": "application/json" });
+			res.end(JSON.stringify({ error: "Unauthorized" }));
+			return;
+		}
+
 		let body = "";
 		req.on("data", (chunk) => {
 			body += chunk.toString();
