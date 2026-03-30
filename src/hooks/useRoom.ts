@@ -25,6 +25,7 @@ export interface RoomState {
 	description?: string;
 	status: "waiting" | "preparing" | "active" | "ended";
 	streamerId: string | null;
+	streamerPeerId: string | null;
 	participants: RoomParticipant[];
 	createdAt: Date;
 }
@@ -53,19 +54,38 @@ export function useRoom(roomId: string | undefined): UseRoomReturn {
 	const [isJoined, setIsJoined] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const hasJoinedRef = useRef(false);
+	const lastRoomIdRef = useRef<string | undefined>(undefined);
 
 	const isStreamer =
 		userId && roomState ? roomState.streamerId === userId : false;
 
+	// Reset hasJoinedRef and isJoined when roomId changes
+	useEffect(() => {
+		if (roomId !== lastRoomIdRef.current) {
+			hasJoinedRef.current = false;
+			lastRoomIdRef.current = roomId;
+			setIsJoined(false);
+			console.log("[useRoom] Room changed, resetting join state:", roomId);
+		}
+	}, [roomId]);
+
 	// Join room
 	const joinRoom = useCallback(() => {
+		console.log("[useRoom Debug] joinRoom called:", {
+			socket: !!socket,
+			roomId,
+			userId,
+			hasJoined: hasJoinedRef.current,
+		});
+
 		if (!socket || !roomId || !userId) {
+			console.log("[useRoom Debug] Cannot join - missing required data");
 			setError("Cannot join room - missing required data");
 			return;
 		}
 
 		if (hasJoinedRef.current) {
-			console.log("[useRoom] Already joined or joining room");
+			console.log("[useRoom Debug] Already joined or joining room, skipping");
 			return;
 		}
 
@@ -146,7 +166,7 @@ export function useRoom(roomId: string | undefined): UseRoomReturn {
 			participantCount: number;
 			roomState: RoomState;
 		}) => {
-			if (!roomState || data.roomState.id !== roomId) return;
+			if (data.roomState.id !== roomId) return;
 
 			console.log("[useRoom] User joined:", data.userName);
 			setRoomState(data.roomState);
@@ -161,7 +181,7 @@ export function useRoom(roomId: string | undefined): UseRoomReturn {
 			newStreamerName?: string;
 			roomState: RoomState;
 		}) => {
-			if (!roomState || data.roomState.id !== roomId) return;
+			if (data.roomState.id !== roomId) return;
 
 			console.log("[useRoom] User left:", data.userName);
 			setRoomState(data.roomState);
@@ -172,14 +192,14 @@ export function useRoom(roomId: string | undefined): UseRoomReturn {
 			newStreamerId: string;
 			newStreamerName: string;
 		}) => {
-			if (!roomState) return;
-
 			console.log("[useRoom] Streamer changed:", data.newStreamerName);
 			setRoomState((prev) =>
 				prev
 					? {
 							...prev,
 							streamerId: data.newStreamerId,
+							// Reset streamerPeerId — new streamer will set it via peerjs:streamer_ready
+							streamerPeerId: null,
 						}
 					: null,
 			);
@@ -187,8 +207,6 @@ export function useRoom(roomId: string | undefined): UseRoomReturn {
 
 		// Room status changed
 		const handleStatusChanged = (data: { status: RoomState["status"] }) => {
-			if (!roomState) return;
-
 			console.log("[useRoom] Status changed:", data.status);
 			setRoomState((prev) =>
 				prev
@@ -241,8 +259,10 @@ export function useRoom(roomId: string | undefined): UseRoomReturn {
 		socket.on("room:join_error", handleJoinError);
 		socket.on("room:error", handleRoomError);
 
-		// Auto-join on mount if not already joined
-		if (!hasJoinedRef.current && !isJoined) {
+		// Auto-join on mount if not already joined.
+		// Use the ref (not isJoined state) so this block doesn't re-run every time
+		// the join completes, which would tear down and re-register all listeners.
+		if (!hasJoinedRef.current) {
 			joinRoom();
 		}
 
@@ -258,7 +278,7 @@ export function useRoom(roomId: string | undefined): UseRoomReturn {
 			socket.off("room:join_error", handleJoinError);
 			socket.off("room:error", handleRoomError);
 		};
-	}, [socket, roomId, userId, joinRoom, isJoined, roomState]);
+	}, [socket, roomId, userId, joinRoom]);
 
 	return {
 		roomState,

@@ -6,13 +6,14 @@
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import React from "react";
 import { StreamerControls } from "#/components/StreamerControls";
 import { AudioConfigModal } from "#/components/AudioConfigModal";
-import { useWebRTC } from "#/hooks/useWebRTC";
+import { useStreaming } from "#/lib/streaming-context";
 import { detectDevice } from "#/lib/device-detection";
 
 // Mock dependencies
-vi.mock("#/hooks/useWebRTC");
+vi.mock("#/lib/streaming-context");
 vi.mock("#/lib/device-detection");
 
 describe("StreamerControls", () => {
@@ -31,7 +32,7 @@ describe("StreamerControls", () => {
 			userAgent: "Desktop",
 		});
 
-		(vi.mocked(useWebRTC) as ReturnType<typeof vi.fn>).mockReturnValue({
+		(vi.mocked(useStreaming) as ReturnType<typeof vi.fn>).mockReturnValue({
 			isScreenSharing: false,
 			isStreamer: false,
 			deviceCapabilities: { isMobile: false, canStream: true },
@@ -45,14 +46,14 @@ describe("StreamerControls", () => {
 
 	describe("Desktop User - Not Streaming", () => {
 		it("renders start streaming button for desktop", () => {
-			render(<StreamerControls roomId="room-1" userId="user-1" />);
+			render(<StreamerControls />);
 
 			expect(screen.getByText("Start Streaming")).toBeInTheDocument();
 			expect(screen.getByRole("button")).not.toBeDisabled();
 		});
 
 		it("opens audio config modal when clicking start", () => {
-			render(<StreamerControls roomId="room-1" userId="user-1" />);
+			render(<StreamerControls />);
 
 			fireEvent.click(screen.getByText("Start Streaming"));
 
@@ -65,7 +66,7 @@ describe("StreamerControls", () => {
 		const mockToggleAudio = vi.fn();
 
 		beforeEach(() => {
-			(vi.mocked(useWebRTC) as ReturnType<typeof vi.fn>).mockReturnValue({
+			(vi.mocked(useStreaming) as ReturnType<typeof vi.fn>).mockReturnValue({
 				isScreenSharing: true,
 				isStreamer: true,
 				deviceCapabilities: { isMobile: false, canStream: true },
@@ -78,7 +79,7 @@ describe("StreamerControls", () => {
 		});
 
 		it("shows streaming controls when active", () => {
-			render(<StreamerControls roomId="room-1" userId="user-1" />);
+			render(<StreamerControls />);
 
 			expect(screen.getByText("Stop Sharing")).toBeInTheDocument();
 			expect(screen.getByText("LIVE")).toBeInTheDocument();
@@ -86,7 +87,7 @@ describe("StreamerControls", () => {
 		});
 
 		it("calls stopScreenShare when clicking stop", () => {
-			render(<StreamerControls roomId="room-1" userId="user-1" />);
+			render(<StreamerControls />);
 
 			fireEvent.click(screen.getByText("Stop Sharing"));
 
@@ -94,13 +95,12 @@ describe("StreamerControls", () => {
 		});
 
 		it("toggles audio mute button", () => {
-			render(<StreamerControls roomId="room-1" userId="user-1" />);
+			render(<StreamerControls />);
 
 			const muteButton = screen.getByTitle("Mute audio");
 			expect(muteButton).toBeInTheDocument();
 
 			fireEvent.click(muteButton);
-			// Would need to test state change if we tracked it
 		});
 	});
 
@@ -114,7 +114,7 @@ describe("StreamerControls", () => {
 				userAgent: "Mobile",
 			});
 
-			(vi.mocked(useWebRTC) as ReturnType<typeof vi.fn>).mockReturnValue({
+			(vi.mocked(useStreaming) as ReturnType<typeof vi.fn>).mockReturnValue({
 				isScreenSharing: false,
 				deviceCapabilities: { isMobile: true, canStream: false },
 				startScreenShare: mockStartScreenShare,
@@ -123,14 +123,14 @@ describe("StreamerControls", () => {
 		});
 
 		it("shows disabled button for mobile users", () => {
-			render(<StreamerControls roomId="room-1" userId="user-1" />);
+			render(<StreamerControls />);
 
 			const button = screen.getByText("Start Streaming");
 			expect(button).toBeDisabled();
 		});
 
 		it("shows mobile restriction message", () => {
-			render(<StreamerControls roomId="room-1" userId="user-1" />);
+			render(<StreamerControls />);
 
 			expect(screen.getByText("Mobile devices cannot stream")).toBeInTheDocument();
 		});
@@ -142,7 +142,7 @@ describe("StreamerControls", () => {
 			["system-only", "System only"],
 			["no-audio", ""],
 		])("displays correct audio config: %s", (audioConfig, expectedText) => {
-			(vi.mocked(useWebRTC) as ReturnType<typeof vi.fn>).mockReturnValue({
+			(vi.mocked(useStreaming) as ReturnType<typeof vi.fn>).mockReturnValue({
 				isScreenSharing: true,
 				deviceCapabilities: { isMobile: false },
 				startScreenShare: mockStartScreenShare,
@@ -150,7 +150,7 @@ describe("StreamerControls", () => {
 				audioConfig,
 			});
 
-			render(<StreamerControls roomId="room-1" userId="user-1" />);
+			render(<StreamerControls />);
 
 			if (expectedText) {
 				expect(screen.getByText(expectedText)).toBeInTheDocument();
@@ -220,10 +220,7 @@ describe("AudioConfigModal", () => {
 				/>,
 			);
 
-			// Click system audio only option
 			fireEvent.click(screen.getByText("System audio only"));
-
-			// Start streaming
 			fireEvent.click(screen.getByText("Share Screen"));
 
 			expect(mockOnStart).toHaveBeenCalledWith(
@@ -258,10 +255,7 @@ describe("AudioConfigModal", () => {
 				/>,
 			);
 
-			// Click "Never" option
 			fireEvent.click(screen.getByText("Never"));
-
-			// Start streaming
 			fireEvent.click(screen.getByText("Share Screen"));
 
 			expect(mockOnStart).toHaveBeenCalledWith(
@@ -282,13 +276,8 @@ describe("AudioConfigModal", () => {
 				/>,
 			);
 
-			// Change audio to system only
 			fireEvent.click(screen.getByText("System audio only"));
-
-			// Change cursor to never
 			fireEvent.click(screen.getByText("Never"));
-
-			// Start streaming
 			fireEvent.click(screen.getByText("Share Screen"));
 
 			expect(mockOnStart).toHaveBeenCalledWith({

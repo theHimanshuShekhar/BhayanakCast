@@ -51,6 +51,7 @@
     "nanoid": "^5.1.6",
     "nitro": "npm:nitro-nightly@latest",
     "node-cron": "^4.2.1",
+    "peerjs": "^1.5.5",
     "pg": "^8.16.3",
     "playwright": "^1.58.2",
     "posthog-js": "^1.335.4",
@@ -67,8 +68,8 @@
   "devDependencies": {
     "@biomejs/biome": "2.2.4",
     "@playwright/test": "^1.58.2",
-    "@tanstack/devtools-vite": "^0.6.0",
     "@tailwindcss/typography": "^0.5.16",
+    "@tanstack/devtools-vite": "^0.6.0",
     "@testing-library/dom": "^10.4.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.2.0",

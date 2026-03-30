@@ -1,181 +1,90 @@
 # Getting Started
 
-Quick start guide for BhayanakCast development.
-
 ## Prerequisites
 
 - Node.js 20+ with pnpm
-- PostgreSQL 16+
-- Discord OAuth app (for authentication)
+- PostgreSQL 16+ (via Docker)
+- Discord OAuth app
 
-## Installation
+## Setup
 
 ```bash
-# Clone and install dependencies
 git clone <repo-url>
 cd BhayanakCast
 pnpm install
-
-# Copy environment variables
 cp .env.example .env.local
-# Edit .env.local with your Discord OAuth credentials
+# Fill in .env.local — see ENVIRONMENT_VARIABLES.md
 ```
 
-## Development Commands
+### Discord OAuth App
+1. Go to [discord.com/developers/applications](https://discord.com/developers/applications)
+2. Create app → OAuth2 → copy Client ID and Secret
+3. Add redirect URI: `http://localhost:3000/api/auth/callback/discord`
 
-### Start Development Servers
-
+### Auth Secret
 ```bash
-# Run both web and WebSocket servers
-pnpm dev
-
-# Run individually
-pnpm dev:web    # Web server on port 3000
-pnpm dev:ws     # WebSocket server on port 3001
+pnpm dlx @better-auth/cli secret
+# Copy output to BETTER_AUTH_SECRET in .env.local
 ```
 
-### Database Setup
-
+### Database
 ```bash
-# Start PostgreSQL (requires Docker)
 docker compose up -d postgres
-
-# Push schema changes
 pnpm db:push
-
-# Open Drizzle Studio
-pnpm db:studio
 ```
 
-### Testing
+## Development
 
 ```bash
-# Run unit and integration tests (204 tests)
-pnpm test:unit
-
-# Run specific test file
-pnpm vitest run tests/unit/rate-limiter.test.ts
-
-# Watch mode
-pnpm test:watch
-
-# With coverage
-pnpm test:coverage
-
-# Run E2E tests (requires dev server, run locally only)
-pnpm test:e2e
+pnpm dev          # Web (port 3000) + WebSocket (port 3001) concurrently
+pnpm dev:web      # Web only
+pnpm dev:ws       # WebSocket only
 ```
 
-**Note:** E2E tests are NOT run in CI. Run them locally before major releases.
-
-### Code Quality
+## Commands Reference
 
 ```bash
-pnpm lint        # Check code style
-pnpm format      # Format code
-pnpm check       # Run all checks (lint + format)
+# Testing
+pnpm test:unit      # 373 Vitest tests
+pnpm test:watch     # Watch mode
+pnpm test:coverage  # Coverage (90% threshold)
+pnpm test:e2e       # Playwright E2E (requires dev server running)
+
+# Code quality
+pnpm check          # Biome lint + format check
+pnpm format         # Auto-fix formatting
+pnpm lint           # Lint only
+
+# Database
+pnpm db:push        # Push schema (dev)
+pnpm db:generate    # Generate migration files
+pnpm db:migrate     # Run migrations
+pnpm db:studio      # Drizzle Studio UI
 ```
 
-## Docker Build
+**E2E tests are NOT run in CI.** Run locally before major releases.
 
-### Build and Run Locally
+## Docker
 
 ```bash
-# Build the Docker image
 docker compose build
-
-# Run with Docker Compose (includes PostgreSQL)
-docker compose up -d
-
-# View logs
+docker compose up -d      # Includes PostgreSQL
 docker compose logs -f
-
-# Stop services
 docker compose down
 ```
 
-The app will be available at:
-- Web App: http://localhost:3000
-- WebSocket: http://localhost:3001
+App available at http://localhost:3000 (web) and http://localhost:3001 (WebSocket).
 
-### Production Deployment
+## Troubleshooting
 
-The Docker image is automatically built and pushed to GitHub Container Registry on pushes to `main` and version tags.
-
-```bash
-# Pull from GHCR
-docker pull ghcr.io/yourusername/bhayanak-cast:latest
-
-# Run with environment variables
-docker run -p 3000:3000 -p 3001:3001 \
-  -e DATABASE_URL=postgresql://... \
-  -e BETTER_AUTH_SECRET=... \
-  -e DISCORD_CLIENT_ID=... \
-  -e DISCORD_CLIENT_SECRET=... \
-  ghcr.io/yourusername/bhayanak-cast:latest
-```
-
-### Testing Production Build Locally
-
-```bash
-# Build production image
-docker build -t bhayanak-cast:test .
-
-# Run with test environment
-docker run -p 3000:3000 -p 3001:3001 \
-  --env-file .env.local \
-  bhayanak-cast:test
-```
-
-## First Time Setup
-
-1. **Create Discord OAuth App:**
-   - Go to https://discord.com/developers/applications
-   - Create new application
-   - Add OAuth2 redirect: `http://localhost:3000/api/auth/callback/discord`
-   - Copy Client ID and Secret to `.env.local`
-
-2. **Generate Auth Secret:**
-   ```bash
-   pnpm dlx @better-auth/cli secret
-   # Copy output to BETTER_AUTH_SECRET in .env.local
-   ```
-
-3. **Start the application:**
-   ```bash
-   pnpm dev
-   # Open http://localhost:3000
-   ```
-
-## Common Issues
-
-### PostgreSQL Connection Failed
-- Ensure Docker is running: `docker ps`
-- Check DATABASE_URL in `.env.local` matches your setup
-- Default: `postgresql://postgres:postgres@localhost:5432/postgres`
-
-### WebSocket Connection Failed
-- Check VITE_WS_URL in `.env.local`
-- Ensure port 3001 is not in use
-- Verify both `pnpm dev:web` and `pnpm dev:ws` are running
-
-### Database Schema Out of Sync
-```bash
-pnpm db:push        # Push local schema changes
-# OR
-pnpm db:pull        # Pull remote schema changes
-```
-
-## Development Workflow
-
-1. Create feature branch
-2. Make changes
-3. Run tests: `pnpm test`
-4. Check code quality: `pnpm check`
-5. Commit and push
+| Problem | Fix |
+|---------|-----|
+| PostgreSQL connection failed | `docker ps` — ensure container running; check `DATABASE_URL` |
+| WebSocket connection failed | Ensure `pnpm dev:ws` is running; check `VITE_WS_URL` |
+| DB schema out of sync | `pnpm db:push` |
+| Auth not working | Check `BETTER_AUTH_SECRET` is set and `BETTER_AUTH_URL` matches domain |
 
 ## See Also
-
-- [Project Structure](./PROJECT_STRUCTURE.md) - Directory layout
-- [Coding Standards](./CODING_STANDARDS.md) - Code style and rules
-- [Environment Variables](./ENVIRONMENT_VARIABLES.md) - Full configuration guide
+- [Environment Variables](./ENVIRONMENT_VARIABLES.md)
+- [Project Structure](./PROJECT_STRUCTURE.md)
+- [Coding Standards](./CODING_STANDARDS.md)

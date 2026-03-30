@@ -1,109 +1,99 @@
-# WebRTC Screen Sharing Implementation Plan
+# Streaming Architecture (PeerJS)
 
-This directory contains a comprehensive plan for implementing screen sharing with WebRTC in BhayanakCast, with support for audio configuration and graceful handling during streamer transfers.
+BhayanakCast uses **PeerJS** as a WebRTC abstraction layer for P2P screen sharing. The files in this directory (`01-07`) are historical planning documents from before the PeerJS decision and describe a manual RTCPeerConnection architecture that was **never implemented**. They are kept for reference only.
 
-## Key Design Principles
+---
 
-1. **Screen Sharing is MVP** - Primary focus on `getDisplayMedia()`, not camera
-2. **Optional/Configurable Audio** - Streamer controls audio sources (system + mic, mic only, or none)
-3. **Immediate Stop Detection** - Browser's "Stop sharing" button ends stream instantly
-4. **Realistic Timing** - 8-15 second total transfer time is acceptable
-5. **Auto Quality** - Adaptive bitrate, no manual quality selection needed
-6. **Explicit Opt-in** - New streamer must click "Start Streaming" button
+## How It Works
 
-## Documents
+Streaming is layered on top of the WebSocket room system:
 
-### Core Implementation
-
-1. **[01-overview-and-sequence.md](./01-overview-and-sequence.md)**
-   - Screen sharing architecture overview
-   - 5-phase timing sequence (T+0ms to T+15000ms)
-   - State management with audio configuration
-   - Stop sharing detection flow
-
-2. **[02-events-and-cleanup.md](./02-events-and-cleanup.md)**
-   - Socket.io event definitions with audio config support
-   - Screen sharing ended detection (`onended` event)
-   - Enhanced cleanup logic for screen tracks
-   - Audio state management
-
-3. **[03-streamer-and-viewer-logic.md](./03-streamer-and-viewer-logic.md)**
-   - `startScreenShare(audioConfig)` implementation
-   - Display surface selection (monitor, window, tab)
-   - Screen-specific RTC configuration (resolution, frame rate)
-   - Audio track mixing (system audio + microphone)
-
-### Server & Integration
-
-4. **[04-server-handlers.md](./04-server-handlers.md)**
-   - `webrtc:screen_share_ended` event handling
-   - Audio configuration state tracking
-   - Transfer with screen sharing context
-   - ICE restart coordination (both sides)
-
-5. **[05-ui-and-error-handling.md](./05-ui-and-error-handling.md)**
-   - Audio configuration modal
-   - Screen sharing preview component
-   - Stop sharing overlay handling
-   - Audio toggle controls during stream
-
-### Edge Cases & Testing
-
-6. **[06-edge-cases.md](./06-edge-cases.md)**
-   - User stops sharing via browser UI during transfer
-   - Audio permission separate from screen permission
-   - Multiple monitors/display surfaces
-   - Screen sharing blocked by browser policy
-   - Mobile limitations
-
-7. **[07-implementation-checklist.md](./07-implementation-checklist.md)**
-   - Screen sharing focused implementation phases
-   - Updated timing constants (8-15s transfer)
-   - Audio configuration tasks
-   - Testing scenarios for screen sharing
-
-## Quick Start
-
-To implement this plan:
-
-1. **Phase 1** - Create the `useScreenShare` hook with audio configuration
-2. **Phase 2** - Add server-side screen sharing event handlers
-3. **Phase 3** - Build audio configuration UI and screen preview
-4. **Phase 4** - Add stop sharing detection and error handling
-5. **Phase 5** - Test screen sharing edge cases
-
-## Key Design Decisions
-
-- **Screen sharing first**: All implementation optimized for `getDisplayMedia()`
-- **Configurable audio**: Three audio modes (system+mic, mic-only, none)
-- **Stop sharing detection**: Critical UX - listen for `track.onended`
-- **Realistic timing**: 8-15 seconds acceptable for screen sharing setup
-- **Auto quality**: Simulcast enabled, adaptive bitrate, no manual selection
-- **Explicit streaming**: New streamer must click button to start
-
-## Audio Configuration Modes
-
-```typescript
-type AudioMode = 
-  | 'system-and-mic'    // Share system audio + microphone
-  | 'microphone-only'   // Voice only, no system audio
-  | 'silent';           // No audio at all
+```
+1. Streamer gets Peer instance (singleton via PeerJSContext in __root.tsx)
+2. On peer.on("open") → emits peerjs:streamer_ready { roomId, peerId }
+3. Server stores peerId in RoomState.streamerPeerId → broadcasts room:state_sync
+4. Viewers receive streamerPeerId from room state → call connectToStreamer(peerId)
+5. PeerJS handles WebRTC offer/answer/ICE → P2P stream established
+6. Viewer receives MediaStream → displayed in VideoDisplay component
 ```
 
-## Architecture Integration
+## Key Files
 
-This plan integrates with existing BhayanakCast:
-- Uses existing Socket.io infrastructure
-- Leverages current room management
-- Maintains compatibility with auth and rate limiting
-- No database schema changes required
+| File | Purpose |
+|------|---------|
+| `src/lib/peerjs-context.tsx` | PeerJS singleton — prevents duplicate `Peer` instances |
+| `src/hooks/usePeerJS.ts` | Main streaming hook for both streamers and viewers |
+| `src/lib/connection-retry.ts` | Exponential backoff retry with jitter and abort support |
+| `src/types/webrtc.ts` | `ConnectionStatus` type (single canonical definition) |
+| `src/components/ScreenSharePreview.tsx` | Streamer local preview |
+| `src/components/VideoDisplay.tsx` | Viewer video + connection status overlays |
+| `src/components/TransferOverlay.tsx` | UI shown during streamer transfer |
+| `websocket/streaming/events.ts` | Server-side PeerJS event handlers |
+| `websocket/streaming/types.ts` | Streaming event payload types |
 
-## Mobile Considerations
+## Streamer Flow
 
-Mobile screen sharing is limited (iOS Safari doesn't support it). Plan includes notes for future camera fallback implementation.
+```typescript
+// usePeerJS.ts — startScreenShare()
+const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+const peer = getOrCreatePeer(); // from PeerJSContext
 
-## External References
+peer.on("open", (peerId) => {
+  socket.emit("peerjs:streamer_ready", { roomId, peerId, audioConfig });
+});
 
-- [Screen Capture API](https://developer.mozilla.org/en-US/docs/Web/API/Screen_Capture_API)
-- [getDisplayMedia()](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getDisplayMedia)
-- [WebRTC Simulcast](https://developer.mozilla.org/en-US/docs/Web/API/RTCRtpSender/setParameters)
+peer.on("call", (call) => {
+  call.answer(stream); // Answer incoming viewer connections
+});
+```
+
+## Viewer Flow
+
+```typescript
+// usePeerJS.ts — connectToStreamer()
+const peer = getOrCreatePeer();
+const call = peer.call(streamerPeerId, emptyStream);
+
+call.on("stream", (remoteStream) => {
+  setRemoteStream(remoteStream);
+  setConnectionStatus("connected");
+});
+```
+
+## Late-Joiner Auto-Connect
+
+Viewers who join after the streamer is already ready connect automatically via `streamerPeerId` from room state — no new event needed:
+
+```typescript
+// usePeerJS.ts
+useEffect(() => {
+  if (!streamerPeerId || isStreamer) return;
+  void connectToStreamer(streamerPeerId);
+}, [streamerPeerId]);
+```
+
+## Streamer Transfer
+
+When the streamer leaves:
+1. Server emits `peerjs:streamer_changed` to all clients with `newStreamerPeerId: string | null`
+2. If `null`: viewers wait for next `room:state_sync` (new streamer hasn't called `peerjs:streamer_ready` yet)
+3. If set: viewers immediately reconnect
+4. `useRoom` resets `streamerPeerId` to `null` on `room:streamer_changed` to prevent stale connections
+
+## Retry / Error Recovery
+
+`ConnectionRetryManager` (`src/lib/connection-retry.ts`) provides:
+- Exponential backoff with jitter
+- Configurable max retries
+- Abort support (on unmount)
+- `retryAttempt` count exposed to UI for status display
+
+Connection errors are handled silently — retry in background, show subtle spinner.
+
+## PeerJS Cloud Server
+
+Uses the default PeerJS cloud signaling server. No self-hosted TURN/STUN needed for typical room sizes (2–12 users).
+
+## See Also
+- [WebSocket Events](../WEBSOCKET_EVENTS.md) — PeerJS event payloads
+- [WebSocket Architecture](../WEBSOCKET_ARCHITECTURE.md) — PeerJS in context

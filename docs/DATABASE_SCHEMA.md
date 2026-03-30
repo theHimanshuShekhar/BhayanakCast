@@ -50,18 +50,6 @@ OAuth account connections.
 | createdAt | timestamp | Connection date |
 | updatedAt | timestamp | Last update |
 
-### verifications
-Email verification tokens.
-
-| Column | Type | Notes |
-|--------|------|-------|
-| id | varchar(36) | Verification ID |
-| identifier | varchar(255) | Email or user identifier |
-| value | varchar(255) | Verification token |
-| expiresAt | timestamp | Token expiration |
-| createdAt | timestamp | Creation time |
-| updatedAt | timestamp | Last update |
-
 ## Application Tables
 
 ### streaming_rooms

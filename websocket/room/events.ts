@@ -23,8 +23,8 @@ import {
 	serializeRoomState,
 	findStaleRooms,
 	type ParticipantState,
-} from "./room-state";
-import { socketUserMap } from "./websocket-server";
+} from "./state";
+import { socketUserMap } from "../websocket-server";
 import {
 	persistRoomCreation,
 	persistParticipantJoin,
@@ -34,16 +34,9 @@ import {
 	getRoomFromDB,
 	getActiveParticipantsFromDB,
 	findStaleRoomsFromDB,
-} from "./db-persistence";
-import { RateLimits, rateLimiter } from "../src/lib/rate-limiter";
-
-// Types for socket data
-interface SocketUserData {
-	userId?: string;
-	userName?: string;
-	userImage?: string;
-	isMobile?: boolean;
-}
+} from "./persistence";
+import { RateLimits, rateLimiter } from "../../src/lib/rate-limiter";
+import type { SocketUserData } from "../websocket-server";
 
 // Extend Socket type
 type TypedSocket = Socket & {
@@ -76,7 +69,7 @@ export function setupRoomEventHandlers(
 /**
  * Handle room:create event
  */
-function handleRoomCreate(io: SocketIOServer, socket: TypedSocket) {
+function handleRoomCreate(_io: SocketIOServer, socket: TypedSocket) {
 	return async (data: { name: string; description?: string }) => {
 		try {
 			const userId = socket.data.userId;
@@ -85,6 +78,20 @@ function handleRoomCreate(io: SocketIOServer, socket: TypedSocket) {
 			if (!userId || userId.startsWith("anonymous:")) {
 				socket.emit("room:create_error", {
 					message: "You must be logged in to create rooms",
+				});
+				return;
+			}
+
+			// Check rate limit for room creation
+			const createLimiter = rateLimiter.forAction("room:create");
+			const rateLimitResult = createLimiter.checkAndRecord(
+				userId,
+				RateLimits.ROOM_CREATE,
+			);
+			if (!rateLimitResult.allowed) {
+				socket.emit("room:create_error", {
+					message: `You're creating rooms too quickly. Try again in ${rateLimitResult.retryAfter} seconds.`,
+					retryAfter: rateLimitResult.retryAfter,
 				});
 				return;
 			}
@@ -134,8 +141,14 @@ function handleRoomCreate(io: SocketIOServer, socket: TypedSocket) {
 			updateRoomStreamer(roomResult.roomId, userId);
 			updateRoomStatus(roomResult.roomId, "preparing");
 
-			// 5. Join socket to room
+			// 5. Join socket to room and update socketUserMap
 			socket.join(roomResult.roomId);
+			const socketData = socketUserMap.get(socket.id);
+			if (socketData) {
+				socketData.roomId = roomResult.roomId;
+				socketUserMap.set(socket.id, socketData);
+				console.log(`[RoomEvents Debug] Updated socketUserMap for creator ${userId}, roomId: ${roomResult.roomId}`);
+			}
 
 			// 6. Emit success to creator
 			socket.emit("room:created", {
@@ -180,6 +193,8 @@ function handleRoomJoin(io: SocketIOServer, socket: TypedSocket) {
 			const userName = socket.data.userName;
 			const { roomId } = data;
 
+			console.log(`[RoomEvents Debug] handleRoomJoin called for user ${userId}, room ${roomId}`);
+
 			if (!userId || userId.startsWith("anonymous:")) {
 				socket.emit("room:join_error", {
 					message: "You must be logged in to join rooms",
@@ -187,11 +202,60 @@ function handleRoomJoin(io: SocketIOServer, socket: TypedSocket) {
 				return;
 			}
 
-			// Check if already in this room
-			if (isUserInRoom(roomId, userId)) {
+			// Check rate limit for room joins
+			const joinLimiter = rateLimiter.forAction("room:join");
+			const rateLimitResult = joinLimiter.checkAndRecord(
+				userId,
+				RateLimits.ROOM_JOIN,
+			);
+			if (!rateLimitResult.allowed) {
 				socket.emit("room:join_error", {
-					message: "Already in this room",
+					message: `You're joining rooms too quickly. Try again in ${rateLimitResult.retryAfter} seconds.`,
+					retryAfter: rateLimitResult.retryAfter,
 				});
+				return;
+			}
+
+			// Check if already in this room — this can happen legitimately when the
+			// room creator navigates to their room page (they were added as participant
+			// during room:create). In that case, re-attach the socket and send state
+			// instead of erroring, so they receive isJoined=true and room state.
+			if (isUserInRoom(roomId, userId)) {
+				socket.join(roomId);
+				const existingSocketData = socketUserMap.get(socket.id);
+				if (existingSocketData) {
+					existingSocketData.roomId = roomId;
+					socketUserMap.set(socket.id, existingSocketData);
+				} else {
+					socketUserMap.set(socket.id, {
+						userId,
+						userName: userName || "Unknown",
+						roomId,
+						isMobile: socket.data.isMobile || false,
+						peerId: undefined,
+					});
+				}
+				// Update the participant's socketId so future events reach the right socket
+				const existingRoom = getRoomState(roomId);
+				if (existingRoom) {
+					const existingParticipant = existingRoom.participants.get(userId);
+					if (existingParticipant) {
+						existingParticipant.socketId = socket.id;
+					}
+				}
+				const roomState = serializeRoomState(roomId);
+				const isStreamer = getRoomState(roomId)?.streamerId === userId;
+				socket.emit("room:joined", {
+					roomId,
+					participant: {
+						userId,
+						userName: userName || "Unknown",
+						joinedAt: existingRoom?.participants.get(userId)?.joinedAt ?? new Date(),
+						isStreamer,
+					},
+					roomState,
+				});
+				console.log(`[RoomEvents] User ${userName} re-attached to room ${roomId} (already participant)`);
 				return;
 			}
 
@@ -300,9 +364,10 @@ function handleRoomJoin(io: SocketIOServer, socket: TypedSocket) {
 				updateRoomStreamer(roomId, userId);
 			}
 
-			// Check if room became active
+			// Check if room became active (use getRoomState to get current status after DB update)
 			const participantCount = getParticipantCount(roomId);
-			if (room.status === "preparing" && participantCount >= 2) {
+			const currentRoomStatus = getRoomState(roomId)?.status;
+			if (currentRoomStatus === "preparing" && participantCount >= 2) {
 				updateRoomStatus(roomId, "active");
 			}
 
@@ -312,6 +377,17 @@ function handleRoomJoin(io: SocketIOServer, socket: TypedSocket) {
 		if (socketData) {
 			socketData.roomId = roomId;
 			socketUserMap.set(socket.id, socketData);
+			console.log(`[RoomEvents Debug] Updated socketUserMap for ${userId}, roomId: ${roomId}`);
+		} else {
+			// Socket data not found - create it
+			socketUserMap.set(socket.id, {
+				userId,
+				userName: userName || "Unknown",
+				roomId,
+				isMobile: socket.data.isMobile || false,
+				peerId: undefined,
+			});
+			console.log(`[RoomEvents Debug] Created socketUserMap for ${userId}, roomId: ${roomId}`);
 		}
 
 		// 4. Emit success to joining user (full state)
@@ -373,6 +449,20 @@ function handleRoomLeave(io: SocketIOServer, socket: TypedSocket) {
 				return;
 			}
 
+			// Check rate limit for room leaves
+			const leaveLimiter = rateLimiter.forAction("room:leave");
+			const rateLimitResult = leaveLimiter.checkAndRecord(
+				userId,
+				RateLimits.ROOM_LEAVE,
+			);
+			if (!rateLimitResult.allowed) {
+				socket.emit("room:error", {
+					message: `You're leaving rooms too quickly. Try again in ${rateLimitResult.retryAfter} seconds.`,
+					retryAfter: rateLimitResult.retryAfter,
+				});
+				return;
+			}
+
 			if (!isUserInRoom(roomId, userId)) {
 				socket.emit("room:error", { message: "Not in room" });
 				return;
@@ -399,6 +489,10 @@ function handleRoomLeave(io: SocketIOServer, socket: TypedSocket) {
 
 			// 2. Update in-memory state
 			removeParticipantFromRoom(roomId, userId);
+
+			// Remove peer ID tracking for this user
+			const { removePeerId } = await import("../streaming/events");
+			removePeerId(roomId, userId);
 
 			// Update streamer if transferred
 			if (leaveResult.newStreamerId) {
@@ -537,18 +631,33 @@ function handleRoomRejoin(io: SocketIOServer, socket: TypedSocket) {
 				}
 			}
 
-			// 2. Update participant info (may be reconnecting)
+			// 2. Persist participant join to DB and update in-memory state.
+			// Always call persistParticipantJoin — it handles the case where the
+			// user is already active in the DB (idempotent) and covers the scenario
+			// where disconnect already marked them as left (creates a fresh record).
+			// Without this, a disconnect+rejoin cycle would leave the user with no
+			// active DB record, causing "Not in room" errors on subsequent leave.
 			const existingParticipant = room.participants.get(userId);
+			const joinResult = await persistParticipantJoin({ roomId, userId });
+
 			const participant: ParticipantState = {
 				userId,
 				userName: existingParticipant?.userName || userName,
 				userImage: socket.data.userImage || existingParticipant?.userImage,
 				socketId: socket.id,
-				joinedAt: existingParticipant?.joinedAt || new Date(),
+				joinedAt: joinResult.joinedAt,
 				isMobile: socket.data.isMobile || false,
 			};
 
-			room.participants.set(userId, participant);
+			addParticipantToRoom(roomId, participant);
+
+			// Update streamer/status in memory if changed by the join
+			if (joinResult.becameStreamer) {
+				updateRoomStreamer(roomId, userId);
+				updateRoomStatus(roomId, "preparing");
+			} else if (joinResult.isStreamer && !existingParticipant) {
+				updateRoomStreamer(roomId, userId);
+			}
 
 		// 3. Join socket to room and update socketUserMap
 		socket.join(roomId);
@@ -556,6 +665,17 @@ function handleRoomRejoin(io: SocketIOServer, socket: TypedSocket) {
 		if (rejoinSocketData) {
 			rejoinSocketData.roomId = roomId;
 			socketUserMap.set(socket.id, rejoinSocketData);
+			console.log(`[RoomEvents Debug] Updated socketUserMap for rejoining user ${userId}, roomId: ${roomId}`);
+		} else {
+			// Socket data not found - create it
+			socketUserMap.set(socket.id, {
+				userId,
+				userName,
+				roomId,
+				isMobile: socket.data.isMobile || false,
+				peerId: undefined,
+			});
+			console.log(`[RoomEvents Debug] Created socketUserMap for rejoining user ${userId}, roomId: ${roomId}`);
 		}
 
 		// 4. Emit full state to rejoining user
@@ -605,10 +725,10 @@ function handleStreamerTransfer(io: SocketIOServer, socket: TypedSocket) {
 				return;
 			}
 
-			// Check rate limit for streamer transfers (30 second cooldown)
+			// Check rate limit for streamer transfers (30 second cooldown, keyed per room)
 			const transferLimiter = rateLimiter.forAction("streamer:transfer");
 			const rateLimitResult = transferLimiter.checkAndRecord(
-				userId,
+				`${roomId}:${userId}`,
 				RateLimits.STREAMER_TRANSFER,
 			);
 			if (!rateLimitResult.allowed) {
@@ -742,13 +862,11 @@ export async function handleSocketDisconnect(
 	io: SocketIOServer,
 	socket: TypedSocket,
 	sendSystemMessage?: (roomId: string, content: string) => void,
-	initiateWebRTCTransfer?: (
+	initiateStreamerTransfer?: (
 		roomId: string,
-		oldStreamerId: string,
 		newStreamerId: string,
 		participants: Array<{ userId: string; userName: string }>,
 	) => Promise<void>,
-	getWebRTCState?: (roomId: string) => { streamerId: string | null } | undefined,
 ): Promise<void> {
 	const userId = socket.data.userId;
 	if (!userId) return;
@@ -782,6 +900,10 @@ export async function handleSocketDisconnect(
 				// Update in-memory state
 				removeParticipantFromRoom(roomId, userId);
 
+				// Remove peer ID tracking for this user
+				const { removePeerId } = await import("../streaming/events");
+				removePeerId(roomId, userId);
+
 				if (leaveResult.newStreamerId) {
 					updateRoomStreamer(roomId, leaveResult.newStreamerId);
 				} else if (room.streamerId === userId) {
@@ -792,7 +914,8 @@ export async function handleSocketDisconnect(
 					updateRoomStatus(roomId, leaveResult.roomStatus);
 				}
 
-				// Broadcast
+				// Serialize AFTER all in-memory mutations so roomState.streamerId
+				// reflects the new streamer (not the one who just disconnected)
 				const participantCount = getParticipantCount(roomId);
 				const roomState = serializeRoomState(roomId);
 
@@ -802,7 +925,7 @@ export async function handleSocketDisconnect(
 					participantCount,
 					newStreamerId: leaveResult.newStreamerId,
 					newStreamerName: leaveResult.newStreamerId
-						? room.participants.get(leaveResult.newStreamerId)?.userName
+						? getRoomState(roomId)?.participants.get(leaveResult.newStreamerId)?.userName
 						: undefined,
 					roomState,
 				});
@@ -813,7 +936,8 @@ export async function handleSocketDisconnect(
 				}
 
 				if (leaveResult.newStreamerId) {
-					const newStreamerName = room.participants.get(leaveResult.newStreamerId)?.userName || "Someone";
+					const updatedRoom = getRoomState(roomId);
+					const newStreamerName = updatedRoom?.participants.get(leaveResult.newStreamerId)?.userName || "Someone";
 					io.to(roomId).emit("room:streamer_changed", {
 						newStreamerId: leaveResult.newStreamerId,
 						newStreamerName,
@@ -824,20 +948,16 @@ export async function handleSocketDisconnect(
 						sendSystemMessage(roomId, `${newStreamerName} is now the streamer`);
 					}
 
-					// Initiate WebRTC transfer if old streamer was streaming
-					if (initiateWebRTCTransfer && getWebRTCState) {
-						const webrtcState = getWebRTCState(roomId);
-						if (webrtcState && webrtcState.streamerId === userId) {
-							const participantsList = Array.from(room.participants.values()).map(
-								(p) => ({ userId: p.userId, userName: p.userName }),
-							);
-							await initiateWebRTCTransfer(
-								roomId,
-								userId,
-								leaveResult.newStreamerId,
-								participantsList,
-							);
-						}
+					// Initiate streamer transfer for PeerJS
+					if (initiateStreamerTransfer) {
+						const participantsList = Array.from((updatedRoom?.participants.values() ?? [])).map(
+							(p) => ({ userId: p.userId, userName: p.userName }),
+						);
+						await initiateStreamerTransfer(
+							roomId,
+							leaveResult.newStreamerId,
+							participantsList,
+						);
 					}
 				}
 
