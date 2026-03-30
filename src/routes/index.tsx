@@ -11,7 +11,7 @@ function HomePageSkeleton() {
 	return (
 		<div className="h-full w-full bg-depth-0 px-4 py-8 overflow-auto">
 			<div className="mx-auto max-w-7xl">
-				<div className="flex gap-8">
+				<div className="flex flex-col xl:flex-row gap-8">
 					<div className="flex-1 min-w-0">
 						<div className="mb-8">
 							<div className="h-9 w-48 bg-depth-1 rounded animate-pulse mb-2" />
@@ -19,7 +19,7 @@ function HomePageSkeleton() {
 						</div>
 						<RoomListSkeleton />
 					</div>
-					<div className="hidden xl:block w-72 shrink-0">
+					<div className="w-full xl:w-72 xl:shrink-0">
 						<div className="h-80 bg-depth-1 rounded-xl border border-border-subtle animate-pulse" />
 					</div>
 				</div>
@@ -51,7 +51,7 @@ function App() {
 	return (
 		<div className="h-full w-full bg-depth-0 px-4 py-8 overflow-auto">
 			<div className="mx-auto max-w-7xl">
-				<div className="flex gap-8">
+				<div className="flex flex-col xl:flex-row gap-8">
 					<div className="flex-1 min-w-0">
 						<div className="mb-8">
 							<h1 className="text-3xl font-bold text-text-primary mb-2">
@@ -66,15 +66,17 @@ function App() {
 							userId={homeData.session?.user?.id}
 						/>
 					</div>
-					{isLoggedIn ? (
-						<UserStatsCard />
-					) : (
-						<AnonymousStatsColumn
-							trendingRooms={homeData.trendingRooms}
-							communityStats={homeData.communityStats}
-							globalStats={homeData.globalStats}
-						/>
-					)}
+					<div className="w-full xl:w-72 xl:shrink-0">
+						{isLoggedIn ? (
+							<UserStatsCard />
+						) : (
+							<AnonymousStatsColumn
+								trendingRooms={homeData.trendingRooms}
+								communityStats={homeData.communityStats}
+								globalStats={homeData.globalStats}
+							/>
+						)}
+					</div>
 				</div>
 			</div>
 			{homeData.session?.user?.id && (
