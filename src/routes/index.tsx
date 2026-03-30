@@ -19,7 +19,7 @@ function HomePageSkeleton() {
 						</div>
 						<RoomListSkeleton />
 					</div>
-					<div className="w-full xl:w-72 xl:shrink-0">
+					<div className="w-full xl:w-72 xl:shrink-0 min-w-0">
 						<div className="h-80 bg-depth-1 rounded-xl border border-border-subtle animate-pulse" />
 					</div>
 				</div>
@@ -66,7 +66,7 @@ function App() {
 							userId={homeData.session?.user?.id}
 						/>
 					</div>
-					<div className="w-full xl:w-72 xl:shrink-0">
+					<div className="w-full xl:w-72 xl:shrink-0 min-w-0">
 						{isLoggedIn ? (
 							<UserStatsCard />
 						) : (
