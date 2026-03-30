@@ -28,9 +28,15 @@ export function VideoDisplay({
 	const videoRef = useRef<HTMLVideoElement>(null);
 
 	useEffect(() => {
-		if (videoRef.current && stream) {
-			videoRef.current.srcObject = stream;
+		const video = videoRef.current;
+		if (video && stream) {
+			video.srcObject = stream;
 		}
+		return () => {
+			// Clear srcObject on cleanup so the browser releases the MediaStream
+			// reference and underlying tracks (prevents "mic/camera in use" lingering)
+			if (video) video.srcObject = null;
+		};
 	}, [stream]);
 
 	if (!stream) {

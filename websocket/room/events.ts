@@ -216,11 +216,46 @@ function handleRoomJoin(io: SocketIOServer, socket: TypedSocket) {
 				return;
 			}
 
-			// Check if already in this room
+			// Check if already in this room — this can happen legitimately when the
+			// room creator navigates to their room page (they were added as participant
+			// during room:create). In that case, re-attach the socket and send state
+			// instead of erroring, so they receive isJoined=true and room state.
 			if (isUserInRoom(roomId, userId)) {
-				socket.emit("room:join_error", {
-					message: "Already in this room",
+				socket.join(roomId);
+				const existingSocketData = socketUserMap.get(socket.id);
+				if (existingSocketData) {
+					existingSocketData.roomId = roomId;
+					socketUserMap.set(socket.id, existingSocketData);
+				} else {
+					socketUserMap.set(socket.id, {
+						userId,
+						userName: userName || "Unknown",
+						roomId,
+						isMobile: socket.data.isMobile || false,
+						peerId: undefined,
+					});
+				}
+				// Update the participant's socketId so future events reach the right socket
+				const existingRoom = getRoomState(roomId);
+				if (existingRoom) {
+					const existingParticipant = existingRoom.participants.get(userId);
+					if (existingParticipant) {
+						existingParticipant.socketId = socket.id;
+					}
+				}
+				const roomState = serializeRoomState(roomId);
+				const isStreamer = getRoomState(roomId)?.streamerId === userId;
+				socket.emit("room:joined", {
+					roomId,
+					participant: {
+						userId,
+						userName: userName || "Unknown",
+						joinedAt: existingRoom?.participants.get(userId)?.joinedAt ?? new Date(),
+						isStreamer,
+					},
+					roomState,
 				});
+				console.log(`[RoomEvents] User ${userName} re-attached to room ${roomId} (already participant)`);
 				return;
 			}
 
@@ -455,6 +490,10 @@ function handleRoomLeave(io: SocketIOServer, socket: TypedSocket) {
 			// 2. Update in-memory state
 			removeParticipantFromRoom(roomId, userId);
 
+			// Remove peer ID tracking for this user
+			const { removePeerId } = await import("../streaming/events");
+			removePeerId(roomId, userId);
+
 			// Update streamer if transferred
 			if (leaveResult.newStreamerId) {
 				updateRoomStreamer(roomId, leaveResult.newStreamerId);
@@ -592,18 +631,33 @@ function handleRoomRejoin(io: SocketIOServer, socket: TypedSocket) {
 				}
 			}
 
-			// 2. Update participant info (may be reconnecting)
+			// 2. Persist participant join to DB and update in-memory state.
+			// Always call persistParticipantJoin — it handles the case where the
+			// user is already active in the DB (idempotent) and covers the scenario
+			// where disconnect already marked them as left (creates a fresh record).
+			// Without this, a disconnect+rejoin cycle would leave the user with no
+			// active DB record, causing "Not in room" errors on subsequent leave.
 			const existingParticipant = room.participants.get(userId);
+			const joinResult = await persistParticipantJoin({ roomId, userId });
+
 			const participant: ParticipantState = {
 				userId,
 				userName: existingParticipant?.userName || userName,
 				userImage: socket.data.userImage || existingParticipant?.userImage,
 				socketId: socket.id,
-				joinedAt: existingParticipant?.joinedAt || new Date(),
+				joinedAt: joinResult.joinedAt,
 				isMobile: socket.data.isMobile || false,
 			};
 
-			room.participants.set(userId, participant);
+			addParticipantToRoom(roomId, participant);
+
+			// Update streamer/status in memory if changed by the join
+			if (joinResult.becameStreamer) {
+				updateRoomStreamer(roomId, userId);
+				updateRoomStatus(roomId, "preparing");
+			} else if (joinResult.isStreamer && !existingParticipant) {
+				updateRoomStreamer(roomId, userId);
+			}
 
 		// 3. Join socket to room and update socketUserMap
 		socket.join(roomId);
@@ -860,7 +914,8 @@ export async function handleSocketDisconnect(
 					updateRoomStatus(roomId, leaveResult.roomStatus);
 				}
 
-				// Broadcast
+				// Serialize AFTER all in-memory mutations so roomState.streamerId
+				// reflects the new streamer (not the one who just disconnected)
 				const participantCount = getParticipantCount(roomId);
 				const roomState = serializeRoomState(roomId);
 
@@ -870,7 +925,7 @@ export async function handleSocketDisconnect(
 					participantCount,
 					newStreamerId: leaveResult.newStreamerId,
 					newStreamerName: leaveResult.newStreamerId
-						? room.participants.get(leaveResult.newStreamerId)?.userName
+						? getRoomState(roomId)?.participants.get(leaveResult.newStreamerId)?.userName
 						: undefined,
 					roomState,
 				});
@@ -881,7 +936,8 @@ export async function handleSocketDisconnect(
 				}
 
 				if (leaveResult.newStreamerId) {
-					const newStreamerName = room.participants.get(leaveResult.newStreamerId)?.userName || "Someone";
+					const updatedRoom = getRoomState(roomId);
+					const newStreamerName = updatedRoom?.participants.get(leaveResult.newStreamerId)?.userName || "Someone";
 					io.to(roomId).emit("room:streamer_changed", {
 						newStreamerId: leaveResult.newStreamerId,
 						newStreamerName,
@@ -892,17 +948,17 @@ export async function handleSocketDisconnect(
 						sendSystemMessage(roomId, `${newStreamerName} is now the streamer`);
 					}
 
-				// Initiate streamer transfer for PeerJS
-				if (initiateStreamerTransfer) {
-					const participantsList = Array.from(room.participants.values()).map(
-						(p) => ({ userId: p.userId, userName: p.userName }),
-					);
-					await initiateStreamerTransfer(
-						roomId,
-						leaveResult.newStreamerId,
-						participantsList,
-					);
-				}
+					// Initiate streamer transfer for PeerJS
+					if (initiateStreamerTransfer) {
+						const participantsList = Array.from((updatedRoom?.participants.values() ?? [])).map(
+							(p) => ({ userId: p.userId, userName: p.userName }),
+						);
+						await initiateStreamerTransfer(
+							roomId,
+							leaveResult.newStreamerId,
+							participantsList,
+						);
+					}
 				}
 
 				if (getRoomState(roomId)?.status !== room.status) {

@@ -59,9 +59,19 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 	const [userCount, setUserCount] = useState(0);
 	const [userId, setUserId] = useState<string | null>(null);
 	const [currentRoomId, setCurrentRoomId] = useState<string | null>(null);
+	// Ref mirrors state so the connect handler always reads the latest roomId
+	// without triggering a full socket teardown on every room navigation
+	const currentRoomIdRef = useRef<string | null>(null);
 	const socketRef = useRef<Socket | null>(null);
 	const debouncedUpdateRef = useRef<((count: number) => void) | null>(null);
 	const { data: session } = authClient.useSession();
+	// Refs for session metadata so the connect handler can read up-to-date values
+	// without adding them to the socket effect's dep array (which would tear down
+	// and recreate the socket — and evict the user from their room — on profile updates)
+	const sessionNameRef = useRef<string | undefined>(session?.user?.name);
+	const sessionImageRef = useRef<string | null | undefined>(
+		session?.user?.image,
+	);
 
 	// Fetch runtime configuration from server
 	const { data: runtimeConfig } = useQuery({
@@ -72,6 +82,15 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 	});
 
 	const wsUrl = runtimeConfig?.wsUrl || "http://localhost:3001";
+
+	// Keep refs in sync whenever values change (no socket teardown side-effect)
+	useEffect(() => {
+		currentRoomIdRef.current = currentRoomId;
+	}, [currentRoomId]);
+	useEffect(() => {
+		sessionNameRef.current = session?.user?.name;
+		sessionImageRef.current = session?.user?.image;
+	}, [session?.user?.name, session?.user?.image]);
 
 	useEffect(() => {
 		if (typeof window === "undefined" || !wsUrl) {
@@ -98,20 +117,24 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 
 		socket.on("connect", () => {
 			setIsConnected(true);
-			// Identify the user after connection
+			// Read session identity from refs — avoids adding name/image to deps
+			// which would tear down the socket on every profile update
 			const effectiveUserId = getEffectiveUserId(session?.user?.id);
 			setUserId(effectiveUserId);
 			socket.emit("identify", {
 				userId: effectiveUserId,
-				userName: session?.user?.name || effectiveUserId,
-				userImage: session?.user?.image,
+				userName: sessionNameRef.current || effectiveUserId,
+				userImage: sessionImageRef.current,
 			});
 
-			// Auto-rejoin room if we were in one before disconnect
-			if (currentRoomId && effectiveUserId) {
-				console.log("[WebSocket] Auto-rejoining room:", currentRoomId);
+			// Auto-rejoin room if we were in one before disconnect.
+			// Read from ref (not closure) so this doesn't add currentRoomId to deps
+			// which would tear down and recreate the socket on every room navigation.
+			const roomId = currentRoomIdRef.current;
+			if (roomId && effectiveUserId) {
+				console.log("[WebSocket] Auto-rejoining room:", roomId);
 				socket.emit("room:rejoin", {
-					roomId: currentRoomId,
+					roomId,
 					userId: effectiveUserId,
 				});
 			}
@@ -131,9 +154,10 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 	}, [
 		wsUrl,
 		session?.user?.id,
-		session?.user?.name,
-		session?.user?.image,
-		currentRoomId,
+		// session.user.name / image intentionally excluded: profile-metadata changes
+		// are handled by the re-identify effect below without tearing down the socket
+		// and evicting the user from their room.
+		// currentRoomId intentionally excluded: changes are tracked via currentRoomIdRef.
 	]);
 
 	// Re-identify when session changes (user logs in/out)

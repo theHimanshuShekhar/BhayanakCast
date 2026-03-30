@@ -259,8 +259,10 @@ export function useRoom(roomId: string | undefined): UseRoomReturn {
 		socket.on("room:join_error", handleJoinError);
 		socket.on("room:error", handleRoomError);
 
-		// Auto-join on mount if not already joined
-		if (!hasJoinedRef.current && !isJoined) {
+		// Auto-join on mount if not already joined.
+		// Use the ref (not isJoined state) so this block doesn't re-run every time
+		// the join completes, which would tear down and re-register all listeners.
+		if (!hasJoinedRef.current) {
 			joinRoom();
 		}
 
@@ -276,9 +278,7 @@ export function useRoom(roomId: string | undefined): UseRoomReturn {
 			socket.off("room:join_error", handleJoinError);
 			socket.off("room:error", handleRoomError);
 		};
-		// Intentionally omit roomState to prevent stale closure issues
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [socket, roomId, userId, joinRoom, isJoined]);
+	}, [socket, roomId, userId, joinRoom]);
 
 	return {
 		roomState,
