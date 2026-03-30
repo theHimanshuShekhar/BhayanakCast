@@ -1,0 +1,2 @@
+ALTER TABLE "community_stats_snapshots" ALTER COLUMN "total_watch_seconds_this_week" SET DATA TYPE numeric(10, 2);--> statement-breakpoint
+ALTER TABLE "community_stats_snapshots" ALTER COLUMN "total_watch_seconds_this_week" SET DEFAULT '0';
