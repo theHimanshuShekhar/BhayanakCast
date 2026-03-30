@@ -78,7 +78,7 @@ export function CommunityStatsCard({
 					</div>
 					<div className="flex items-center justify-between p-2.5 rounded-lg bg-depth-2">
 						<span className="text-sm text-text-secondary">
-							Active Streamers
+							Active Streamers (30d)
 						</span>
 						<span className="text-lg font-bold text-accent">
 							{stats.mostActiveStreamers}

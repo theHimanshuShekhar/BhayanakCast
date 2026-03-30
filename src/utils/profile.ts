@@ -1,7 +1,12 @@
 import { createServerFn } from "@tanstack/react-start";
 import { eq } from "drizzle-orm";
 import { db } from "#/db/index";
-import { getTopRelationships, type UserProfileData } from "#/db/queries";
+import {
+	getTopRelationships,
+	getTopRelationshipsLast30Days,
+	type UserProfileData,
+} from "#/db/queries";
+import { getUserStats } from "#/db/queries/stats";
 import { users } from "#/db/schema";
 
 export const getProfileData = createServerFn({ method: "GET" })
@@ -25,10 +30,20 @@ export const getProfileData = createServerFn({ method: "GET" })
 			return null;
 		}
 
-		const topRelationships = await getTopRelationships(data.userId, 5);
+		const [topRelationships, topRelationshipsLast30Days, userStats] =
+			await Promise.all([
+				getTopRelationships(data.userId, 5),
+				getTopRelationshipsLast30Days(data.userId, 5),
+				getUserStats(data.userId),
+			]);
 
 		return {
 			user: user[0],
 			topRelationships,
+			topRelationshipsLast30Days,
+			stats: {
+				totalWatchTime: userStats.totalWatchTime,
+				watchTimeLast30Days: userStats.watchTimeLast30Days,
+			},
 		};
 	});

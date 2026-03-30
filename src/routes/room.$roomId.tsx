@@ -169,12 +169,15 @@ function RoomContent() {
 
 	const isActive = room.status === "active";
 	const isPreparing = room.status === "preparing";
+	const isEnded = room.status === "ended";
 
 	// Get streamer info from initial data (for SSR) or from roomState
 	const streamer = initialData?.room.streamer;
 
-	// Participants from roomState (real-time via WebSocket)
-	const participants = room.participants || [];
+	// Ended rooms use loader data (WebSocket never populates participants for ended rooms)
+	const participants = isEnded
+		? initialData?.participants || []
+		: room.participants || [];
 
 	// Leave room handler
 	const handleLeaveRoom = useCallback(() => {
@@ -266,8 +269,12 @@ function RoomContent() {
 
 	const now = clientNow || new Date();
 	const startTime = room?.createdAt ? new Date(room.createdAt) : now;
+	const endTime =
+		isEnded && initialData?.room.room?.endedAt
+			? new Date(initialData.room.room.endedAt)
+			: now;
 	const totalDuration = Math.floor(
-		(now.getTime() - startTime.getTime()) / 1000,
+		(endTime.getTime() - startTime.getTime()) / 1000,
 	);
 
 	// Check if current user is a participant and if they're the streamer

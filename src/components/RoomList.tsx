@@ -65,6 +65,7 @@ interface RoomListProps {
 			description: string | null;
 			status: string;
 			createdAt: Date;
+			endedAt: Date | null;
 		};
 		streamer: {
 			id: string;
@@ -72,6 +73,7 @@ interface RoomListProps {
 			image: string | null;
 		} | null;
 		participantCount: number;
+		streamerIsPresent: boolean;
 		participants?: Participant[];
 	}>;
 	userId?: string;
@@ -112,23 +114,7 @@ export function RoomList({ initialRooms, userId }: RoomListProps) {
 
 	// Transform database rooms to component format
 	const rooms: Room[] = useMemo(() => {
-		const sourceData = (searchedRooms || initialRooms) as Array<{
-			room: {
-				id: string;
-				name: string;
-				description: string | null;
-				status: string;
-				createdAt: Date;
-				endedAt: Date | null;
-			};
-			streamer: {
-				id: string;
-				name: string;
-				image: string | null;
-			} | null;
-			participantCount: number;
-			participants?: Participant[];
-		}>;
+		const sourceData = searchedRooms || initialRooms;
 		if (!sourceData) return [];
 
 		return sourceData.map((roomData) => ({
@@ -138,7 +124,7 @@ export function RoomList({ initialRooms, userId }: RoomListProps) {
 			streamerName: roomData.streamer?.name,
 			streamerImage: roomData.streamer?.image || undefined,
 			participantCount: roomData.participantCount || 0,
-			maxUsersJoined: undefined,
+			streamerIsPresent: roomData.streamerIsPresent,
 			status: roomData.room.status as
 				| "waiting"
 				| "preparing"
