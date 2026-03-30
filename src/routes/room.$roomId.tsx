@@ -169,12 +169,15 @@ function RoomContent() {
 
 	const isActive = room.status === "active";
 	const isPreparing = room.status === "preparing";
+	const isEnded = room.status === "ended";
 
 	// Get streamer info from initial data (for SSR) or from roomState
 	const streamer = initialData?.room.streamer;
 
-	// Participants from roomState (real-time via WebSocket)
-	const participants = room.participants || [];
+	// Ended rooms use loader data (WebSocket never populates participants for ended rooms)
+	const participants = isEnded
+		? initialData?.participants || []
+		: room.participants || [];
 
 	// Leave room handler
 	const handleLeaveRoom = useCallback(() => {
