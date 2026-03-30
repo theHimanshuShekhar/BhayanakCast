@@ -69,7 +69,7 @@ export function UserStatsCard() {
 	const communityStats = statsData?.communityStats;
 
 	return (
-		<div className="hidden xl:block w-72 shrink-0">
+		<div className="w-full">
 			<div className="space-y-4">
 				{/* User Profile Card */}
 				<div className="bg-depth-1 rounded-xl border border-border-subtle p-5">
