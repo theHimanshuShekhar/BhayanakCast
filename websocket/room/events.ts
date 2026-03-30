@@ -35,6 +35,7 @@ import {
 	getActiveParticipantsFromDB,
 	findStaleRoomsFromDB,
 } from "./persistence";
+import { initiateStreamerTransfer } from "../streaming/events";
 import { RateLimits, rateLimiter } from "../../src/lib/rate-limiter";
 import type { SocketUserData } from "../websocket-server";
 
@@ -773,17 +774,33 @@ function handleStreamerTransfer(io: SocketIOServer, socket: TypedSocket) {
 				`[RoomEvents] Transferring streamer in ${roomId} to ${newStreamer.userName}`,
 			);
 
+			const prevStatus = room.status;
+
 			// 1. Persist to database (SYNCHRONOUS)
 			await persistStreamerTransfer(roomId, newStreamerId);
 
 			// 2. Update in-memory state
 			updateRoomStreamer(roomId, newStreamerId);
+			// New streamer hasn't started broadcasting yet → revert to preparing
+			updateRoomStatus(roomId, "preparing");
 
 			// 3. Broadcast to all room members
 			io.to(roomId).emit("room:streamer_changed", {
 				newStreamerId,
 				newStreamerName: newStreamer.userName,
 			});
+
+			// 4. Broadcast status change if needed
+			if (prevStatus !== "preparing") {
+				io.to(roomId).emit("room:status_changed", { status: "preparing" });
+			}
+
+			// 5. Notify PeerJS layer so viewers reconnect to the new streamer
+			const updatedRoom = getRoomState(roomId);
+			const participantsList = Array.from(
+				updatedRoom?.participants.values() ?? [],
+			).map((p) => ({ userId: p.userId, userName: p.userName }));
+			await initiateStreamerTransfer(io, roomId, newStreamerId, participantsList);
 
 			console.log(
 				`[RoomEvents] Streamer transferred in ${roomId} to ${newStreamer.userName}`,
