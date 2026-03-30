@@ -31,7 +31,7 @@ export function AnonymousStatsColumn({
 }: AnonymousStatsColumnProps) {
 	const { userCount } = useWebSocket();
 	return (
-		<div className="hidden xl:block w-72 shrink-0 space-y-4">
+		<div className="w-full space-y-4">
 			{/* Card 1: Global Site Stats - Show if has data */}
 			{globalStats.totalRoomsCreated > 0 && (
 				<div className="bg-depth-1 rounded-xl border border-border-subtle p-5">
