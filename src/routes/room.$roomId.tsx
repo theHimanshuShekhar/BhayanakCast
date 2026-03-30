@@ -269,8 +269,12 @@ function RoomContent() {
 
 	const now = clientNow || new Date();
 	const startTime = room?.createdAt ? new Date(room.createdAt) : now;
+	const endTime =
+		isEnded && initialData?.room.room?.endedAt
+			? new Date(initialData.room.room.endedAt)
+			: now;
 	const totalDuration = Math.floor(
-		(now.getTime() - startTime.getTime()) / 1000,
+		(endTime.getTime() - startTime.getTime()) / 1000,
 	);
 
 	// Check if current user is a participant and if they're the streamer
