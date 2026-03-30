@@ -613,6 +613,20 @@ export function StreamingProvider({
 				data.newStreamerPeerId ?? "(not yet registered)",
 			);
 
+			// If we were the outgoing streamer, stop our local stream and tear down
+			// the peer so we stop answering viewer calls after the transfer.
+			if (isStreamerRef.current) {
+				console.log(
+					"[PeerJS] We were the streamer — cleaning up after transfer",
+				);
+				cleanup();
+				return;
+			}
+
+			// Abort any in-progress retry so we don't reconnect to the old streamer
+			// (this is a no-op if connectToStreamer is not currently running).
+			retryManagerRef.current?.abort();
+
 			// Close existing call
 			if (currentCallRef.current) {
 				try {
@@ -659,7 +673,7 @@ export function StreamingProvider({
 			socket.off("peerjs:streamer_changed", handleStreamerChanged);
 			socket.off("peerjs:screen_share_ended", handleScreenShareEnded);
 		};
-	}, [socket, connectToStreamer]);
+	}, [socket, connectToStreamer, cleanup]);
 
 	/**
 	 * Auto-connect late joiners when streamerPeerId first appears in room state.
