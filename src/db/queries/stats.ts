@@ -39,6 +39,7 @@ function setCached<T>(key: string, data: T, ttl: number = CACHE_TTL): void {
 
 interface UserStats {
 	totalWatchTime: number;
+	watchTimeLast30Days: number;
 	totalRoomsJoined: number;
 	totalConnections: number;
 }
@@ -119,25 +120,35 @@ export async function getUserStats(userId: string): Promise<UserStats> {
 		.from(roomParticipants)
 		.where(eq(roomParticipants.userId, userId));
 
+	// Watch time in last 30 days
+	const watchTimeLast30DaysResult = await db
+		.select({ totalWatchTime: sum(roomParticipants.totalTimeSeconds) })
+		.from(roomParticipants)
+		.where(
+			and(
+				eq(roomParticipants.userId, userId),
+				gte(roomParticipants.joinedAt, thirtyDaysAgo),
+			),
+		);
+
 	// Total unique rooms joined
 	const roomsJoinedResult = await db
 		.select({ count: sql<number>`count(distinct ${roomParticipants.roomId})` })
 		.from(roomParticipants)
 		.where(eq(roomParticipants.userId, userId));
 
-	// Total connections (unique users met)
+	// Total connections (unique users met, all time)
 	const connectionsResult = await db
 		.select({ count: sql<number>`count(*)` })
 		.from(userRelationships)
 		.where(
-			and(
-				gte(userRelationships.lastInteractionAt, thirtyDaysAgo),
-				sql`(${userRelationships.user1Id} = ${userId} OR ${userRelationships.user2Id} = ${userId})`,
-			),
+			sql`(${userRelationships.user1Id} = ${userId} OR ${userRelationships.user2Id} = ${userId})`,
 		);
 
 	const stats = {
 		totalWatchTime: Number(watchTimeResult[0]?.totalWatchTime) || 0,
+		watchTimeLast30Days:
+			Number(watchTimeLast30DaysResult[0]?.totalWatchTime) || 0,
 		totalRoomsJoined: Number(roomsJoinedResult[0]?.count) || 0,
 		totalConnections: Number(connectionsResult[0]?.count) || 0,
 	};
