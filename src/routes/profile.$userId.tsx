@@ -51,7 +51,11 @@ function ProfilePage() {
 		);
 	}
 
-	const { user, topRelationships } = profile;
+	const { user, topRelationships, topRelationshipsLast30Days, stats } = profile;
+	const memberSince = new Date(user.createdAt).toLocaleDateString("en-US", {
+		month: "short",
+		year: "numeric",
+	});
 
 	return (
 		<div className="h-full w-full bg-depth-0 px-4 py-12 overflow-auto">
@@ -80,14 +84,38 @@ function ProfilePage() {
 									</span>
 								)}
 							</h1>
-							<p className="text-text-secondary mt-1">{user.email}</p>
+						</div>
+					</div>
+				</div>
+
+				<div className="bg-depth-1 rounded-lg p-6 border border-border-subtle">
+					<div className="grid grid-cols-3 gap-4 text-center">
+						<div>
+							<p className="text-text-tertiary text-sm">Member Since</p>
+							<p className="text-text-primary text-2xl font-bold mt-1">
+								{memberSince}
+							</p>
+						</div>
+						<div>
+							<p className="text-text-tertiary text-sm">Total Watch Time</p>
+							<p className="text-text-primary text-2xl font-bold mt-1">
+								{formatDuration(stats.totalWatchTime)}
+							</p>
+						</div>
+						<div>
+							<p className="text-text-tertiary text-sm">Last 30 Days</p>
+							<p className="text-text-primary text-2xl font-bold mt-1">
+								{formatDuration(stats.watchTimeLast30Days)}
+							</p>
 						</div>
 					</div>
 				</div>
 
 				<div className="bg-depth-1 rounded-lg p-6 border border-border-subtle">
 					<h2 className="text-2xl font-bold text-text-primary mb-6">
-						{isOwnProfile ? "Your Top Connections" : "Top Connections"}
+						{isOwnProfile
+							? "Your Top Connections — All Time"
+							: "Top Connections — All Time"}
 					</h2>
 					{topRelationships.length === 0 ? (
 						<p className="text-text-secondary">
@@ -98,6 +126,65 @@ function ProfilePage() {
 					) : (
 						<div className="space-y-4">
 							{topRelationships.map((rel, index) => (
+								<Link
+									key={rel.otherUserId}
+									to="/profile/$userId"
+									params={{ userId: rel.otherUserId }}
+									className="flex items-center gap-4 p-4 bg-depth-2 rounded-lg hover:bg-depth-3 transition-colors"
+								>
+									<div className="shrink-0 w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center">
+										<span className="text-sm font-bold text-accent">
+											#{index + 1}
+										</span>
+									</div>
+									{rel.user?.image ? (
+										<img
+											src={rel.user.image}
+											alt={rel.user.name}
+											className="h-12 w-12 rounded-full object-cover"
+										/>
+									) : (
+										<div className="h-12 w-12 rounded-full bg-surface-3 flex items-center justify-center">
+											<span className="text-lg font-medium text-text-primary">
+												{rel.user?.name?.charAt(0).toUpperCase() || "?"}
+											</span>
+										</div>
+									)}
+									<div className="flex-1 min-w-0">
+										<h3 className="text-lg font-semibold text-text-primary truncate">
+											{rel.user?.name || "Unknown User"}
+										</h3>
+										<p className="text-text-tertiary text-sm">
+											{rel.roomsCount} {rel.roomsCount === 1 ? "room" : "rooms"}
+										</p>
+									</div>
+									<div className="text-right">
+										<p className="text-lg font-bold text-accent">
+											{formatDuration(rel.totalTimeSeconds)}
+										</p>
+										<p className="text-text-tertiary text-sm">total time</p>
+									</div>
+								</Link>
+							))}
+						</div>
+					)}
+				</div>
+
+				<div className="bg-depth-1 rounded-lg p-6 border border-border-subtle">
+					<h2 className="text-2xl font-bold text-text-primary mb-6">
+						{isOwnProfile
+							? "Your Top Connections — Last 30 Days"
+							: "Top Connections — Last 30 Days"}
+					</h2>
+					{topRelationshipsLast30Days.length === 0 ? (
+						<p className="text-text-secondary">
+							{isOwnProfile
+								? "You haven't shared room time with anyone in the last 30 days."
+								: "This user hasn't shared room time with anyone in the last 30 days."}
+						</p>
+					) : (
+						<div className="space-y-4">
+							{topRelationshipsLast30Days.map((rel, index) => (
 								<Link
 									key={rel.otherUserId}
 									to="/profile/$userId"

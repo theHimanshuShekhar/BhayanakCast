@@ -1,6 +1,6 @@
-import { desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, or, sql, sum } from "drizzle-orm";
 import { db } from "./index";
-import { userRelationships, users } from "./schema";
+import { userRelationships, userRoomOverlaps, users } from "./schema";
 
 export interface RelationshipResult {
 	otherUserId: string;
@@ -26,6 +26,8 @@ export interface RelationshipWithUser extends RelationshipResult {
 export interface UserProfileData {
 	user: UserResult;
 	topRelationships: RelationshipWithUser[];
+	topRelationshipsLast30Days: RelationshipWithUser[];
+	stats: { totalWatchTime: number; watchTimeLast30Days: number };
 }
 
 /**
@@ -85,6 +87,72 @@ export async function getTopRelationships(
 	return relationships.map((rel: RelationshipResult) => ({
 		...rel,
 		user: otherUsers.find((u: UserResult) => u.id === rel.otherUserId),
+	}));
+}
+
+/**
+ * Get top users a specific user has shared room time with in the last 30 days
+ */
+export async function getTopRelationshipsLast30Days(
+	userId: string,
+	limit = 5,
+): Promise<RelationshipWithUser[]> {
+	const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+	const overlaps = await db
+		.select({
+			otherUserId: sql<string>`
+				CASE
+					WHEN ${userRoomOverlaps.user1Id} = ${userId} THEN ${userRoomOverlaps.user2Id}
+					ELSE ${userRoomOverlaps.user1Id}
+				END
+			`.as("other_user_id"),
+			totalTimeSeconds: sum(userRoomOverlaps.overlapSeconds).as(
+				"total_time_seconds",
+			),
+			roomsCount: sql<number>`count(distinct ${userRoomOverlaps.roomId})`.as(
+				"rooms_count",
+			),
+		})
+		.from(userRoomOverlaps)
+		.where(
+			and(
+				or(
+					eq(userRoomOverlaps.user1Id, userId),
+					eq(userRoomOverlaps.user2Id, userId),
+				),
+				gte(userRoomOverlaps.overlapStart, thirtyDaysAgo),
+			),
+		)
+		.groupBy(sql`1`)
+		.orderBy(desc(sum(userRoomOverlaps.overlapSeconds)))
+		.limit(limit);
+
+	const otherUserIds = overlaps.map((r) => r.otherUserId);
+
+	if (otherUserIds.length === 0) {
+		return [];
+	}
+
+	const otherUsers = await db
+		.select({
+			id: users.id,
+			name: users.name,
+			email: users.email,
+			image: users.image,
+			emailVerified: users.emailVerified,
+			createdAt: users.createdAt,
+			updatedAt: users.updatedAt,
+		})
+		.from(users)
+		.where(inArray(users.id, otherUserIds));
+
+	return overlaps.map((rel) => ({
+		otherUserId: rel.otherUserId,
+		totalTimeSeconds: Number(rel.totalTimeSeconds) || 0,
+		roomsCount: Number(rel.roomsCount) || 0,
+		lastInteractionAt: null,
+		user: otherUsers.find((u) => u.id === rel.otherUserId),
 	}));
 }
 
