@@ -137,15 +137,12 @@ export async function getUserStats(userId: string): Promise<UserStats> {
 		.from(roomParticipants)
 		.where(eq(roomParticipants.userId, userId));
 
-	// Total connections (unique users met)
+	// Total connections (unique users met, all time)
 	const connectionsResult = await db
 		.select({ count: sql<number>`count(*)` })
 		.from(userRelationships)
 		.where(
-			and(
-				gte(userRelationships.lastInteractionAt, thirtyDaysAgo),
-				sql`(${userRelationships.user1Id} = ${userId} OR ${userRelationships.user2Id} = ${userId})`,
-			),
+			sql`(${userRelationships.user1Id} = ${userId} OR ${userRelationships.user2Id} = ${userId})`,
 		);
 
 	const stats = {

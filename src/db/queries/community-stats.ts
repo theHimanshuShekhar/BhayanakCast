@@ -29,11 +29,13 @@ async function calculateCommunityStats(): Promise<CommunityStats> {
 		.from(users);
 
 	// Watch hours this week (last 7 days)
-	// 1. Count completed sessions (users who left)
+	// 1. Count completed sessions that started this week
+	//    Filter by joinedAt (not leftAt) to avoid counting sessions that started
+	//    weeks ago but happened to end this week.
 	const completedWatchResult = await db
 		.select({ totalSeconds: sum(roomParticipants.totalTimeSeconds) })
 		.from(roomParticipants)
-		.where(gte(roomParticipants.leftAt, oneWeekAgo));
+		.where(gte(roomParticipants.joinedAt, oneWeekAgo));
 
 	// 2. Count ongoing sessions (users still in rooms who joined this week)
 	const ongoingWatchResult = await db
