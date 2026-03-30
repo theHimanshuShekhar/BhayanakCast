@@ -31,7 +31,7 @@ function MobileTopBar() {
 				<span className="text-sm">BhayanakCast</span>
 			</Link>
 			<div className="flex items-center gap-3">
-				<ThemeSwitcher isExpanded={false} />
+				<ThemeSwitcher isExpanded={false} compact />
 				{session?.user?.id ? (
 					<UserButton
 						size="icon"
