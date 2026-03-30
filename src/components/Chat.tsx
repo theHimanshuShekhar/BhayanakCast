@@ -275,7 +275,7 @@ export function Chat({ roomId, userId, userName, userImage }: ChatProps) {
 			</div>
 
 			{/* Input Area */}
-			<div className="p-3 border-t border-border-subtle bg-depth-2">
+			<div className="p-3 border-t border-border-subtle bg-depth-2 safe-bottom">
 				{!isConnected ? (
 					<div className="text-center text-sm text-text-tertiary py-2">
 						Connecting to chat...

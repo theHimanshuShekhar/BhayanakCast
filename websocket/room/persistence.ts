@@ -389,11 +389,13 @@ export async function persistStreamerTransfer(
 			throw new Error("New streamer is not in room");
 		}
 
-		// 2. Update streamer
+		// 2. Update streamer and revert status to preparing (new streamer hasn't
+		//    started broadcasting yet, even if the room was previously active)
 		await trx
 			.update(streamingRooms)
 			.set({
 				streamerId: newStreamerId,
+				status: "preparing",
 			})
 			.where(eq(streamingRooms.id, roomId));
 
