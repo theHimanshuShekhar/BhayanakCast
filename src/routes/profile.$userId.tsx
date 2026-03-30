@@ -89,22 +89,22 @@ function ProfilePage() {
 				</div>
 
 				<div className="bg-depth-1 rounded-lg p-6 border border-border-subtle">
-					<div className="grid grid-cols-3 gap-4 text-center">
+					<div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center">
 						<div>
 							<p className="text-text-tertiary text-sm">Member Since</p>
-							<p className="text-text-primary text-2xl font-bold mt-1">
+							<p className="text-text-primary text-xl font-bold mt-1">
 								{memberSince}
 							</p>
 						</div>
 						<div>
 							<p className="text-text-tertiary text-sm">Total Watch Time</p>
-							<p className="text-text-primary text-2xl font-bold mt-1">
+							<p className="text-text-primary text-xl font-bold mt-1">
 								{formatDuration(stats.totalWatchTime)}
 							</p>
 						</div>
 						<div>
 							<p className="text-text-tertiary text-sm">Last 30 Days</p>
-							<p className="text-text-primary text-2xl font-bold mt-1">
+							<p className="text-text-primary text-xl font-bold mt-1">
 								{formatDuration(stats.watchTimeLast30Days)}
 							</p>
 						</div>
