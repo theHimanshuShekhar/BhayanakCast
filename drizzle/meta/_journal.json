@@ -22,6 +22,13 @@
       "when": 1773670743483,
       "tag": "0002_normal_vivisector",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1774860043595,
+      "tag": "0003_spicy_northstar",
+      "breakpoints": true
     }
   ]
 }
