@@ -73,7 +73,7 @@ function Sidebar() {
 
 	return (
 		<aside
-			className={`hidden md:flex border-r border-border-subtle bg-depth-1 flex-col shrink-0 transition-all duration-300 ease-in-out ${
+			className={`hidden md:flex md:flex-col border-r border-border-subtle bg-depth-1 shrink-0 transition-all duration-300 ease-in-out ${
 				isExpanded ? "w-60" : "w-16"
 			}`}
 		>
