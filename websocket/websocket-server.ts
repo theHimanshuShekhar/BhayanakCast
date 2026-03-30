@@ -9,9 +9,11 @@ const __dirname = dirname(__filename);
 config({ path: join(__dirname, "..", ".env.local"), override: true });
 config({ path: join(__dirname, "..", ".env"), override: true });
 
-import { Server } from "socket.io";
+import { Server, type Socket } from "socket.io";
 import { createServer } from "http";
-import { setupRoomEventHandlers, handleSocketDisconnect } from "./room-events";
+import { setupRoomEventHandlers, handleSocketDisconnect } from "./room";
+import { setupChatHandlers, sendSystemMessage } from "./chat";
+import { setupStreamingHandlers, initiateStreamerTransfer } from "./streaming";
 import { initializeCommunityStats } from "../src/db/queries/community-stats";
 import { RateLimits, rateLimiter } from "../src/lib/rate-limiter";
 
@@ -125,8 +127,18 @@ const httpServer = createServer((req, res) => {
 		return;
 	}
 
-	// Handle broadcast endpoint for server functions
+	// Handle broadcast endpoint for server functions.
+	// Protected by a shared secret in the Authorization header so that only
+	// the web server (running server functions) can call this endpoint.
 	if (req.url === "/api/broadcast" && req.method === "POST") {
+		const broadcastSecret = process.env.BROADCAST_SECRET;
+		const authHeader = req.headers["authorization"];
+		if (!broadcastSecret || authHeader !== `Bearer ${broadcastSecret}`) {
+			res.writeHead(401, { "Content-Type": "application/json" });
+			res.end(JSON.stringify({ error: "Unauthorized" }));
+			return;
+		}
+
 		let body = "";
 		req.on("data", (chunk) => {
 			body += chunk.toString();
@@ -166,8 +178,10 @@ const io = new Server(httpServer, {
 export interface SocketUserData {
 	userId: string;
 	userName: string;
+	userImage?: string;
 	roomId?: string;
 	isMobile: boolean;
+	peerId?: string; // PeerJS ID for WebRTC connections
 }
 
 // Export socketUserMap for room-events.ts to update
@@ -178,20 +192,6 @@ const socketUserMap = new Map<string, SocketUserData>();
 // Track unique users and their connection count for global user count
 const connectedUsers = new Map<string, number>();
 
-// Track WebRTC state per room
-interface RoomWebRTCState {
-	streamerId: string;
-	streamerSocketId: string;
-	viewerIds: Set<string>;
-	transferInProgress: boolean;
-	transferStartedAt?: number;
-}
-
-const roomWebRTCState = new Map<string, RoomWebRTCState>();
-
-// Debounce transfers to prevent rapid changes
-const transferDebounces = new Map<string, NodeJS.Timeout>();
-
 // Broadcast user count to all connected clients
 function broadcastUserCount() {
 	const count = connectedUsers.size;
@@ -199,121 +199,8 @@ function broadcastUserCount() {
 	io.emit("userCount", { count });
 }
 
-// Chat message type
-interface ChatMessage {
-	id: string;
-	roomId: string;
-	userId: string;
-	userName: string;
-	userImage?: string | null;
-	content: string;
-	timestamp: number;
-	type: "user" | "system";
-}
-
-// Broadcast to all clients in a room (including sender)
-function broadcastToRoom(roomId: string, event: string, data: unknown) {
-	io.to(roomId).emit(event, data);
-}
-
-// Send system message to room
-function sendSystemMessage(roomId: string, content: string) {
-	const message: ChatMessage = {
-		id: `system-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-		roomId,
-		userId: "system",
-		userName: "System",
-		content,
-		timestamp: Date.now(),
-		type: "system",
-	};
-	broadcastToRoom(roomId, "chat:message", message);
-}
-
-// Initiate WebRTC transfer with debouncing
-async function initiateWebRTCTransfer(
-	roomId: string,
-	oldStreamerId: string,
-	newStreamerId: string,
-	participants: Array<{ userId: string; userName: string }>,
-) {
-	// Clear any existing debounce for this room
-	const existing = transferDebounces.get(roomId);
-	if (existing) {
-		clearTimeout(existing);
-	}
-
-	// Debounce by 500ms to batch rapid changes
-	const timeout = setTimeout(async () => {
-		console.log(`[WebRTC] Executing transfer in room ${roomId}`);
-
-		// Update room WebRTC state
-		roomWebRTCState.set(roomId, {
-			streamerId: newStreamerId,
-			streamerSocketId: "", // Will be set when new streamer connects
-			viewerIds: new Set(participants.map((p) => p.userId)),
-			transferInProgress: true,
-			transferStartedAt: Date.now(),
-		});
-
-		// Notify all clients to initiate cleanup
-		broadcastToRoom(roomId, "webrtc:transfer_initiating", {
-			oldStreamerId,
-			newStreamerId,
-			reason: "streamer_left",
-			estimatedReconnectAt: Date.now() + 3000,
-			allParticipants: participants.map((p) => ({
-				userId: p.userId,
-				userName: p.userName,
-				isMobile: false, // Will be determined by socket data
-			})),
-		});
-
-		// Find new streamer's socket
-		let newStreamerSocketId = "";
-		for (const [socketId, userData] of socketUserMap.entries()) {
-			if (userData.userId === newStreamerId && userData.roomId === roomId) {
-				newStreamerSocketId = socketId;
-				break;
-			}
-		}
-
-		if (newStreamerSocketId) {
-			// Update state with socket ID
-			const state = roomWebRTCState.get(roomId);
-			if (state) {
-				state.streamerSocketId = newStreamerSocketId;
-			}
-
-			// Notify new streamer specifically
-			io.to(newStreamerSocketId).emit("webrtc:become_streamer", {
-				viewers: participants
-					.filter((p) => p.userId !== newStreamerId)
-					.map((p) => ({
-						userId: p.userId,
-						userName: p.userName,
-					})),
-				startBroadcastingAt: Date.now() + 1500,
-			});
-		}
-
-		// Set transfer timeout (10 seconds)
-		setTimeout(() => {
-			const state = roomWebRTCState.get(roomId);
-			if (state?.transferInProgress) {
-				console.error(`[WebRTC] Transfer timeout in room ${roomId}`);
-				roomWebRTCState.delete(roomId);
-			}
-		}, 10000);
-
-		transferDebounces.delete(roomId);
-	}, 500);
-
-	transferDebounces.set(roomId, timeout);
-}
-
 // Socket.io connection handler
-io.on("connection", (socket) => {
+io.on("connection", (socket: Socket) => {
 	const clientIp = socket.handshake.address;
 	console.log(`[Socket.io] Client connected: ${socket.id} (IP: ${clientIp})`);
 
@@ -332,6 +219,11 @@ io.on("connection", (socket) => {
 	// Send current user count on connection
 	socket.emit("userCount", { count: connectedUsers.size });
 
+	// Setup module-specific event handlers ONCE per connection
+	setupRoomEventHandlers(io, socket as any);
+	setupChatHandlers(io, socket as any, socketUserMap);
+	setupStreamingHandlers(io, socket as any, socketUserMap);
+
 	// Handle user identification
 	socket.on("identify", (data: { userId?: string; userName?: string; userImage?: string | null; isMobile?: boolean }) => {
 		const userId = data.userId || `anonymous:${socket.id}`;
@@ -342,10 +234,14 @@ io.on("connection", (socket) => {
 		socket.data.userImage = data.userImage;
 		socket.data.isMobile = data.isMobile || false;
 
+		// Preserve existing roomId and peerId if already in socketUserMap
+		const existingData = socketUserMap.get(socket.id);
 		socketUserMap.set(socket.id, {
 			userId,
 			userName,
 			isMobile: data.isMobile || false,
+			roomId: existingData?.roomId,
+			peerId: existingData?.peerId,
 		});
 
 		// Increment connection count for this user
@@ -358,252 +254,9 @@ io.on("connection", (socket) => {
 
 		console.log(`[Socket.io] User identified: ${userName} (${userId}) (socket: ${socket.id}) (mobile: ${data.isMobile})`);
 		socket.emit("identified", { userId, userName });
-
-		// Setup new WebSocket-first room event handlers
-		setupRoomEventHandlers(io, socket as any);
 	});
 
-	// Note: room:join and room:leave handlers are now in room-events.ts (WebSocket-first architecture)
-
-	// Handle chat messages
-	socket.on("chat:send", (data: { roomId: string; content: string }) => {
-		const { roomId, content } = data;
-		const userId = socket.data.userId;
-		const userName = socket.data.userName || userId;
-		const userImage = socket.data.userImage;
-
-		if (!userId) {
-			socket.emit("chat:error", { message: "Not authenticated" });
-			return;
-		}
-
-		if (!content || content.trim().length === 0) {
-			socket.emit("chat:error", { message: "Message cannot be empty" });
-			return;
-		}
-
-		// Check rate limit
-		const chatLimiter = rateLimiter.forAction("chat:send");
-		const rateLimitResult = chatLimiter.checkAndRecord(userId, RateLimits.CHAT_SEND);
-		if (!rateLimitResult.allowed) {
-			socket.emit("chat:error", {
-				message: `You're sending messages too quickly. Try again in ${rateLimitResult.retryAfter} seconds.`,
-				retryAfter: rateLimitResult.retryAfter,
-			});
-			return;
-		}
-
-		// Check if user is in the room
-		const socketData = socketUserMap.get(socket.id);
-		if (!socketData?.roomId || socketData.roomId !== roomId) {
-			socket.emit("chat:error", { message: "You must join the room first" });
-			return;
-		}
-
-		const message: ChatMessage = {
-			id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-			roomId,
-			userId,
-			userName,
-			userImage,
-			content: content.trim(),
-			timestamp: Date.now(),
-			type: "user",
-		};
-
-		console.log(`[Chat] Message from ${userName} in room ${roomId}: ${content}`);
-
-		// Broadcast to all in room (including sender)
-		broadcastToRoom(roomId, "chat:message", message);
-	});
-
-	// Note: streamer:transfer handler is now in room-events.ts (WebSocket-first architecture)
-
-	// ============ WebRTC Signaling Events ============
-
-	// Streamer ready to broadcast
-	socket.on("webrtc:streamer_ready", (data: { roomId: string; audioConfig: string }) => {
-		const { roomId, audioConfig } = data;
-		const userId = socket.data.userId;
-
-		console.log(`[WebRTC] Streamer ${userId} ready in room ${roomId}`);
-
-		// Update room WebRTC state
-		const state = roomWebRTCState.get(roomId);
-		if (state) {
-			state.streamerId = userId;
-			state.streamerSocketId = socket.id;
-			state.transferInProgress = false;
-		}
-
-		// Notify all room members
-		broadcastToRoom(roomId, "webrtc:streamer_ready", {
-			streamerId: userId,
-			streamerName: socket.data.userName,
-			audioConfig,
-		});
-
-		// Trigger viewer reconnection after a delay
-		setTimeout(() => {
-			broadcastToRoom(roomId, "webrtc:reconnect_now", {
-				newStreamerId: userId,
-				newStreamerName: socket.data.userName,
-				streamerSocketId: socket.id,
-			});
-		}, 1000);
-	});
-
-	// Screen sharing ended
-	socket.on("webrtc:screen_share_ended", async (data: { roomId: string }) => {
-		const { roomId } = data;
-		const userId = socket.data.userId;
-
-		console.log(`[WebRTC] Screen share ended by ${userId} in room ${roomId}`);
-
-		// Check in-memory state if user is streamer
-		const { getRoomState } = await import("./room-state");
-		const room = getRoomState(roomId);
-		if (!room || room.streamerId !== userId) {
-			return; // Not the streamer, ignore
-		}
-
-		// Clear WebRTC state
-		roomWebRTCState.delete(roomId);
-
-		// Streamer stopped streaming but stays in room
-		// Status changes to preparing, but participant stays
-		const { updateRoomStatus } = await import("./room-state");
-		updateRoomStatus(roomId, "preparing");
-
-		// Broadcast status change
-		broadcastToRoom(roomId, "room:status_changed", { status: "preparing" });
-		broadcastToRoom(roomId, "webrtc:screen_share_ended", { streamerId: userId });
-
-		console.log(`[WebRTC] Screen share ended in room ${roomId}, status changed to preparing`);
-	});
-
-	// WebRTC offer from viewer
-	socket.on("webrtc:offer", (data: { roomId: string; toUserId: string; offer: RTCSessionDescriptionInit }) => {
-		const { roomId, toUserId, offer } = data;
-		const fromUserId = socket.data.userId;
-
-		// Rate limit check
-		const rateLimitResult = rateLimiter.checkAndRecord(fromUserId, RateLimits.WEBRTC_SIGNALING);
-		if (!rateLimitResult.allowed) {
-			console.warn(`[WebRTC] Rate limit exceeded for user ${fromUserId}`);
-			return;
-		}
-
-		// Validate sender is in the room
-		const senderData = socketUserMap.get(socket.id);
-		if (!senderData || senderData.roomId !== roomId) {
-			console.warn(`[WebRTC] User ${fromUserId} attempted to send offer but is not in room ${roomId}`);
-			return;
-		}
-
-		// Validate target is the streamer (viewers send offers TO streamers)
-		const targetData = Array.from(socketUserMap.values()).find(
-			(u) => u.userId === toUserId && u.roomId === roomId
-		);
-		if (!targetData) {
-			console.warn(`[WebRTC] Target user ${toUserId} not found in room ${roomId}`);
-			return;
-		}
-
-		// Find target socket
-		for (const [targetSocketId, userData] of socketUserMap.entries()) {
-			if (userData.userId === toUserId && userData.roomId === roomId) {
-				io.to(targetSocketId).emit("webrtc:offer", {
-					fromUserId,
-					fromUserName: socket.data.userName,
-					offer,
-				});
-				break;
-			}
-		}
-	});
-
-	// WebRTC answer from streamer
-	socket.on("webrtc:answer", (data: { roomId: string; toUserId: string; answer: RTCSessionDescriptionInit }) => {
-		const { roomId, toUserId, answer } = data;
-		const fromUserId = socket.data.userId;
-
-		// Rate limit check
-		const rateLimitResult = rateLimiter.checkAndRecord(fromUserId, RateLimits.WEBRTC_SIGNALING);
-		if (!rateLimitResult.allowed) {
-			console.warn(`[WebRTC] Rate limit exceeded for user ${fromUserId}`);
-			return;
-		}
-
-		// Validate sender is in the room
-		const senderData = socketUserMap.get(socket.id);
-		if (!senderData || senderData.roomId !== roomId) {
-			console.warn(`[WebRTC] User ${fromUserId} attempted to send answer but is not in room ${roomId}`);
-			return;
-		}
-
-		// Validate target is a viewer (streamers send answers TO viewers)
-		const targetData = Array.from(socketUserMap.values()).find(
-			(u) => u.userId === toUserId && u.roomId === roomId
-		);
-		if (!targetData) {
-			console.warn(`[WebRTC] Target user ${toUserId} not found in room ${roomId}`);
-			return;
-		}
-
-		// Find target socket
-		for (const [targetSocketId, userData] of socketUserMap.entries()) {
-			if (userData.userId === toUserId && userData.roomId === roomId) {
-				io.to(targetSocketId).emit("webrtc:answer", {
-					fromUserId,
-					answer,
-				});
-				break;
-			}
-		}
-	});
-
-	// ICE candidate exchange
-	socket.on("webrtc:ice_candidate", (data: { roomId: string; toUserId: string; candidate: RTCIceCandidateInit }) => {
-		const { roomId, toUserId, candidate } = data;
-		const fromUserId = socket.data.userId;
-
-		// Rate limit check
-		const rateLimitResult = rateLimiter.checkAndRecord(fromUserId, RateLimits.WEBRTC_SIGNALING);
-		if (!rateLimitResult.allowed) {
-			console.warn(`[WebRTC] Rate limit exceeded for user ${fromUserId}`);
-			return;
-		}
-
-		// Validate sender is in the room
-		const senderData = socketUserMap.get(socket.id);
-		if (!senderData || senderData.roomId !== roomId) {
-			console.warn(`[WebRTC] User ${fromUserId} attempted to send ICE candidate but is not in room ${roomId}`);
-			return;
-		}
-
-		// Validate target is in the same room
-		const targetData = Array.from(socketUserMap.values()).find(
-			(u) => u.userId === toUserId && u.roomId === roomId
-		);
-		if (!targetData) {
-			console.warn(`[WebRTC] Target user ${toUserId} not found in room ${roomId}`);
-			return;
-		}
-
-		// Find target socket
-		for (const [targetSocketId, userData] of socketUserMap.entries()) {
-			if (userData.userId === toUserId && userData.roomId === roomId) {
-				io.to(targetSocketId).emit("webrtc:ice_candidate", {
-					fromUserId,
-					candidate,
-				});
-				break;
-			}
-		}
-	});
-
-	// Handle disconnect using WebSocket-first architecture
+	// Handle disconnect
 	socket.on("disconnect", async () => {
 		const socketData = socketUserMap.get(socket.id);
 		if (!socketData) return;
@@ -611,14 +264,13 @@ io.on("connection", (socket) => {
 		const { userId, userName } = socketData;
 		console.log(`[Socket.io] Client disconnected: ${socket.id} (user: ${userName})`);
 
-		// Use WebSocket-first handler to leave all rooms
+		// Use room handler to leave all rooms
 		try {
 			await handleSocketDisconnect(
 				io,
 				socket as any,
-				sendSystemMessage,
-				initiateWebRTCTransfer,
-				(roomId) => roomWebRTCState.get(roomId),
+				(roomId, content) => sendSystemMessage(io, roomId, content),
+				(roomId, newStreamerId, participants) => initiateStreamerTransfer(io, roomId, newStreamerId, participants),
 			);
 		} catch (error) {
 			console.error(`[RoomEvents] Error in disconnect handler:`, error);
@@ -647,7 +299,7 @@ httpServer.listen(PORT, async () => {
 	// Run initial cleanup using WebSocket-first architecture
 	console.log("[RoomManager] Running initial cleanup on startup...");
 	try {
-		const { runRoomCleanupJob } = await import("./room-events");
+		const { runRoomCleanupJob } = await import("./room");
 		await runRoomCleanupJob(io);
 	} catch (error) {
 		console.error("[RoomManager] Error during initial cleanup:", error);
@@ -671,7 +323,7 @@ httpServer.listen(PORT, async () => {
 
 	setInterval(async () => {
 		try {
-			const { runRoomCleanupJob } = await import("./room-events");
+			const { runRoomCleanupJob } = await import("./room");
 			await runRoomCleanupJob(io);
 		} catch (error) {
 			console.error("[RoomManager] Error during room cleanup:", error);

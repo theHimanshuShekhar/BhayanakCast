@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RoomParticipant } from "#/hooks/useRoom";
-import type { SerializedParticipant } from "../../websocket/room-state";
+import type { SerializedParticipant } from "../../websocket/room/state";
 
 describe("Participant Type Safety", () => {
 	describe("RoomParticipant and SerializedParticipant compatibility", () => {

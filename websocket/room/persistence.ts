@@ -7,8 +7,8 @@
  * @module websocket/db-persistence
  */
 
-import { and, eq, sql } from "drizzle-orm";
-import { roomParticipants, streamingRooms, users } from "../src/db/schema";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { roomParticipants, streamingRooms, users } from "../../src/db/schema";
 
 // Types
 export interface CreateRoomData {
@@ -75,7 +75,7 @@ async function generateId(): Promise<string> {
 export async function persistRoomCreation(
 	data: CreateRoomData,
 ): Promise<CreateRoomResult> {
-	const { db } = await import("../src/db/index");
+	const { db } = await import("../../src/db/index");
 	const now = new Date();
 	const roomId = await generateId();
 
@@ -115,7 +115,7 @@ export async function persistRoomCreation(
 export async function persistParticipantJoin(
 	data: JoinRoomData,
 ): Promise<JoinRoomResult> {
-	const { db } = await import("../src/db/index");
+	const { db } = await import("../../src/db/index");
 	const now = new Date();
 	const participantId = await generateId();
 
@@ -179,9 +179,12 @@ export async function persistParticipantJoin(
 			)
 			.then((rows) => rows[0]?.count || 0);
 
-		// 4. Determine if user becomes streamer
+		// 4. Determine if user becomes streamer.
+		// becameStreamer: joining an empty waiting room triggers auto-assignment.
+		// isStreamer: also true if the user was already the room's streamer (crash-rejoin).
 		const isFirstParticipant = participantCount === 0;
 		const becameStreamer = isFirstParticipant && room.status === "waiting";
+		const isExistingStreamer = room.streamerId === data.userId;
 
 		// 5. Add participant
 		await trx.insert(roomParticipants).values({
@@ -212,7 +215,7 @@ export async function persistParticipantJoin(
 
 		return {
 			success: true,
-			isStreamer: becameStreamer,
+			isStreamer: becameStreamer || isExistingStreamer,
 			becameStreamer,
 			participantId,
 			joinedAt: now,
@@ -226,7 +229,7 @@ export async function persistParticipantJoin(
 export async function persistParticipantLeave(
 	data: LeaveRoomData,
 ): Promise<LeaveRoomResult> {
-	const { db } = await import("../src/db/index");
+	const { db } = await import("../../src/db/index");
 	const now = new Date();
 
 	return await db.transaction(async (trx) => {
@@ -272,14 +275,18 @@ export async function persistParticipantLeave(
 			throw new Error("Room not found");
 		}
 
-		// 5. Handle streamer transfer if needed
+		// 5. Handle streamer transfer if needed.
+		// Track whether this branch already wrote a new status so step 7 doesn't
+		// issue a conflicting UPDATE (e.g. streamer was last person → "waiting" in
+		// branch A would be overridden by "preparing" in branch B otherwise).
 		let newStreamerId: string | undefined;
+		let statusSetByStreamerBranch: string | undefined;
 
 		if (room.streamerId === data.userId) {
 			// Find next viewer (earliest joined) who is eligible to stream
 			// Filter by eligibleStreamerIds if provided (to exclude mobile users)
 			const eligibleIds = data.eligibleStreamerIds;
-			
+
 			const nextViewer = await trx
 				.select()
 				.from(roomParticipants)
@@ -287,9 +294,9 @@ export async function persistParticipantLeave(
 					and(
 						eq(roomParticipants.roomId, data.roomId),
 						sql`${roomParticipants.leftAt} IS NULL`,
-						// Filter by eligible IDs if provided
+						// Filter by eligible IDs if provided (safe parameterized query)
 						eligibleIds && eligibleIds.length > 0
-							? sql`${roomParticipants.userId} IN (${eligibleIds.join(",")})`
+							? inArray(roomParticipants.userId, eligibleIds)
 							: sql`1=1`,
 					),
 				)
@@ -301,19 +308,16 @@ export async function persistParticipantLeave(
 				newStreamerId = nextViewer.userId;
 				await trx
 					.update(streamingRooms)
-					.set({
-						streamerId: newStreamerId,
-					})
+					.set({ streamerId: newStreamerId })
 					.where(eq(streamingRooms.id, data.roomId));
 			} else {
-				// No eligible viewers left (all mobile or no viewers), clear streamer
+				// No eligible viewers left — clear streamer and set waiting.
+				// Record that we already wrote the status so step 7 skips it.
 				await trx
 					.update(streamingRooms)
-					.set({
-						streamerId: null,
-						status: "waiting",
-					})
+					.set({ streamerId: null, status: "waiting" })
 					.where(eq(streamingRooms.id, data.roomId));
+				statusSetByStreamerBranch = "waiting";
 			}
 		}
 
@@ -329,16 +333,25 @@ export async function persistParticipantLeave(
 			)
 			.then((rows) => rows[0]?.count || 0);
 
-		// 7. Update status if needed
-		let roomStatus = room.status;
-		if (remainingCount === 0 && room.status !== "waiting") {
-			await trx
-				.update(streamingRooms)
-				.set({
-					status: "waiting",
-				})
-				.where(eq(streamingRooms.id, data.roomId));
-			roomStatus = "waiting";
+		// 7. Update status if needed — but only if step 5 didn't already set it.
+		// This prevents conflicting UPDATEs (e.g. "waiting" then overwritten with
+		// "preparing" in the same transaction when the streamer was the last person).
+		let roomStatus: string = statusSetByStreamerBranch ?? room.status;
+		if (!statusSetByStreamerBranch) {
+			if (remainingCount === 0 && room.status !== "waiting") {
+				await trx
+					.update(streamingRooms)
+					.set({ status: "waiting" })
+					.where(eq(streamingRooms.id, data.roomId));
+				roomStatus = "waiting";
+			} else if (remainingCount === 1 && room.status === "active") {
+				// Drop back to preparing when only one participant remains
+				await trx
+					.update(streamingRooms)
+					.set({ status: "preparing" })
+					.where(eq(streamingRooms.id, data.roomId));
+				roomStatus = "preparing";
+			}
 		}
 
 		return {
@@ -356,7 +369,7 @@ export async function persistStreamerTransfer(
 	roomId: string,
 	newStreamerId: string,
 ): Promise<boolean> {
-	const { db } = await import("../src/db/index");
+	const { db } = await import("../../src/db/index");
 
 	return await db.transaction(async (trx) => {
 		// 1. Verify new streamer is in room
@@ -395,7 +408,7 @@ export async function persistStreamerTransfer(
 export async function persistRoomEnd(
 	roomId: string,
 ): Promise<boolean> {
-	const { db } = await import("../src/db/index");
+	const { db } = await import("../../src/db/index");
 	const now = new Date();
 
 	await db.transaction(async (trx) => {
@@ -439,7 +452,7 @@ export async function getRoomFromDB(
 	streamerId: string | null;
 	createdAt: Date;
 } | null> {
-	const { db } = await import("../src/db/index");
+	const { db } = await import("../../src/db/index");
 
 	const room = await db
 		.select()
@@ -463,7 +476,7 @@ export async function getActiveParticipantsFromDB(
 		joinedAt: Date;
 	}>
 > {
-	const { db } = await import("../src/db/index");
+	const { db } = await import("../../src/db/index");
 
 	const participants = await db
 		.select({
@@ -490,7 +503,7 @@ export async function getActiveParticipantsFromDB(
 export async function findStaleRoomsFromDB(
 	maxAgeMinutes: number = 5,
 ): Promise<Array<{ id: string; name: string }>> {
-	const { db } = await import("../src/db/index");
+	const { db } = await import("../../src/db/index");
 	const now = new Date();
 	const cutoff = new Date(now.getTime() - maxAgeMinutes * 60 * 1000);
 
@@ -533,7 +546,7 @@ export async function findStaleRoomsFromDB(
 export async function getUserActiveRoom(
 	userId: string,
 ): Promise<string | null> {
-	const { db } = await import("../src/db/index");
+	const { db } = await import("../../src/db/index");
 
 	const participant = await db
 		.select({ roomId: roomParticipants.roomId })
@@ -559,7 +572,7 @@ export async function getUserActiveRoom(
  * Leave all rooms (for single-room enforcement)
  */
 export async function leaveAllRooms(userId: string): Promise<string[]> {
-	const { db } = await import("../src/db/index");
+	const { db } = await import("../../src/db/index");
 	const now = new Date();
 
 	// Get all active participations

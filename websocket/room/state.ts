@@ -13,6 +13,7 @@ export interface RoomState {
 	name: string;
 	description?: string;
 	streamerId: string | null;
+	streamerPeerId: string | null; // PeerJS ID for late joiners
 	status: "waiting" | "preparing" | "active" | "ended";
 	participants: Map<string, ParticipantState>;
 	createdAt: Date;
@@ -42,6 +43,7 @@ export interface SerializedRoomState {
 	name: string;
 	description?: string;
 	streamerId: string | null;
+	streamerPeerId: string | null; // PeerJS ID for late joiners
 	status: "waiting" | "preparing" | "active" | "ended";
 	participants: SerializedParticipant[];
 	createdAt: Date;
@@ -67,6 +69,7 @@ export function createRoomState(data: {
 }): RoomState {
 	const room: RoomState = {
 		...data,
+		streamerPeerId: null,
 		participants: new Map(),
 		dbConfirmed: false,
 	};
@@ -217,6 +220,11 @@ export function updateRoomStreamer(
 	const oldStreamer = room.streamerId;
 	room.streamerId = streamerId;
 
+	// Clear peer ID when streamer changes (new streamer will set their own)
+	if (oldStreamer !== streamerId) {
+		room.streamerPeerId = null;
+	}
+
 	if (DEBUG) {
 		console.log(
 			`[RoomState] ${roomId}: streamer ${oldStreamer} → ${streamerId}`,
@@ -279,6 +287,7 @@ export function serializeRoomState(
 		name: room.name,
 		description: room.description,
 		streamerId: room.streamerId,
+		streamerPeerId: room.streamerPeerId,
 		status: room.status,
 		participants: Array.from(room.participants.values()).map((p) => ({
 			userId: p.userId,
@@ -353,6 +362,7 @@ export function debugRoomState(roomId: string): void {
 			name: room.name,
 			status: room.status,
 			streamerId: room.streamerId,
+		streamerPeerId: room.streamerPeerId,
 			participants: Array.from(room.participants.entries()).map(
 				([uid, p]) => ({
 					userId: uid,

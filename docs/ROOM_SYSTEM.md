@@ -1,277 +1,63 @@
 # Room System
 
-Complete guide to rooms, their lifecycle, and business logic.
-
-## Architecture Overview
-
-**WebSocket-First Architecture:**
-```
-Client → WebSocket Server → Database (wait for confirmation) → Broadcast to Room
-         ↓
-    In-Memory State (primary runtime source of truth)
-```
-
-**Key Principles:**
-- **WebSocket server** maintains primary room state in memory during runtime
-- **Database** is the persistence layer - all writes wait for DB confirmation
-- **Frontend** never writes to database directly - all operations via WebSocket
-- **On server restart**: State is rebuilt from client rejoins (clients automatically rejoin and sync state)
-
-## Room Status States
-
-Rooms progress through 4 states:
-
-| Status | Description | Visual | Transition |
-|--------|-------------|--------|------------|
-| **waiting** | Room created, no streamer | Gray dot | Creator joins → preparing |
-| **preparing** | Streamer present, < 2 viewers | Yellow dot | 2nd join → active |
-| **active** | Live streaming (2+ people) | Green dot + LIVE | Streamer leaves → preparing |
-| **ended** | Room closed | History icon | Waiting + empty 5min → ended |
-
-## Room Status Transitions (Business Rules)
-
-### Streamer Stops Streaming
-**Status → preparing**
-- Streamer clicks "Stop Streaming"
-- Streamer remains in room
-- Room stays in "preparing" status
-- Streamer can start streaming again
-
-### Streamer Leaves Room
-**Automatic transfer to next viewer:**
-1. Find oldest eligible viewer
-2. Transfer streamer ownership
-3. Status → **preparing**
-4. Notify all participants
-
-**No eligible viewers:**
-1. streamerId → null
-2. Status → **waiting**
-3. Room remains joinable
-
-### Room in "waiting" Status
-- **Not ended** - room is still active and joinable
-- Anyone can join and become streamer
-- Only ended after 5+ minutes empty
-
-### Room Ending Criteria
-**Room ONLY ends when ALL conditions met:**
-1. Status is "waiting" (no active streamer)
-2. No participants present for 5+ minutes
-3. Room created > 5 minutes ago
-
-**After ending:**
-- Status → "ended"
-- Visible in "Past Streams" for 3 hours
-- Cannot be rejoined
-
-## Room Lifecycle
-
-### 1. Creation Flow
+## Architecture
 
 ```
-User clicks "Create Room"
-    ↓
-Frontend emits 'room:create' via WebSocket
-    ↓
-WebSocket validates input
-    ↓
-WebSocket inserts to database (SYNCHRONOUS - waits for confirmation)
-    ↓
-On DB success:
-  - Create RoomState in memory
-  - Emit 'room:created' to creator
-  - Room visible to others after DB confirmation
-    ↓
-On DB failure:
-  - Emit 'room:create_error' to creator
-  - No state created, no broadcast
+Client → WebSocket Server → Database (sync, await) → Broadcast to Room
+              ↓
+         In-Memory State (primary runtime source of truth)
 ```
 
-**Important:** Room is only joinable after database confirmation. WebSocket maintains `dbConfirmed: boolean` flag.
+- Frontend **never** writes to DB directly — all room ops via WebSocket
+- DB writes block before any broadcast (consistency guarantee)
+- On server restart: clients auto-rejoin → state rebuilt from DB
 
-### 2. Joining Flow
+## Room Status
 
-```
-User clicks "Join Room"
-    ↓
-Frontend emits 'room:join' { roomId }
-    ↓
-WebSocket checks in-memory state (room must exist and not be ended)
-    ↓
-WebSocket inserts participant to database (SYNCHRONOUS)
-    ↓
-On DB success:
-  - Add participant to in-memory RoomState
-  - Update room status if needed (waiting → preparing → active)
-  - Emit 'room:joined' to joining user (full room state)
-  - Broadcast 'room:user_joined' to others
-    ↓
-On DB failure:
-  - Emit 'room:join_error' to user
-  - State unchanged
-```
+| Status | Description | Transition |
+|--------|-------------|------------|
+| **waiting** | No streamer assigned | First user joins → preparing |
+| **preparing** | Streamer present, < 2 participants | 2nd joins → active |
+| **active** | 2+ participants, streamer assigned | Streamer leaves → preparing |
+| **ended** | Empty 5+ minutes | Cleanup job → ended |
 
-### 3. Leaving Flow
+Room only ends via the 5-minute cleanup job — not when the stream stops.
 
-```
-User clicks "Leave Room" OR disconnects
-    ↓
-WebSocket updates database (set leftAt, calculate watch time)
-    ↓
-On DB success:
-  - Remove participant from in-memory RoomState
-  - Handle streamer transfer if needed (in DB transaction)
-  - Update room status
-  - Broadcast 'room:user_left'
-  - If room empty → status = waiting (NOT ended)
-    ↓
-Note: Room only ends via cleanup job after 5+ minutes empty
-```
-
-### 4. Rejoin/Rebuild Flow (Server Restart Recovery)
-
-**When WebSocket server restarts, all room state is lost. Clients automatically recover:**
-
-```
-Client connects/reconnects
-    ↓
-Client was in a room before disconnect
-    ↓
-Client emits 'room:rejoin' { roomId, userId }
-    ↓
-WebSocket checks if room exists in memory:
-
-  CASE A: Room exists in memory
-    - Add participant back
-    - Emit 'room:state_sync' with full room state
-    - Broadcast 'room:user_joined' to others
-    
-  CASE B: Room doesn't exist (server restarted)
-    - Query database for room
-    - Query database for current participants
-    - Rebuild RoomState in memory
-    - Add rejoining participant
-    - Emit 'room:state_sync' to rejoining user
-    - Broadcast 'room:user_joined' to others
-    
-All other clients receive 'room:user_joined' and update their state
-```
-
-**Key Point:** Rejoin logic automatically triggers on reconnection. No manual user action needed.
-
-### 5. Cleanup Flow
-
-```
-Room in "waiting" status
-    ↓
-Empty for 5+ minutes AND room created > 5 minutes ago
-    ↓
-Cleanup job runs (every 5 minutes)
-    ↓
-Update database: status = "ended", endedAt = now
-    ↓
-Remove from in-memory state
-    ↓
-Broadcast 'room:ended'
-    ↓
-Room visible in "Past Streams" for 3 hours
-```
-
-## Business Rules
+## Key Business Rules
 
 ### Streamer Transfer
+When the streamer leaves, a DB transaction atomically:
+1. Marks streamer as left (calculates watch time)
+2. Finds earliest-joined active viewer as new streamer
+3. If no viewers: clears `streamerId`, sets status → `waiting`
+4. Broadcasts `room:streamer_changed` after DB success
 
-When the streamer leaves, database handles transfer atomically:
+30-second transfer cooldown, keyed as `${roomId}:${userId}`.
 
-```typescript
-// Database transaction ensures consistency
-await db.transaction(async (trx) => {
-  // 1. Mark streamer as left
-  await trx.update(roomParticipants)
-    .set({ leftAt: new Date(), totalTimeSeconds: calculated })
-    .where(eq(roomParticipants.id, streamerParticipantId));
-  
-  // 2. Find next viewer (earliest joined)
-  const nextViewer = await trx.select()
-    .from(roomParticipants)
-    .where(and(
-      eq(roomParticipants.roomId, roomId),
-      isNull(roomParticipants.leftAt)
-    ))
-    .orderBy(asc(roomParticipants.joinedAt))
-    .limit(1);
-  
-  // 3. Transfer streamer ownership
-  if (nextViewer.length > 0) {
-    await trx.update(streamingRooms)
-      .set({ streamerId: nextViewer[0].userId })
-      .where(eq(streamingRooms.id, roomId));
-  } else {
-    // No viewers, clear streamer
-    await trx.update(streamingRooms)
-      .set({ streamerId: null, status: "waiting" })
-      .where(eq(streamingRooms.id, roomId));
-  }
-});
+### One Room Per User
+Users can only be in one room at a time. Joining a new room auto-leaves the old one. Enforced in WebSocket join handler before DB write.
 
-// After DB success, WebSocket broadcasts:
-// - 'room:streamer_changed' to all participants
-// - 'room:user_left' for the departing user
-```
-
-**Cooldown:** 30 seconds between transfers (checked in database rate limiter)
-
-### Single Room Rule
-
-Users can only be in **ONE** room at a time:
-
-```typescript
-// WebSocket server enforces this:
-// 1. On 'room:join', check if user is already in another room
-// 2. If yes, emit 'room:leave' for current room first
-// 3. Then process the new join
-// 4. All database operations in transaction
-```
+### Mobile Users
+Mobile users can join and view but **cannot** be assigned as streamer.
 
 ### Room Activation
+`waiting → preparing`: first user joins (they become streamer)
+`preparing → active`: second user joins (2+ participants in room)
 
-A room becomes "active" when:
-- Status is "preparing" AND
-- 2nd participant joins (database transaction)
-
-```typescript
-// Inside join transaction:
-const participantCount = await trx.select({ count: sql<number>`count(*)` })
-  .from(roomParticipants)
-  .where(and(
-    eq(roomParticipants.roomId, roomId),
-    isNull(roomParticipants.leftAt)
-  ));
-
-if (participantCount[0].count >= 2 && room.status === "preparing") {
-  await trx.update(streamingRooms)
-    .set({ status: "active" })
-    .where(eq(streamingRooms.id, roomId));
-}
-```
-
-## State Management
-
-### In-Memory State (WebSocket Server)
-
-Located in `websocket/room-state.ts`:
+## In-Memory State
 
 ```typescript
+// websocket/room/state.ts
 interface RoomState {
   id: string;
   name: string;
   description?: string;
   streamerId: string | null;
-  status: 'waiting' | 'preparing' | 'active' | 'ended';
+  streamerPeerId: string | null;  // PeerJS peer ID for WebRTC connections
+  status: "waiting" | "preparing" | "active" | "ended";
   participants: Map<string, ParticipantState>;
   createdAt: Date;
-  dbConfirmed: boolean; // true after DB write succeeds
+  dbConfirmed: boolean;
 }
 
 interface ParticipantState {
@@ -282,164 +68,74 @@ interface ParticipantState {
   joinedAt: Date;
   isMobile: boolean;
 }
-
-// Global state store
-const roomStates = new Map<string, RoomState>();
 ```
 
-### Database State
+## Lifecycle Flows
 
-Tables act as persistence layer:
-- `streamingRooms` - Room metadata (source of truth on restart)
-- `roomParticipants` - Participation history with `leftAt` timestamp
-- All writes synchronous (wait for confirmation)
+### Create
+1. Client emits `room:create`
+2. Server validates → inserts to DB (awaits)
+3. On success: creates in-memory state → emits `room:created`
+4. On failure: emits `room:create_error`, no state created
 
-### Frontend State
+### Join
+1. Client emits `room:join`
+2. Server checks in-memory (room must exist, not ended)
+3. If user in another room, auto-leave first
+4. Insert participant to DB (awaits)
+5. On success: update in-memory state, update room status → broadcast
 
-- Subscribes to WebSocket events for real-time updates
-- Uses 'room:state_sync' for initial state and rejoins
-- No direct database queries for room operations
-- React Query used for room list (with WebSocket invalidation)
+### Leave / Disconnect
+1. Update DB: set `leftAt`, calculate `totalTimeSeconds`
+2. Remove from in-memory state
+3. Handle streamer transfer if needed
+4. Broadcast `room:user_left`
+5. If empty → status = `waiting` (NOT ended)
 
-## Socket.io Events
+### Rejoin (Auto-Recovery)
+On reconnect, client emits `room:rejoin`:
+- **Room exists in memory:** add participant back, emit `room:state_sync`
+- **Room lost (server restart):** query DB, rebuild state, emit `room:state_sync`
+- Broadcasts `room:user_joined` to others either way
+
+### Cleanup Job (every 5 min)
+Ends rooms where: status = `waiting` AND empty AND created > 5 min ago.
+
+## Socket Events
 
 ### Client → Server
-
-| Event | Payload | Description |
-|-------|---------|-------------|
-| `room:create` | `{ name: string, description?: string }` | Create new room |
-| `room:join` | `{ roomId: string }` | Join existing room |
-| `room:leave` | `{ roomId: string }` | Leave room |
-| `room:rejoin` | `{ roomId: string, userId: string }` | Reconnect and rebuild state |
-| `chat:send` | `{ roomId: string, content: string }` | Send chat message |
-| `streamer:transfer` | `{ roomId: string, newStreamerId: string }` | Transfer ownership |
+| Event | Payload |
+|-------|---------|
+| `room:create` | `{ name, description? }` |
+| `room:join` | `{ roomId }` |
+| `room:leave` | `{ roomId }` |
+| `room:rejoin` | `{ roomId, userId }` |
+| `streamer:transfer` | `{ roomId, newStreamerId }` |
+| `chat:send` | `{ roomId, content }` |
 
 ### Server → Client
-
-| Event | Payload | Description |
-|-------|---------|-------------|
-| `room:created` | `{ room: Room, participant: Participant }` | Room created successfully |
-| `room:create_error` | `{ message: string }` | Room creation failed |
-| `room:joined` | `{ roomId: string, participant: Participant, roomState: RoomState }` | Successfully joined |
-| `room:join_error` | `{ message: string }` | Join failed |
-| `room:state_sync` | `{ roomId: string, roomState: RoomState }` | Full room state (for rejoins) |
-| `room:user_joined` | `{ userId, userName, participantCount, roomState: RoomState }` | Someone joined |
-| `room:user_left` | `{ userId, userName, participantCount, newStreamerId? }` | Someone left |
-| `room:streamer_changed` | `{ newStreamerId, newStreamerName }` | Streamer changed |
-| `room:status_changed` | `{ status: string }` | Room status updated |
-| `room:ended` | `{ roomId: string }` | Room has ended |
-| `chat:message` | `{ id, userId, userName, content, timestamp }` | New message |
-| `chat:error` | `{ message: string }` | Chat error |
-
-## Error Handling
-
-### Database Write Failures
-
-All database operations are synchronous. On failure:
-
-1. **Transaction rolls back** - No partial state changes
-2. **In-memory state unchanged** - Stays consistent with DB
-3. **Error emitted to client** - Client shows error, can retry
-4. **No broadcast** - Other clients unaffected
-
-### Reconnection Handling
-
-```typescript
-// Client-side reconnection logic:
-socket.on('connect', () => {
-  if (currentRoomId && currentUserId) {
-    // Auto-rejoin after reconnect
-    socket.emit('room:rejoin', { 
-      roomId: currentRoomId, 
-      userId: currentUserId 
-    });
-  }
-});
-
-// Server handles rejoin:
-socket.on('room:rejoin', async (data) => {
-  // Rebuild state if needed, sync to client
-});
-```
+| Event | Description |
+|-------|-------------|
+| `room:created` | Room created, full state |
+| `room:joined` | Joined successfully, full room state |
+| `room:state_sync` | Full state (rejoin/reconnect) |
+| `room:user_joined` | Someone joined, updated state |
+| `room:user_left` | Someone left, updated state |
+| `room:streamer_changed` | Streamer changed (includes `newStreamerId`) |
+| `room:status_changed` | Room status updated |
+| `room:ended` | Room ended by cleanup job |
+| `room:create_error` / `room:join_error` / `room:error` | Error messages |
 
 ## Rate Limits
 
-Room operations have rate limits (enforced before DB write):
-
 | Operation | Limit | Window |
 |-----------|-------|--------|
-| Create room | 3 | 60 seconds |
-| Join room | 10 | 60 seconds |
-| Leave room | 5 | 60 seconds |
-| Transfer streamer | 1 | 30 seconds |
-
-See [Rate Limiting](./RATE_LIMITING.md) for implementation details.
-
-## Cleanup Job
-
-Runs every 5 minutes via `setInterval`:
-
-```typescript
-// Check in-memory state first
-for (const [roomId, roomState] of roomStates) {
-  if (roomState.status === 'waiting' && 
-      roomState.participants.size === 0 &&
-      roomState.createdAt < fiveMinutesAgo) {
-    
-    // Update database
-    await db.update(streamingRooms)
-      .set({ status: 'ended', endedAt: new Date() })
-      .where(eq(streamingRooms.id, roomId));
-    
-    // Remove from memory
-    roomStates.delete(roomId);
-    
-    // Notify any connected clients
-    broadcastToRoom(roomId, 'room:ended', { roomId });
-  }
-}
-```
-
-## File Structure
-
-```
-websocket/
-├── websocket-server.ts      # Main server, event routing
-├── websocket-room-manager.ts # Room management logic
-├── room-state.ts            # In-memory state management ⭐ NEW
-├── room-events.ts           # Room event handlers ⭐ NEW
-├── db-persistence.ts        # Database write operations ⭐ NEW
-└── chat-handler.ts          # Chat events
-
-src/
-├── routes/
-│   ├── room.$roomId.tsx     # Room page (WebSocket only)
-│   └── index.tsx            # Room list
-├── components/
-│   ├── CreateRoomModal.tsx  # Emits 'room:create'
-│   └── StreamerControls.tsx # Room controls
-├── lib/
-│   └── websocket-context.tsx # WebSocket connection + room helpers
-└── hooks/
-    └── useRoom.ts           # Room state subscription ⭐ NEW
-```
+| Create room | 3 | 60s |
+| Join room | 10 | 60s |
+| Leave room | 5 | 60s |
+| Streamer transfer | 1 per `${roomId}:${userId}` | 30s |
 
 ## See Also
-
-- [Database Schema](./DATABASE_SCHEMA.md) - Table definitions
-- [WebSocket Events](./WEBSOCKET_EVENTS.md) - Complete event reference
-- [Rate Limiting](./RATE_LIMITING.md) - Rate limit configurations
-- [WebSocket Architecture](./WEBSOCKET_ARCHITECTURE.md) - Server restart recovery
-
-## Migration Notes
-
-**From HTTP-First to WebSocket-First:**
-
-| Old (HTTP) | New (WebSocket) |
-|------------|-----------------|
-| `createRoom()` server fn | `socket.emit('room:create')` |
-| `joinRoom()` server fn | `socket.emit('room:join')` |
-| `leaveRoom()` server fn | `socket.emit('room:leave')` |
-| HTTP polling for state | WebSocket events + state_sync |
-| Database as primary | In-memory as primary, DB as persistence |
-| Manual reconnection | Auto-rejoin with state rebuild |
+- [Database Schema](./DATABASE_SCHEMA.md)
+- [WebSocket Events](./WEBSOCKET_EVENTS.md)
+- [Rate Limiting](./RATE_LIMITING.md)
