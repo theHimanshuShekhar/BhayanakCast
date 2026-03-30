@@ -453,3 +453,13 @@ button:active {
     @apply bg-bg-primary text-text-primary;
   }
 }
+
+/* ============================================
+   MOBILE SAFE AREAS (notched phones)
+   ============================================ */
+
+@supports (padding: env(safe-area-inset-bottom)) {
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
