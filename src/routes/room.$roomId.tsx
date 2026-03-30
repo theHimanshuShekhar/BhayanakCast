@@ -568,7 +568,7 @@ function ActiveRoomLayout({
 	}, [remoteStream, setIsTransferring, setPreviousStreamerName]);
 
 	return (
-		<div className="h-full w-full bg-depth-0 overflow-hidden">
+		<div className="w-full bg-depth-0 md:h-full md:overflow-hidden">
 			{/* Back button */}
 			<div className="px-4 py-3 border-b border-border-subtle bg-depth-1">
 				<button
@@ -582,9 +582,9 @@ function ActiveRoomLayout({
 			</div>
 
 			{/* Two-column layout */}
-			<div className="flex h-[calc(100%-53px)]">
+			<div className="flex flex-col md:flex-row md:h-[calc(100%-53px)]">
 				{/* Column 1: Main Content (70%) */}
-				<div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
+				<div className="flex-1 flex flex-col min-w-0 md:overflow-y-auto">
 					<div className="p-6 space-y-6">
 						{/* Room Header */}
 						<div>
@@ -707,7 +707,7 @@ function ActiveRoomLayout({
 				</div>
 
 				{/* Column 2: Sidebar (30%, min 320px) */}
-				<div className="w-80 min-w-80 border-l border-border-subtle bg-depth-1 flex flex-col">
+				<div className="w-full md:w-80 md:min-w-80 border-t md:border-t-0 md:border-l border-border-subtle bg-depth-1 flex flex-col min-h-96 md:min-h-0">
 					{/* Streamer & Viewers Section */}
 					<div className="p-4 border-b border-border-subtle">
 						{/* Current Streamer */}
