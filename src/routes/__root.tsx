@@ -52,7 +52,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 				<HeadContent />
 			</head>
 			<body
-				className="flex h-screen w-screen overflow-hidden font-sans antialiased"
+				className="flex flex-col md:flex-row h-screen w-screen overflow-hidden font-sans antialiased"
 				suppressHydrationWarning
 			>
 				<ThemeProvider>

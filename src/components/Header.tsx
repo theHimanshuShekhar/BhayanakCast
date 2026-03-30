@@ -16,7 +16,50 @@ function formatCompactNumber(num: number): string {
 	return num.toString();
 }
 
-export default function Sidebar() {
+function MobileTopBar() {
+	const { data: session } = authClient.useSession();
+
+	return (
+		<header className="flex md:hidden items-center justify-between h-12 px-4 border-b border-border-subtle bg-depth-1 shrink-0">
+			<Link
+				to="/"
+				className="flex items-center gap-2 text-accent font-bold hover:opacity-80 transition-opacity"
+			>
+				<div className="flex items-center justify-center w-7 h-7 rounded-lg bg-accent/10 text-accent font-bold text-sm">
+					BC
+				</div>
+				<span className="text-sm">BhayanakCast</span>
+			</Link>
+			<div className="flex items-center gap-3">
+				<ThemeSwitcher isExpanded={false} />
+				{session?.user?.id ? (
+					<UserButton
+						size="icon"
+						disableDefaultLinks
+						additionalLinks={[
+							{
+								label: "Profile",
+								href: `/profile/${session.user.id}`,
+								icon: <User className="h-4 w-4" />,
+							},
+						]}
+					/>
+				) : (
+					<Link
+						to="/auth/$authView"
+						params={{ authView: "sign-in" }}
+						className="flex items-center justify-center w-8 h-8 rounded-lg bg-accent hover:bg-accent-hover text-bg-primary font-bold transition-all"
+						title="Sign In"
+					>
+						<User className="h-4 w-4" />
+					</Link>
+				)}
+			</div>
+		</header>
+	);
+}
+
+function Sidebar() {
 	const { data: session } = authClient.useSession();
 	const { userCount, isConnected } = useWebSocket();
 	const [isExpanded, setIsExpanded] = useState(false);
@@ -30,7 +73,7 @@ export default function Sidebar() {
 
 	return (
 		<aside
-			className={`border-r border-border-subtle bg-depth-1 flex flex-col shrink-0 transition-all duration-300 ease-in-out ${
+			className={`hidden md:flex border-r border-border-subtle bg-depth-1 flex-col shrink-0 transition-all duration-300 ease-in-out ${
 				isExpanded ? "w-60" : "w-16"
 			}`}
 		>
@@ -234,5 +277,14 @@ export default function Sidebar() {
 				</div>
 			</div>
 		</aside>
+	);
+}
+
+export default function Header() {
+	return (
+		<>
+			<MobileTopBar />
+			<Sidebar />
+		</>
 	);
 }
