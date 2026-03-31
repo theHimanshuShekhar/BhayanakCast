@@ -28,6 +28,7 @@ import {
 import { ConnectionRetryManager } from "#/lib/connection-retry";
 import { type DeviceCapabilities, detectDevice } from "#/lib/device-detection";
 import { usePeerJSContext } from "#/lib/peerjs-context";
+import { getDisplayMediaConstraints } from "#/lib/webrtc-config";
 import { useWebSocket } from "#/lib/websocket-context";
 import type {
 	AudioConfig,
@@ -259,6 +260,46 @@ export function StreamingProvider({
 				if (localStreamRef.current && isStreamerRef.current) {
 					call.answer(localStreamRef.current);
 
+					// Configure outbound video encoding to maintain 1080p quality
+					const pc = (
+						call as MediaConnection & {
+							peerConnection?: RTCPeerConnection;
+						}
+					).peerConnection;
+					if (pc) {
+						const configureVideoEncoding = () => {
+							pc.getSenders().forEach((sender) => {
+								if (sender.track?.kind === "video") {
+									const params = sender.getParameters();
+									if (params.encodings?.length) {
+										params.encodings[0].maxBitrate = 8_000_000; // 8 Mbps for 1080p
+										params.encodings[0].maxFramerate = 60;
+										sender.setParameters(params).catch(console.warn);
+									}
+								}
+							});
+						};
+						if (
+							pc.iceConnectionState === "connected" ||
+							pc.iceConnectionState === "completed"
+						) {
+							configureVideoEncoding();
+						} else {
+							pc.addEventListener(
+								"iceconnectionstatechange",
+								function handler() {
+									if (
+										pc.iceConnectionState === "connected" ||
+										pc.iceConnectionState === "completed"
+									) {
+										pc.removeEventListener("iceconnectionstatechange", handler);
+										configureVideoEncoding();
+									}
+								},
+							);
+						}
+					}
+
 					call.on("close", () => {
 						console.log("[PeerJS] Call with viewer closed");
 					});
@@ -337,15 +378,13 @@ export function StreamingProvider({
 			}
 
 			try {
-				// Get display media
+				// Get display media with quality constraints (1080p @ ideal 30fps / max 60fps)
+				const displayConstraints = getDisplayMediaConstraints({
+					cursor: options.cursor,
+					displaySurface: options.displaySurface,
+				});
 				const stream = await navigator.mediaDevices.getDisplayMedia({
-					video: {
-						cursor: options.cursor,
-						displaySurface:
-							options.displaySurface === "default"
-								? undefined
-								: (options.displaySurface as DisplayCaptureSurfaceType),
-					} as MediaTrackConstraints,
+					...displayConstraints,
 					audio: options.audioConfig !== "no-audio",
 				});
 
@@ -375,11 +414,24 @@ export function StreamingProvider({
 				localStreamRef.current = stream;
 				setLocalStream(stream);
 
+				// Reinforce quality constraints post-capture (some browsers ignore getDisplayMedia constraints)
+				const videoTrack = stream.getVideoTracks()[0];
+				if (videoTrack) {
+					videoTrack
+						.applyConstraints({
+							width: { ideal: 1920, max: 1920 },
+							height: { ideal: 1080, max: 1080 },
+							frameRate: { ideal: 30, max: 60 },
+						})
+						.catch(() => {
+							// Browser may not support all constraints — graceful fallback
+						});
+				}
+
 				// Reset the share-ended dedup guard for this new streaming session
 				hasEmittedShareEndedRef.current = false;
 
 				// Listen for browser "Stop sharing" button
-				const videoTrack = stream.getVideoTracks()[0];
 				if (videoTrack) {
 					videoTrack.onended = () => {
 						console.log("[PeerJS] User clicked Stop sharing button");
