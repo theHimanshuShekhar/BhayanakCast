@@ -249,4 +249,44 @@ describe("retryWithBackoff", () => {
 			}),
 		).rejects.toThrow("Failed after 1 attempts");
 	});
+
+	it("waitForRetry returns false immediately when shouldRetry is already exhausted", async () => {
+		vi.useFakeTimers();
+		try {
+			const manager = createConnectionRetryManager({
+				maxRetries: 1,
+				initialDelayMs: 100,
+			});
+
+			// First call: advances attempt counter (attempt 0 → 1), then resolves true
+			const firstWait = manager.waitForRetry();
+			vi.advanceTimersByTime(200);
+			const firstResult = await firstWait;
+			expect(firstResult).toBe(true);
+
+			// Second call: attempt=1 >= maxRetries=1, so shouldRetry()=false → returns false
+			const secondResult = await manager.waitForRetry();
+			expect(secondResult).toBe(false);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("should throw 'Retry aborted' when waitForRetry returns false", async () => {
+		// Simulate the manager being aborted while waiting between retries
+		vi.spyOn(ConnectionRetryManager.prototype, "waitForRetry").mockResolvedValueOnce(
+			false,
+		);
+
+		const fn = vi.fn().mockRejectedValue(new Error("always fails"));
+
+		await expect(
+			retryWithBackoff(fn, {
+				maxRetries: 3,
+				initialDelayMs: 10,
+			}),
+		).rejects.toThrow("Retry aborted");
+
+		vi.restoreAllMocks();
+	});
 });

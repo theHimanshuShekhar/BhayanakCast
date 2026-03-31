@@ -16,7 +16,7 @@ describe("CommunityStatsCard", () => {
 
 		expect(screen.getByText("Total Users")).toBeInTheDocument();
 		expect(screen.getByText("Watch Time (Week)")).toBeInTheDocument();
-		expect(screen.getByText("Active Streamers")).toBeInTheDocument();
+		expect(screen.getByText("Active Streamers (30d)")).toBeInTheDocument();
 		expect(screen.getByText("New This Week")).toBeInTheDocument();
 	});
 
