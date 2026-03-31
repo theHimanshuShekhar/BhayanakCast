@@ -89,6 +89,7 @@ export function VideoDisplay({
 				ref={videoRef}
 				autoPlay
 				playsInline
+				controls
 				className="w-full h-full object-contain"
 			/>
 			<div className="absolute top-4 left-4 px-3 py-1 rounded bg-black/70 text-white text-sm flex items-center gap-2">
