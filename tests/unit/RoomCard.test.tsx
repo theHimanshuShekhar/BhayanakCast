@@ -76,4 +76,41 @@ describe("RoomCard", () => {
 		render(<RoomCardSkeleton />);
 		expect(document.querySelector(".animate-pulse")).toBeInTheDocument();
 	});
+
+	describe("ended rooms with participants", () => {
+		const endedRoom = {
+			...mockRoom,
+			status: "ended" as const,
+			participants: [
+				{ id: "p1", name: "Alice", image: "https://example.com/alice.png" },
+				{ id: "p2", name: "Bob", image: undefined },
+			],
+		};
+
+		it("shows participant avatars for ended rooms", () => {
+			render(<RoomCard room={endedRoom} />);
+			// Shows image for participant with image
+			expect(screen.getByAltText("Alice")).toBeInTheDocument();
+		});
+
+		it("shows initial letter avatar when participant has no image", () => {
+			render(<RoomCard room={endedRoom} />);
+			expect(screen.getByText("B")).toBeInTheDocument();
+		});
+
+		it("shows participant count joined text", () => {
+			render(<RoomCard room={endedRoom} />);
+			expect(screen.getByText("2 joined")).toBeInTheDocument();
+		});
+
+		it("shows overflow count when more than 5 participants", () => {
+			const manyParticipants = Array.from({ length: 7 }, (_, i) => ({
+				id: `p${i}`,
+				name: `User ${i}`,
+				image: undefined,
+			}));
+			render(<RoomCard room={{ ...endedRoom, participants: manyParticipants }} />);
+			expect(screen.getByText("+2")).toBeInTheDocument();
+		});
+	});
 });

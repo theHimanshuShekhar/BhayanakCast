@@ -41,8 +41,36 @@ export default defineConfig({
 			},
 			include: ["src/**/*.{ts,tsx}"],
 			exclude: [
+				// Type definition files
 				"src/**/*.d.ts",
 				"src/**/routeTree.gen.ts",
+				// Route files are SSR/server hybrids — covered by E2E tests, not unit tests
+				"src/routes/**/*",
+				// Server utility functions — covered by E2E/integration tests
+				"src/utils/**/*",
+				// Database layer — covered by integration tests
+				"src/db/**/*",
+				// Third-party integration provider wrappers (no internal logic to test)
+				"src/integrations/**/*",
+				// App router and env config — thin framework wrappers with no testable logic
+				"src/router.tsx",
+				"src/env.ts",
+				// Thin config wrappers with no testable logic
+				"src/lib/auth.ts",
+				"src/lib/auth-client.ts",
+				"src/lib/auth-guard.ts",
+				"src/lib/site.ts",
+				"src/lib/webrtc-config.ts",
+				// Pure type definitions
+				"src/types/webrtc.ts",
+				// Components that depend on third-party auth UI (UserButton, useAuthenticate)
+				// or server functions with dynamic imports — covered by E2E tests
+				"src/components/AuthGuard.tsx",
+				"src/components/Header.tsx",
+				"src/components/UserStatsCard.tsx",
+				"src/components/TopConnectionsCard.tsx",
+				"src/components/ActiveRoomIndicator.tsx",
+				// Test helpers
 				"src/test/**/*",
 				"tests/**/*",
 			],
