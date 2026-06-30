@@ -1,0 +1,106 @@
+import { readFileSync } from 'node:fs'
+import { describe, expect, test } from 'vitest'
+
+describe('room route source', () => {
+  test('loads private room password outside query params', () => {
+    const source = readFileSync(
+      new URL('./$roomId.tsx', import.meta.url),
+      'utf8',
+    )
+
+    expect(source).toContain('sessionStorage.getItem')
+    expect(source).not.toContain('validateSearch')
+    expect(source).not.toContain('search.password')
+  })
+
+  test('requires an authenticated loader state before rendering room stream UI', () => {
+    const source = readFileSync(
+      new URL('./$roomId.tsx', import.meta.url),
+      'utf8',
+    )
+
+    expect(source).toContain('!room.authenticated')
+    expect(source).toContain('AuthRequiredState')
+    expect(source).toContain('loadRoomSummary')
+  })
+
+  test('renders chat people feed side tabs', () => {
+    const source = readFileSync(
+      new URL('./$roomId.tsx', import.meta.url),
+      'utf8',
+    )
+
+    expect(source).toContain("'chat' | 'people' | 'feed'")
+    expect(source).toContain('say something...')
+    expect(source).toContain('room activity appears here')
+  })
+
+  test('renders product room summary header fields', () => {
+    const source = readFileSync(
+      new URL('./$roomId.tsx', import.meta.url),
+      'utf8',
+    )
+
+    expect(source).toContain('loadRoomSummary')
+    expect(source).toContain('/10 members')
+    expect(source).toContain('live')
+  })
+
+  test('does not duplicate stream controls in a second bottom dock', () => {
+    const source = readFileSync(
+      new URL('./$roomId.tsx', import.meta.url),
+      'utf8',
+    )
+
+    expect(source).not.toContain('room-bottom-dock')
+    expect(source).not.toContain('# room info')
+  })
+
+  test('does not render chat status below the input', () => {
+    const source = readFileSync(
+      new URL('./$roomId.tsx', import.meta.url),
+      'utf8',
+    )
+
+    expect(source).not.toContain('{status}</div>')
+  })
+
+
+  test('leaves the room through socket protocol', () => {
+    const source = readFileSync(
+      new URL('./$roomId.tsx', import.meta.url),
+      'utf8',
+    )
+
+    expect(source).toContain("socket.emit('room:leave'")
+    expect(source).toContain('Leave room')
+  })
+
+  test('owns live room socket state for members chat and feed', () => {
+    const source = readFileSync(
+      new URL('./$roomId.tsx', import.meta.url),
+      'utf8',
+    )
+
+    expect(source).toContain("socket.on('member:joined'")
+    expect(source).toContain("socket.on('member:left'")
+    expect(source).toContain("socket.on('chat:message'")
+    expect(source).toContain("socket.on('stream:started'")
+    expect(source).toContain("socket.on('stream:stopped'")
+    expect(source).toContain("socket.emit('chat:send'")
+    expect(source).toContain('setFeedItems')
+  })
+
+  test('normalizes raw join snapshots before reading user names', () => {
+    const source = readFileSync(
+      new URL('./$roomId.tsx', import.meta.url),
+      'utf8',
+    )
+
+    expect(source).toContain('normalizeMember')
+    expect(source).toContain('normalizeStream')
+    expect(source).toContain('userId')
+  })
+
+
+})

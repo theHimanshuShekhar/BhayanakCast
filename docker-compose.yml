@@ -1,56 +1,39 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: bhayanak-postgres
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: postgres
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - bhayanak-network
-
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: runner
-    container_name: bhayanak-app
-    env_file:
-      - .env.production
-    environment:
-      # Runtime environment variables (server-side only)
-      NODE_ENV: production
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
-      # WebSocket and Auth URLs - used by runtime config endpoint
-      # Client fetches these from server at runtime
-      VITE_WS_URL: ${VITE_WS_URL:-http://localhost:3001}
-      CLIENT_URL: ${CLIENT_URL:-http://localhost:3000}
-      VITE_BETTER_AUTH_URL: ${VITE_BETTER_AUTH_URL:-http://localhost:3000}
-      # Optional: PostHog analytics
-      VITE_POSTHOG_KEY: ${VITE_POSTHOG_KEY:-}
-      VITE_POSTHOG_HOST: ${VITE_POSTHOG_HOST:-https://eu.i.posthog.com}
-    ports:
-      - "3000:3000"
-      - "3001:3001"
+    container_name: bhayanakcast-app
+    build: .
     depends_on:
       postgres:
         condition: service_healthy
-    networks:
-      - bhayanak-network
-    restart: unless-stopped
+      valkey:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://bhayanakcast:bhayanakcast@postgres:5432/bhayanakcast
+      VALKEY_URL: redis://valkey:6379
+    ports:
+      - '${PORT:-3000}:3000'
+
+  postgres:
+    container_name: bhayanakcast-postgres
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: bhayanakcast
+      POSTGRES_USER: bhayanakcast
+      POSTGRES_PASSWORD: bhayanakcast
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U bhayanakcast -d bhayanakcast']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  valkey:
+    container_name: bhayanakcast-valkey
+    image: valkey/valkey:8-alpine
+    command: ['valkey-server', '--save', '', '--appendonly', 'no']
 
 volumes:
   postgres_data:
-
-networks:
-  bhayanak-network:
-    driver: bridge
