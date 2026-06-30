@@ -393,7 +393,7 @@ export function RoomStreamPanel({
           <article className="tile viewer-tile member-tile motion-tile-state overflow-hidden rounded-2xl border border-white/10 bg-[#10182d] shadow-[0_8px_30px_rgba(0,0,0,0.24)]" key={member.user.id}>
             <div className="grid h-full place-items-center px-6 text-center">
               <div>
-                <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-violet-200 text-sm font-black text-slate-950 shadow-[0_0_12px_rgba(167,139,250,0.25)]">
+                <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-violet-300 text-sm font-black text-[#111827] shadow-[0_0_12px_rgba(167,139,250,0.25)]">
                   {friendlyName(member.user).slice(0, 2).toUpperCase()}
                 </div>
                 <strong className="mt-4 block max-w-full truncate text-sm font-black text-white">{friendlyName(member.user)}</strong>
