@@ -94,6 +94,30 @@ function joinedState(room: RoomSummary, socket: Socket, ack: RoomJoinAck): RoomJ
   }
 }
 
+function roomStatusCopy(code: string | undefined, fallback: string) {
+  switch (code) {
+    case 'INVALID_PASSWORD':
+      return 'That password did not open the room.'
+    case 'PASSWORD_REQUIRED':
+      return 'Enter the shared room password to join.'
+    case 'ROOM_FULL':
+      return 'This room is already at its 10-member capacity.'
+    case 'ROOM_BANNED':
+      return 'The host has blocked this account from rejoining this room.'
+    case 'ROOM_ENDED':
+      return 'This room has ended.'
+    case 'DUPLICATE_CLIENT':
+      return 'This room is already active in another tab or device.'
+    case 'CONNECTION_FAILED':
+    case 'JOIN_FAILED':
+      return "We couldn't reach the room server. Check your connection and try again."
+    case 'CHAT_FAILED':
+      return "We couldn't send that message. Try again."
+    default:
+      return fallback
+  }
+}
+
 type FeedItem = { id: string; text: string }
 
 type RawMember = Partial<LiveRoomMember> & {
@@ -159,13 +183,13 @@ function RoomPage() {
       (ack: RoomJoinAck) => {
         if (!ack.ok) {
           setJoinState(mapJoinFailure(currentRoom, ack))
-          setStatus(ack.code ?? 'Room admission failed')
+          setStatus(roomStatusCopy(ack.code, 'Room admission failed. Try again from Active Rooms.'))
           return
         }
 
         const nextState = joinedState(currentRoom, socket, ack)
         setJoinState(nextState)
-        setStatus(nextState.status === 'joined' ? 'Ready' : 'Room admission failed')
+        setStatus(nextState.status === 'joined' ? 'Ready' : roomStatusCopy(undefined, 'Room admission failed. Try again from Active Rooms.'))
       },
     )
 
@@ -260,7 +284,7 @@ function RoomPage() {
 
     joinedRoomState.socket.emit('chat:send', { roomId, body }, (ack: { ok: boolean; code?: string }) => {
       if (!ack.ok) {
-        setStatus(ack.code ?? 'CHAT_FAILED')
+        setStatus(roomStatusCopy(ack.code, "We couldn't send that message. Try again."))
         return
       }
       setChatBody('')
@@ -446,7 +470,7 @@ function PrivatePasswordGate({
   onPasswordSubmit: (password: string) => void
 }) {
   const [nextPassword, setNextPassword] = useState('')
-  const error = message === 'INVALID_PASSWORD' ? "That password didn't open the room." : ''
+  const error = message === 'INVALID_PASSWORD' ? 'That password did not open the room.' : ''
 
   return (
     <main className="grid min-h-screen place-items-center bg-[#080d18] px-5 text-slate-100">
