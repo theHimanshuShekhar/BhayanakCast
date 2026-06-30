@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { io } from 'socket.io-client'
@@ -121,6 +121,7 @@ function RoomPage() {
   const [feedItems, setFeedItems] = useState<FeedItem[]>([])
   const [chatBody, setChatBody] = useState('')
   const [status, setStatus] = useState('Requesting room admission')
+  const mediaCleanupRef = useRef<(() => Promise<void>) | null>(null)
 
   useEffect(() => {
     setPassword(sessionStorage.getItem(`room-password:${roomId}`) ?? undefined)
@@ -266,11 +267,16 @@ function RoomPage() {
     })
   }
 
-  function leaveCurrentRoom() {
-    joinedRoomState.socket.emit('room:leave', { roomId }, () => {
-      joinedRoomState.socket.close()
-      void navigate({ to: '/' })
-    })
+  async function leaveCurrentRoom() {
+    const socket = joinedRoomState.socket
+    try {
+      await mediaCleanupRef.current?.()
+    } finally {
+      socket.emit('room:leave', { roomId }, () => {
+        socket.close()
+        void navigate({ to: '/' })
+      })
+    }
   }
 
   return (
@@ -281,6 +287,9 @@ function RoomPage() {
       onChatBodyChange={setChatBody}
       onChatSubmit={sendChat}
       onLeave={leaveCurrentRoom}
+      onMediaCleanupReady={(cleanup) => {
+        mediaCleanupRef.current = cleanup
+      }}
       roomId={roomId}
       status={status}
     />
@@ -294,6 +303,7 @@ function LiveRoomShell({
   onChatBodyChange,
   onChatSubmit,
   onLeave,
+  onMediaCleanupReady,
   roomId,
   status,
 }: {
@@ -303,6 +313,7 @@ function LiveRoomShell({
   onChatBodyChange: (value: string) => void
   onChatSubmit: (event: FormEvent<HTMLFormElement>) => void
   onLeave: () => void
+  onMediaCleanupReady: (cleanup: () => Promise<void>) => void
   roomId: string
   status: string
 }) {
@@ -339,6 +350,7 @@ function LiveRoomShell({
             socket={joinState.socket}
             streams={joinState.streams}
             status={status}
+            onMediaCleanupReady={onMediaCleanupReady}
           />
         </main>
         <RoomSide

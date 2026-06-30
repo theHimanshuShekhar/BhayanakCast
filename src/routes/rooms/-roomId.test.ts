@@ -76,6 +76,25 @@ describe('room route source', () => {
     expect(source).toContain('Leave room')
   })
 
+  test('runs media cleanup before leaving an admitted room', () => {
+    const routeSource = readFileSync(
+      new URL('./$roomId.tsx', import.meta.url),
+      'utf8',
+    )
+    const panelSource = readFileSync(
+      new URL('../../components/room-stream-panel.tsx', import.meta.url),
+      'utf8',
+    )
+
+    expect(routeSource).toContain('mediaCleanupRef')
+    expect(routeSource).toContain('await mediaCleanupRef.current?.()')
+    expect(routeSource).toContain("socket.emit('room:leave'")
+    expect(panelSource).toContain('onMediaCleanupReady')
+    expect(panelSource).toContain('stopRoomMedia')
+    expect(panelSource).toContain('void stopSharing().catch')
+    expect(panelSource).toContain('void stopWatching().catch')
+  })
+
   test('owns live room socket state for members chat and feed', () => {
     const source = readFileSync(
       new URL('./$roomId.tsx', import.meta.url),
