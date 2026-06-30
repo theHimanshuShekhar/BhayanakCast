@@ -48,6 +48,7 @@ type SignalIce = {
 }
 
 export function RoomStreamPanel({
+  onMediaCleanupReady,
   members,
   roomId,
   socket,
@@ -55,6 +56,7 @@ export function RoomStreamPanel({
   streams,
 }: {
   members: LiveRoomMember[]
+  onMediaCleanupReady: (cleanup: () => Promise<void>) => void
   roomId: string
   socket: Socket | null
   status: string
@@ -108,6 +110,20 @@ export function RoomStreamPanel({
       closePeers()
     }
   }, [])
+
+  useEffect(() => {
+    onMediaCleanupReady(stopRoomMedia)
+  }, [onMediaCleanupReady])
+
+  async function stopRoomMedia() {
+    void stopSharing().catch(() => undefined)
+    void stopWatching().catch(() => undefined)
+    stopLocalStream()
+    closePeers()
+    setRemoteStream(null)
+    setWatchedStreamSessionId(null)
+    setLocalStatus('Ready')
+  }
 
   async function startSharing() {
     if (!socket) return
