@@ -108,6 +108,19 @@ describe('room route source', () => {
     expect(source).not.toContain("setStatus(nextState.status === 'joined' ? 'Ready' : 'Room admission failed')")
   })
 
+  test('keeps stream tiles inside documented room visual system', () => {
+    const panelSource = readFileSync(
+      new URL('../../components/room-stream-panel.tsx', import.meta.url),
+      'utf8',
+    )
+
+    expect(panelSource).not.toContain('rounded-3xl')
+    expect(panelSource).not.toContain('0_18px_50px')
+    expect(panelSource).not.toContain('bg-gradient-to-br')
+    expect(panelSource).toContain('rounded-2xl')
+    expect(panelSource).toContain('shadow-[0_8px_30px_rgba')
+  })
+
   test('owns live room socket state for members chat and feed', () => {
     const source = readFileSync(
       new URL('./$roomId.tsx', import.meta.url),
