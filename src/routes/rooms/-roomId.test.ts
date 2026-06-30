@@ -95,6 +95,19 @@ describe('room route source', () => {
     expect(panelSource).toContain('void stopWatching().catch')
   })
 
+  test('maps room protocol codes to actionable user copy', () => {
+    const source = readFileSync(
+      new URL('./$roomId.tsx', import.meta.url),
+      'utf8',
+    )
+
+    expect(source).toContain('roomStatusCopy')
+    expect(source).toContain('That password did not open the room')
+    expect(source).toContain('This room is already active in another tab or device')
+    expect(source).not.toContain('setStatus(ack.code')
+    expect(source).not.toContain("setStatus(nextState.status === 'joined' ? 'Ready' : 'Room admission failed')")
+  })
+
   test('owns live room socket state for members chat and feed', () => {
     const source = readFileSync(
       new URL('./$roomId.tsx', import.meta.url),
