@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BhayanakCast — live screen sharing</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+
+    <style type="text/tailwindcss">
+      @custom-variant dark (&:where(.dark, .dark *));
+
+      @theme {
+        --accent-h: 265;
+        --color-primary: oklch(0.68 0.19 var(--accent-h));
+        --color-primary-soft: oklch(0.68 0.19 var(--accent-h) / 0.18);
+        --color-primary-glow: oklch(0.68 0.19 var(--accent-h) / 0.55);
+        --color-primary-ink: oklch(0.98 0.01 var(--accent-h));
+
+        --color-live: oklch(0.72 0.22 25);
+        --color-success: oklch(0.78 0.18 150);
+        --color-warning: oklch(0.8 0.17 70);
+
+        --color-bg: oklch(0.94 0.01 260);
+        --color-canvas: oklch(0.96 0.008 260);
+        --color-surface: oklch(0.995 0.004 260);
+        --color-surface-2: oklch(0.92 0.01 260);
+        --color-surface-3: oklch(0.88 0.012 260);
+
+        --color-fg: oklch(0.16 0.015 260);
+        --color-fg-muted: oklch(0.28 0.015 260);
+        --color-muted: oklch(0.42 0.014 260);
+        --color-subtle: oklch(0.55 0.012 260);
+
+        --color-border-subtle: oklch(0 0 0 / 0.08);
+        --color-border: oklch(0 0 0 / 0.14);
+        --color-border-strong: oklch(0 0 0 / 0.22);
+
+        --color-highlight: oklch(1 0 0 / 0.7);
+        --color-shade: oklch(0 0 0 / 0.08);
+
+        --font-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+        --default-font-family: var(--font-mono);
+
+        --radius: 12px;
+        --radius-sm: 8px;
+        --radius-lg: 18px;
+
+        --tile-pad: 14px;
+
+        --shadow-card:
+          0 1px 0 oklch(1 0 0 / 0.7) inset, 0 1px 2px oklch(0 0 0 / 0.08);
+        --shadow-pop:
+          0 1px 0 oklch(1 0 0 / 0.7) inset, 0 6px 20px oklch(0 0 0 / 0.1);
+        --shadow-deep:
+          0 1px 0 oklch(1 0 0 / 0.7) inset, 0 14px 40px oklch(0 0 0 / 0.14);
+        --shadow-glow: 0 0 24px var(--color-primary-glow);
+      }
+    </style>
+
+    <!-- Cascade fallbacks: Tailwind v4 @theme tokens drive utility generation
+       but the bespoke component CSS references var(--color-*) at runtime, so
+       we also define them on :root (light) and .dark (dark override). -->
+    <style>
+      :root {
+        --accent-h: 265;
+        --color-primary: oklch(0.68 0.19 var(--accent-h));
+        --color-primary-soft: oklch(0.68 0.19 var(--accent-h) / 0.18);
+        --color-primary-glow: oklch(0.68 0.19 var(--accent-h) / 0.55);
+        --color-primary-ink: oklch(0.98 0.01 var(--accent-h));
+
+        --color-live: oklch(0.72 0.22 25);
+        --color-success: oklch(0.78 0.18 150);
+        --color-warning: oklch(0.8 0.17 70);
+
+        --color-bg: oklch(0.94 0.01 260);
+        --color-canvas: oklch(0.96 0.008 260);
+        --color-surface: oklch(0.995 0.004 260);
+        --color-surface-2: oklch(0.92 0.01 260);
+        --color-surface-3: oklch(0.88 0.012 260);
+
+        --color-fg: oklch(0.16 0.015 260);
+        --color-fg-muted: oklch(0.28 0.015 260);
+        --color-muted: oklch(0.42 0.014 260);
+        --color-subtle: oklch(0.55 0.012 260);
+
+        --color-border-subtle: oklch(0 0 0 / 0.08);
+        --color-border: oklch(0 0 0 / 0.14);
+        --color-border-strong: oklch(0 0 0 / 0.22);
+
+        --color-highlight: oklch(1 0 0 / 0.7);
+        --color-shade: oklch(0 0 0 / 0.08);
+
+        --font-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+
+        --radius: 12px;
+        --radius-sm: 8px;
+        --radius-lg: 18px;
+
+        --tile-pad: 14px;
+
+        --shadow-card:
+          0 1px 0 oklch(1 0 0 / 0.7) inset, 0 1px 2px oklch(0 0 0 / 0.08);
+        --shadow-pop:
+          0 1px 0 oklch(1 0 0 / 0.7) inset, 0 6px 20px oklch(0 0 0 / 0.1);
+        --shadow-deep:
+          0 1px 0 oklch(1 0 0 / 0.7) inset, 0 14px 40px oklch(0 0 0 / 0.14);
+        --shadow-glow: 0 0 24px var(--color-primary-glow);
+      }
+
+      .dark {
+        --color-bg: oklch(0.17 0.025 265);
+        --color-canvas: oklch(0.2 0.028 265);
+        --color-surface: oklch(0.24 0.03 265);
+        --color-surface-2: oklch(0.29 0.032 265);
+        --color-surface-3: oklch(0.34 0.034 265);
+
+        --color-fg: oklch(0.98 0.005 260);
+        --color-fg-muted: oklch(0.82 0.01 260);
+        --color-muted: oklch(0.62 0.012 260);
+        --color-subtle: oklch(0.45 0.012 260);
+
+        --color-border-subtle: oklch(1 0 0 / 0.06);
+        --color-border: oklch(1 0 0 / 0.1);
+        --color-border-strong: oklch(1 0 0 / 0.16);
+
+        --color-highlight: oklch(1 0 0 / 0.05);
+        --color-shade: oklch(0 0 0 / 0.35);
+
+        --shadow-card:
+          0 1px 0 oklch(1 0 0 / 0.05) inset, 0 -1px 0 oklch(0 0 0 / 0.35) inset,
+          0 1px 2px oklch(0 0 0 / 0.3);
+        --shadow-pop:
+          0 1px 0 oklch(1 0 0 / 0.05) inset, 0 -1px 0 oklch(0 0 0 / 0.35) inset,
+          0 4px 14px oklch(0 0 0 / 0.35);
+        --shadow-deep:
+          0 1px 0 oklch(1 0 0 / 0.05) inset, 0 -1px 0 oklch(0 0 0 / 0.35) inset,
+          0 10px 30px oklch(0 0 0 / 0.45);
+      }
+
+      ::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: var(--color-border);
+        border-radius: 99px;
+        border: 2px solid transparent;
+        background-clip: padding-box;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: var(--color-border-strong);
+        background-clip: padding-box;
+        border: 2px solid transparent;
+      }
+    </style>
+
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script
+      src="https://unpkg.com/react@18.3.1/umd/react.development.js"
+      integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L"
+      crossorigin="anonymous"
+    ></script>
+    <script
+      src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"
+      integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm"
+      crossorigin="anonymous"
+    ></script>
+    <script
+      src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js"
+      integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y"
+      crossorigin="anonymous"
+    ></script>
+
+    <script type="text/babel" src="icons.jsx"></script>
+    <script type="text/babel" src="data.jsx"></script>
+    <script type="text/babel" src="components.jsx"></script>
+    <script type="text/babel" src="sidenav.jsx"></script>
+    <script type="text/babel" src="home.jsx"></script>
+    <script type="text/babel" src="room.jsx"></script>
+    <script type="text/babel" src="profile.jsx"></script>
+    <script type="text/babel" src="admin.jsx"></script>
+    <script type="text/babel" src="overlays.jsx"></script>
+    <script type="text/babel" src="app.jsx"></script>
+  </body>
+</html>

@@ -9,31 +9,57 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as ProfileRouteImport } from './routes/profile'
+import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as RoomRoomIdRouteImport } from './routes/room.$roomId'
-import { Route as ProfileUserIdRouteImport } from './routes/profile.$userId'
-import { Route as AuthAuthViewRouteImport } from './routes/auth/$authView'
+import { Route as UsersUserIdRouteImport } from './routes/users/$userId'
+import { Route as RoomsRoomIdRouteImport } from './routes/rooms/$roomId'
+import { Route as ApiHealthRouteImport } from './routes/api/health'
+import { Route as ApiTestSessionRouteImport } from './routes/api/test/session'
+import { Route as ApiDevSessionRouteImport } from './routes/api/dev/session'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
-import { Route as ApiTestAuthSplatRouteImport } from './routes/api/test/auth/$'
+import { Route as ApiStreamsStreamSessionIdThumbnailRouteImport } from './routes/api/streams/$streamSessionId/thumbnail'
+import { Route as ApiRoomsRoomIdTranscriptRouteImport } from './routes/api/rooms/$roomId/transcript'
+import { Route as ApiReportsReportIdThumbnailRouteImport } from './routes/api/reports/$reportId/thumbnail'
 
+const ProfileRoute = ProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const RoomRoomIdRoute = RoomRoomIdRouteImport.update({
-  id: '/room/$roomId',
-  path: '/room/$roomId',
+const UsersUserIdRoute = UsersUserIdRouteImport.update({
+  id: '/users/$userId',
+  path: '/users/$userId',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ProfileUserIdRoute = ProfileUserIdRouteImport.update({
-  id: '/profile/$userId',
-  path: '/profile/$userId',
+const RoomsRoomIdRoute = RoomsRoomIdRouteImport.update({
+  id: '/rooms/$roomId',
+  path: '/rooms/$roomId',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AuthAuthViewRoute = AuthAuthViewRouteImport.update({
-  id: '/auth/$authView',
-  path: '/auth/$authView',
+const ApiHealthRoute = ApiHealthRouteImport.update({
+  id: '/api/health',
+  path: '/api/health',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiTestSessionRoute = ApiTestSessionRouteImport.update({
+  id: '/api/test/session',
+  path: '/api/test/session',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDevSessionRoute = ApiDevSessionRouteImport.update({
+  id: '/api/dev/session',
+  path: '/api/dev/session',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
@@ -41,75 +67,144 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiTestAuthSplatRoute = ApiTestAuthSplatRouteImport.update({
-  id: '/api/test/auth/$',
-  path: '/api/test/auth/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
+const ApiStreamsStreamSessionIdThumbnailRoute =
+  ApiStreamsStreamSessionIdThumbnailRouteImport.update({
+    id: '/api/streams/$streamSessionId/thumbnail',
+    path: '/api/streams/$streamSessionId/thumbnail',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiRoomsRoomIdTranscriptRoute =
+  ApiRoomsRoomIdTranscriptRouteImport.update({
+    id: '/api/rooms/$roomId/transcript',
+    path: '/api/rooms/$roomId/transcript',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiReportsReportIdThumbnailRoute =
+  ApiReportsReportIdThumbnailRouteImport.update({
+    id: '/api/reports/$reportId/thumbnail',
+    path: '/api/reports/$reportId/thumbnail',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/auth/$authView': typeof AuthAuthViewRoute
-  '/profile/$userId': typeof ProfileUserIdRoute
-  '/room/$roomId': typeof RoomRoomIdRoute
+  '/admin': typeof AdminRoute
+  '/profile': typeof ProfileRoute
+  '/api/health': typeof ApiHealthRoute
+  '/rooms/$roomId': typeof RoomsRoomIdRoute
+  '/users/$userId': typeof UsersUserIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/api/test/auth/$': typeof ApiTestAuthSplatRoute
+  '/api/dev/session': typeof ApiDevSessionRoute
+  '/api/test/session': typeof ApiTestSessionRoute
+  '/api/reports/$reportId/thumbnail': typeof ApiReportsReportIdThumbnailRoute
+  '/api/rooms/$roomId/transcript': typeof ApiRoomsRoomIdTranscriptRoute
+  '/api/streams/$streamSessionId/thumbnail': typeof ApiStreamsStreamSessionIdThumbnailRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/auth/$authView': typeof AuthAuthViewRoute
-  '/profile/$userId': typeof ProfileUserIdRoute
-  '/room/$roomId': typeof RoomRoomIdRoute
+  '/admin': typeof AdminRoute
+  '/profile': typeof ProfileRoute
+  '/api/health': typeof ApiHealthRoute
+  '/rooms/$roomId': typeof RoomsRoomIdRoute
+  '/users/$userId': typeof UsersUserIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/api/test/auth/$': typeof ApiTestAuthSplatRoute
+  '/api/dev/session': typeof ApiDevSessionRoute
+  '/api/test/session': typeof ApiTestSessionRoute
+  '/api/reports/$reportId/thumbnail': typeof ApiReportsReportIdThumbnailRoute
+  '/api/rooms/$roomId/transcript': typeof ApiRoomsRoomIdTranscriptRoute
+  '/api/streams/$streamSessionId/thumbnail': typeof ApiStreamsStreamSessionIdThumbnailRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/auth/$authView': typeof AuthAuthViewRoute
-  '/profile/$userId': typeof ProfileUserIdRoute
-  '/room/$roomId': typeof RoomRoomIdRoute
+  '/admin': typeof AdminRoute
+  '/profile': typeof ProfileRoute
+  '/api/health': typeof ApiHealthRoute
+  '/rooms/$roomId': typeof RoomsRoomIdRoute
+  '/users/$userId': typeof UsersUserIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/api/test/auth/$': typeof ApiTestAuthSplatRoute
+  '/api/dev/session': typeof ApiDevSessionRoute
+  '/api/test/session': typeof ApiTestSessionRoute
+  '/api/reports/$reportId/thumbnail': typeof ApiReportsReportIdThumbnailRoute
+  '/api/rooms/$roomId/transcript': typeof ApiRoomsRoomIdTranscriptRoute
+  '/api/streams/$streamSessionId/thumbnail': typeof ApiStreamsStreamSessionIdThumbnailRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/auth/$authView'
-    | '/profile/$userId'
-    | '/room/$roomId'
+    | '/admin'
+    | '/profile'
+    | '/api/health'
+    | '/rooms/$roomId'
+    | '/users/$userId'
     | '/api/auth/$'
-    | '/api/test/auth/$'
+    | '/api/dev/session'
+    | '/api/test/session'
+    | '/api/reports/$reportId/thumbnail'
+    | '/api/rooms/$roomId/transcript'
+    | '/api/streams/$streamSessionId/thumbnail'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/auth/$authView'
-    | '/profile/$userId'
-    | '/room/$roomId'
+    | '/admin'
+    | '/profile'
+    | '/api/health'
+    | '/rooms/$roomId'
+    | '/users/$userId'
     | '/api/auth/$'
-    | '/api/test/auth/$'
+    | '/api/dev/session'
+    | '/api/test/session'
+    | '/api/reports/$reportId/thumbnail'
+    | '/api/rooms/$roomId/transcript'
+    | '/api/streams/$streamSessionId/thumbnail'
   id:
     | '__root__'
     | '/'
-    | '/auth/$authView'
-    | '/profile/$userId'
-    | '/room/$roomId'
+    | '/admin'
+    | '/profile'
+    | '/api/health'
+    | '/rooms/$roomId'
+    | '/users/$userId'
     | '/api/auth/$'
-    | '/api/test/auth/$'
+    | '/api/dev/session'
+    | '/api/test/session'
+    | '/api/reports/$reportId/thumbnail'
+    | '/api/rooms/$roomId/transcript'
+    | '/api/streams/$streamSessionId/thumbnail'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AuthAuthViewRoute: typeof AuthAuthViewRoute
-  ProfileUserIdRoute: typeof ProfileUserIdRoute
-  RoomRoomIdRoute: typeof RoomRoomIdRoute
+  AdminRoute: typeof AdminRoute
+  ProfileRoute: typeof ProfileRoute
+  ApiHealthRoute: typeof ApiHealthRoute
+  RoomsRoomIdRoute: typeof RoomsRoomIdRoute
+  UsersUserIdRoute: typeof UsersUserIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
-  ApiTestAuthSplatRoute: typeof ApiTestAuthSplatRoute
+  ApiDevSessionRoute: typeof ApiDevSessionRoute
+  ApiTestSessionRoute: typeof ApiTestSessionRoute
+  ApiReportsReportIdThumbnailRoute: typeof ApiReportsReportIdThumbnailRoute
+  ApiRoomsRoomIdTranscriptRoute: typeof ApiRoomsRoomIdTranscriptRoute
+  ApiStreamsStreamSessionIdThumbnailRoute: typeof ApiStreamsStreamSessionIdThumbnailRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/profile': {
+      id: '/profile'
+      path: '/profile'
+      fullPath: '/profile'
+      preLoaderRoute: typeof ProfileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -117,25 +212,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/room/$roomId': {
-      id: '/room/$roomId'
-      path: '/room/$roomId'
-      fullPath: '/room/$roomId'
-      preLoaderRoute: typeof RoomRoomIdRouteImport
+    '/users/$userId': {
+      id: '/users/$userId'
+      path: '/users/$userId'
+      fullPath: '/users/$userId'
+      preLoaderRoute: typeof UsersUserIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/profile/$userId': {
-      id: '/profile/$userId'
-      path: '/profile/$userId'
-      fullPath: '/profile/$userId'
-      preLoaderRoute: typeof ProfileUserIdRouteImport
+    '/rooms/$roomId': {
+      id: '/rooms/$roomId'
+      path: '/rooms/$roomId'
+      fullPath: '/rooms/$roomId'
+      preLoaderRoute: typeof RoomsRoomIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/auth/$authView': {
-      id: '/auth/$authView'
-      path: '/auth/$authView'
-      fullPath: '/auth/$authView'
-      preLoaderRoute: typeof AuthAuthViewRouteImport
+    '/api/health': {
+      id: '/api/health'
+      path: '/api/health'
+      fullPath: '/api/health'
+      preLoaderRoute: typeof ApiHealthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/test/session': {
+      id: '/api/test/session'
+      path: '/api/test/session'
+      fullPath: '/api/test/session'
+      preLoaderRoute: typeof ApiTestSessionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/dev/session': {
+      id: '/api/dev/session'
+      path: '/api/dev/session'
+      fullPath: '/api/dev/session'
+      preLoaderRoute: typeof ApiDevSessionRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/auth/$': {
@@ -145,11 +254,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/test/auth/$': {
-      id: '/api/test/auth/$'
-      path: '/api/test/auth/$'
-      fullPath: '/api/test/auth/$'
-      preLoaderRoute: typeof ApiTestAuthSplatRouteImport
+    '/api/streams/$streamSessionId/thumbnail': {
+      id: '/api/streams/$streamSessionId/thumbnail'
+      path: '/api/streams/$streamSessionId/thumbnail'
+      fullPath: '/api/streams/$streamSessionId/thumbnail'
+      preLoaderRoute: typeof ApiStreamsStreamSessionIdThumbnailRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/rooms/$roomId/transcript': {
+      id: '/api/rooms/$roomId/transcript'
+      path: '/api/rooms/$roomId/transcript'
+      fullPath: '/api/rooms/$roomId/transcript'
+      preLoaderRoute: typeof ApiRoomsRoomIdTranscriptRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/reports/$reportId/thumbnail': {
+      id: '/api/reports/$reportId/thumbnail'
+      path: '/api/reports/$reportId/thumbnail'
+      fullPath: '/api/reports/$reportId/thumbnail'
+      preLoaderRoute: typeof ApiReportsReportIdThumbnailRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -157,11 +280,18 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AuthAuthViewRoute: AuthAuthViewRoute,
-  ProfileUserIdRoute: ProfileUserIdRoute,
-  RoomRoomIdRoute: RoomRoomIdRoute,
+  AdminRoute: AdminRoute,
+  ProfileRoute: ProfileRoute,
+  ApiHealthRoute: ApiHealthRoute,
+  RoomsRoomIdRoute: RoomsRoomIdRoute,
+  UsersUserIdRoute: UsersUserIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
-  ApiTestAuthSplatRoute: ApiTestAuthSplatRoute,
+  ApiDevSessionRoute: ApiDevSessionRoute,
+  ApiTestSessionRoute: ApiTestSessionRoute,
+  ApiReportsReportIdThumbnailRoute: ApiReportsReportIdThumbnailRoute,
+  ApiRoomsRoomIdTranscriptRoute: ApiRoomsRoomIdTranscriptRoute,
+  ApiStreamsStreamSessionIdThumbnailRoute:
+    ApiStreamsStreamSessionIdThumbnailRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -1,28 +1,28 @@
 {
-  "projectName": "bhayanak_cast",
+  "projectName": "bhayanakcast",
   "mode": "file-router",
   "typescript": true,
-  "packageManager": "pnpm",
-  "includeExamples": false,
   "tailwind": true,
+  "packageManager": "pnpm",
+  "git": false,
+  "install": true,
+  "intent": true,
   "addOnOptions": {
     "drizzle": {
       "database": "postgresql"
     }
   },
+  "includeExamples": false,
   "envVarValues": {},
-  "git": true,
   "routerOnly": false,
   "version": 1,
   "framework": "react",
   "chosenAddOns": [
-    "biome",
-    "nitro",
+    "better-auth",
     "drizzle",
     "shadcn",
-    "t3env",
-    "better-auth",
     "tanstack-query",
-    "posthog"
+    "eslint",
+    "nitro"
   ]
 }
