@@ -103,4 +103,32 @@ describe('room route source', () => {
   })
 
 
+  test('gates live room UI behind authoritative join state', () => {
+    const source = readFileSync(
+      new URL('./$roomId.tsx', import.meta.url),
+      'utf8',
+    )
+
+    expect(source).toContain('RoomJoinState')
+    expect(source).toContain("status: 'joined'")
+    expect(source).toContain('AdmissionGate')
+    expect(source).toContain("joinState.status !== 'joined'")
+    expect(source).toContain('<LiveRoomShell')
+  })
+
+  test('renders distinct admission blockers for server join outcomes', () => {
+    const source = readFileSync(
+      new URL('./$roomId.tsx', import.meta.url),
+      'utf8',
+    )
+
+    expect(source).toContain('PrivatePasswordGate')
+    expect(source).toContain('DuplicateClientGate')
+    expect(source).toContain('RoomFullGate')
+    expect(source).toContain('RoomBannedGate')
+    expect(source).toContain('RoomEndedGate')
+    expect(source).toContain('ConnectionFailedGate')
+    expect(source).toContain('ProtocolErrorGate')
+  })
+
 })
