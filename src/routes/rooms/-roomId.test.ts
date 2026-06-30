@@ -137,6 +137,16 @@ describe('room route source', () => {
     expect(panelSource).toContain('bg-violet-300 text-sm font-black text-[#111827]')
   })
 
+  test('does not render inert duplicate chat action in the room header', () => {
+    const source = readFileSync(
+      new URL('./$roomId.tsx', import.meta.url),
+      'utf8',
+    )
+
+    expect(source).not.toContain('/> Chat')
+    expect(source).toContain("SideTab active={tab === 'chat'}")
+  })
+
   test('owns live room socket state for members chat and feed', () => {
     const source = readFileSync(
       new URL('./$roomId.tsx', import.meta.url),

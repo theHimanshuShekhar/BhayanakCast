@@ -357,9 +357,6 @@ function LiveRoomShell({
           <span className="rounded-full bg-rose-400/15 px-2 py-1 text-rose-100">
             ● {topbarStreams} live
           </span>
-          <Button className="h-8 rounded-lg bg-violet-500/25 px-3 text-xs text-violet-100 ring-1 ring-violet-300/20 hover:bg-violet-500/35">
-            <MessageSquare className="mr-2 h-4 w-4" /> Chat
-          </Button>
           <Button className="h-8 rounded-lg border border-white/10 bg-white/5 px-3 text-xs text-slate-200 hover:bg-white/10" onClick={onLeave}>
             Leave room
           </Button>
