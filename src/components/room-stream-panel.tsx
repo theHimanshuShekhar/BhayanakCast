@@ -340,7 +340,7 @@ export function RoomStreamPanel({
     <div className="room-view room-mosaic-view relative flex min-h-0 flex-1 flex-col">
       <div className="mosaic room-mosaic grid min-h-0 flex-1 grid-cols-[repeat(auto-fit,minmax(260px,1fr))] content-start gap-4 overflow-y-auto p-5 pb-24" style={{ gridAutoRows: 'minmax(220px, 320px)' }} aria-label="Room member mosaic">
         {streamSessionId ? (
-          <article className="tile viewer-tile member-tile tile-subscribed motion-tile-state overflow-hidden rounded-3xl border border-cyan-300/20 bg-[#101b33] shadow-[0_18px_50px_rgba(0,0,0,0.28)]">
+          <article className="tile viewer-tile member-tile tile-subscribed motion-tile-state overflow-hidden rounded-2xl border border-cyan-300/20 bg-[#101b33] shadow-[0_8px_30px_rgba(0,0,0,0.28)]">
             <video autoPlay muted playsInline ref={localVideoRef} />
             <span className="stream-live-pill">● Live</span>
             <div className="stream-tile-caption member-name-chip">
@@ -351,7 +351,7 @@ export function RoomStreamPanel({
         ) : null}
 
         {watchedStream ? (
-          <article className="tile viewer-tile member-tile tile-subscribed motion-tile-state overflow-hidden rounded-3xl border border-cyan-300/20 bg-[#101b33] shadow-[0_18px_50px_rgba(0,0,0,0.28)]" ref={subscribedTileRef}>
+          <article className="tile viewer-tile member-tile tile-subscribed motion-tile-state overflow-hidden rounded-2xl border border-cyan-300/20 bg-[#101b33] shadow-[0_8px_30px_rgba(0,0,0,0.28)]" ref={subscribedTileRef}>
             <video autoPlay muted={remoteMuted} playsInline ref={remoteVideoRef} />
             <span className="stream-live-pill">● Live</span>
             <div className="stream-tile-caption member-name-chip">
@@ -373,7 +373,7 @@ export function RoomStreamPanel({
         ) : null}
 
         {previewTargets.map((stream) => (
-          <article className="tile member-tile tile-preview motion-tile-state overflow-hidden rounded-3xl border border-violet-300/20 bg-[#101b33] shadow-[0_18px_50px_rgba(0,0,0,0.28)]" key={getStreamId(stream)}>
+          <article className="tile member-tile tile-preview motion-tile-state overflow-hidden rounded-2xl border border-violet-300/20 bg-[#101b33] shadow-[0_8px_30px_rgba(0,0,0,0.28)]" key={getStreamId(stream)}>
             <div className="tile-preview-blur" />
             <span className="stream-live-pill">● Live</span>
             <div className="stream-tile-caption member-name-chip">
@@ -390,10 +390,10 @@ export function RoomStreamPanel({
         ))}
 
         {fallbackMembers.map((member) => (
-          <article className="tile viewer-tile member-tile motion-tile-state overflow-hidden rounded-3xl border border-white/10 bg-[#10182d] shadow-[0_18px_50px_rgba(0,0,0,0.24)]" key={member.user.id}>
+          <article className="tile viewer-tile member-tile motion-tile-state overflow-hidden rounded-2xl border border-white/10 bg-[#10182d] shadow-[0_8px_30px_rgba(0,0,0,0.24)]" key={member.user.id}>
             <div className="grid h-full place-items-center px-6 text-center">
               <div>
-                <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-gradient-to-br from-violet-300 to-cyan-300 text-sm font-black text-slate-950 shadow-[0_0_28px_rgba(34,211,238,0.22)]">
+                <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-violet-200 text-sm font-black text-slate-950 shadow-[0_0_12px_rgba(167,139,250,0.25)]">
                   {friendlyName(member.user).slice(0, 2).toUpperCase()}
                 </div>
                 <strong className="mt-4 block max-w-full truncate text-sm font-black text-white">{friendlyName(member.user)}</strong>
@@ -404,7 +404,7 @@ export function RoomStreamPanel({
         ))}
       </div>
 
-      <div className="streamer-bottom-controls pointer-events-auto absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center justify-center gap-3 rounded-2xl border border-white/10 bg-[#0b1220]/90 p-2 shadow-[0_18px_50px_rgba(0,0,0,0.38)] backdrop-blur-xl">
+      <div className="streamer-bottom-controls pointer-events-auto absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center justify-center gap-3 rounded-2xl border border-white/10 bg-[#0b1220]/90 p-2 shadow-[0_8px_30px_rgba(0,0,0,0.38)] backdrop-blur-xl">
         {!streamSessionId ? (
           <Button className="streamer-control-button border border-violet-300/30 bg-violet-500/20 text-violet-50 hover:bg-violet-500/30" disabled={!shareSupported || !socket} onClick={() => void startSharing()} size="sm">
             <Radio className="mr-2 h-4 w-4" /> Start stream
