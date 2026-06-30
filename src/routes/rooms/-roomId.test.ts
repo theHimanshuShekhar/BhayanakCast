@@ -121,6 +121,22 @@ describe('room route source', () => {
     expect(panelSource).toContain('shadow-[0_8px_30px_rgba')
   })
 
+  test('avoids gray text on colored room accents', () => {
+    const routeSource = readFileSync(
+      new URL('./$roomId.tsx', import.meta.url),
+      'utf8',
+    )
+    const panelSource = readFileSync(
+      new URL('../../components/room-stream-panel.tsx', import.meta.url),
+      'utf8',
+    )
+
+    expect(routeSource).not.toContain("active ? 'bg-violet-500/15 text-violet-100' : 'text-slate-500'")
+    expect(panelSource).not.toContain('bg-violet-200 text-sm font-black text-slate-950')
+    expect(routeSource).toContain("active ? 'bg-violet-500/15 text-violet-50' : 'text-violet-200/70'")
+    expect(panelSource).toContain('bg-violet-300 text-sm font-black text-[#111827]')
+  })
+
   test('owns live room socket state for members chat and feed', () => {
     const source = readFileSync(
       new URL('./$roomId.tsx', import.meta.url),

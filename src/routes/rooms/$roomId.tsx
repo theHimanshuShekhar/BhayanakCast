@@ -696,7 +696,7 @@ function SideTab({
   return (
     <button
       className={`flex items-center justify-center gap-2 px-3 py-3 ${
-        active ? 'bg-violet-500/15 text-violet-100' : 'text-slate-500'
+        active ? 'bg-violet-500/15 text-violet-50' : 'text-violet-200/70'
       }`}
       onClick={onClick}
       type="button"
