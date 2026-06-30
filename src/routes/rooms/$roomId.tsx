@@ -38,6 +38,62 @@ type RoomJoinAck = {
   }
 }
 
+type RoomJoinState =
+  | { status: 'auth-required' }
+  | { status: 'not-found' }
+  | { status: 'joining'; room: RoomSummary }
+  | { status: 'password-required'; room: RoomSummary; message?: string }
+  | { status: 'duplicate-client'; room: RoomSummary }
+  | { status: 'room-full'; room: RoomSummary }
+  | { status: 'room-banned'; room: RoomSummary }
+  | { status: 'room-ended'; room: RoomSummary }
+  | { status: 'connection-failed'; room: RoomSummary; message?: string }
+  | {
+      status: 'joined'
+      room: RoomSummary
+      socket: Socket
+      members: LiveRoomMember[]
+      streams: LiveRoomStream[]
+      messages: ChatMessage[]
+    }
+  | { status: 'protocol-error'; room?: RoomSummary; message?: string }
+
+type JoinIntent = 'join' | 'takeover'
+
+const JOIN_CODE_TO_STATE: Record<
+  string,
+  Exclude<RoomJoinState['status'], 'auth-required' | 'not-found' | 'joining' | 'joined'>
+> = {
+  PASSWORD_REQUIRED: 'password-required',
+  INVALID_PASSWORD: 'password-required',
+  ROOM_FULL: 'room-full',
+  ROOM_BANNED: 'room-banned',
+  ROOM_ENDED: 'room-ended',
+  DUPLICATE_CLIENT: 'duplicate-client',
+  CONNECTION_FAILED: 'connection-failed',
+  JOIN_FAILED: 'connection-failed',
+}
+
+function mapJoinFailure(room: RoomSummary, ack: RoomJoinAck): RoomJoinState {
+  const status = JOIN_CODE_TO_STATE[ack.code ?? ''] ?? 'protocol-error'
+  if (status === 'protocol-error') {
+    return { status, room, message: ack.message ?? ack.code }
+  }
+  return { status, room, message: ack.message ?? ack.code }
+}
+
+function joinedState(room: RoomSummary, socket: Socket, ack: RoomJoinAck): RoomJoinState {
+  if (!ack.data) return { status: 'protocol-error', room }
+  return {
+    status: 'joined',
+    room: ack.data.room ?? room,
+    socket,
+    members: (ack.data.members ?? []).map(normalizeMember),
+    streams: (ack.data.streams ?? []).map(normalizeStream),
+    messages: (ack.data.recentMessages ?? []).map(normalizeMessage),
+  }
+}
+
 type FeedItem = { id: string; text: string }
 
 type RawMember = Partial<LiveRoomMember> & {
@@ -54,25 +110,40 @@ function RoomPage() {
   const { roomId } = Route.useParams()
   const room = Route.useLoaderData()
   const navigate = useNavigate()
+  const initialRoom = room.room
   const [password, setPassword] = useState<string | undefined>()
-  const [roomSocket, setRoomSocket] = useState<Socket | null>(null)
-  const [liveRoom, setLiveRoom] = useState<RoomSummary | null>(room.room)
-  const [members, setMembers] = useState<LiveRoomMember[]>([])
-  const [streams, setStreams] = useState<LiveRoomStream[]>([])
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [joinIntent, setJoinIntent] = useState<JoinIntent>('join')
+  const [joinState, setJoinState] = useState<RoomJoinState>(() => {
+    if (!room.authenticated) return { status: 'auth-required' }
+    if (!initialRoom) return { status: 'not-found' }
+    return { status: 'joining', room: initialRoom }
+  })
   const [feedItems, setFeedItems] = useState<FeedItem[]>([])
   const [chatBody, setChatBody] = useState('')
-  const [status, setStatus] = useState('Connecting')
+  const [status, setStatus] = useState('Requesting room admission')
 
   useEffect(() => {
     setPassword(sessionStorage.getItem(`room-password:${roomId}`) ?? undefined)
   }, [roomId])
 
   useEffect(() => {
-    if (!room.authenticated || !room.room) return
+    if (!room.authenticated) {
+      setJoinState({ status: 'auth-required' })
+      return
+    }
+    if (!room.room) {
+      setJoinState({ status: 'not-found' })
+      return
+    }
 
+    const currentRoom = room.room
     const socket = io({ transports: ['websocket'] })
-    setRoomSocket(socket)
+    setJoinState({ status: 'joining', room: currentRoom })
+    setStatus(
+      joinIntent === 'takeover'
+        ? 'Taking over room session'
+        : 'Requesting room admission',
+    )
 
     const addFeed = (text: string) => {
       setFeedItems((items) => [
@@ -81,76 +152,112 @@ function RoomPage() {
       ].slice(0, 50))
     }
 
-    socket.emit('room:join', { roomId, password }, (ack: RoomJoinAck) => {
-      if (!ack.ok || !ack.data) {
-        setStatus(ack.code ?? 'JOIN_FAILED')
-        return
-      }
+    socket.emit(
+      'room:join',
+      { roomId, password, takeover: joinIntent === 'takeover' },
+      (ack: RoomJoinAck) => {
+        if (!ack.ok) {
+          setJoinState(mapJoinFailure(currentRoom, ack))
+          setStatus(ack.code ?? 'Room admission failed')
+          return
+        }
 
-      setLiveRoom(ack.data.room ?? room.room)
-      setMembers((ack.data.members ?? []).map(normalizeMember))
-      setStreams((ack.data.streams ?? []).map(normalizeStream))
-      setMessages((ack.data.recentMessages ?? []).map(normalizeMessage))
-      setStatus('Ready')
-    })
+        const nextState = joinedState(currentRoom, socket, ack)
+        setJoinState(nextState)
+        setStatus(nextState.status === 'joined' ? 'Ready' : 'Room admission failed')
+      },
+    )
 
     socket.on('member:joined', (event: { room?: RoomSummary; member: RawMember }) => {
       const member = normalizeMember(event.member)
-      setLiveRoom(event.room ?? null)
-      setMembers((current) =>
-        current.some((item) => memberId(item) === memberId(member))
-          ? current
-          : [...current, member],
-      )
+      setJoinState((current) => {
+        if (current.status !== 'joined') return current
+        return {
+          ...current,
+          room: event.room ?? current.room,
+          members: current.members.some((item) => memberId(item) === memberId(member))
+            ? current.members
+            : [...current.members, member],
+        }
+      })
       addFeed(`${displayName(member.user)} joined`)
     })
 
     socket.on('member:left', (event: { room?: RoomSummary; userId: string }) => {
-      setLiveRoom(event.room ?? null)
-      setMembers((current) => current.filter((member) => memberId(member) !== event.userId))
-      setStreams((current) => current.filter((stream) => streamUserId(stream) !== event.userId))
+      setJoinState((current) => {
+        if (current.status !== 'joined') return current
+        return {
+          ...current,
+          room: event.room ?? current.room,
+          members: current.members.filter((member) => memberId(member) !== event.userId),
+          streams: current.streams.filter((stream) => streamUserId(stream) !== event.userId),
+        }
+      })
       addFeed('A room member left')
     })
 
     socket.on('chat:message', (event: { message: ChatMessage }) => {
-      setMessages((current) => [...current, normalizeMessage(event.message)])
+      setJoinState((current) =>
+        current.status === 'joined'
+          ? { ...current, messages: [...current.messages, normalizeMessage(event.message)] }
+          : current,
+      )
     })
 
     socket.on('stream:started', (event: { room?: RoomSummary; stream: RawStream }) => {
       const stream = normalizeStream(event.stream)
-      setLiveRoom(event.room ?? null)
-      setStreams((current) => mergeStream(current, stream))
-      setMembers((current) => markStreaming(current, streamUserId(stream), true))
+      setJoinState((current) => {
+        if (current.status !== 'joined') return current
+        return {
+          ...current,
+          room: event.room ?? current.room,
+          streams: mergeStream(current.streams, stream),
+          members: markStreaming(current.members, streamUserId(stream), true),
+        }
+      })
       addFeed(`${displayName(stream.user)} went live`)
     })
 
     socket.on('stream:stopped', (event: { room?: RoomSummary; streamSessionId: string; userId: string }) => {
-      setLiveRoom(event.room ?? null)
-      setStreams((current) => current.filter((stream) => streamId(stream) !== event.streamSessionId))
-      setMembers((current) => markStreaming(current, event.userId, false))
+      setJoinState((current) => {
+        if (current.status !== 'joined') return current
+        return {
+          ...current,
+          room: event.room ?? current.room,
+          streams: current.streams.filter((stream) => streamId(stream) !== event.streamSessionId),
+          members: markStreaming(current.members, event.userId, false),
+        }
+      })
       addFeed('A stream stopped')
     })
 
     return () => {
       socket.close()
-      setRoomSocket(null)
     }
-  }, [password, room.authenticated, room.room, roomId])
+  }, [joinIntent, password, room.authenticated, room.room, roomId])
 
-  if (!room.authenticated) return <AuthRequiredState />
-  if (!room.room) return <RoomNotFoundState />
+  if (joinState.status !== 'joined') {
+    return (
+      <AdmissionGate
+        joinState={joinState}
+        onBack={() => void navigate({ to: '/' })}
+        onPasswordSubmit={(nextPassword) => {
+          sessionStorage.setItem(`room-password:${roomId}`, nextPassword)
+          setPassword(nextPassword)
+        }}
+        onTakeover={() => setJoinIntent('takeover')}
+      />
+    )
+  }
 
-  const summary = liveRoom ?? room.room
-  const topbarMembers = members.length || summary.members
-  const topbarStreams = streams.length || summary.streams
+  const joinedRoomState = joinState
 
   function sendChat(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const body = chatBody.trim()
-    const socket = roomSocket
-    if (!body || !socket) return
+    if (!body) return
 
-    socket.emit('chat:send', { roomId, body }, (ack: { ok: boolean; code?: string }) => {
+    joinedRoomState.socket.emit('chat:send', { roomId, body }, (ack: { ok: boolean; code?: string }) => {
       if (!ack.ok) {
         setStatus(ack.code ?? 'CHAT_FAILED')
         return
@@ -160,16 +267,48 @@ function RoomPage() {
   }
 
   function leaveCurrentRoom() {
-    const socket = roomSocket
-    if (!socket) {
-      void navigate({ to: '/' })
-      return
-    }
-    socket.emit('room:leave', { roomId }, () => {
-      socket.close()
+    joinedRoomState.socket.emit('room:leave', { roomId }, () => {
+      joinedRoomState.socket.close()
       void navigate({ to: '/' })
     })
   }
+
+  return (
+    <LiveRoomShell
+      chatBody={chatBody}
+      feedItems={feedItems}
+      joinState={joinedRoomState}
+      onChatBodyChange={setChatBody}
+      onChatSubmit={sendChat}
+      onLeave={leaveCurrentRoom}
+      roomId={roomId}
+      status={status}
+    />
+  )
+}
+
+function LiveRoomShell({
+  chatBody,
+  feedItems,
+  joinState,
+  onChatBodyChange,
+  onChatSubmit,
+  onLeave,
+  roomId,
+  status,
+}: {
+  chatBody: string
+  feedItems: FeedItem[]
+  joinState: Extract<RoomJoinState, { status: 'joined' }>
+  onChatBodyChange: (value: string) => void
+  onChatSubmit: (event: FormEvent<HTMLFormElement>) => void
+  onLeave: () => void
+  roomId: string
+  status: string
+}) {
+  const summary = joinState.room
+  const topbarMembers = joinState.members.length || summary.members
+  const topbarStreams = joinState.streams.length || summary.streams
 
   return (
     <div className="room-mosaic-shell min-h-screen bg-[#080d18] text-slate-100">
@@ -186,33 +325,232 @@ function RoomPage() {
           <Button className="h-8 rounded-lg bg-violet-500/25 px-3 text-xs text-violet-100 ring-1 ring-violet-300/20 hover:bg-violet-500/35">
             <MessageSquare className="mr-2 h-4 w-4" /> Chat
           </Button>
-            <Button className="h-8 rounded-lg border border-white/10 bg-white/5 px-3 text-xs text-slate-200 hover:bg-white/10" onClick={leaveCurrentRoom}>
-              Leave room
-            </Button>
+          <Button className="h-8 rounded-lg border border-white/10 bg-white/5 px-3 text-xs text-slate-200 hover:bg-white/10" onClick={onLeave}>
+            Leave room
+          </Button>
         </div>
       </header>
 
       <div className="grid h-[calc(100vh-3rem)] grid-cols-[minmax(0,1fr)_320px] overflow-hidden bg-[#080d18] max-lg:grid-cols-1">
         <main className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[#080d18]">
           <RoomStreamPanel
-            members={members}
+            members={joinState.members}
             roomId={roomId}
-            socket={roomSocket}
-            streams={streams}
+            socket={joinState.socket}
+            streams={joinState.streams}
             status={status}
           />
         </main>
         <RoomSide
           feedItems={feedItems}
-          messages={messages}
-          members={members}
-          onChatBodyChange={setChatBody}
-          onChatSubmit={sendChat}
+          messages={joinState.messages}
+          members={joinState.members}
+          onChatBodyChange={onChatBodyChange}
+          onChatSubmit={onChatSubmit}
           peopleFallbackCount={summary.members}
           value={chatBody}
         />
       </div>
     </div>
+  )
+}
+
+function AdmissionGate({
+  joinState,
+  onBack,
+  onPasswordSubmit,
+  onTakeover,
+}: {
+  joinState: Exclude<RoomJoinState, { status: 'joined' }>
+  onBack: () => void
+  onPasswordSubmit: (password: string) => void
+  onTakeover: () => void
+}) {
+  switch (joinState.status) {
+    case 'auth-required':
+      return <AuthRequiredState onBack={onBack} />
+    case 'not-found':
+      return <RoomNotFoundState onBack={onBack} />
+    case 'joining':
+      return (
+        <RoomGateShell
+          action={<Button onClick={onBack}>Back to Active Rooms</Button>}
+          description="Requesting room admission from the room server."
+          title="Joining room"
+        />
+      )
+    case 'password-required':
+      return (
+        <PrivatePasswordGate
+          message={joinState.message}
+          onBack={onBack}
+          onPasswordSubmit={onPasswordSubmit}
+        />
+      )
+    case 'duplicate-client':
+      return <DuplicateClientGate onBack={onBack} onTakeover={onTakeover} />
+    case 'room-full':
+      return <RoomFullGate onBack={onBack} />
+    case 'room-banned':
+      return <RoomBannedGate onBack={onBack} />
+    case 'room-ended':
+      return <RoomEndedGate onBack={onBack} room={joinState.room} />
+    case 'connection-failed':
+      return <ConnectionFailedGate onBack={onBack} message={joinState.message} />
+    case 'protocol-error':
+      return <ProtocolErrorGate onBack={onBack} message={joinState.message} />
+  }
+}
+
+function RoomGateShell({
+  action,
+  description,
+  title,
+}: {
+  action: React.ReactNode
+  description: string
+  title: string
+}) {
+  return (
+    <main className="grid min-h-screen place-items-center bg-[#080d18] px-5 text-slate-100">
+      <section className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0b1220] p-6 text-center shadow-[0_8px_30px_rgba(0,0,0,0.28)]">
+        <div className="text-xl font-black text-white">{title}</div>
+        <p className="mt-3 text-sm leading-relaxed text-slate-300">
+          {description}
+        </p>
+        <div className="mt-5 flex justify-center gap-3">{action}</div>
+      </section>
+    </main>
+  )
+}
+
+function PrivatePasswordGate({
+  message,
+  onBack,
+  onPasswordSubmit,
+}: {
+  message?: string
+  onBack: () => void
+  onPasswordSubmit: (password: string) => void
+}) {
+  const [nextPassword, setNextPassword] = useState('')
+  const error = message === 'INVALID_PASSWORD' ? "That password didn't open the room." : ''
+
+  return (
+    <main className="grid min-h-screen place-items-center bg-[#080d18] px-5 text-slate-100">
+      <form
+        className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0b1220] p-6 text-center shadow-[0_8px_30px_rgba(0,0,0,0.28)]"
+        onSubmit={(event) => {
+          event.preventDefault()
+          const trimmed = nextPassword.trim()
+          if (trimmed) onPasswordSubmit(trimmed)
+        }}
+      >
+        <div className="text-xl font-black text-white">Room password required</div>
+        <p className="mt-3 text-sm leading-relaxed text-slate-300">
+          This private room is listed publicly, but admission needs the shared room password.
+        </p>
+        <Input
+          className="mt-5 border-white/10 bg-[#101725] text-sm text-slate-100 placeholder:text-slate-300"
+          onChange={(event) => setNextPassword(event.currentTarget.value)}
+          placeholder="Enter room password"
+          type="password"
+          value={nextPassword}
+        />
+        {error ? <p className="mt-3 text-sm text-rose-200">{error}</p> : null}
+        <div className="mt-5 flex justify-center gap-3">
+          <Button type="submit">Join private room</Button>
+          <Button onClick={onBack} type="button" variant="outline">
+            Back to Active Rooms
+          </Button>
+        </div>
+      </form>
+    </main>
+  )
+}
+
+function DuplicateClientGate({
+  onBack,
+  onTakeover,
+}: {
+  onBack: () => void
+  onTakeover: () => void
+}) {
+  return (
+    <RoomGateShell
+      action={
+        <>
+          <Button onClick={onTakeover}>Take over this room session</Button>
+          <Button onClick={onBack} variant="outline">
+            Cancel
+          </Button>
+        </>
+      }
+      description="This account is already active in this room on another tab or device."
+      title="Room already open"
+    />
+  )
+}
+
+function RoomFullGate({ onBack }: { onBack: () => void }) {
+  return (
+    <RoomGateShell
+      action={<Button onClick={onBack}>Back to Active Rooms</Button>}
+      description="This room is at its 10-member capacity."
+      title="Room is full"
+    />
+  )
+}
+
+function RoomBannedGate({ onBack }: { onBack: () => void }) {
+  return (
+    <RoomGateShell
+      action={<Button onClick={onBack}>Back to Active Rooms</Button>}
+      description="The host has blocked this account from rejoining this room."
+      title="You cannot join this room"
+    />
+  )
+}
+
+function RoomEndedGate({ onBack, room }: { onBack: () => void; room: RoomSummary }) {
+  return (
+    <RoomGateShell
+      action={<Button onClick={onBack}>Back to Active Rooms</Button>}
+      description={`${room.name} has ended. Past Streams are history records, not replayable recordings.`}
+      title="Room has ended"
+    />
+  )
+}
+
+function ConnectionFailedGate({
+  message,
+  onBack,
+}: {
+  message?: string
+  onBack: () => void
+}) {
+  return (
+    <RoomGateShell
+      action={<Button onClick={onBack}>Back to Active Rooms</Button>}
+      description={message ?? "We couldn't reach the room server. Check your connection and try again from Active Rooms."}
+      title="Room connection failed"
+    />
+  )
+}
+
+function ProtocolErrorGate({
+  message,
+  onBack,
+}: {
+  message?: string
+  onBack: () => void
+}) {
+  return (
+    <RoomGateShell
+      action={<Button onClick={onBack}>Back to Active Rooms</Button>}
+      description={message ?? 'The room server returned an unexpected response. We kept live controls hidden to protect the room state.'}
+      title="Room state unavailable"
+    />
   )
 }
 
@@ -334,27 +672,30 @@ function SideTab({
 }
 
 
-function AuthRequiredState() {
+function AuthRequiredState({ onBack }: { onBack: () => void }) {
   return (
-    <main className="grid min-h-screen place-items-center bg-[#080d18] text-slate-100">
-      <div className="rounded-3xl border border-white/10 bg-[#0b1220] p-8 text-center shadow-2xl">
-        <div className="text-2xl font-black">Sign in required</div>
-        <p className="mt-3 text-sm text-slate-400">Join the room after signing in with Discord.</p>
-      </div>
-    </main>
+    <RoomGateShell
+      action={
+        <Button onClick={onBack}>
+          Back to Active Rooms
+        </Button>
+      }
+      description="Join the room after signing in with Discord."
+      title="Sign in required"
+    />
   )
 }
 
-function RoomNotFoundState() {
+function RoomNotFoundState({ onBack }: { onBack: () => void }) {
   return (
-    <main className="grid min-h-screen place-items-center bg-[#080d18] text-slate-100">
-      <div className="rounded-3xl border border-white/10 bg-[#0b1220] p-8 text-center shadow-2xl">
-        <div className="text-2xl font-black">Room unavailable</div>
-        <p className="mt-3 text-sm text-slate-400">This room does not exist or is no longer live.</p>
-      </div>
-    </main>
+    <RoomGateShell
+      action={<Button onClick={onBack}>Back to Active Rooms</Button>}
+      description="This room does not exist or is not available to join."
+      title="Room unavailable"
+    />
   )
 }
+
 
 function displayName(user: { name?: string | null; id?: string } | undefined) {
   if (user?.name && user.name !== user.id) return user.name
