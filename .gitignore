@@ -1,0 +1,32 @@
+.worktrees/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+dist-ssr/
+.output/
+.vinxi/
+.nitro/
+.tanstack/
+.wrangler/
+
+# Tool-generated files
+__unconfig*
+todos.json
+
+# Test and coverage outputs
+coverage/
+.playwright/
+test-results/
+playwright-report/
+
+# Local/editor files
+*.local
+.DS_Store
