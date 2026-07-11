@@ -1,9 +1,0 @@
-node_modules
-.git
-.env
-.env.*
-dist
-.vite
-coverage
-playwright-report
-test-results
