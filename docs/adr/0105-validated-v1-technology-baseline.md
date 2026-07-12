@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-11
-- **Supersedes in part:** ADR 0021, ADR 0022, ADR 0092, and ADR 0099 where their implementation wording conflicts
+- **Supersedes in part:** ADR 0022, ADR 0092, ADR 0099 where implementation wording conflicts
 
 ## Context
 

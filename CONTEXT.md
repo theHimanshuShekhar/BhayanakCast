@@ -265,7 +265,6 @@ BhayanakCast is a public discovery platform for small social screen-sharing room
 - [`docs/adr/0018-general-audience-content-policy.md`](docs/adr/0018-general-audience-content-policy.md) — defines the V1 audience and prohibited-content boundary.
 - [`docs/adr/0019-persistent-chat-mute.md`](docs/adr/0019-persistent-chat-mute.md) — adds a private account-level chat-only mute.
 - [`docs/adr/0020-discovery-ordering.md`](docs/adr/0020-discovery-ordering.md) — ranks rooms by current social presence.
-- [`docs/adr/0021-retain-documented-v1-stack.md`](docs/adr/0021-retain-documented-v1-stack.md) — preserves the framework/runtime/persistence/realtime boundary.
 - [`docs/adr/0022-compose-cloudflare-tunnel-deployment.md`](docs/adr/0022-compose-cloudflare-tunnel-deployment.md) — defines the single-node production deployment boundary.
 - [`docs/adr/0023-postgres-backup-and-restore.md`](docs/adr/0023-postgres-backup-and-restore.md) — sets backup retention and recovery expectations.
 - [`docs/adr/0024-sync-discord-identity-on-sign-in.md`](docs/adr/0024-sync-discord-identity-on-sign-in.md) — refreshes public Discord identity at authentication.
@@ -285,8 +284,6 @@ BhayanakCast is a public discovery platform for small social screen-sharing room
 - [`docs/adr/0038-historical-host-transcript-access.md`](docs/adr/0038-historical-host-transcript-access.md) — preserves transcript access for every historical Host.
 - [`docs/adr/0039-one-active-watch-subscription.md`](docs/adr/0039-one-active-watch-subscription.md) — limits every Account to one current watched Stream.
 - [`docs/adr/0040-one-websocket-connection-per-account.md`](docs/adr/0040-one-websocket-connection-per-account.md) — makes a newly accepted WebSocket globally replace older Account connections.
-- [`docs/adr/0041-peerjs-peer-server-public-stun.md`](docs/adr/0041-peerjs-peer-server-public-stun.md) — superseded PeerJS/PeerServer signaling decision.
-- [`docs/adr/0042-server-issued-peer-identities.md`](docs/adr/0042-server-issued-peer-identities.md) — superseded PeerJS identity decision.
 - [`docs/adr/0043-empty-discovery-onboarding.md`](docs/adr/0043-empty-discovery-onboarding.md) — combines Past Streams with a Create Room empty state.
 - [`docs/adr/0044-public-room-default.md`](docs/adr/0044-public-room-default.md) — makes Public the Create Room default.
 
@@ -351,3 +348,4 @@ BhayanakCast is a public discovery platform for small social screen-sharing room
 - [`docs/adr/0103-responsive-room-controls-and-recovery.md`](docs/adr/0103-responsive-room-controls-and-recovery.md) — defines mobile controls, sheets, compatibility, reconnect, departure, and room-end transitions.
 - [`docs/adr/0104-native-webrtc-over-socket-io.md`](docs/adr/0104-native-webrtc-over-socket-io.md) — uses native WebRTC with authenticated Socket.IO signaling.
 - [`docs/adr/0105-validated-v1-technology-baseline.md`](docs/adr/0105-validated-v1-technology-baseline.md) — pins the reviewed runtime, build, auth, data, and execution-control baseline.
+- [`docs/adr/0106-layered-testing-and-release-evidence.md`](docs/adr/0106-layered-testing-and-release-evidence.md) — separates deterministic domain/integration coverage, representative multi-user browser tests, and production qualification evidence.

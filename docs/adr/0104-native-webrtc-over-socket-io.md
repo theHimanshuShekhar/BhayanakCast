@@ -2,7 +2,6 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-11
-- **Supersedes:** ADR 0041 and ADR 0042
 
 ## Context
 
