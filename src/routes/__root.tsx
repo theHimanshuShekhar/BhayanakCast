@@ -5,12 +5,18 @@ import {
   Scripts,
   createRootRoute,
 } from '@tanstack/react-router'
+import { ThemeToggle } from '../features/theme/ThemeToggle'
+import { THEME_BOOTSTRAP_SCRIPT } from '../features/theme/theme'
+import '../styles/app.css'
 
 export const Route = createRootRoute({
   head: () => ({
     meta: [
       { charSet: 'utf-8' },
-      { name: 'viewport', content: 'width=device-width, initial-scale=1' },
+      {
+        name: 'viewport',
+        content: 'width=device-width, initial-scale=1, viewport-fit=cover',
+      },
       { title: 'BhayanakCast' },
       {
         name: 'description',
@@ -46,11 +52,18 @@ function RootComponent() {
 
 function Document({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
+        <script
+          data-theme-bootstrap=""
+          dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }}
+        />
         <HeadContent />
       </head>
       <body>
+        <div aria-label="Display controls" className="root-controls" role="region">
+          <ThemeToggle />
+        </div>
         {children}
         <Scripts />
       </body>
