@@ -1,6 +1,7 @@
 import type { Server as HttpServer } from 'node:http'
 import handler, { createServerEntry } from '@tanstack/react-start/server-entry'
 import { Server as SocketServer } from 'socket.io'
+export { createServerRuntime } from './server/runtime'
 
 const attachedSockets = new WeakMap<HttpServer, SocketServer>()
 

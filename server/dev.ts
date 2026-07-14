@@ -29,17 +29,20 @@ server.listen(port, host, async () => {
 })
 
 let shuttingDown = false
-function shutdown() {
+async function shutdown() {
   if (shuttingDown) return
   shuttingDown = true
   const deadline = setTimeout(() => process.exit(1), 10_000)
   deadline.unref()
   sockets.disconnectSockets(true)
-  sockets.close()
-  server.close(() => {
+  try {
+    await sockets.close()
     clearTimeout(deadline)
     process.exit(0)
-  })
+  } catch (error) {
+    console.error(error)
+    process.exit(1)
+  }
 }
 process.once('SIGINT', shutdown)
 process.once('SIGTERM', shutdown)

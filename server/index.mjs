@@ -29,6 +29,16 @@ if (!startEntry || typeof startEntry.fetch !== 'function') {
 if (typeof startModule.attachSocketServer !== 'function') {
   throw new TypeError('The Start server bundle must export attachSocketServer')
 }
+if (typeof startModule.createServerRuntime !== 'function') {
+  throw new TypeError('The Start server bundle must export createServerRuntime')
+}
+const runtime = startModule.createServerRuntime(process.env)
+if (process.send && runtime.bindings.workerId) {
+  process.on('message', (message) => {
+    void handleRuntimeCommand(message)
+  })
+  process.once('disconnect', shutdown)
+}
 
 const server = createServer(async (request, response) => {
   try {
@@ -50,23 +60,68 @@ server.listen(PORT, HOST, () => {
   const address = server.address()
   const port = typeof address === 'object' && address ? address.port : PORT
   console.log(`BhayanakCast listening on http://${HOST}:${port}`)
+  process.send?.({
+    type: 'runtime-ready',
+    bindings: runtime.bindings,
+  })
 })
 
 let shuttingDown = false
-function shutdown() {
+async function shutdown() {
   if (shuttingDown) return
   shuttingDown = true
   const deadline = setTimeout(() => process.exit(1), 10_000)
   deadline.unref()
   sockets.disconnectSockets(true)
-  sockets.close()
-  server.close(() => {
+  try {
+    await sockets.close()
+    await runtime.close()
     clearTimeout(deadline)
     process.exit(0)
-  })
+  } catch (error) {
+    console.error(error)
+    process.exit(1)
+  }
 }
 process.once('SIGINT', shutdown)
 process.once('SIGTERM', shutdown)
+
+async function handleRuntimeCommand(message) {
+  if (
+    !message ||
+    typeof message !== 'object' ||
+    message.type !== 'runtime-command' ||
+    typeof message.id !== 'string'
+  ) {
+    return
+  }
+  try {
+    let result
+    switch (message.operation) {
+      case 'sql':
+        result = await runtime.sql(message.text, message.values)
+        break
+      case 'set':
+        result = await runtime.set(message.key, message.value)
+        break
+      case 'get':
+        result = await runtime.get(message.key)
+        break
+      case 'advance-clock':
+        result = runtime.advanceClock(message.instant)
+        break
+      default:
+        throw new Error(`unknown runtime operation: ${message.operation}`)
+    }
+    process.send?.({ type: 'runtime-result', id: message.id, result })
+  } catch (error) {
+    process.send?.({
+      type: 'runtime-result',
+      id: message.id,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
 
 async function serveClientAsset(request, response) {
   if (request.method !== 'GET' && request.method !== 'HEAD') return false
