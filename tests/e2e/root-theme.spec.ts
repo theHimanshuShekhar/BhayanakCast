@@ -50,11 +50,13 @@ test('theme controls work when browser storage access is denied', async ({
   await page.goto('/')
   await page.emulateMedia({ colorScheme: 'dark' })
 
-  const toggle = page.getByRole('button', { name: 'Dark theme' })
+  const toggle = page.locator('.theme-toggle')
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+  await expect(toggle).toHaveAttribute('aria-label', 'Light theme')
   await expect(toggle).toHaveAttribute('aria-pressed', 'true')
   await toggle.click()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+  await expect(toggle).toHaveAttribute('aria-label', 'Dark theme')
   expect(pageErrors).toEqual([])
 })
 
@@ -64,9 +66,11 @@ test('the visible toggle persists an anonymous override across reloads', async (
   await page.emulateMedia({ colorScheme: 'light' })
   await page.goto('/')
 
-  const toggle = page.getByRole('button', { name: 'Dark theme' })
+  const toggle = page.locator('.theme-toggle')
+  await expect(toggle).toHaveAttribute('aria-label', 'Dark theme')
   await expect(toggle).toHaveAttribute('aria-pressed', 'false')
   await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-label', 'Light theme')
   await expect(toggle).toHaveAttribute('aria-pressed', 'true')
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
   await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute(
@@ -80,6 +84,7 @@ test('the visible toggle persists an anonymous override across reloads', async (
   await page.reload()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
   await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+  await expect(toggle).toHaveAttribute('aria-label', 'Light theme')
 })
 
 test('applies the theme in the head before document readiness', async ({
@@ -126,7 +131,7 @@ test('publishes the root metadata contract', async ({ page }) => {
 test('the root control reserves space instead of overlaying route content', async ({
   page,
 }) => {
-  await page.goto('/')
+  await page.goto('/missing')
 
   const layout = await page.evaluate(() => {
     const toggle = document.querySelector('.theme-toggle')

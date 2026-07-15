@@ -11,6 +11,7 @@ export default defineConfig({
           setupFiles: ['./tests/setup/unit.ts'],
           testTimeout: 30_000,
           hookTimeout: 30_000,
+          sequence: { groupOrder: 0 },
         },
       },
       {
@@ -26,6 +27,7 @@ export default defineConfig({
           testTimeout: 30_000,
           hookTimeout: 30_000,
           maxWorkers: 2,
+          sequence: { groupOrder: 1 },
         },
       },
     ],

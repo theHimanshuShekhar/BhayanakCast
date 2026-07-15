@@ -1,0 +1,55 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1784020578188,
+      "tag": "0000_graceful_johnny_blaze",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1784025961745,
+      "tag": "0001_fine_sleeper",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784027483113,
+      "tag": "0002_lucky_gideon",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784028878239,
+      "tag": "0003_graceful_yellowjacket",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1784031432936,
+      "tag": "0004_block_sanctioned_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1784031878252,
+      "tag": "0005_persist_session_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1784041547515,
+      "tag": "0006_enforce_stream_room_ownership",
+      "breakpoints": true
+    }
+  ]
+}

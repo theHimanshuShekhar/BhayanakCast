@@ -1,0 +1,1 @@
+ALTER TABLE "room" ADD CONSTRAINT "room_tag_count_check" CHECK (cardinality("room"."tags") <= 5);

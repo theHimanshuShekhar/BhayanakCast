@@ -1,15 +1,17 @@
 import type { ReactNode } from 'react'
+import type { QueryClient } from '@tanstack/react-query'
 import {
   HeadContent,
   Outlet,
   Scripts,
-  createRootRoute,
+  createRootRouteWithContext,
+  useRouterState,
 } from '@tanstack/react-router'
 import { ThemeToggle } from '../features/theme/ThemeToggle'
 import { THEME_BOOTSTRAP_SCRIPT } from '../features/theme/theme'
 import '../styles/app.css'
 
-export const Route = createRootRoute({
+export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   head: () => ({
     meta: [
       { charSet: 'utf-8' },
@@ -43,14 +45,20 @@ export const Route = createRootRoute({
 })
 
 function RootComponent() {
+  const showDisplayControls = useRouterState({
+    select: (state) => state.location.pathname !== '/',
+  })
   return (
-    <Document>
+    <Document showDisplayControls={showDisplayControls}>
       <Outlet />
     </Document>
   )
 }
 
-function Document({ children }: Readonly<{ children: ReactNode }>) {
+function Document({
+  children,
+  showDisplayControls = true,
+}: Readonly<{ children: ReactNode; showDisplayControls?: boolean }>) {
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -61,9 +69,11 @@ function Document({ children }: Readonly<{ children: ReactNode }>) {
         <HeadContent />
       </head>
       <body>
-        <div aria-label="Display controls" className="root-controls" role="region">
-          <ThemeToggle />
-        </div>
+        {showDisplayControls && (
+          <div aria-label="Display controls" className="root-controls" role="region">
+            <ThemeToggle />
+          </div>
+        )}
         {children}
         <Scripts />
       </body>

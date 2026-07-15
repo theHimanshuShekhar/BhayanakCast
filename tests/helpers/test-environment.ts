@@ -37,7 +37,7 @@ export async function createTestEnvironment(
       .replace(/[^a-z0-9]/g, '_')
       .replace(/^_+|_+$/g, '') || 'worker'
   const unique = randomUUID().replaceAll('-', '').slice(0, 10)
-  const schema = `test_${safeWorkerId}_${unique}`
+  const schema = `${`test_${safeWorkerId}`.slice(0, 52)}_${unique}`
   const valkeyPrefix = `${schema}:`
   const pool = new Pool({
     connectionString: databaseUrl,
