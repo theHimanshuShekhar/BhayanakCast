@@ -32,7 +32,27 @@ if (typeof startModule.attachSocketServer !== 'function') {
 if (typeof startModule.createServerRuntime !== 'function') {
   throw new TypeError('The Start server bundle must export createServerRuntime')
 }
+if (typeof startModule.bindServerRuntime !== 'function') {
+  throw new TypeError('The Start server bundle must export bindServerRuntime')
+}
+if (
+  typeof startModule.parseTrustedProxyIps !== 'function' ||
+  typeof startModule.resolveTrustedClientIp !== 'function'
+) {
+  throw new TypeError('The Start server bundle must export client IP policy')
+}
+const usesEphemeralTestOrigin =
+  process.env.NODE_ENV === 'test' &&
+  !process.env.CLOUDFLARED_PUBLIC_URL &&
+  !process.env.BETTER_AUTH_URL
+if (usesEphemeralTestOrigin) {
+  process.env.BETTER_AUTH_URL = `http://${HOST}`
+}
 const runtime = startModule.createServerRuntime(process.env)
+startModule.bindServerRuntime(runtime)
+const trustedProxyIps = startModule.parseTrustedProxyIps(
+  process.env.TRUSTED_PROXY_IPS,
+)
 if (process.send && runtime.bindings.workerId) {
   process.on('message', (message) => {
     void handleRuntimeCommand(message)
@@ -59,6 +79,9 @@ const sockets = startModule.attachSocketServer(server)
 server.listen(PORT, HOST, () => {
   const address = server.address()
   const port = typeof address === 'object' && address ? address.port : PORT
+  if (usesEphemeralTestOrigin) {
+    process.env.BETTER_AUTH_URL = `http://${HOST}:${port}`
+  }
   console.log(`BhayanakCast listening on http://${HOST}:${port}`)
   process.send?.({
     type: 'runtime-ready',
@@ -177,6 +200,12 @@ async function serveStart(incoming, outgoing) {
   for (let index = 0; index < incoming.rawHeaders.length; index += 2) {
     headers.append(incoming.rawHeaders[index], incoming.rawHeaders[index + 1])
   }
+  headers.delete('x-bhayanakcast-client-ip')
+  const clientIp = startModule.resolveTrustedClientIp(
+    { directIp: incoming.socket.remoteAddress, headers },
+    { trustedProxyIps },
+  )
+  if (clientIp) headers.set('x-bhayanakcast-client-ip', clientIp)
   const host = headers.get('host') ?? 'localhost'
   const bodyless = incoming.method === 'GET' || incoming.method === 'HEAD'
   const init = {

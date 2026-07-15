@@ -31,6 +31,10 @@ export class ServerRuntime {
     this.valkey = valkey
   }
 
+  getDatabasePool(): Pool | undefined {
+    return this.database
+  }
+
   async sql<T extends QueryResultRow = QueryResultRow>(
     text: string,
     values?: unknown[],

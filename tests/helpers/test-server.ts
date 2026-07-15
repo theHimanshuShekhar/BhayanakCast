@@ -9,10 +9,17 @@ import type { TestEnvironment } from './test-environment'
 
 const LISTENING = /BhayanakCast listening on http:\/\/127\.0\.0\.1:(\d+)/
 
+export interface TestAuthConfiguration {
+  readonly secret: string
+  readonly discordClientId: string
+  readonly discordClientSecret: string
+}
+
 export interface TestServer {
   readonly port: number
   readonly origin: string
   readonly bindings: RuntimeBindings
+  readonly auth: TestAuthConfiguration
   sql(text: string, values?: unknown[]): Promise<unknown[]>
   set(key: string, value: string): Promise<'OK'>
   get(key: string): Promise<string | null>
@@ -23,6 +30,11 @@ export interface TestServer {
 export async function startTestServer(
   environment: TestEnvironment,
 ): Promise<TestServer> {
+  const auth: TestAuthConfiguration = {
+    secret: `${randomUUID()}${randomUUID()}`,
+    discordClientId: `test-client-${randomUUID()}`,
+    discordClientSecret: `test-client-secret-${randomUUID()}`,
+  }
   const child = spawn(process.execPath, ['server/index.mjs'], {
     cwd: process.cwd(),
     env: {
@@ -36,6 +48,13 @@ export async function startTestServer(
       VALKEY_PREFIX: environment.valkeyPrefix,
       TEST_WORKER_ID: environment.workerId,
       CLOCK_EPOCH_MS: String(environment.clock.now()),
+      BETTER_AUTH_SECRET: auth.secret,
+      DISCORD_CLIENT_ID: auth.discordClientId,
+      DISCORD_CLIENT_SECRET: auth.discordClientSecret,
+      BETTER_AUTH_URL: '',
+      CLOUDFLARED_PUBLIC_URL: '',
+      ADMIN_DISCORD_IDS: process.env.TEST_ADMIN_DISCORD_IDS ?? '102938475610293900',
+      TRUSTED_PROXY_IPS: '',
     },
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
   })
@@ -110,6 +129,7 @@ export async function startTestServer(
     port,
     origin: `http://127.0.0.1:${port}`,
     bindings,
+    auth,
     sql: (text, values) => callRuntime('sql', { text, values }),
     set: (key, value) => callRuntime('set', { key, value }),
     get: (key) => callRuntime('get', { key }),
