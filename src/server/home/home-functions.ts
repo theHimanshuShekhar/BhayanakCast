@@ -40,6 +40,14 @@ export const getHomeProfiles = createServerFn({ method: 'GET' })
     repository().profiles(data, context.homeRequestSignal),
   )
 
+export const getPublicProfile = createServerFn({ method: 'GET' })
+  .middleware([requestSignal])
+  .validator(validatePublicProfileInput)
+  .handler(({ data, context }) =>
+    repository().publicProfile(data.accountId, context.homeRequestSignal),
+  )
+
+
 export const getPastStreams = createServerFn({ method: 'GET' })
   .middleware([requestSignal])
   .handler(({ context }) => repository().pastStreams(context.homeRequestSignal))
@@ -72,6 +80,19 @@ export function validateHomeSearch(value: unknown): HomeSearch {
 
 function validateProfileSearch(value: unknown): HomeSearch {
   return validateHomeSearch(value)
+}
+
+export function validatePublicProfileInput(value: unknown): { accountId: string } {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    !('accountId' in value) ||
+    typeof value.accountId !== 'string' ||
+    value.accountId.length === 0
+  ) {
+    throw new TypeError('accountId must be a non-empty string')
+  }
+  return { accountId: value.accountId }
 }
 
 function validateOperatorDay(value: unknown) {
