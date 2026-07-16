@@ -4,6 +4,8 @@ import {
   HomePastStreamsSkeleton,
   HomeRoomsSkeleton,
 } from './HomeSectionSkeletons'
+import { LiveRooms } from './LiveRooms'
+import { PastStreams } from './PastStreams'
 import type {
   ActiveRoomSummary,
   HomeSearch,
@@ -31,6 +33,16 @@ export function HomeSections({
   profiles,
   pastStreams,
 }: HomeSectionsProps) {
+  const hasActiveDiscoveryContext = Boolean(
+    search.q || search.category || search.tags?.length,
+  )
+  const snapshotKey = JSON.stringify([
+    search.q ?? '',
+    search.category ?? '',
+    search.tags ?? [],
+  ])
+  const showPastStreams =
+    pastStreams.data === undefined || pastStreams.data.length > 0
   return (
     <>
       <section className="home-center-section" data-home-center-region="live-rooms">
@@ -42,10 +54,13 @@ export function HomeSections({
           queryKey={rooms.queryKey}
           skeleton={<HomeRoomsSkeleton />}
         >
-          <section aria-label="Live Rooms" className="home-section-content">
-            <h2>Live Rooms</h2>
-            <p>{rooms.data?.length ?? 0} rooms available.</p>
-          </section>
+          <LiveRooms
+            hasPastStreams={showPastStreams}
+            isPlaceholderData={rooms.updating}
+            rooms={rooms.data ?? []}
+            showEmptyInvitation={!hasActiveDiscoveryContext}
+            snapshotKey={snapshotKey}
+          />
         </HomeSectionBoundary>
       </section>
 
@@ -64,7 +79,7 @@ export function HomeSections({
             </section>
           </HomeSectionBoundary>
         </section>
-      ) : (
+      ) : showPastStreams ? (
         <section className="home-center-section" data-home-center-region="past-streams">
           <HomeSectionBoundary
             failed={pastStreams.failed}
@@ -73,13 +88,10 @@ export function HomeSections({
             queryKey={pastStreams.queryKey}
             skeleton={<HomePastStreamsSkeleton />}
           >
-            <section aria-label="Past Streams" className="home-section-content">
-              <h2>Past Streams</h2>
-              <p>{pastStreams.data?.length ?? 0} streams available.</p>
-            </section>
+            <PastStreams streams={pastStreams.data ?? []} />
           </HomeSectionBoundary>
         </section>
-      )}
+      ) : null}
     </>
   )
 }
