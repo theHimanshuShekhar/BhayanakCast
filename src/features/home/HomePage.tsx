@@ -66,6 +66,7 @@ export function HomePage({ search, session }: HomePageProps) {
             failed: profiles.isError,
             pending: profiles.isPending,
             queryKey: profilesOptions.queryKey,
+            updating: profiles.isPlaceholderData,
           }}
           rooms={{
             data: rooms.data,

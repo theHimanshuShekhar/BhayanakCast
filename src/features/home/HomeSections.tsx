@@ -4,6 +4,7 @@ import {
   HomePastStreamsSkeleton,
   HomeRoomsSkeleton,
 } from './HomeSectionSkeletons'
+import { HomeSearchResults } from './HomeSearchResults'
 import { LiveRooms } from './LiveRooms'
 import { PastStreams } from './PastStreams'
 import type {
@@ -23,7 +24,7 @@ interface QuerySection<T> {
 interface HomeSectionsProps {
   readonly search: HomeSearch
   readonly rooms: QuerySection<ActiveRoomSummary> & { readonly updating: boolean }
-  readonly profiles: QuerySection<PublicProfileSummary>
+  readonly profiles: QuerySection<PublicProfileSummary> & { readonly updating: boolean }
   readonly pastStreams: QuerySection<PastStreamSummary>
 }
 
@@ -36,6 +37,15 @@ export function HomeSections({
   const hasActiveDiscoveryContext = Boolean(
     search.q || search.category || search.tags?.length,
   )
+  if (hasActiveDiscoveryContext) {
+    return (
+      <HomeSearchResults
+        profiles={profiles}
+        query={search.q}
+        rooms={rooms}
+      />
+    )
+  }
   const snapshotKey = JSON.stringify([
     search.q ?? '',
     search.category ?? '',
@@ -64,22 +74,7 @@ export function HomeSections({
         </HomeSectionBoundary>
       </section>
 
-      {search.q ? (
-        <section className="home-center-section" data-home-center-region="profiles">
-          <HomeSectionBoundary
-            failed={profiles.failed}
-            label="Public Profiles"
-            pending={profiles.pending && !profiles.data}
-            queryKey={profiles.queryKey}
-            skeleton={<HomeRoomsSkeleton label="Loading public profiles" />}
-          >
-            <section aria-label="Public Profiles" className="home-section-content">
-              <h2>Public Profiles</h2>
-              <p>{profiles.data?.length ?? 0} profiles available.</p>
-            </section>
-          </HomeSectionBoundary>
-        </section>
-      ) : showPastStreams ? (
+      {showPastStreams ? (
         <section className="home-center-section" data-home-center-region="past-streams">
           <HomeSectionBoundary
             failed={pastStreams.failed}

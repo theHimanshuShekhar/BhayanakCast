@@ -185,6 +185,30 @@ export class HomeRepository {
     )
     const selected = rankProfiles(candidates.rows, search).slice(0, PROFILE_LIMIT)
     if (selected.length === 0) return []
+    const rows = await this.richProfiles(
+      selected.map(({ accountId }) => accountId),
+      signal,
+    )
+    const profilesById = new Map(rows.map((profile) => [profile.accountId, profile]))
+    return selected.flatMap(({ accountId }) => {
+      const profile = profilesById.get(accountId)
+      return profile ? [toProfile(profile)] : []
+    })
+  }
+
+  async publicProfile(
+    accountId: string,
+    signal?: AbortSignal,
+  ): Promise<PublicProfileSummary | null> {
+    const profile = (await this.richProfiles([accountId], signal))[0]
+    return profile ? toProfile(profile) : null
+  }
+
+  private async richProfiles(
+    accountIds: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<ProfileRow[]> {
+    if (accountIds.length === 0) return []
     const rows = await this.query<ProfileRow>(
       `WITH candidates AS (
          SELECT account.id, account.name, account.image
@@ -258,13 +282,9 @@ export class HomeRepository {
              ) item
          ) co_users ON true`,
       signal,
-      [selected.map(({ accountId }) => accountId)],
+      [accountIds],
     )
-    const profilesById = new Map(rows.rows.map((profile) => [profile.accountId, profile]))
-    return selected.flatMap(({ accountId }) => {
-      const profile = profilesById.get(accountId)
-      return profile ? [toProfile(profile)] : []
-    })
+    return rows.rows
   }
 
   async facets(signal?: AbortSignal): Promise<HomeFacets> {

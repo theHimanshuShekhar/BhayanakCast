@@ -3,6 +3,7 @@ import type { QueryKey } from '@tanstack/react-query'
 import { SignInButton } from '../auth/SignInButton'
 import type { SessionProjection } from '../auth/auth-client'
 import { CreateRoomButton } from './HomeNavigation'
+import { HomeSearch as HomeSearchController } from './HomeSearch'
 import { HomeSectionBoundary } from './HomeSectionBoundary'
 import { HomeMetricsSkeleton } from './HomeSectionSkeletons'
 import type { HomeFacets, HomeSearch, HomeStatistics } from './home-types'
@@ -40,31 +41,13 @@ export function HomeUtilities({
         className={`home-search-utilities${hasActiveSearch ? ' home-search-utilities--active' : ''}`}
         data-home-center-region="search"
       >
-        <div aria-label="Find rooms and people" className="home-search" role="search">
-          <label htmlFor="home-search-input">Find rooms and people</label>
-          <input
-            id="home-search-input"
-            name="q"
-            placeholder="Search rooms, categories, tags, or people"
-            readOnly
-            type="search"
-            value={search.q ?? ''}
-          />
-        </div>
-        <HomeSectionBoundary
-          failed={facetsFailed}
-          label="Filters"
-          pending={facetsPending && !facets}
-          queryKey={facetsQueryKey}
-          skeleton={<HomeMetricsSkeleton label="Loading filters" />}
-        >
-          <section aria-label="Filters" className="home-filters">
-            <h2>Filters</h2>
-            <p>
-              {facets ? `${facets.categories.length} categories and ${facets.tags.length} tags available.` : 'Filter options are unavailable.'}
-            </p>
-          </section>
-        </HomeSectionBoundary>
+        <HomeSearchController
+          facets={facets}
+          facetsFailed={facetsFailed}
+          facetsPending={facetsPending}
+          facetsQueryKey={facetsQueryKey}
+          search={search}
+        />
       </section>
 
       <aside aria-label="Clubhouse activity" className="home-utilities-rail" data-testid="home-rail">

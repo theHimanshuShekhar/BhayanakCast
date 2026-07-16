@@ -188,6 +188,30 @@ describe('Home PostgreSQL projections', () => {
     })
   })
 
+  test('returns one public profile while treating absent and pending-deletion accounts as absent', async () => {
+    const data = await fixture()
+    const visible = await data.account('Visible profile', 'visible-avatar')
+    const pending = await data.account('Pending profile', 'pending-avatar')
+    await data.pool.query(
+      'INSERT INTO account_state (account_id, deletion_requested_at) VALUES ($1, now())',
+      [pending],
+    )
+
+    const repository = new HomeRepository(createPoolHomeQueryExecutor(data.pool))
+
+    await expect(repository.publicProfile(visible)).resolves.toMatchObject({
+      accountId: visible,
+      displayName: 'Visible profile',
+      avatarUrl: 'visible-avatar',
+      roomCount: 0,
+      streamCount: 0,
+      pastStreams: [],
+      coUsers: [],
+    })
+    await expect(repository.publicProfile(pending)).resolves.toBeNull()
+    await expect(repository.publicProfile(randomUUID())).resolves.toBeNull()
+  })
+
   test('excludes co-users whose membership intervals never overlapped', async () => {
     const data = await fixture()
     const alice = await data.account('Interval Alice')
