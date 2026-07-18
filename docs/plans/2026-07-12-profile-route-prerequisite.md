@@ -2,9 +2,9 @@
 
 > **REQUIRED SUB-SKILL:** Use the executing-plans skill to implement this plan task-by-task.
 
-**Goal:** Deliver the authenticated `/profile` route required by Home navigation, including the Account's public activity projection, private theme/mute preferences, and self-service deletion request/cancellation without creating a separate settings route.
+**Goal:** Deliver the `/profile` destination required by Home navigation, with a contextual anonymous Discord access gate and the authenticated Account's public activity projection, private theme/mute preferences, and self-service deletion request/cancellation—without creating a separate settings or log-in route.
 
-**Architecture:** Reuse the public-profile projection already required by Home search, then compose private authenticated sections on `/profile`. Better Auth remains the session/credential authority; PostgreSQL owns account preferences, mutes, and deletion-request state. Submission immediately changes the Account to hidden/read-only through shared server authorization policy. Platform Admin approval/rejection UI remains in the later `/admin` plan, but this plan establishes the canonical request state and user-visible pending/cancel behavior.
+**Architecture:** Reuse the public-profile projection already required by Home search, render only the lightweight Profile access gate without Account data to Anonymous visitors, then compose private authenticated sections on `/profile` after sign-in. Better Auth remains the session/credential authority; PostgreSQL owns account preferences, mutes, and deletion-request state. Submission immediately changes the Account to hidden/read-only through shared server authorization policy. Platform Admin approval/rejection UI remains in the later `/admin` plan, but this plan establishes the canonical request state and user-visible pending/cancel behavior.
 
 **Tech Stack:** The Home plan's scaffold, auth, Drizzle/PostgreSQL, TanStack Start/Query, Tailwind tokens, Vitest, and Playwright. Add no form library, settings framework, local profile editor, or client state store.
 
@@ -35,13 +35,13 @@ This route does not permit local display-name/avatar editing; Discord identity r
 
 Cover:
 
-- anonymous direct navigation returns through Discord sign-in and then `/profile` without creating another intent;
+- anonymous direct navigation renders the Profile-context access gate without starting OAuth; activating `Continue with Discord` uses a full-page redirect and returns to `/profile`;
 - authenticated navigation renders the current Account only;
 - mirrored Discord name/avatar are read-only;
 - public activity/statistics/Past Streams/co-users reuse the allowed public projection;
 - private preference and deletion sections never enter `/users/:userId`, Home search, SSR for another Account, or Socket.IO payloads;
 - deletion-pending Account still reads its own request status while its public projection is hidden;
-- invalid/revoked session returns to authentication immediately.
+- invalid/revoked session clears private state immediately and replaces the current route content with the same Profile access gate.
 
 **Step 2: Reuse, do not duplicate, the public projection**
 
@@ -49,7 +49,7 @@ Extract only the server query/projection already shared by Home results, `/users
 
 **Step 3: Implement the route**
 
-Use one page heading and clear Public activity, Preferences, and Account deletion sections. The route is authenticated and `noindex`; `/users/:userId` remains anonymous/indexable. Use the Home navigation vocabulary and shared tokens, not a dashboard shell or card grid.
+Use one page heading and clear Public activity, Preferences, and Account deletion sections for an authenticated Account. `/profile` is `noindex` and renders only the lightweight Profile access gate to an Anonymous visitor; `/users/:userId` remains anonymous/indexable. Use the Home navigation vocabulary and shared tokens, not a dashboard shell or card grid.
 
 **Step 4: Verify and commit**
 
@@ -211,7 +211,7 @@ Expected: all exit 0; no test succeeds only on retry.
 
 Confirm:
 
-- `/profile` is authenticated and `noindex`;
+- `/profile` is `noindex`, exposes only the contextual Discord access gate anonymously, and exposes private sections only to the current authenticated Account;
 - `/users/:userId` remains public/indexable but receives no preferences, mute list, deletion status, placeholder email, or credentials;
 - no local identity editing exists;
 - one persisted theme preference drives both Profile and global toggle;
@@ -229,4 +229,4 @@ git commit -m "test: verify Profile prerequisite contract"
 
 ## Profile plan completion criteria
 
-Home may be declared complete only when its signed-in Profile navigation reaches this real route; current Account public activity and private sections remain clearly separated; theme and mute preferences persist without public leakage; deletion submission immediately hides/restricts the Account through server policy; pending users can cancel; and no ordinary participation flow gains a terms-acceptance gate.
+Home may be declared complete only when anonymous `/profile` renders the contextual access gate without auto-redirecting, successful Discord sign-in returns there, and signed-in Profile navigation reaches the real route; current Account public activity and private sections remain clearly separated; theme and mute preferences persist without public leakage; deletion submission immediately hides/restricts the Account through server policy; pending users can cancel; and no ordinary participation flow gains a terms-acceptance gate.

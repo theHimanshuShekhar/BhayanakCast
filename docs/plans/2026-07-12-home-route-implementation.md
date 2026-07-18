@@ -216,6 +216,9 @@ Cover:
 
 - Discord profile refresh on every sign-in;
 - no-email identity maps to `<discord-id>@discord.placeholder.local` and never enters public projections;
+- Discord `identify` and `email` scopes, with stable Discord user ID as the sole Account identity key and no email-based merging;
+- no sign-up, log-in, or authentication-error page;
+- dedicated `Continue with Discord` controls and action-specific Create/Join controls use one full-page OAuth handoff with allowlisted non-secret returns, accessible pending state, and one-time safe error feedback;
 - seven-day session and one-day update age;
 - sign-out/revocation removes access immediately;
 - arbitrary forwarded headers cannot spoof the trusted Cloudflare client IP;
@@ -474,11 +477,13 @@ Cover:
 - Public default;
 - Private password minimum eight characters and no retrieval;
 - anonymous Create OAuth return reopening a blank form only;
+- anonymous `Create Room` keeps its action label and starts Discord OAuth directly from that action;
 - failed create preserving current membership;
 - successful create entering creator as Host;
 - room-card navigation never auto-joining;
 - private password omitted from OAuth intent;
 - anonymous Join OAuth carries only `roomId`, returns to the same pre-admission projection without membership, discards any private password, and re-evaluates current visibility/capacity/ban/sanction/end gates;
+- anonymous `Join` keeps its action label and starts Discord OAuth directly from that action;
 - public, private, changed-to-Full, and ended targets remain canonical across OAuth return;
 - Full disables Join;
 - missing room returns generic 404;
