@@ -66,9 +66,9 @@ Use a 4px spacing base with primary steps 8, 12, 16, 24, 32, and 48px. Room card
 
 ### Home frame and navigation
 
-At 1280px and above, center a frame capped at 1600px with a 216px left rail, a fluid center constrained to 640–1040px, a 280px right rail, and 24px gaps/padding. The 768–1279px stage uses a 72px icon-only left rail and at least 16px center gutters. Small layouts use 16px gutters, a 56px top brand bar, and a 64px bottom navigation plus safe-area inset.
+At 1280px above, center frame capped 1600px 216px left rail, fluid center constrained to 640–1040px, 280px right rail, 24px gaps/padding. 768–1279px stage uses 72px icon-only left rail and least 16px center gutters. Small layouts use 16px gutters, 56px top brand bar, 64px bottom navigation plus safe-area inset.
 
-The wide rail uses icons with labels and a cobalt inset active marker. The medium icon rail provides accessible names and hover/focus tooltips. Small bottom navigation always shows icon and label for Home, Create, and Profile/Log in; Create is the primary cobalt action, while active destination state remains distinct from destructive/live semantics.
+The wide rail uses icons labels cobalt inset active marker. The medium icon rail provides accessible names and hover/focus tooltips; an anonymous dedicated Discord affordance may use the Discord mark alone only with accessible name and tooltip `Continue with Discord`. Small bottom navigation always shows an icon and label for Home, Create, and Profile when signed in or `Discord` when anonymous. The visible anonymous label is `Discord`; its accessible name is `Continue with Discord`. Create remains the primary cobalt action, while active destination state remains distinct from destructive/live semantics. Neither responsive stage introduces a login page.
 
 ### Motion
 

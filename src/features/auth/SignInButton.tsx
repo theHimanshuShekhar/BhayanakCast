@@ -25,9 +25,9 @@ export function SignInButton({
         provider: 'discord',
         callbackURL: safeOAuthCallbackPath(callbackURL),
       })
-      if (result.error) setError(result.error.message ?? 'Unable to sign in with Discord')
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Unable to sign in with Discord')
+      if (result.error) setError('Unable to sign in with Discord')
+    } catch {
+      setError('Unable to sign in with Discord')
     } finally {
       setIsPending(false)
     }
@@ -44,7 +44,7 @@ export function SignInButton({
         type="button"
         onClick={signIn}
       >
-        {isPending ? 'Signing in…' : label}
+        {isPending ? 'Opening Discord…' : label}
       </button>
       {error && <p className="auth-error" role="alert">{error}</p>}
     </div>
