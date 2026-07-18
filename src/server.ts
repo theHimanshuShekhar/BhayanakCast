@@ -11,6 +11,7 @@ import { handleAuthenticationRequest } from './server/auth/handler'
 import { parseAdminDiscordIds } from './server/auth/session'
 import { bindHomeRuntime } from './server/home/home-functions'
 import { bindPreferenceRuntime } from './server/profile/preference-service'
+import { bindChatMuteRuntime } from './server/profile/chat-mute-service'
 import { homePresence } from './server/home/home-presence'
 import type { ServerRuntime } from './server/runtime'
 export { createServerRuntime } from './server/runtime'
@@ -25,6 +26,7 @@ export function bindServerRuntime(runtime: ServerRuntime) {
   bindAuthRuntime({ pool })
   bindHomeRuntime({ pool })
   bindPreferenceRuntime({ pool })
+  bindChatMuteRuntime({ pool })
 }
 
 const attachedSockets = new WeakMap<HttpServer, SocketServer>()

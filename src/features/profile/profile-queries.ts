@@ -1,21 +1,50 @@
 import { queryOptions } from '@tanstack/react-query'
 import {
+  getChatMutes,
+  muteAccount,
+  unmuteAccount,
+  type MutedAccount,
+} from '../../server/profile/chat-mute-service'
+import {
   getThemePreference,
   setThemePreference,
-  type ThemePreference,
-  type ThemeOverride,
+  type ThemePreference as ThemePreferenceData,
+  type ThemeOverride as ThemeOverrideData,
 } from '../../server/profile/preference-service'
 
 export const themePreferenceQueryKey = ['profile', 'theme-preference'] as const
 export const themePreferenceMutationKey = themePreferenceQueryKey
 
 export function themePreferenceQueryOptions() {
-  return queryOptions<ThemePreference>({
+  return queryOptions<ThemePreferenceData>({
     queryKey: themePreferenceQueryKey,
     queryFn: ({ signal }) => getThemePreference({ signal }),
   })
 }
 
-export function updateThemePreference(theme: ThemeOverride) {
+export function updateThemePreference(theme: ThemeOverrideData) {
   return setThemePreference({ data: { theme } })
+}
+
+export const chatMutesQueryKey = ['profile', 'chat-mutes'] as const
+export const chatMuteMutationKey = ['profile', 'chat-mute'] as const
+
+export interface ChatMutesData {
+  readonly authenticated: boolean
+  readonly mutes: readonly MutedAccount[]
+}
+
+export function chatMutesQueryOptions() {
+  return queryOptions<ChatMutesData>({
+    queryKey: chatMutesQueryKey,
+    queryFn: ({ signal }) => getChatMutes({ signal }),
+  })
+}
+
+export function muteChatAccount(accountId: string) {
+  return muteAccount({ data: { accountId } })
+}
+
+export function unmuteChatAccount(accountId: string) {
+  return unmuteAccount({ data: { accountId } })
 }

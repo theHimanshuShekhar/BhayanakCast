@@ -6,6 +6,7 @@ import { stream } from './streams'
 import { streamSubscription } from './subscriptions'
 
 import { accountPreference } from './preferences'
+import { chatMute } from './chat-mutes'
 export const databaseSchema = {
   ...authSchema,
   accountState,
@@ -16,4 +17,5 @@ export const databaseSchema = {
   stream,
   streamSubscription,
   accountPreference,
+  chatMute,
 }
