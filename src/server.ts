@@ -10,6 +10,7 @@ import {
 import { handleAuthenticationRequest } from './server/auth/handler'
 import { parseAdminDiscordIds } from './server/auth/session'
 import { bindHomeRuntime } from './server/home/home-functions'
+import { bindPreferenceRuntime } from './server/profile/preference-service'
 import { homePresence } from './server/home/home-presence'
 import type { ServerRuntime } from './server/runtime'
 export { createServerRuntime } from './server/runtime'
@@ -21,9 +22,9 @@ export {
 export function bindServerRuntime(runtime: ServerRuntime) {
   const pool = runtime.getDatabasePool()
   if (pool) configuredAuthOrigin(process.env)
-  parseAdminDiscordIds(process.env.ADMIN_DISCORD_IDS)
   bindAuthRuntime({ pool })
   bindHomeRuntime({ pool })
+  bindPreferenceRuntime({ pool })
 }
 
 const attachedSockets = new WeakMap<HttpServer, SocketServer>()

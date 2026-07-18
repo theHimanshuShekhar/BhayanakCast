@@ -8,7 +8,9 @@ import {
   useRouterState,
 } from '@tanstack/react-router'
 import { ThemeToggle } from '../features/theme/ThemeToggle'
-import { THEME_BOOTSTRAP_SCRIPT } from '../features/theme/theme'
+import { createThemeBootstrapScript } from '../features/theme/theme'
+import { getThemePreference } from '../server/profile/preference-service'
+import type { ThemePreference } from '../server/profile/preference-service'
 import '../styles/app.css'
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
@@ -26,6 +28,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       },
     ],
   }),
+  loader: () => getThemePreference(),
   component: RootComponent,
   errorComponent: ({ error, reset }) => (
     <Document>
@@ -45,11 +48,15 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 })
 
 function RootComponent() {
+  const themePreference = Route.useLoaderData()
   const showDisplayControls = useRouterState({
     select: (state) => state.location.pathname !== '/',
   })
   return (
-    <Document showDisplayControls={showDisplayControls}>
+    <Document
+      showDisplayControls={showDisplayControls}
+      themePreference={themePreference}
+    >
       <Outlet />
     </Document>
   )
@@ -58,20 +65,27 @@ function RootComponent() {
 function Document({
   children,
   showDisplayControls = true,
-}: Readonly<{ children: ReactNode; showDisplayControls?: boolean }>) {
+  themePreference = { authenticated: false, theme: null },
+}: Readonly<{
+  children: ReactNode
+  showDisplayControls?: boolean
+  themePreference?: ThemePreference
+}>) {
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
         <script
           data-theme-bootstrap=""
-          dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }}
+          dangerouslySetInnerHTML={{
+            __html: createThemeBootstrapScript(themePreference),
+          }}
         />
         <HeadContent />
       </head>
       <body>
         {showDisplayControls && (
           <div aria-label="Display controls" className="root-controls" role="region">
-            <ThemeToggle />
+            <ThemeToggle initialPreference={themePreference} />
           </div>
         )}
         {children}
