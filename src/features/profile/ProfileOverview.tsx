@@ -1,6 +1,7 @@
 import { PastStreams } from '../home/PastStreams'
 import type { PublicProfileSummary } from '../home/home-types'
 import type { SessionProjection } from '../auth/auth-client'
+import { ThemePreference } from './ThemePreference'
 
 interface ProfileOverviewProps {
   readonly profile: PublicProfileSummary | null
@@ -88,6 +89,7 @@ export function ProfileOverview({ profile, session }: ProfileOverviewProps) {
           <p>Public activity is not available right now.</p>
         )}
       </section>
+      <ThemePreference />
     </main>
   )
 }

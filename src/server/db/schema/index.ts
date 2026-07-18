@@ -5,6 +5,7 @@ import { room } from './rooms'
 import { stream } from './streams'
 import { streamSubscription } from './subscriptions'
 
+import { accountPreference } from './preferences'
 export const databaseSchema = {
   ...authSchema,
   accountState,
@@ -14,4 +15,5 @@ export const databaseSchema = {
   roomBan,
   stream,
   streamSubscription,
+  accountPreference,
 }
