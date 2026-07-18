@@ -1485,6 +1485,57 @@ a {
   border-radius: var(--radius-pill);
   object-fit: cover;
 }
+
+.profile-preference,
+.profile-muted-accounts {
+  margin-top: calc(var(--spacing) * 8);
+  border-top: 1px solid var(--border);
+  padding-top: calc(var(--spacing) * 6);
+}
+
+.profile-preference h2,
+.profile-muted-accounts h2 {
+  margin: 0;
+}
+
+.profile-muted-accounts__list {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+  margin: calc(var(--spacing) * 4) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.profile-muted-accounts__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
+}
+
+.profile-muted-accounts__identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: calc(var(--spacing) * 3);
+}
+
+.profile-muted-accounts__identity img,
+.profile-muted-accounts__avatar-fallback {
+  display: grid;
+  width: calc(var(--spacing) * 12);
+  height: calc(var(--spacing) * 12);
+  flex: none;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  background: var(--action-soft);
+  color: var(--action);
+  object-fit: cover;
+  font-weight: 700;
+}
 @media (min-width: 48rem) {
   html {
     scroll-padding-block: 1rem;

@@ -2,6 +2,7 @@ import { PastStreams } from '../home/PastStreams'
 import type { PublicProfileSummary } from '../home/home-types'
 import type { SessionProjection } from '../auth/auth-client'
 import { ThemePreference } from './ThemePreference'
+import { MutedAccounts } from './MutedAccounts'
 
 interface ProfileOverviewProps {
   readonly profile: PublicProfileSummary | null
@@ -90,6 +91,7 @@ export function ProfileOverview({ profile, session }: ProfileOverviewProps) {
         )}
       </section>
       <ThemePreference />
+      <MutedAccounts />
     </main>
   )
 }

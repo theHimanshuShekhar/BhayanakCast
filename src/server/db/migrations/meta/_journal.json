@@ -57,6 +57,13 @@
       "when": 1784380000000,
       "tag": "0007_persist_theme_preference",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1784388000000,
+      "tag": "0008_chat_mutes",
+      "breakpoints": true
     }
   ]
 }
