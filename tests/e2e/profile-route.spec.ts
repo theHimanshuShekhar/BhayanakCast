@@ -69,8 +69,7 @@ test('authenticated Profile shows only the current Account public projection', a
     await expect(page.getByRole('heading', { name: 'Public activity' })).toBeVisible()
     await expect(page.getByText('Current member room', { exact: true })).toBeVisible()
     await expect(page.getByText('private@example.test', { exact: true })).toHaveCount(0)
-    await expect(page.getByRole('heading', { name: 'Preferences', exact: true })).toHaveCount(0)
-    await expect(page.getByRole('heading', { name: 'Account deletion', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('heading', { name: 'Account deletion', exact: true })).toBeVisible()
     await expect(page.getByText(/will be available in a later update/i)).toHaveCount(0)
   } finally {
     await cleanupPastActivity()

@@ -27,6 +27,7 @@ import {
   RoomRepository,
   type RoomRecord,
 } from './room-repository'
+import { readAccountAccessPolicy } from '../auth/account-access-policy'
 
 const ROOM_CAPACITY = 10
 const SANCTION_DEFAULT_MS = 7 * 24 * 60 * 60 * 1_000
@@ -458,23 +459,29 @@ export class RoomService {
   }
 
   async setDeletionPending(accountId: string, pending: boolean) {
-    await this.transaction(async (client) => {
-      if (!(await this.lockAccount(client, accountId))) {
-        throw new Error(`Unknown Account: ${accountId}`)
-      }
-      const current = pending
-        ? await this.lockCurrentMembership(client, accountId)
-        : null
-      const instant = this.now()
-      await client.query(
-        `INSERT INTO account_state (account_id, deletion_requested_at)
-         VALUES ($1, $2)
-         ON CONFLICT (account_id)
-         DO UPDATE SET deletion_requested_at = EXCLUDED.deletion_requested_at`,
-        [accountId, pending ? instant : null],
-      )
-      if (current) await this.depart(client, current, instant)
-    })
+    await this.transaction((client) =>
+      this.setDeletionPendingInTransaction(client, accountId, pending),
+    )
+  }
+
+  async setDeletionPendingInTransaction(
+    client: PoolClient,
+    accountId: string,
+    pending: boolean,
+  ) {
+    if (!(await this.lockAccount(client, accountId))) {
+      throw new Error(`Unknown Account: ${accountId}`)
+    }
+    const current = pending ? await this.lockCurrentMembership(client, accountId) : null
+    const instant = this.now()
+    await client.query(
+      `INSERT INTO account_state (account_id, deletion_requested_at)
+       VALUES ($1, $2)
+       ON CONFLICT (account_id)
+       DO UPDATE SET deletion_requested_at = EXCLUDED.deletion_requested_at`,
+      [accountId, pending ? instant : null],
+    )
+    if (current) await this.depart(client, current, instant)
   }
 
   async applySanction(input: {
@@ -543,7 +550,8 @@ export class RoomService {
         accountId,
       ])
       if (!accounts.has(hostAccountId)) return { status: 'forbidden' as const }
-      if (!accounts.has(accountId)) return { status: 'not-member' as const }
+      const access = await readAccountAccessPolicy(client, hostAccountId, this.now())
+      if (!access?.canMutate('moderate')) return { status: 'forbidden' as const }
       await this.lockRooms(client, [roomId])
       const instant = this.now()
       if (await this.closeRoomIfDue(client, roomId, instant)) {
@@ -578,6 +586,8 @@ export class RoomService {
       if (!(await this.lockAccount(client, hostAccountId))) {
         return { status: 'forbidden' as const }
       }
+      const access = await readAccountAccessPolicy(client, hostAccountId, this.now())
+      if (!access?.canMutate('moderate')) return { status: 'forbidden' as const }
       await this.lockRooms(client, [roomId])
       const instant = this.now()
       if (await this.closeRoomIfDue(client, roomId, instant)) {
@@ -680,35 +690,15 @@ export class RoomService {
     includeRoomCreation: boolean,
     executor: Pool | PoolClient = this.configuration.pool,
   ): Promise<Restriction | 'unauthenticated' | null> {
-    const instant = this.now()
-    const account = await executor.query<{
-      deletionRequestedAt: Date | null
-    }>(
-      `SELECT state.deletion_requested_at AS "deletionRequestedAt"
-         FROM "user" account
-         LEFT JOIN account_state state ON state.account_id = account.id
-        WHERE account.id = $1`,
-      [accountId],
-    )
-    if (!account.rows[0]) return 'unauthenticated'
-    if (account.rows[0].deletionRequestedAt) return 'account-read-only'
-
-    const sanctions = await executor.query<{ type: SanctionType }>(
-      `SELECT type
-         FROM platform_sanction
-        WHERE account_id = $1
-          AND starts_at <= $2
-          AND lifted_at IS NULL
-          AND (expires_at IS NULL OR expires_at > $2)`,
-      [accountId, instant],
-    )
-    if (sanctions.rows.some((row) => row.type === 'all_access')) {
+    const policy = await readAccountAccessPolicy(executor, accountId, this.now())
+    if (!policy) return 'unauthenticated'
+    if (policy.state === 'pending' || policy.state === 'approved') {
+      return 'account-read-only'
+    }
+    if (policy.sanctionTypes.includes('all_access')) {
       return 'all-access-sanctioned'
     }
-    if (
-      includeRoomCreation &&
-      sanctions.rows.some((row) => row.type === 'room_creation')
-    ) {
+    if (includeRoomCreation && policy.sanctionTypes.includes('room_creation')) {
       return 'room-creation-sanctioned'
     }
     return null

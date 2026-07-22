@@ -64,6 +64,13 @@
       "when": 1784388000000,
       "tag": "0008_chat_mutes",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1784390850407,
+      "tag": "0009_deletion_requests",
+      "breakpoints": true
     }
   ]
 }
