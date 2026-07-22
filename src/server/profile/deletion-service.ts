@@ -5,7 +5,7 @@ import {
   getProductionAuth,
   readSessionProjection,
 } from '../auth/auth'
-import type { RoomService } from '../rooms/room-service'
+import type { AffectedRoomTransition, RoomService } from '../rooms/room-service'
 
 export type DeletionRequestStatus = 'pending' | 'cancelled' | 'rejected' | 'approved'
 export type DeletionAuditEvent = 'submitted' | 'cancelled' | 'rejected' | 'approved'
@@ -32,7 +32,10 @@ interface DeletionRequestRow {
 
 interface DeletionRuntimeState {
   pool?: Pool
-  roomService?: Pick<RoomService, 'setDeletionPending' | 'setDeletionPendingInTransaction'>
+  roomService?: Pick<
+    RoomService,
+    'setDeletionPending' | 'setDeletionPendingInTransaction' | 'publishRoomTransitions'
+  >
   revokeConnections?: (accountId: string) => Promise<void> | void
 }
 
@@ -51,7 +54,7 @@ export function createDeletionService(
   options: {
     readonly roomService?: Pick<
       RoomService,
-      'setDeletionPending' | 'setDeletionPendingInTransaction'
+      'setDeletionPending' | 'setDeletionPendingInTransaction' | 'publishRoomTransitions'
     >
     readonly revokeConnections?: (accountId: string) => Promise<void> | void
     readonly now?: () => Date
@@ -77,6 +80,7 @@ export function createDeletionService(
     },
 
     async submit(accountId: string): Promise<DeletionRequest> {
+      let affectedRooms: readonly AffectedRoomTransition[] = []
       const result = await transaction(pool, async (client) => {
         await lockAccount(client, accountId)
         const existing = await latestRequest(client, accountId, true)
@@ -114,10 +118,15 @@ export function createDeletionService(
            DO UPDATE SET deletion_requested_at = EXCLUDED.deletion_requested_at`,
           [accountId, instant],
         )
-        await options.roomService?.setDeletionPendingInTransaction(client, accountId, true)
+        affectedRooms = (await options.roomService?.setDeletionPendingInTransaction(
+          client,
+          accountId,
+          true,
+        )) ?? []
         await audit(client, requestId, accountId, 'submitted', instant)
         return mapRequest(inserted.rows[0])
       })
+      await options.roomService?.publishRoomTransitions(affectedRooms)
       if (result.status === 'pending') {
         await options.revokeConnections?.(accountId)
       }
@@ -125,7 +134,8 @@ export function createDeletionService(
     },
 
     async cancel(accountId: string): Promise<DeletionCommandResult> {
-      return transaction(pool, async (client) => {
+      let affectedRooms: readonly AffectedRoomTransition[] = []
+      const result = await transaction(pool, async (client) => {
         await lockAccount(client, accountId)
         const existing = await latestRequest(client, accountId, true)
         if (!existing) return { status: 'not-found' as const }
@@ -150,10 +160,16 @@ export function createDeletionService(
             WHERE account_id = $1`,
           [accountId],
         )
-        await options.roomService?.setDeletionPendingInTransaction(client, accountId, false)
+        affectedRooms = (await options.roomService?.setDeletionPendingInTransaction(
+          client,
+          accountId,
+          false,
+        )) ?? []
         await audit(client, existing.requestId, accountId, 'cancelled', instant)
         return mapRequest(updated.rows[0])
       })
+      await options.roomService?.publishRoomTransitions(affectedRooms)
+      return result
     },
 
     async respond(
@@ -161,6 +177,7 @@ export function createDeletionService(
       status: Extract<DeletionRequestStatus, 'approved' | 'rejected'>,
       actorId?: string,
     ): Promise<DeletionCommandResult> {
+      let affectedRooms: readonly AffectedRoomTransition[] = []
       const result = await transaction(pool, async (client) => {
         await lockAccount(client, accountId)
         const existing = await latestRequest(client, accountId, true)
@@ -183,7 +200,11 @@ export function createDeletionService(
               WHERE account_id = $1`,
             [accountId],
           )
-          await options.roomService?.setDeletionPendingInTransaction(client, accountId, false)
+          affectedRooms = (await options.roomService?.setDeletionPendingInTransaction(
+            client,
+            accountId,
+            false,
+          )) ?? []
         } else {
           await client.query(
             `UPDATE account_state
@@ -195,6 +216,7 @@ export function createDeletionService(
         }
         return mapRequest(updated.rows[0])
       })
+      await options.roomService?.publishRoomTransitions(affectedRooms)
       if (result.status === 'approved') {
         await options.revokeConnections?.(accountId)
       }

@@ -5,6 +5,7 @@ import {
   AccountAccessDeniedError,
   requireAccountMutation,
 } from '../auth/account-access-policy'
+import type { HomeEventPublisher } from '../realtime/home-events'
 
 
 export type SubscriptionResult =
@@ -23,12 +24,24 @@ export interface ActiveSubscription {
   readonly streamId: string
   readonly startedAt: Date
 }
-
 export class SubscriptionService {
+  private readonly publishHomeEvent: HomeEventPublisher
+
   constructor(
     private readonly pool: Pool,
     private readonly now: () => Date = () => new Date(),
-  ) {}
+    publishHomeEvent?: HomeEventPublisher,
+  ) {
+    this.publishHomeEvent = publishHomeEvent ?? (() => {})
+  }
+
+  private emitHomeEvent(event: Parameters<HomeEventPublisher>[0]) {
+    try {
+      this.publishHomeEvent(event)
+    } catch {
+      // Home notifications are best effort after the stream transaction commits.
+    }
+  }
 
   async subscribe(
     viewerMembershipId: string,
@@ -118,6 +131,10 @@ export class SubscriptionService {
       if (deadline.getTime() <= instant.getTime()) {
         await endRoom(client, observedViewer.rows[0].roomId, deadline)
         await client.query('COMMIT')
+        this.emitHomeEvent({
+          type: 'room-ended',
+          roomId: observedViewer.rows[0].roomId,
+        })
         return { status: 'stream-unavailable' }
       }
 

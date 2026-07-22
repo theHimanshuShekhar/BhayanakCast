@@ -14,7 +14,6 @@ const dev = await rsbuild.createDevServer()
 const host = process.env.HOST ?? '127.0.0.1'
 const port = Number(process.env.PORT ?? dev.port)
 const runtime = createServerRuntime(process.env)
-bindServerRuntime(runtime)
 const trustedProxyIps = parseTrustedProxyIps(process.env.TRUSTED_PROXY_IPS)
 
 const server = createServer((request, response) => {
@@ -39,8 +38,8 @@ const server = createServer((request, response) => {
     response.end('Page not found')
   })
 })
-
-const sockets = attachSocketServer(server)
+const sockets = attachSocketServer(server, runtime.getDatabasePool())
+bindServerRuntime(runtime, server)
 dev.connectWebSocket({ server })
 server.listen(port, host, async () => {
   await dev.afterListen()

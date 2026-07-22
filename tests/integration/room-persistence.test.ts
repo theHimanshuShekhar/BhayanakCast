@@ -15,6 +15,7 @@ interface Fixture {
   valkey: Redis
   service: RoomService
   now: { value: number }
+  homeEvents: Array<{ readonly type: string; readonly roomId?: string }>
   revokedConnections: string[]
   account(): Promise<string>
   close(): Promise<void>
@@ -42,6 +43,7 @@ async function createFixture(): Promise<Fixture> {
   await valkey.connect()
   const now = { value: Math.max(Date.now(), context.environment.clock.now()) }
   const revokedConnections: string[] = []
+  const homeEvents: Array<{ readonly type: string; readonly roomId?: string }> = []
   const service = new RoomService({
     pool,
     valkey,
@@ -50,6 +52,7 @@ async function createFixture(): Promise<Fixture> {
     revokeConnections: async (accountId) => {
       revokedConnections.push(accountId)
     },
+    publishHomeEvent: (event) => homeEvents.push(event),
   })
   const fixture: Fixture = {
     pool,
@@ -57,6 +60,7 @@ async function createFixture(): Promise<Fixture> {
     service,
     now,
     revokedConnections,
+    homeEvents,
     async account() {
       const id = randomUUID()
       await pool.query(
@@ -353,11 +357,33 @@ describe('room persistence and admission', () => {
     await expect(fixture.service.admit(banned, room.id)).resolves.toMatchObject({
       status: 'banned',
     })
+
     await expect(
       fixture.service.clearBan(owner, room.id, banned),
     ).resolves.toMatchObject({ status: 'cleared' })
     await expect(fixture.service.admit(banned, room.id)).resolves.toMatchObject({
       status: 'joined',
+    })
+  })
+
+  test('publishes a committed room-ended transition when clearBan closes a due room', async () => {
+    const fixture = await createFixture()
+    const owner = await fixture.account()
+    const banned = await fixture.account()
+    const room = created(
+      await fixture.service.createRoom(owner, { name: 'Due clear-ban room' }),
+    )
+    await fixture.service.admit(banned, room.room.id)
+    await fixture.service.banAccount(owner, room.room.id, banned)
+    fixture.homeEvents.length = 0
+    fixture.now.value = room.room.createdAt.getTime() + 12 * HOUR_MS
+
+    await expect(
+      fixture.service.clearBan(owner, room.room.id, banned),
+    ).resolves.toMatchObject({ status: 'ended' })
+    expect(fixture.homeEvents).toContainEqual({
+      type: 'room-ended',
+      roomId: room.room.id,
     })
   })
 

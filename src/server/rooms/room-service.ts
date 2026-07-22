@@ -27,6 +27,7 @@ import {
   RoomRepository,
   type RoomRecord,
 } from './room-repository'
+import type { HomeEventPublisher } from '../realtime/home-events'
 import { readAccountAccessPolicy } from '../auth/account-access-policy'
 
 const ROOM_CAPACITY = 10
@@ -125,24 +126,46 @@ export type RoomInspection =
     }
 
 export type SanctionType = 'room_creation' | 'all_access'
+export interface AffectedRoomTransition {
+  readonly roomId: string
+}
 
 export interface RoomServiceConfiguration {
   readonly pool: Pool
   readonly valkey: Redis
   readonly valkeyPrefix: string
   readonly now?: () => Date
+  readonly publishHomeEvent?: HomeEventPublisher
   readonly revokeConnections: (accountId: string) => Promise<void> | void
 }
 
 export class RoomService {
   private readonly repository: RoomRepository
   private readonly now: () => Date
+  private readonly publishHomeEvent: HomeEventPublisher
   private readonly revokeConnections: (accountId: string) => Promise<void> | void
 
   constructor(private readonly configuration: RoomServiceConfiguration) {
     this.repository = new RoomRepository(configuration.pool)
     this.now = configuration.now ?? (() => new Date())
     this.revokeConnections = configuration.revokeConnections
+    this.publishHomeEvent = configuration.publishHomeEvent ?? (() => {})
+  }
+
+  private emitHomeEvent(event: Parameters<HomeEventPublisher>[0]) {
+    try {
+      this.publishHomeEvent(event)
+    } catch {
+      // Notifications are best effort after the owning mutation commits.
+    }
+  }
+
+  async publishRoomTransitions(
+    transitions: readonly AffectedRoomTransition[],
+  ): Promise<void> {
+    for (const transition of transitions) {
+      await this.publishRoomMembership(transition.roomId)
+    }
   }
 
   async createRoom(
@@ -188,7 +211,8 @@ export class RoomService {
     const passwordHash = normalized.password
       ? await hashPassword(normalized.password)
       : null
-    return this.transaction(async (client) => {
+    const affectedRooms: AffectedRoomTransition[] = []
+    const result: CreateRoomResult = await this.transaction(async (client) => {
       if (!(await this.lockAccount(client, accountId))) {
         return { status: 'unauthenticated' }
       }
@@ -200,6 +224,7 @@ export class RoomService {
         lockedCurrent &&
         (await this.closeRoomIfDue(client, lockedCurrent.roomId, instant))
       ) {
+        affectedRooms.push({ roomId: lockedCurrent.roomId })
         lockedCurrent = null
       }
       if (lockedCurrent) {
@@ -230,6 +255,7 @@ export class RoomService {
         ],
       )
       if (lockedCurrent) await this.depart(client, lockedCurrent, instant)
+      if (lockedCurrent) affectedRooms.push({ roomId: lockedCurrent.roomId })
       await client.query(
         `INSERT INTO room_membership
            (id, room_id, account_id, role, joined_at)
@@ -260,6 +286,12 @@ export class RoomService {
         },
       }
     })
+    if (result.status === 'created') {
+      await this.publishRoomTransitions(affectedRooms)
+      this.emitHomeEvent({ type: 'room-discovery', roomId: result.room.id })
+      await this.publishRoomMembership(result.room.id)
+    }
+    return result
   }
 
   async admit(
@@ -304,7 +336,8 @@ export class RoomService {
       }
     }
 
-    return this.transaction(async (client) => {
+    const affectedRooms: AffectedRoomTransition[] = []
+    const result: AdmitResult = await this.transaction(async (client) => {
       if (!(await this.lockAccount(client, accountId))) {
         return { status: 'unauthenticated' }
       }
@@ -326,6 +359,7 @@ export class RoomService {
         current &&
         (await this.closeRoomIfDue(client, current.roomId, instant))
       ) {
+        affectedRooms.push({ roomId: current.roomId })
         current = null
       }
       if (current?.roomId === roomId) {
@@ -336,6 +370,7 @@ export class RoomService {
       if (!target) return { status: 'not-found' }
       if (target.endedAt || roomExpired(target, instant) || emptyGraceExpired(target, instant)) {
         if (!target.endedAt) {
+          affectedRooms.push({ roomId: target.id })
           await endRoom(client, target.id, roomEndDeadline(target))
         }
         return { status: 'ended' }
@@ -370,6 +405,7 @@ export class RoomService {
         }
       }
 
+      if (current) affectedRooms.push({ roomId: current.roomId })
       if (current) await this.depart(client, current, instant)
       const revived = target.emptyAt !== null
       const role = revived ? 'host' : 'member'
@@ -391,20 +427,30 @@ export class RoomService {
       )
       return { status: 'joined', membership, role, revived }
     })
+    await this.publishRoomTransitions(affectedRooms)
+    if (result.status === 'joined') {
+      this.emitHomeEvent({ type: 'room-discovery', roomId: result.membership.roomId })
+      await this.publishRoomMembership(result.membership.roomId)
+    }
+    return result
   }
 
   async leave(
     accountId: string,
     options: { readonly confirmation?: MembershipConfirmation } = {},
   ): Promise<LeaveResult> {
-    return this.transaction(async (client) => {
+    const affectedRooms: AffectedRoomTransition[] = []
+    let changedRoomId: string | undefined
+    const result: LeaveResult = await this.transaction(async (client) => {
       if (!(await this.lockAccount(client, accountId))) {
         return { status: 'not-member' }
       }
       const current = await this.lockCurrentMembership(client, accountId)
       if (!current) return { status: 'not-member' }
+      changedRoomId = current.roomId
       const instant = this.now()
       if (await this.closeRoomIfDue(client, current.roomId, instant)) {
+        affectedRooms.push({ roomId: current.roomId })
         return { status: 'left', roomState: 'ended' }
       }
       const consequences = await this.sourceConsequences(client, current)
@@ -415,8 +461,16 @@ export class RoomService {
         return this.confirmationRequired(current, consequences)
       }
       const roomState = await this.depart(client, current, instant)
+      affectedRooms.push({ roomId: current.roomId })
       return { status: 'left', roomState }
     })
+    if (result.status === 'left') {
+      await this.publishRoomTransitions(affectedRooms)
+      if (result.roomState !== 'ended' && changedRoomId) {
+        this.emitHomeEvent({ type: 'room-discovery', roomId: changedRoomId })
+      }
+    }
+    return result
   }
 
   async currentMembership(accountId: string): Promise<MembershipProjection | null> {
@@ -459,16 +513,17 @@ export class RoomService {
   }
 
   async setDeletionPending(accountId: string, pending: boolean) {
-    await this.transaction((client) =>
+    const affectedRooms = await this.transaction((client) =>
       this.setDeletionPendingInTransaction(client, accountId, pending),
     )
+    await this.publishRoomTransitions(affectedRooms)
   }
 
   async setDeletionPendingInTransaction(
     client: PoolClient,
     accountId: string,
     pending: boolean,
-  ) {
+  ): Promise<readonly AffectedRoomTransition[]> {
     if (!(await this.lockAccount(client, accountId))) {
       throw new Error(`Unknown Account: ${accountId}`)
     }
@@ -481,7 +536,11 @@ export class RoomService {
        DO UPDATE SET deletion_requested_at = EXCLUDED.deletion_requested_at`,
       [accountId, pending ? instant : null],
     )
-    if (current) await this.depart(client, current, instant)
+    if (current) {
+      await this.depart(client, current, instant)
+      return [{ roomId: current.roomId }]
+    }
+    return []
   }
 
   async applySanction(input: {
@@ -489,6 +548,7 @@ export class RoomService {
     readonly type: SanctionType
     readonly expiresAt?: Date | null
   }) {
+    const affectedRooms: AffectedRoomTransition[] = []
     const removedFromRoom = await this.transaction(async (client) => {
       if (!(await this.lockAccount(client, input.accountId))) {
         throw new Error(`Unknown Account: ${input.accountId}`)
@@ -533,9 +593,11 @@ export class RoomService {
         [input.accountId, instant],
       )
       if (current) await this.depart(client, current, instant)
+      if (current) affectedRooms.push({ roomId: current.roomId })
       await client.query('DELETE FROM session WHERE user_id = $1', [input.accountId])
       return current !== null
     })
+    await this.publishRoomTransitions(affectedRooms)
     if (input.type === 'all_access') {
       await this.revokeConnections(input.accountId)
     }
@@ -544,7 +606,8 @@ export class RoomService {
 
   async banAccount(hostAccountId: string, roomId: string, accountId: string) {
     if (hostAccountId === accountId) return { status: 'invalid-target' as const }
-    return this.transaction(async (client) => {
+    const affectedRooms: AffectedRoomTransition[] = []
+    const result = await this.transaction(async (client) => {
       const accounts = await this.lockAccounts(client, [
         hostAccountId,
         accountId,
@@ -555,6 +618,7 @@ export class RoomService {
       await this.lockRooms(client, [roomId])
       const instant = this.now()
       if (await this.closeRoomIfDue(client, roomId, instant)) {
+        affectedRooms.push({ roomId })
         return { status: 'ended' as const }
       }
       const host = await this.repository.currentMembership(hostAccountId, client, true)
@@ -577,12 +641,16 @@ export class RoomService {
         )
       }
       await this.depart(client, target, instant)
+      affectedRooms.push({ roomId: target.roomId })
       return { status: 'banned' as const }
     })
+    await this.publishRoomTransitions(affectedRooms)
+    return result
   }
 
   async clearBan(hostAccountId: string, roomId: string, accountId: string) {
-    return this.transaction(async (client) => {
+    const affectedRooms: AffectedRoomTransition[] = []
+    const result = await this.transaction(async (client) => {
       if (!(await this.lockAccount(client, hostAccountId))) {
         return { status: 'forbidden' as const }
       }
@@ -591,6 +659,7 @@ export class RoomService {
       await this.lockRooms(client, [roomId])
       const instant = this.now()
       if (await this.closeRoomIfDue(client, roomId, instant)) {
+        affectedRooms.push({ roomId })
         return { status: 'ended' as const }
       }
       const host = await this.repository.currentMembership(hostAccountId, client, true)
@@ -606,11 +675,14 @@ export class RoomService {
       )
       return { status: result.rows[0] ? ('cleared' as const) : ('not-banned' as const) }
     })
+    await this.publishRoomTransitions(affectedRooms)
+    return result
   }
 
   async endDueRooms() {
     const instant = this.now()
-    return this.transaction(async (client) => {
+    const endedRoomIds: string[] = []
+    const count = await this.transaction(async (client) => {
       const due = await client.query<{
         id: string
         createdAt: Date
@@ -631,9 +703,53 @@ export class RoomService {
       )
       for (const room of due.rows) {
         await endRoom(client, room.id, roomEndDeadline(room))
+        endedRoomIds.push(room.id)
       }
       return due.rows.length
     })
+    for (const roomId of endedRoomIds) {
+      this.emitHomeEvent({ type: 'room-ended', roomId })
+    }
+    return count
+  }
+
+  private async publishRoomMembership(roomId: string): Promise<void> {
+    try {
+      const result = await this.configuration.pool.query<{
+        memberCount: number
+        streamCount: number
+        endedAt: Date | null
+      }>(
+        `SELECT count(DISTINCT membership.id)::int AS "memberCount",
+                count(DISTINCT stream.id)::int AS "streamCount",
+                max(room.ended_at) AS "endedAt"
+           FROM room
+           LEFT JOIN room_membership membership
+             ON membership.room_id = room.id
+            AND membership.left_at IS NULL
+           LEFT JOIN stream
+             ON stream.room_id = room.id
+            AND stream.ended_at IS NULL
+          WHERE room.id = $1
+          GROUP BY room.id`,
+        [roomId],
+      )
+      const row = result.rows[0]
+      if (!row) return
+      if (row.endedAt) {
+        this.emitHomeEvent({ type: 'room-ended', roomId })
+        return
+      }
+      this.emitHomeEvent({
+        type: 'room-membership',
+        roomId,
+        memberCount: row.memberCount,
+        streamCount: row.streamCount,
+        state: row.memberCount >= ROOM_CAPACITY ? 'full' : 'live',
+      })
+    } catch {
+      // Projection failures must not turn a committed mutation into a retry.
+    }
   }
 
   private async lockAccount(client: PoolClient, accountId: string) {

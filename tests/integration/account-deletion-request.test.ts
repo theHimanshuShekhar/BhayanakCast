@@ -238,7 +238,9 @@ describe('account deletion requests', () => {
         setDeletionPendingInTransaction: async () => {
           lifecycleStarted()
           await lifecycleHeld
+          return []
         },
+        publishRoomTransitions: async () => undefined,
       },
     })
     const preferences = createPreferenceService(protectedPool)

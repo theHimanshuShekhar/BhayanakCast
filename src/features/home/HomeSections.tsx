@@ -26,13 +26,14 @@ interface HomeSectionsProps {
   readonly rooms: QuerySection<ActiveRoomSummary> & { readonly updating: boolean }
   readonly profiles: QuerySection<PublicProfileSummary> & { readonly updating: boolean }
   readonly pastStreams: QuerySection<PastStreamSummary>
+  readonly realtimeRefreshVersion: number
 }
-
 export function HomeSections({
   search,
   rooms,
   profiles,
   pastStreams,
+  realtimeRefreshVersion,
 }: HomeSectionsProps) {
   const hasActiveDiscoveryContext = Boolean(
     search.q || search.category || search.tags?.length,
@@ -50,6 +51,7 @@ export function HomeSections({
     search.q ?? '',
     search.category ?? '',
     search.tags ?? [],
+    realtimeRefreshVersion,
   ])
   const showPastStreams =
     pastStreams.data === undefined || pastStreams.data.length > 0
