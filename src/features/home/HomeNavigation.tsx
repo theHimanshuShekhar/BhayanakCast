@@ -15,6 +15,7 @@ interface HomeNavigationProps {
   readonly presencePending: boolean
   readonly presenceFailed: boolean
   readonly presenceQueryKey: QueryKey
+  readonly currentPage?: 'home' | 'profile'
 }
 
 export function HomeNavigation({
@@ -23,6 +24,7 @@ export function HomeNavigation({
   presencePending,
   presenceFailed,
   presenceQueryKey,
+  currentPage = 'home',
 }: HomeNavigationProps) {
   return (
     <header
@@ -56,9 +58,9 @@ export function HomeNavigation({
         data-testid="home-bottom-navigation"
       >
         <a
-          aria-current="page"
+          aria-current={currentPage === 'home' ? 'page' : undefined}
           aria-label="Home"
-          className="home-nav-item home-nav-item--current"
+          className={`home-nav-item${currentPage === 'home' ? ' home-nav-item--current' : ''}`}
           data-tooltip="Home"
           href="/"
         >
@@ -68,8 +70,9 @@ export function HomeNavigation({
         <CreateRoomButton className="home-nav-item home-nav-item--create" />
         {session ? (
           <a
+            aria-current={currentPage === 'profile' ? 'page' : undefined}
             aria-label="Profile"
-            className="home-nav-item home-nav-item--profile"
+            className={`home-nav-item home-nav-item--profile${currentPage === 'profile' ? ' home-nav-item--current' : ''}`}
             data-tooltip="Profile"
             href="/profile"
           >
@@ -77,7 +80,10 @@ export function HomeNavigation({
             <span>Profile</span>
           </a>
         ) : (
-          <div className="home-nav-item--profile">
+          <div
+            aria-current={currentPage === 'profile' ? 'page' : undefined}
+            className={`home-nav-item--profile${currentPage === 'profile' ? ' home-nav-item--current' : ''}`}
+          >
             <SignInButton ariaLabel="Profile — sign in with Discord" label="Profile" />
           </div>
         )}
