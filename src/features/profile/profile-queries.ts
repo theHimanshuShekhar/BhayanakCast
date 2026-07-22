@@ -11,6 +11,13 @@ import {
   type ThemePreference as ThemePreferenceData,
   type ThemeOverride as ThemeOverrideData,
 } from '../../server/profile/preference-service'
+import {
+  cancelDeletionRequest,
+  getDeletionRequest,
+  submitDeletionRequest,
+  type DeletionCommandResult,
+  type DeletionRequest,
+} from '../../server/profile/deletion-service'
 
 export const themePreferenceQueryKey = ['profile', 'theme-preference'] as const
 export const themePreferenceMutationKey = themePreferenceQueryKey
@@ -48,3 +55,23 @@ export function muteChatAccount(accountId: string) {
 export function unmuteChatAccount(accountId: string) {
   return unmuteAccount({ data: { accountId } })
 }
+export const deletionRequestQueryKey = ['profile', 'deletion-request'] as const
+export const deletionRequestMutationKey = deletionRequestQueryKey
+
+export function deletionRequestQueryOptions() {
+  return queryOptions<DeletionCommandResult>({
+    queryKey: deletionRequestQueryKey,
+    queryFn: ({ signal }) => getDeletionRequest({ signal }),
+    refetchInterval: (query) => (query.state.data?.status === 'pending' ? 5_000 : false),
+  })
+}
+
+export function submitAccountDeletion() {
+  return submitDeletionRequest()
+}
+
+export function cancelAccountDeletion() {
+  return cancelDeletionRequest()
+}
+
+export type DeletionRequestData = DeletionRequest

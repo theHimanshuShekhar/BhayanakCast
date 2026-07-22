@@ -5,6 +5,7 @@ import {
   getProductionAuth,
   readSessionProjection,
 } from '../auth/auth'
+import { withAccountMutation } from '../auth/account-access-policy'
 
 export type ThemeOverride = 'light' | 'dark' | null
 
@@ -57,13 +58,15 @@ export function createPreferenceService(pool: Pool) {
 
     async setTheme(accountId: string, value: unknown): Promise<ThemeOverride> {
       const theme = parseThemeOverride(value)
-      await pool.query(
-        `INSERT INTO account_preference (account_id, theme)
-         VALUES ($1, $2)
-         ON CONFLICT (account_id) DO UPDATE SET theme = EXCLUDED.theme`,
-        [accountId, theme],
-      )
-      return theme
+      return withAccountMutation(pool, accountId, 'theme', async (client) => {
+        await client.query(
+          `INSERT INTO account_preference (account_id, theme)
+           VALUES ($1, $2)
+           ON CONFLICT (account_id) DO UPDATE SET theme = EXCLUDED.theme`,
+          [accountId, theme],
+        )
+        return theme
+      })
     },
   }
 }

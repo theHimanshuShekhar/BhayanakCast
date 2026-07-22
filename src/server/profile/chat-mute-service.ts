@@ -5,6 +5,7 @@ import {
   getProductionAuth,
   readSessionProjection,
 } from '../auth/auth'
+import { withAccountMutation } from '../auth/account-access-policy'
 
 const MUTE_LIST_LIMIT = 100
 
@@ -39,20 +40,24 @@ export function createChatMuteService(pool: Pool) {
   return {
     async mute(mutingAccountId: string, mutedAccountId: string): Promise<void> {
       assertAccountIds(mutingAccountId, mutedAccountId)
-      await pool.query(
-        `INSERT INTO chat_mute (muting_account_id, muted_account_id)
-         VALUES ($1, $2)
-         ON CONFLICT (muting_account_id, muted_account_id) DO NOTHING`,
-        [mutingAccountId, mutedAccountId],
-      )
+      await withAccountMutation(pool, mutingAccountId, 'chat-mute', async (client) => {
+        await client.query(
+          `INSERT INTO chat_mute (muting_account_id, muted_account_id)
+           VALUES ($1, $2)
+           ON CONFLICT (muting_account_id, muted_account_id) DO NOTHING`,
+          [mutingAccountId, mutedAccountId],
+        )
+      })
     },
 
     async unmute(mutingAccountId: string, mutedAccountId: string): Promise<void> {
       assertAccountIds(mutingAccountId, mutedAccountId)
-      await pool.query(
-        'DELETE FROM chat_mute WHERE muting_account_id = $1 AND muted_account_id = $2',
-        [mutingAccountId, mutedAccountId],
-      )
+      await withAccountMutation(pool, mutingAccountId, 'chat-mute', async (client) => {
+        await client.query(
+          'DELETE FROM chat_mute WHERE muting_account_id = $1 AND muted_account_id = $2',
+          [mutingAccountId, mutedAccountId],
+        )
+      })
     },
 
     async list(mutingAccountId: string): Promise<MutedAccount[]> {

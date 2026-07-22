@@ -1,8 +1,11 @@
+import { useQuery } from '@tanstack/react-query'
 import { PastStreams } from '../home/PastStreams'
 import type { PublicProfileSummary } from '../home/home-types'
 import type { SessionProjection } from '../auth/auth-client'
 import { ThemePreference } from './ThemePreference'
 import { MutedAccounts } from './MutedAccounts'
+import { AccountDeletion } from './AccountDeletion'
+import { deletionRequestQueryOptions } from './profile-queries'
 
 interface ProfileOverviewProps {
   readonly profile: PublicProfileSummary | null
@@ -10,8 +13,10 @@ interface ProfileOverviewProps {
 }
 
 export function ProfileOverview({ profile, session }: ProfileOverviewProps) {
-  const coUserAvatars = profile?.coUsers.filter(({ avatarUrl }) => avatarUrl !== null) ?? []
-
+  const deletionQuery = useQuery(deletionRequestQueryOptions())
+  const deletionPending = deletionQuery.data?.status === 'pending'
+  const visibleProfile = deletionPending ? null : profile
+  const coUserAvatars = visibleProfile?.coUsers.filter(({ avatarUrl }) => avatarUrl !== null) ?? []
   return (
     <main aria-labelledby="profile-heading" className="public-profile">
       <a className="public-profile__home" href="/">
@@ -44,19 +49,19 @@ export function ProfileOverview({ profile, session }: ProfileOverviewProps) {
           <h2 id="public-activity-heading">Public activity</h2>
           <p>Activity visible on your public profile</p>
         </div>
-        {profile ? (
+        {visibleProfile ? (
           <>
             <dl className="public-profile__metrics">
               <div>
                 <dt>Past rooms</dt>
-                <dd>{countLabel(profile.roomCount, 'room')}</dd>
+                <dd>{countLabel(visibleProfile.roomCount, 'room')}</dd>
               </div>
               <div>
                 <dt>Past streams</dt>
-                <dd>{countLabel(profile.streamCount, 'stream')}</dd>
+                <dd>{countLabel(visibleProfile.streamCount, 'stream')}</dd>
               </div>
             </dl>
-            <PastStreams streams={profile.pastStreams} />
+            <PastStreams streams={visibleProfile.pastStreams} />
             {coUserAvatars.length > 0 && (
               <section
                 aria-labelledby="profile-co-users-heading"
@@ -90,8 +95,13 @@ export function ProfileOverview({ profile, session }: ProfileOverviewProps) {
           <p>Public activity is not available right now.</p>
         )}
       </section>
-      <ThemePreference />
-      <MutedAccounts />
+      {!deletionPending && (
+        <>
+          <ThemePreference />
+          <MutedAccounts />
+        </>
+      )}
+      <AccountDeletion />
     </main>
   )
 }
