@@ -1554,6 +1554,9 @@ a {
   .public-profile__home {
     display: none;
   }
+  body:has(.profile-page) > .root-controls {
+    display: none;
+  }
 }
 
 @media (min-width: 48rem) {

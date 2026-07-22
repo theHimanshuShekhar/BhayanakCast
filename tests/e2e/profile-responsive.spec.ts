@@ -70,6 +70,7 @@ test('authenticated Profile keeps navigation and content contained across respon
         for (const heading of ['Public activity', 'Theme preference', 'Muted accounts', 'Account deletion']) {
           await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible()
         }
+        await expect(page.getByRole('button', { name: /theme$/i })).toHaveCount(1)
 
         const identity = page.locator('.public-profile__identity h2')
         await expect(identity).toHaveCSS('overflow-wrap', 'anywhere')
@@ -243,7 +244,7 @@ test('pending Profile state has a stable responsive visual baseline', async ({ a
     await page.setViewportSize({ width: 390, height: 800 })
     await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' })
     await page.goto('/profile')
-    await expect(page.getByRole('status')).toContainText('Deletion request pending')
+    await expect(page.getByRole('region', { name: 'Account deletion' }).getByRole('status')).toContainText('Deletion request pending')
     const cancelButton = page.getByRole('button', { name: 'Cancel deletion request' })
     await cancelButton.evaluate((element) => element.scrollIntoView({ block: 'center' }))
     const cancelClearance = await cancelButton.evaluate((element) => {
