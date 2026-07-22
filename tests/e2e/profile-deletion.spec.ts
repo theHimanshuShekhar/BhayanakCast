@@ -116,7 +116,7 @@ test('pending deletion forcibly disconnects an already connected socket', async 
     await expect(connected.promise).resolves.toBeUndefined()
     await page.getByRole('button', { name: 'Request account deletion' }).click()
     await page.getByRole('dialog').getByRole('button', { name: 'Request deletion now' }).click()
-    await expect(page.getByRole('status')).toContainText('Deletion request pending')
+    await expect(page.getByRole('region', { name: 'Account deletion' }).getByRole('status')).toContainText('Deletion request pending')
     await expect(disconnected.promise).resolves.toBe('io server disconnect')
     expect(socket.connected).toBe(false)
   } finally {
@@ -149,7 +149,7 @@ test('pending deletion hides and cancellation restores public projections across
     await pageA.goto(`${authSessions.origin}/profile`)
     await pageA.getByRole('button', { name: 'Request account deletion' }).click()
     await pageA.getByRole('dialog').getByRole('button', { name: 'Request deletion now' }).click()
-    await expect(pageA.getByRole('status')).toContainText('Deletion request pending')
+    await expect(pageA.getByRole('region', { name: 'Account deletion' }).getByRole('status')).toContainText('Deletion request pending')
 
     await pageB.goto(`${authSessions.origin}/users/${session.id}`)
     await pageB.reload()
@@ -208,7 +208,7 @@ test('denies a real authenticated theme mutation while deletion is pending', asy
 
     await page.getByRole('button', { name: 'Request account deletion' }).click()
     await page.getByRole('dialog').getByRole('button', { name: 'Request deletion now' }).click()
-    await expect(page.getByRole('status')).toContainText('Deletion request pending')
+    await expect(page.getByRole('region', { name: 'Account deletion' }).getByRole('status')).toContainText('Deletion request pending')
 
     const replay = await page.evaluate(
       async ({ url, body, contentType }) => {
@@ -247,7 +247,7 @@ test('service approval invalidates the real Better Auth browser session', async 
     }
     await page.getByRole('button', { name: 'Request account deletion' }).click()
     await page.getByRole('dialog').getByRole('button', { name: 'Request deletion now' }).click()
-    await expect(page.getByRole('status')).toContainText('Deletion request pending')
+    await expect(page.getByRole('region', { name: 'Account deletion' }).getByRole('status')).toContainText('Deletion request pending')
 
     await authSessions.respondToDeletion(session.id, 'approved')
     await page.reload()
@@ -313,7 +313,7 @@ test('external rejection restores pending profile controls in place', async ({
     }
     await page.getByRole('button', { name: 'Request account deletion' }).click()
     await page.getByRole('dialog').getByRole('button', { name: 'Request deletion now' }).click()
-    await expect(page.getByRole('status')).toContainText('Deletion request pending')
+    await expect(page.getByRole('region', { name: 'Account deletion' }).getByRole('status')).toContainText('Deletion request pending')
     await expect(page.getByRole('heading', { name: 'Theme preference' })).toHaveCount(0)
 
     await authSessions.respondToDeletion(session.id, 'rejected')

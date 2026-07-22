@@ -106,8 +106,13 @@ test('failed account update restores the previous effective theme', async ({ aut
   const signedIn = await authSessions.createBrowserContext(ACCOUNT)
   const page = await signedIn.context.newPage()
   await page.emulateMedia({ colorScheme: 'light' })
+  let release!: () => void
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
   await page.route('**/_serverFn/**', async (route) => {
     if (route.request().method() !== 'POST') return route.continue()
+    await held
     await route.fulfill({ status: 500, body: 'preference unavailable' })
   })
   await page.goto(`${authSessions.origin}/profile`)
@@ -116,6 +121,7 @@ test('failed account update restores the previous effective theme', async ({ aut
   await expect(preference).toHaveValue('system')
   await preference.selectOption('dark')
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+  release()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
   await expect(preference).toHaveValue('system')
 })
@@ -176,7 +182,7 @@ test('theme controls disable while one account update is pending', async ({
   const preference = page.getByRole('combobox', { name: 'Theme preference' })
   await preference.selectOption('dark')
   await expect(preference).toBeDisabled()
-  await expect(page.locator('.theme-toggle')).toBeDisabled()
+  await expect(page.getByRole('button', { name: /theme$/i })).toBeDisabled()
   release()
   await expect(preference).toBeEnabled()
 })
