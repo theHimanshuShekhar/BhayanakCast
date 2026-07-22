@@ -6,6 +6,7 @@ import { afterEach, describe, expect, test } from 'vitest'
 import { migrateAuthDatabase } from '../../src/server/db/migrate'
 import { RoomService } from '../../src/server/rooms/room-service'
 import { SubscriptionService } from '../../src/server/streams/subscription-service'
+import type { HomeRealtimeEvent } from '../../src/server/realtime/home-events'
 import { getIntegrationContext } from '../setup/integration'
 
 const resources: Array<{ pool: Pool; valkey: Redis }> = []
@@ -39,7 +40,12 @@ async function setup() {
     now: () => new Date(instant),
     revokeConnections: () => undefined,
   })
-  const subscriptions = new SubscriptionService(pool, () => new Date(instant))
+  const events: HomeRealtimeEvent[] = []
+  const subscriptions = new SubscriptionService(
+    pool,
+    () => new Date(instant),
+    (event) => events.push(event),
+  )
   const account = async () => {
     const id = randomUUID()
     await pool.query(
@@ -52,6 +58,7 @@ async function setup() {
     pool,
     rooms,
     subscriptions,
+    events,
     account,
     now,
     advance: (milliseconds: number) => {
@@ -433,6 +440,10 @@ describe('canonical subscription cleanup during room switching', () => {
     await expect(
       fixture.subscriptions.subscribe(viewerAdmission.membership.id, streamId),
     ).resolves.toMatchObject({ status: 'stream-unavailable' })
+    expect(fixture.events).toContainEqual({
+      type: 'room-ended',
+      roomId: createdRoom.room.id,
+    })
     await expect(
       fixture.subscriptions.current(viewerAdmission.membership.id),
     ).resolves.toBeNull()
