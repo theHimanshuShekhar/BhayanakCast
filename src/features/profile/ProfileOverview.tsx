@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { PastStreams } from '../home/PastStreams'
 import type { PublicProfileSummary } from '../home/home-types'
 import type { SessionProjection } from '../auth/auth-client'
+import { AccountMenu } from '../auth/AccountMenu'
 import { ThemePreference } from './ThemePreference'
 import { MutedAccounts } from './MutedAccounts'
 import { AccountDeletion } from './AccountDeletion'
@@ -41,6 +42,9 @@ export function ProfileOverview({ profile, session }: ProfileOverviewProps) {
             <p>Current Account</p>
             <h2>{session.displayName}</h2>
           </div>
+        </div>
+        <div className="profile-desktop-account">
+          <AccountMenu session={session} />
         </div>
       </header>
 

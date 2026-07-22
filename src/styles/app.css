@@ -593,6 +593,10 @@ a {
   color: var(--action);
 }
 
+.home-nav-item--current .sign-in-button {
+  color: inherit;
+}
+
 .home-nav-item--create {
   color: var(--action);
 }
@@ -1364,6 +1368,14 @@ a {
   font-weight: 750;
 }
 
+.profile-desktop-account {
+  display: none;
+}
+
+.profile-page .profile-navigation {
+  display: contents;
+}
+
 .public-profile {
   width: min(100%, 70rem);
   min-height: 100vh;
@@ -1371,7 +1383,7 @@ a {
   padding:
     max(calc(var(--spacing) * 16), calc(var(--safe-area-top) + 4rem))
     max(calc(var(--spacing) * 4), var(--safe-area-right))
-    max(calc(var(--spacing) * 10), var(--safe-area-bottom))
+    calc(4rem + var(--safe-area-bottom) + 1.5rem)
     max(calc(var(--spacing) * 4), var(--safe-area-left));
 }
 
@@ -1417,7 +1429,7 @@ a {
 }
 
 .public-profile__identity p,
-.public-profile__identity h1 {
+.public-profile__identity h2 {
   margin: 0;
 }
 
@@ -1426,11 +1438,13 @@ a {
   font-size: var(--text-meta);
 }
 
-.public-profile__identity h1 {
+.public-profile__identity h2 {
+  min-width: 0;
   overflow-wrap: anywhere;
   font-size: var(--text-page);
   text-wrap: balance;
 }
+
 
 .public-profile__metrics {
   display: flex;
@@ -1536,7 +1550,31 @@ a {
   object-fit: cover;
   font-weight: 700;
 }
+@media (max-width: 47.999rem) {
+  .public-profile__home {
+    display: none;
+  }
+}
+
 @media (min-width: 48rem) {
+  .profile-navigation .home-navigation {
+    display: none;
+  }
+
+  .profile-desktop-account {
+    display: block;
+    position: relative;
+  }
+
+  .profile-desktop-account .account-menu__popover {
+    position: absolute;
+    inset: calc(100% + 0.5rem) 0 auto auto;
+  }
+
+  .public-profile__identity > div {
+    min-width: 0;
+  }
+
   html {
     scroll-padding-block: 1rem;
   }
