@@ -117,4 +117,24 @@ describe('Home realtime canonical refresh callback', () => {
     retry?.()
     expect(onCanonicalRefresh).toHaveBeenCalledTimes(1)
   })
+  test('surfaces refresh failure when the transport drops during the refresh', async () => {
+    const failure = new Error('canonical refresh failed')
+    mocks.invalidateQueries.mockImplementation((filters: { refetchType?: string }) =>
+      filters.refetchType === 'none' ? Promise.resolve() : Promise.reject(failure),
+    )
+    renderBridge(vi.fn())
+    const cleanup = mocks.effect?.()
+    const disconnect = mocks.handlers.get('disconnect')
+    const connect = mocks.handlers.get('connect')
+    if (!disconnect || !connect || !cleanup || !mocks.ioSocket) throw new Error('bridge did not mount')
+
+    disconnect()
+    connect()
+    mocks.ioSocket.connected = false
+    await flushMicrotasks()
+
+    expect(mocks.state).toBe('error')
+    cleanup()
+  })
+
 })

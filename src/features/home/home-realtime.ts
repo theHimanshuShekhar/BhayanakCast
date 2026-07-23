@@ -71,7 +71,7 @@ export function HomeRealtimeBridge({
         onCanonicalRefreshRef.current()
         setState('idle')
       } catch {
-        if (refreshGeneration === generation && socket.connected && !replaced) {
+        if (refreshGeneration === generation && !replaced) {
           setState('error')
         }
       }
