@@ -13,6 +13,7 @@ const HOUR_MS = 60 * MINUTE_MS
 interface Fixture {
   pool: Pool
   valkey: Redis
+  valkeyPrefix: string
   service: RoomService
   now: { value: number }
   homeEvents: Array<{ readonly type: string; readonly roomId?: string }>
@@ -58,6 +59,7 @@ async function createFixture(): Promise<Fixture> {
     pool,
     valkey,
     service,
+    valkeyPrefix: `${context.environment.valkeyPrefix}room:`,
     now,
     revokedConnections,
     homeEvents,
@@ -190,7 +192,69 @@ describe('room persistence and admission', () => {
     ).resolves.toMatchObject({ memberCount: 10, admission: 'full' })
   })
 
-  test('rejects a confirmation issued for a replaced source membership', async () => {
+
+  test('private room service projections never expose password material', async () => {
+    const fixture = await createFixture()
+    const [owner, member] = await Promise.all([fixture.account(), fixture.account()])
+    const result = created(await fixture.service.createRoom(owner, {
+      name: 'Real private room',
+      visibility: 'private',
+      password: 'correct horse battery',
+    }))
+    expect(JSON.stringify(result)).not.toContain('correct horse battery')
+    expect(JSON.stringify(result)).not.toContain('passwordHash')
+    const boundary = await fixture.service.inspectBoundary(result.room.id, member)
+    expect(JSON.stringify(boundary)).not.toContain('correct horse battery')
+    expect(JSON.stringify(boundary)).not.toContain('passwordHash')
+    await expect(
+      fixture.service.admit(member, result.room.id),
+    ).resolves.toMatchObject({ status: 'password-required' })
+    await expect(
+      fixture.service.admit(member, result.room.id, { password: 'correct horse battery' }),
+    ).resolves.toMatchObject({ status: 'joined' })
+    const stored = await fixture.pool.query<{ passwordHash: string | null }>(
+      'SELECT password_hash AS "passwordHash" FROM room WHERE id = $1',
+      [result.room.id],
+    )
+    expect(stored.rows[0]?.passwordHash).toBeTruthy()
+    expect(stored.rows[0]?.passwordHash).not.toContain('correct horse battery')
+  })
+
+  test('rechecks a target that becomes private while admission waits for its lock', async () => {
+    const fixture = await createFixture()
+    const [sourceOwner, targetOwner] = await Promise.all([
+      fixture.account(),
+      fixture.account(),
+    ])
+    const source = created(
+      await fixture.service.createRoom(sourceOwner, { name: 'Locked source' }),
+    )
+    const target = created(
+      await fixture.service.createRoom(targetOwner, { name: 'Locked target' }),
+    )
+    const client = await fixture.pool.connect()
+    try {
+      await client.query('BEGIN')
+      await client.query('SELECT id FROM room WHERE id = $1 FOR UPDATE', [target.room.id])
+      const admission = fixture.service.admit(sourceOwner, target.room.id)
+      await waitForRoomLockContention(fixture.pool)
+      await client.query(
+        `UPDATE room
+            SET visibility = 'private', password_hash = 'placeholder'
+          WHERE id = $1`,
+        [target.room.id],
+      )
+      await client.query('COMMIT')
+      await expect(admission).resolves.toMatchObject({ status: 'password-required' })
+    } finally {
+      await client.release()
+    }
+    await expect(fixture.service.currentMembership(sourceOwner)).resolves.toMatchObject({
+      id: source.membership.id,
+    })
+  })
+
+  test('rejects a confirmation issued for changed source consequences and command', async () => {
     const fixture = await createFixture()
     const [switchingAccount, targetOwner] = await Promise.all([
       fixture.account(),
@@ -204,12 +268,12 @@ describe('room persistence and admission', () => {
     const target = created(
       await fixture.service.createRoom(targetOwner, { name: 'Target room' }),
     )
-    const originalConfirmation = await fixture.service.admit(
+    const originalConfirmation = await fixture.service.createRoom(
       switchingAccount,
-      target.room.id,
+      { name: 'First replacement' },
     )
     if (originalConfirmation.status !== 'confirmation-required') {
-      throw new Error('Expected original Host transfer confirmation')
+      throw new Error('Expected original create confirmation')
     }
     await fixture.pool.query(
       `INSERT INTO stream (id, room_id, membership_id, started_at)
@@ -223,7 +287,7 @@ describe('room persistence and admission', () => {
     )
     const changedConsequences = await fixture.service.createRoom(
       switchingAccount,
-      { name: 'Must re-confirm' },
+      { name: 'First replacement' },
       { confirmation: originalConfirmation.confirmation },
     )
     expect(changedConsequences).toMatchObject({
@@ -236,7 +300,7 @@ describe('room persistence and admission', () => {
     const replacement = created(
       await fixture.service.createRoom(
         switchingAccount,
-        { name: 'Replacement source' },
+        { name: 'First replacement' },
         { confirmation: changedConsequences.confirmation },
       ),
     )
@@ -253,6 +317,51 @@ describe('room persistence and admission', () => {
     await expect(
       fixture.service.currentMembership(switchingAccount),
     ).resolves.toMatchObject({ id: replacement.membership.id })
+  })
+
+  test('rejects forged and replayed confirmation tokens on the same source', async () => {
+    const fixture = await createFixture()
+    const owner = await fixture.account()
+    const source = created(await fixture.service.createRoom(owner, { name: 'Token source' }))
+    const required = await fixture.service.createRoom(owner, { name: 'Token replacement' })
+    if (required.status !== 'confirmation-required') throw new Error('Expected confirmation')
+    const key = `${fixture.valkeyPrefix}:room-confirmation:${required.confirmation.token}`
+    const forged = {
+      ...required.confirmation,
+      token: randomUUID(),
+      issuedAt: new Date(fixture.now.value),
+    }
+    await expect(
+      fixture.service.createRoom(owner, { name: 'Forged replacement' }, { confirmation: forged }),
+    ).resolves.toMatchObject({ status: 'confirmation-required' })
+    await expect(fixture.service.currentMembership(owner)).resolves.toMatchObject({
+      id: source.membership.id,
+    })
+
+    const confirmed = created(
+      await fixture.service.createRoom(owner, { name: 'Token replacement' }, {
+        confirmation: required.confirmation,
+      }),
+    )
+    await expect(fixture.valkey.exists(key)).resolves.toBe(0)
+    await fixture.pool.query(
+      'DELETE FROM room_membership WHERE id = $1',
+      [confirmed.membership.id],
+    )
+    await fixture.pool.query(
+      'UPDATE room_membership SET left_at = NULL WHERE id = $1',
+      [source.membership.id],
+    )
+    await fixture.pool.query('DELETE FROM room WHERE id = $1', [confirmed.room.id])
+    await expect(fixture.service.currentMembership(owner)).resolves.toMatchObject({
+      id: source.membership.id,
+    })
+    await expect(
+      fixture.service.createRoom(owner, { name: 'Token replacement' }, {
+        confirmation: required.confirmation,
+      }),
+    ).resolves.toMatchObject({ status: 'confirmation-required' })
+    await expect(fixture.valkey.exists(key)).resolves.toBe(0)
   })
 
   test('ends an overdue source before creating a replacement without confirmation', async () => {

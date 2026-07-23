@@ -12,6 +12,7 @@ import { handleAuthenticationRequest } from './server/auth/handler'
 import { parseAdminDiscordIds } from './server/auth/session'
 import { readAccountAccessPolicy } from './server/auth/account-access-policy'
 import { bindHomeRuntime } from './server/home/home-functions'
+import { bindRoomService } from './features/home/create-room'
 import { bindPreferenceRuntime } from './server/profile/preference-service'
 import { bindChatMuteRuntime } from './server/profile/chat-mute-service'
 import { homePresence } from './server/home/home-presence'
@@ -41,19 +42,21 @@ export function bindServerRuntime(runtime: ServerRuntime, server: HttpServer) {
   bindHomeRuntime({ pool })
   bindPreferenceRuntime({ pool })
   const valkey = runtime.getValkey()
+  const roomService =
+    pool && valkey
+      ? new RoomService({
+          pool,
+          valkey,
+          valkeyPrefix: `${runtime.bindings.valkeyPrefix}room:`,
+          publishHomeEvent: (event) => publishHomeEvent(server, event),
+          now: () => new Date(runtime.clock.now()),
+          revokeConnections: () => undefined,
+        })
+      : undefined
+  if (roomService) bindRoomService(roomService)
   bindDeletionRuntime({
     pool,
-    roomService:
-      pool && valkey
-        ? new RoomService({
-            pool,
-            valkey,
-            valkeyPrefix: `${runtime.bindings.valkeyPrefix}room:`,
-            publishHomeEvent: (event) => publishHomeEvent(server, event),
-            now: () => new Date(runtime.clock.now()),
-            revokeConnections: () => undefined,
-          })
-        : undefined,
+    roomService,
   })
   bindChatMuteRuntime({ pool })
 }

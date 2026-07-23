@@ -33,10 +33,11 @@ async function setup() {
   resources.push({ pool, valkey })
   let instant = Date.now()
   const now = instant
+  const valkeyPrefix = `${context.environment.valkeyPrefix}switch:`
   const rooms = new RoomService({
     pool,
     valkey,
-    valkeyPrefix: `${context.environment.valkeyPrefix}switch:`,
+    valkeyPrefix,
     now: () => new Date(instant),
     revokeConnections: () => undefined,
   })
@@ -55,6 +56,8 @@ async function setup() {
     return id
   }
   return {
+    valkey,
+    valkeyPrefix,
     pool,
     rooms,
     subscriptions,
@@ -249,6 +252,186 @@ describe('canonical subscription cleanup during room switching', () => {
     )
     expect(streamAfterSwitch.rows[0]?.ended_at).toEqual(expect.any(Date))
     expect(streamAfterSwitch.rows[0]?.preview_key).toBeNull()
+  })
+
+  test('retains a confirmation token when PostgreSQL COMMIT fails', async () => {
+    const fixture = await setup()
+    const [sourceOwner, switchingAccount, targetOwner] = await Promise.all([
+      fixture.account(),
+      fixture.account(),
+      fixture.account(),
+    ])
+    const source = created(
+      await fixture.rooms.createRoom(sourceOwner, { name: 'Commit source' }),
+    )
+    const switchingMembership = await fixture.rooms.admit(
+      switchingAccount,
+      source.room.id,
+    )
+    expect(switchingMembership.status).toBe('joined')
+    if (switchingMembership.status !== 'joined') throw new Error('Expected source admission')
+    const target = created(
+      await fixture.rooms.createRoom(targetOwner, { name: 'Commit target' }),
+    )
+    const sourceStreamId = randomUUID()
+    await fixture.pool.query(
+      'INSERT INTO stream (id, room_id, membership_id, started_at) VALUES ($1, $2, $3, $4)',
+      [sourceStreamId, source.room.id, switchingMembership.membership.id, new Date(fixture.now)],
+    )
+    const confirmationRequired = await fixture.rooms.admit(
+      switchingAccount,
+      target.room.id,
+    )
+    expect(confirmationRequired.status).toBe('confirmation-required')
+    if (confirmationRequired.status !== 'confirmation-required') {
+      throw new Error('Expected source consequence confirmation')
+    }
+
+    await fixture.pool.query(`
+      CREATE FUNCTION reject_commit_membership() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.room_id = '${target.room.id}'::uuid THEN
+          RAISE EXCEPTION 'injected COMMIT failure';
+        END IF;
+        RETURN NEW;
+      END
+      $$;
+      CREATE CONSTRAINT TRIGGER reject_commit_membership
+      AFTER INSERT ON room_membership
+      DEFERRABLE INITIALLY DEFERRED
+      FOR EACH ROW EXECUTE FUNCTION reject_commit_membership();
+    `)
+    await expect(
+      fixture.rooms.admit(switchingAccount, target.room.id, {
+        confirmation: confirmationRequired.confirmation,
+      }),
+    ).rejects.toThrow('injected COMMIT failure')
+    await fixture.pool.query(`
+      DROP TRIGGER reject_commit_membership ON room_membership;
+      DROP FUNCTION reject_commit_membership();
+    `)
+
+    await expect(
+      fixture.rooms.currentMembership(switchingAccount),
+    ).resolves.toMatchObject({ roomId: source.room.id })
+    const sourceStream = await fixture.pool.query(
+      'SELECT ended_at FROM stream WHERE id = $1',
+      [sourceStreamId],
+    )
+    expect(sourceStream.rows[0]?.ended_at).toBeNull()
+    await expect(
+      fixture.rooms.admit(switchingAccount, target.room.id, {
+        confirmation: confirmationRequired.confirmation,
+      }),
+    ).resolves.toMatchObject({ status: 'joined' })
+  })
+
+  test('returns a fresh confirmation after the Valkey token actually expires', async () => {
+    const fixture = await setup()
+    const [sourceOwner, switchingAccount, targetOwner] = await Promise.all([
+      fixture.account(),
+      fixture.account(),
+      fixture.account(),
+    ])
+    const source = created(
+      await fixture.rooms.createRoom(sourceOwner, { name: 'Expiry source' }),
+    )
+    const switchingMembership = await fixture.rooms.admit(
+      switchingAccount,
+      source.room.id,
+    )
+    expect(switchingMembership.status).toBe('joined')
+    if (switchingMembership.status !== 'joined') throw new Error('Expected source admission')
+    const target = created(
+      await fixture.rooms.createRoom(targetOwner, { name: 'Expiry target' }),
+    )
+    const sourceStreamId = randomUUID()
+    await fixture.pool.query(
+      'INSERT INTO stream (id, room_id, membership_id, started_at) VALUES ($1, $2, $3, $4)',
+      [sourceStreamId, source.room.id, switchingMembership.membership.id, new Date(fixture.now)],
+    )
+    const confirmationRequired = await fixture.rooms.admit(
+      switchingAccount,
+      target.room.id,
+    )
+    expect(confirmationRequired.status).toBe('confirmation-required')
+    if (confirmationRequired.status !== 'confirmation-required') {
+      throw new Error('Expected source consequence confirmation')
+    }
+    const key = `${fixture.valkeyPrefix}:room-confirmation:${confirmationRequired.confirmation.token}`
+    const pttl = await fixture.valkey.pttl(key)
+    expect(pttl).toBeGreaterThan(0)
+    expect(pttl).toBeLessThanOrEqual(5 * 60 * 1_000)
+    await fixture.valkey.pexpireat(key, Date.now() - 1)
+    expect(await fixture.valkey.pttl(key)).toBe(-2)
+
+    const staleAttempt = await fixture.rooms.admit(
+      switchingAccount,
+      target.room.id,
+      { confirmation: confirmationRequired.confirmation },
+    )
+    expect(staleAttempt.status).toBe('confirmation-required')
+    if (staleAttempt.status !== 'confirmation-required') {
+      throw new Error('Expected a fresh confirmation after expiry')
+    }
+    expect(staleAttempt.confirmation.token).not.toBe(
+      confirmationRequired.confirmation.token,
+    )
+    await expect(
+      fixture.rooms.currentMembership(switchingAccount),
+    ).resolves.toMatchObject({ roomId: source.room.id })
+    const sourceStream = await fixture.pool.query(
+      'SELECT ended_at FROM stream WHERE id = $1',
+      [sourceStreamId],
+    )
+    expect(sourceStream.rows[0]?.ended_at).toBeNull()
+  })
+
+  test('rejects a concurrent replay of the same confirmation token', async () => {
+    const fixture = await setup()
+    const [sourceOwner, switchingAccount, targetOwner] = await Promise.all([
+      fixture.account(),
+      fixture.account(),
+      fixture.account(),
+    ])
+    const source = created(
+      await fixture.rooms.createRoom(sourceOwner, { name: 'Replay source' }),
+    )
+    const switchingMembership = await fixture.rooms.admit(
+      switchingAccount,
+      source.room.id,
+    )
+    expect(switchingMembership.status).toBe('joined')
+    if (switchingMembership.status !== 'joined') throw new Error('Expected source admission')
+    const target = created(
+      await fixture.rooms.createRoom(targetOwner, { name: 'Replay target' }),
+    )
+    await fixture.pool.query(
+      'INSERT INTO stream (id, room_id, membership_id, started_at) VALUES ($1, $2, $3, $4)',
+      [randomUUID(), source.room.id, switchingMembership.membership.id, new Date(fixture.now)],
+    )
+    const confirmationRequired = await fixture.rooms.admit(
+      switchingAccount,
+      target.room.id,
+    )
+    expect(confirmationRequired.status).toBe('confirmation-required')
+    if (confirmationRequired.status !== 'confirmation-required') {
+      throw new Error('Expected source consequence confirmation')
+    }
+
+    const attempts = await Promise.all([
+      fixture.rooms.admit(switchingAccount, target.room.id, {
+        confirmation: confirmationRequired.confirmation,
+      }),
+      fixture.rooms.admit(switchingAccount, target.room.id, {
+        confirmation: confirmationRequired.confirmation,
+      }),
+    ])
+    expect(attempts.map(({ status }) => status).sort()).toEqual([
+      'already-member',
+      'joined',
+    ])
   })
 
   test('replaces the viewer sole active remote subscription target-first', async () => {

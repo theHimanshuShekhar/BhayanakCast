@@ -2100,3 +2100,217 @@ a {
     animation-name: none !important;
   }
 }
+.create-room-dialog,
+.membership-consequences-dialog {
+  width: min(38rem, calc(100vw - 2rem));
+  max-width: 100%;
+  max-height: min(46rem, calc(100dvh - 2rem));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-raised);
+  color: var(--ink);
+  padding: 0;
+}
+
+.create-room-dialog::backdrop,
+.membership-consequences-dialog::backdrop {
+  background: rgb(9 14 26 / 0.66);
+}
+
+.create-room-dialog__panel,
+.membership-consequences-dialog__panel {
+  display: grid;
+  gap: 1rem;
+  max-height: inherit;
+  overflow: auto;
+  padding: 1.5rem;
+}
+
+.create-room-dialog__panel h2,
+.membership-consequences-dialog__panel h2 {
+  margin: 0;
+  font-size: var(--text-section);
+}
+
+.create-room-dialog__panel > label,
+.room-boundary__password {
+  display: grid;
+  gap: 0.375rem;
+  color: var(--ink-secondary);
+  font-weight: 650;
+}
+
+.create-room-dialog input,
+.room-boundary__password input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  padding: 0.625rem 0.75rem;
+}
+
+.create-room-dialog fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 0.75rem;
+}
+
+.create-room-dialog fieldset label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.form-hint {
+  color: var(--ink-muted);
+  font-size: var(--text-label);
+  font-weight: 450;
+}
+
+.form-error {
+  margin: 0;
+  color: var(--danger);
+  font-weight: 650;
+}
+
+.create-room-dialog__actions,
+.membership-consequences-dialog__actions,
+.room-boundary__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.create-room-dialog button,
+.membership-consequences-dialog button,
+.room-boundary button,
+.room-boundary__back {
+  min-height: 2.75rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--ink);
+  cursor: pointer;
+  padding: 0.5rem 0.875rem;
+  text-decoration: none;
+}
+
+.create-room-dialog button:last-child,
+.membership-consequences-dialog button:last-child,
+.room-boundary button {
+  border-color: var(--action);
+  background: var(--action);
+  color: var(--action-ink);
+}
+
+.create-room-dialog button:disabled,
+.membership-consequences-dialog button:disabled,
+.room-boundary button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.room-boundary {
+  width: min(44rem, calc(100% - 2rem));
+  min-height: min(40rem, calc(100dvh - 2rem));
+  box-sizing: border-box;
+  margin: 2rem auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-raised);
+  padding: clamp(1.25rem, 4vw, 3rem);
+}
+
+.room-boundary h1 {
+  margin: 0;
+  font-size: clamp(2rem, 5vw, 3rem);
+}
+
+.room-boundary__eyebrow {
+  margin: 0 0 0.5rem;
+  color: var(--ink-secondary);
+  font-size: var(--text-label);
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.room-boundary__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: 0.75rem;
+  margin: 2rem 0;
+}
+
+.room-boundary__facts div {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-subtle);
+  padding: 0.75rem;
+}
+
+.room-boundary__facts dt {
+  color: var(--ink-muted);
+  font-size: var(--text-label);
+}
+
+.room-boundary__facts dd {
+  margin: 0.25rem 0 0;
+  font-size: var(--text-card);
+  font-weight: 700;
+}
+
+.room-boundary__actions {
+  justify-content: space-between;
+  margin-top: 2rem;
+}
+
+.room-boundary__error {
+  width: min(44rem, calc(100% - 2rem));
+  margin: -1rem auto 1rem;
+}
+
+@media (max-width: 47.999rem) {
+  .create-room-dialog,
+  .membership-consequences-dialog {
+    width: 100%;
+    max-width: none;
+    height: 100dvh;
+    max-height: none;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .create-room-dialog__panel,
+  .membership-consequences-dialog__panel {
+    min-height: 100%;
+    box-sizing: border-box;
+    padding:
+      max(1rem, var(--safe-area-top))
+      max(1rem, var(--safe-area-right))
+      max(1rem, calc(var(--safe-area-bottom) + 1rem))
+      max(1rem, var(--safe-area-left));
+  }
+
+  .room-boundary {
+    width: 100%;
+    min-height: 100dvh;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    padding:
+      max(1.25rem, var(--safe-area-top))
+      max(1rem, var(--safe-area-right))
+      max(1.25rem, calc(var(--safe-area-bottom) + 1rem))
+      max(1rem, var(--safe-area-left));
+  }
+}
