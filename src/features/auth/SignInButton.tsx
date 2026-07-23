@@ -60,5 +60,9 @@ export function safeOAuthCallbackPath(value: string | undefined) {
   ) {
     return '/'
   }
-  return new URL(value, 'http://local').pathname
+  const url = new URL(value, 'http://local')
+  if (url.pathname === '/' && url.searchParams.get('intent') === 'create') {
+    return '/?intent=create'
+  }
+  return url.pathname
 }

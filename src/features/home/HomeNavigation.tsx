@@ -1,4 +1,5 @@
 import type { QueryKey } from '@tanstack/react-query'
+import { useState } from 'react'
 import { AccountMenu } from '../auth/AccountMenu'
 import { SignInButton } from '../auth/SignInButton'
 import type { SessionProjection } from '../auth/auth-client'
@@ -8,6 +9,15 @@ import { HomeMetricsSkeleton } from './HomeSectionSkeletons'
 import type { ConnectedPresence } from './home-types'
 
 export const CREATE_ROOM_EVENT = 'bhayanakcast:create-room'
+
+export interface CreateRoomControlState {
+  readonly pending: boolean
+  readonly error: string | null
+}
+
+export interface CreateRoomEventDetail {
+  readonly setState: (state: CreateRoomControlState) => void
+}
 
 interface HomeNavigationProps {
   readonly session: SessionProjection | null
@@ -112,17 +122,39 @@ export function CreateRoomButton({
   className,
   label = 'Create',
 }: Readonly<{ className?: string; label?: string }>) {
+  const [state, setState] = useState<CreateRoomControlState>({
+    pending: false,
+    error: null,
+  })
+  const accessibleLabel = state.pending
+    ? 'Opening Discord…'
+    : label === 'Create'
+      ? 'Create room'
+      : label
   return (
-    <button
-      aria-label={label === 'Create' ? 'Create room' : label}
-      className={className}
-      data-tooltip="Create room"
-      type="button"
-      onClick={() => window.dispatchEvent(new Event(CREATE_ROOM_EVENT))}
-    >
-      <CreateIcon />
-      <span>{label}</span>
-    </button>
+    <>
+      <button
+        aria-busy={state.pending || undefined}
+        aria-label={accessibleLabel}
+        className={className}
+        data-tooltip="Create room"
+        disabled={state.pending}
+        type="button"
+        onClick={() => {
+          window.dispatchEvent(new CustomEvent<CreateRoomEventDetail>(CREATE_ROOM_EVENT, {
+            detail: { setState },
+          }))
+        }}
+      >
+        <CreateIcon />
+        <span>{state.pending ? 'Opening Discord…' : label}</span>
+      </button>
+      {state.error && (
+        <span className="form-error" role="alert">
+          {state.error}
+        </span>
+      )}
+    </>
   )
 }
 

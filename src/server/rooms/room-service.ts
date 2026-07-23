@@ -1,4 +1,5 @@
 import {
+  createHash,
   randomBytes,
   randomUUID,
   scrypt as scryptCallback,
@@ -19,6 +20,7 @@ import {
 } from './end-room'
 import {
   normalizeRoomInput,
+  type NormalizedRoomInput,
   type RoomInput,
   type RoomVisibility,
 } from './room-policy'
@@ -32,9 +34,22 @@ import { readAccountAccessPolicy } from '../auth/account-access-policy'
 
 const ROOM_CAPACITY = 10
 const SANCTION_DEFAULT_MS = 7 * 24 * 60 * 60 * 1_000
+const confirmationProposalDigest = (input: NormalizedRoomInput) =>
+  createHash('sha256')
+    .update(JSON.stringify({
+      name: input.name,
+      category: input.category ?? null,
+      tags: input.tags,
+      visibility: input.visibility,
+      password: input.password ?? null,
+    }))
+    .digest('hex')
+const CONFIRMATION_TTL_MS = 5 * 60 * 1_000
 const deriveKey = promisify(scryptCallback)
 
 type Consequence = 'transfer-host' | 'stop-stream'
+
+export type ConfirmationCommand = 'create' | 'admit' | 'leave'
 type Restriction =
   | 'account-read-only'
   | 'room-creation-sanctioned'
@@ -59,6 +74,10 @@ export interface MembershipProjection {
 }
 
 export interface MembershipConfirmation {
+  readonly token?: string
+  readonly issuedAt?: Date
+  readonly command: ConfirmationCommand
+  readonly target: string
   readonly sourceMembershipId: string
   readonly consequences: readonly Consequence[]
 }
@@ -67,6 +86,10 @@ interface ConfirmationRequired {
   readonly status: 'confirmation-required'
   readonly consequences: readonly Consequence[]
   readonly confirmation: MembershipConfirmation
+}
+
+interface ConfirmationStale {
+  readonly status: 'confirmation-stale'
 }
 
 export type CreateRoomResult =
@@ -80,6 +103,7 @@ export type CreateRoomResult =
   | { readonly status: 'rate-limited'; readonly retryAfterSeconds: number }
   | { readonly status: 'rate-limit-unavailable' }
   | ConfirmationRequired
+  | ConfirmationStale
 
 export interface AdmitOptions {
   readonly password?: string
@@ -102,10 +126,12 @@ export type AdmitResult =
   | { readonly status: 'rate-limited'; readonly retryAfterSeconds: number }
   | { readonly status: 'rate-limit-unavailable' }
   | ConfirmationRequired
+  | ConfirmationStale
 
 export type LeaveResult =
   | { readonly status: 'not-member' }
   | ConfirmationRequired
+  | ConfirmationStale
   | {
       readonly status: 'left'
       readonly roomState: 'active' | 'empty-grace' | 'ended'
@@ -126,6 +152,29 @@ export type RoomInspection =
     }
 
 export type SanctionType = 'room_creation' | 'all_access'
+interface RoomBoundaryDetails {
+  readonly id: string
+  readonly name: string
+  readonly category: string | null
+  readonly tags: readonly string[]
+  readonly visibility: RoomVisibility
+  readonly memberCount: number
+  readonly streamCount: number
+  readonly expiresAt: Date
+  readonly admission: 'open' | 'password-required' | 'full' | 'member' | 'ended'
+  readonly viewerAuthenticated: boolean
+}
+export type RoomBoundaryProjection =
+  | { readonly status: 'not-found'; readonly viewerAuthenticated: boolean }
+  | (RoomBoundaryDetails & {
+      readonly status: 'pre-admission' | 'ended'
+      readonly membership: null
+    })
+  | (RoomBoundaryDetails & {
+      readonly status: 'admitted'
+      readonly admission: 'member'
+      readonly membership: Pick<MembershipProjection, 'role' | 'id'>
+    })
 export interface AffectedRoomTransition {
   readonly roomId: string
 }
@@ -175,6 +224,7 @@ export class RoomService {
   ): Promise<CreateRoomResult> {
     if (!accountId) return { status: 'unauthenticated' }
     const normalized = normalizeRoomInput(input)
+    const proposal = confirmationProposalDigest(normalized)
     const restriction = await this.restriction(accountId, true)
     if (restriction) return { status: restriction }
 
@@ -186,15 +236,20 @@ export class RoomService {
       current &&
       currentRoom &&
       !currentRoom.endedAt &&
-      roomEndDeadline(currentRoom).getTime() > this.now().getTime() &&
-      !options.confirmation
+      roomEndDeadline(currentRoom).getTime() > this.now().getTime()
     ) {
       const consequences = await this.sourceConsequences(
         this.configuration.pool,
         current,
       )
-      if (consequences.length > 0) {
-        return this.confirmationRequired(current, consequences)
+      if (consequences.length > 0 && !options.confirmation) {
+        return this.confirmationRequired(
+          accountId,
+          current,
+          consequences,
+          'create',
+          proposal,
+        )
       }
     }
 
@@ -211,6 +266,13 @@ export class RoomService {
     const passwordHash = normalized.password
       ? await hashPassword(normalized.password)
       : null
+    let validatedConfirmation:
+      | {
+          readonly confirmation: MembershipConfirmation
+          readonly membership: CurrentMembership
+          readonly consequences: readonly Consequence[]
+        }
+      | undefined
     const affectedRooms: AffectedRoomTransition[] = []
     const result: CreateRoomResult = await this.transaction(async (client) => {
       if (!(await this.lockAccount(client, accountId))) {
@@ -229,12 +291,42 @@ export class RoomService {
       }
       if (lockedCurrent) {
         const consequences = await this.sourceConsequences(client, lockedCurrent)
-        if (
-          consequences.length > 0 &&
-          !confirmationMatches(options.confirmation, lockedCurrent, consequences)
-        ) {
-          return this.confirmationRequired(lockedCurrent, consequences)
+        if (options.confirmation) {
+          if (
+            options.confirmation.sourceMembershipId !== lockedCurrent.id ||
+            !(await this.confirmationMatches(
+              accountId,
+              options.confirmation,
+              lockedCurrent,
+              consequences,
+              'create',
+              proposal,
+            ))
+          ) {
+            return await this.confirmationRequired(
+              accountId,
+              lockedCurrent,
+              consequences,
+              'create',
+              proposal,
+            )
+          }
+          validatedConfirmation = {
+            confirmation: options.confirmation,
+            membership: lockedCurrent,
+            consequences,
+          }
+        } else if (consequences.length > 0) {
+          return await this.confirmationRequired(
+            accountId,
+            lockedCurrent,
+            consequences,
+            'create',
+            proposal,
+          )
         }
+      } else if (options.confirmation) {
+        return { status: 'confirmation-stale' }
       }
 
       const roomId = randomUUID()
@@ -264,19 +356,17 @@ export class RoomService {
       )
       return {
         status: 'created',
-        room: roomProjection(
-          {
-            id: roomId,
-            name: normalized.name,
-            category: normalized.category ?? null,
-            tags: normalized.tags,
-            visibility: normalized.visibility,
-            passwordHash,
-            createdAt: instant,
-            emptyAt: null,
-            endedAt: null,
-          },
-        ),
+        room: roomProjection({
+          id: roomId,
+          name: normalized.name,
+          category: normalized.category ?? null,
+          tags: normalized.tags,
+          visibility: normalized.visibility,
+          passwordHash,
+          createdAt: instant,
+          emptyAt: null,
+          endedAt: null,
+        }),
         membership: {
           id: membershipId,
           roomId,
@@ -286,6 +376,16 @@ export class RoomService {
         },
       }
     })
+    if (result.status === 'created' && validatedConfirmation) {
+      await this.consumeConfirmation(
+        accountId,
+        validatedConfirmation.confirmation,
+        validatedConfirmation.membership,
+        validatedConfirmation.consequences,
+        'create',
+        proposal,
+      ).catch(() => false)
+    }
     if (result.status === 'created') {
       await this.publishRoomTransitions(affectedRooms)
       this.emitHomeEvent({ type: 'room-discovery', roomId: result.room.id })
@@ -310,6 +410,7 @@ export class RoomService {
     if (!initialRoom) return { status: 'not-found' }
     if (initialRoom.endedAt) return { status: 'ended' }
 
+    let initialPasswordChecked = false
     if (initialRoom.visibility === 'private') {
       const initialCurrent = await this.repository.currentMembership(accountId)
       if (initialCurrent?.roomId !== roomId) {
@@ -333,9 +434,17 @@ export class RoomService {
         ) {
           return { status: 'invalid-password' }
         }
-      }
+        initialPasswordChecked = true
     }
+      }
 
+    let validatedConfirmation:
+      | {
+          readonly confirmation: MembershipConfirmation
+          readonly membership: CurrentMembership
+          readonly consequences: readonly Consequence[]
+        }
+      | undefined
     const affectedRooms: AffectedRoomTransition[] = []
     const result: AdmitResult = await this.transaction(async (client) => {
       if (!(await this.lockAccount(client, accountId))) {
@@ -375,6 +484,30 @@ export class RoomService {
         }
         return { status: 'ended' }
       }
+      if (target.visibility === 'private') {
+        if (!options.password) return { status: 'password-required' }
+        if (!initialPasswordChecked) {
+          const limit = await consumePrivatePasswordLimit(
+            this.configuration.valkey,
+            this.configuration.valkeyPrefix,
+            {
+              accountId,
+              roomId,
+              clientIp: options.clientIp ?? 'unknown',
+            },
+          )
+          if (limit.kind === 'unavailable') return { status: 'rate-limit-unavailable' }
+          if (limit.kind === 'limited') {
+            return { status: 'rate-limited', retryAfterSeconds: limit.retryAfterSeconds }
+          }
+        }
+        if (
+          !target.passwordHash ||
+          !(await passwordMatches(options.password, target.passwordHash))
+        ) {
+          return { status: 'invalid-password' }
+        }
+      }
 
       const ban = await client.query(
         `SELECT 1 FROM room_ban
@@ -383,27 +516,48 @@ export class RoomService {
       )
       if (ban.rows[0]) return { status: 'banned' }
 
-      if (
-        target.visibility === 'private' &&
-        (!options.password ||
-          !target.passwordHash ||
-          !(await passwordMatches(options.password, target.passwordHash)))
-      ) {
-        return { status: options.password ? 'invalid-password' : 'password-required' }
+      if (current) {
+        const consequences = await this.sourceConsequences(client, current)
+        if (options.confirmation) {
+          if (
+            options.confirmation.sourceMembershipId !== current.id ||
+            !(await this.confirmationMatches(
+              accountId,
+              options.confirmation,
+              current,
+              consequences,
+              'admit',
+              roomId,
+            ))
+          ) {
+            return await this.confirmationRequired(
+              accountId,
+              current,
+              consequences,
+              'admit',
+              roomId,
+            )
+          }
+          validatedConfirmation = {
+            confirmation: options.confirmation,
+            membership: current,
+            consequences,
+          }
+        } else if (consequences.length > 0) {
+          return await this.confirmationRequired(
+            accountId,
+            current,
+            consequences,
+            'admit',
+            roomId,
+          )
+        }
+      } else if (options.confirmation) {
+        return { status: 'confirmation-stale' }
       }
-
       const memberCount = await this.repository.memberCount(roomId, client)
       if (memberCount >= ROOM_CAPACITY) return { status: 'full' }
 
-      if (current) {
-        const consequences = await this.sourceConsequences(client, current)
-        if (
-          consequences.length > 0 &&
-          !confirmationMatches(options.confirmation, current, consequences)
-        ) {
-          return this.confirmationRequired(current, consequences)
-        }
-      }
 
       if (current) affectedRooms.push({ roomId: current.roomId })
       if (current) await this.depart(client, current, instant)
@@ -427,6 +581,16 @@ export class RoomService {
       )
       return { status: 'joined', membership, role, revived }
     })
+    if (result.status === 'joined' && validatedConfirmation) {
+      await this.consumeConfirmation(
+        accountId,
+        validatedConfirmation.confirmation,
+        validatedConfirmation.membership,
+        validatedConfirmation.consequences,
+        'admit',
+        roomId,
+      ).catch(() => false)
+    }
     await this.publishRoomTransitions(affectedRooms)
     if (result.status === 'joined') {
       this.emitHomeEvent({ type: 'room-discovery', roomId: result.membership.roomId })
@@ -434,19 +598,35 @@ export class RoomService {
     }
     return result
   }
-
   async leave(
     accountId: string,
-    options: { readonly confirmation?: MembershipConfirmation } = {},
+    options: {
+      readonly roomId?: string
+      readonly membershipId?: string
+      readonly confirmation?: MembershipConfirmation
+    } = {},
   ): Promise<LeaveResult> {
     const affectedRooms: AffectedRoomTransition[] = []
     let changedRoomId: string | undefined
+    let validatedConfirmation:
+      | {
+          readonly confirmation: MembershipConfirmation
+          readonly membership: CurrentMembership
+          readonly consequences: readonly Consequence[]
+        }
+      | undefined
     const result: LeaveResult = await this.transaction(async (client) => {
       if (!(await this.lockAccount(client, accountId))) {
         return { status: 'not-member' }
       }
       const current = await this.lockCurrentMembership(client, accountId)
-      if (!current) return { status: 'not-member' }
+      if (
+        !current ||
+        (options.roomId !== undefined && options.roomId !== current.roomId) ||
+        (options.membershipId !== undefined && options.membershipId !== current.id)
+      ) {
+        return { status: 'not-member' }
+      }
       changedRoomId = current.roomId
       const instant = this.now()
       if (await this.closeRoomIfDue(client, current.roomId, instant)) {
@@ -454,16 +634,54 @@ export class RoomService {
         return { status: 'left', roomState: 'ended' }
       }
       const consequences = await this.sourceConsequences(client, current)
-      if (
-        consequences.length > 0 &&
-        !confirmationMatches(options.confirmation, current, consequences)
-      ) {
-        return this.confirmationRequired(current, consequences)
+      if (options.confirmation) {
+        if (
+          options.confirmation.sourceMembershipId !== current.id ||
+          !(await this.confirmationMatches(
+            accountId,
+            options.confirmation,
+            current,
+            consequences,
+            'leave',
+            current.roomId,
+          ))
+        ) {
+          return await this.confirmationRequired(
+            accountId,
+            current,
+            consequences,
+            'leave',
+            current.roomId,
+          )
+        }
+        validatedConfirmation = {
+          confirmation: options.confirmation,
+          membership: current,
+          consequences,
+        }
+      } else if (consequences.length > 0) {
+        return await this.confirmationRequired(
+          accountId,
+          current,
+          consequences,
+          'leave',
+          current.roomId,
+        )
       }
       const roomState = await this.depart(client, current, instant)
       affectedRooms.push({ roomId: current.roomId })
       return { status: 'left', roomState }
     })
+    if (result.status === 'left' && validatedConfirmation) {
+      await this.consumeConfirmation(
+        accountId,
+        validatedConfirmation.confirmation,
+        validatedConfirmation.membership,
+        validatedConfirmation.consequences,
+        'leave',
+        validatedConfirmation.membership.roomId,
+      ).catch(() => false)
+    }
     if (result.status === 'left') {
       await this.publishRoomTransitions(affectedRooms)
       if (result.roomState !== 'ended' && changedRoomId) {
@@ -510,6 +728,50 @@ export class RoomService {
       expiresAt: new Date(room.createdAt.getTime() + ROOM_LIFETIME_MS),
       admission,
     }
+  }
+
+  async inspectBoundary(
+    roomId: string,
+    accountId: string | null,
+  ): Promise<RoomBoundaryProjection> {
+    const inspection = await this.inspectPreAdmission(roomId, accountId)
+    if (inspection.status === 'not-found') {
+      return { status: 'not-found', viewerAuthenticated: accountId !== null }
+    }
+    const membership =
+      accountId && inspection.admission === 'member'
+        ? await this.currentMembership(accountId)
+        : null
+    const streamResult = await this.configuration.pool.query<{ count: number }>(
+      `SELECT count(*)::int AS count
+         FROM stream
+        WHERE room_id = $1 AND ended_at IS NULL`,
+      [roomId],
+    )
+    const details = {
+      id: inspection.id,
+      name: inspection.name,
+      category: inspection.category,
+      tags: inspection.tags,
+      visibility: inspection.visibility,
+      memberCount: inspection.memberCount,
+      expiresAt: inspection.expiresAt,
+      admission: inspection.admission,
+      streamCount: streamResult.rows[0]?.count ?? 0,
+      viewerAuthenticated: accountId !== null,
+    }
+    if (inspection.status === 'ended') {
+      return { ...details, status: 'ended' as const, membership: null }
+    }
+    if (inspection.admission === 'member' && membership?.roomId === roomId) {
+      return {
+        ...details,
+        status: 'admitted' as const,
+        admission: 'member' as const,
+        membership: { id: membership.id, role: membership.role },
+      }
+    }
+    return { ...details, status: 'pre-admission' as const, membership: null }
   }
 
   async setDeletionPending(accountId: string, pending: boolean) {
@@ -833,17 +1095,117 @@ export class RoomService {
     if (stream.rows[0]) consequences.push('stop-stream')
     return consequences
   }
-  private confirmationRequired(
+  private confirmationKey(token: string) {
+    return `${this.configuration.valkeyPrefix}:room-confirmation:${token}`
+  }
+
+  private async confirmationRequired(
+    accountId: string,
     membership: CurrentMembership,
     consequences: readonly Consequence[],
-  ): ConfirmationRequired {
+    command: ConfirmationCommand,
+    target: string,
+  ): Promise<ConfirmationRequired> {
+    const token = randomUUID()
+    const issuedAt = this.now()
+    await this.configuration.valkey.set(
+      this.confirmationKey(token),
+      JSON.stringify({
+        accountId,
+        sourceMembershipId: membership.id,
+        consequences,
+        command,
+        target,
+        issuedAt: issuedAt.toISOString(),
+      }),
+      'PX',
+      CONFIRMATION_TTL_MS,
+    )
     return {
       status: 'confirmation-required',
       consequences,
       confirmation: {
+        token,
+        issuedAt,
+        command,
+        target,
         sourceMembershipId: membership.id,
         consequences,
       },
+    }
+  }
+
+  private async confirmationMatches(
+    accountId: string,
+    confirmation: MembershipConfirmation,
+    membership: CurrentMembership,
+    consequences: readonly Consequence[],
+    command: ConfirmationCommand,
+    target: string,
+  ) {
+    if (!confirmation.token) return false
+    const raw = await this.configuration.valkey.get(this.confirmationKey(confirmation.token))
+    if (!raw) return false
+    try {
+      const stored = JSON.parse(raw) as {
+        accountId?: string
+        sourceMembershipId?: string
+        consequences?: readonly Consequence[]
+        command?: ConfirmationCommand
+        target?: string
+      }
+      return (
+        stored.accountId === accountId &&
+        stored.sourceMembershipId === membership.id &&
+        stored.command === command &&
+        stored.target === target &&
+        confirmation.command === command &&
+        confirmation.target === target &&
+        JSON.stringify(stored.consequences) === JSON.stringify(consequences)
+      )
+    } catch {
+      return false
+    }
+  }
+
+  private async consumeConfirmation(
+    accountId: string,
+    confirmation: MembershipConfirmation,
+    membership: CurrentMembership,
+    consequences: readonly Consequence[],
+    command: ConfirmationCommand,
+    target: string,
+  ) {
+    if (!confirmation.token) return false
+    const key = this.confirmationKey(confirmation.token)
+    const raw = await this.configuration.valkey.get(key)
+    if (!raw) return false
+    try {
+      const stored = JSON.parse(raw) as {
+        accountId?: string
+        sourceMembershipId?: string
+        consequences?: readonly Consequence[]
+        command?: ConfirmationCommand
+        target?: string
+      }
+      if (
+        stored.accountId !== accountId ||
+        stored.sourceMembershipId !== membership.id ||
+        stored.command !== command ||
+        stored.target !== target ||
+        confirmation.command !== command ||
+        confirmation.target !== target ||
+        JSON.stringify(stored.consequences) !== JSON.stringify(consequences)
+      ) return false
+      const consumed = await this.configuration.valkey.eval(
+        "local raw = redis.call('GET', KEYS[1]); if raw == ARGV[1] then redis.call('DEL', KEYS[1]); return 1 end; return 0",
+        1,
+        key,
+        raw,
+      )
+      return Number(consumed) === 1
+    } catch {
+      return false
     }
   }
 
@@ -970,7 +1332,6 @@ function roomProjection(room: RoomRecord): RoomProjection {
   }
 }
 
-
 function roomExpired(room: RoomRecord, instant: Date) {
   return room.createdAt.getTime() + ROOM_LIFETIME_MS <= instant.getTime()
 }
@@ -979,20 +1340,6 @@ function emptyGraceExpired(room: RoomRecord, instant: Date) {
   return (
     room.emptyAt !== null &&
     room.emptyAt.getTime() + EMPTY_GRACE_MS <= instant.getTime()
-  )
-}
-
-function confirmationMatches(
-  confirmation: MembershipConfirmation | undefined,
-  membership: CurrentMembership,
-  consequences: readonly Consequence[],
-) {
-  return (
-    confirmation?.sourceMembershipId === membership.id &&
-    confirmation.consequences.length === consequences.length &&
-    confirmation.consequences.every(
-      (consequence, index) => consequence === consequences[index],
-    )
   )
 }
 

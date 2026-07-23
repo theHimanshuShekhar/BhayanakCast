@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { SessionProjection } from '../auth/auth-client'
+import { CreateRoomDialog } from './CreateRoomDialog'
 import { HomeNavigation } from './HomeNavigation'
 import { HomeSections } from './HomeSections'
 import { HomeUtilities } from './HomeUtilities'
@@ -85,6 +86,7 @@ export function HomePage({ search, session }: HomePageProps) {
           search={search}
           realtimeRefreshVersion={realtimeRefreshVersion}
         />
+      <CreateRoomDialog session={session} />
       </main>
     </div>
   )
