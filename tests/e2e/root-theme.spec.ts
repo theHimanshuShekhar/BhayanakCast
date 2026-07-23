@@ -39,12 +39,11 @@ test('theme controls work when browser storage access is denied', async ({
   page.on('pageerror', (error) => pageErrors.push(error))
   await page.emulateMedia({ colorScheme: 'light' })
   await page.addInitScript(() => {
-    Object.defineProperty(window, 'localStorage', {
-      configurable: true,
-      get() {
-        throw new DOMException('Storage access denied', 'SecurityError')
-      },
-    })
+    const denied = () => {
+      throw new DOMException('Storage access denied', 'SecurityError')
+    }
+    Storage.prototype.getItem = denied
+    Storage.prototype.setItem = denied
   })
 
   await page.goto('/')

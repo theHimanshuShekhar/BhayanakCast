@@ -12,7 +12,14 @@ test('keeps Home usable while an authenticated realtime connection recovers', as
     verified: true,
   })
   const page = await signedIn.context.newPage()
+  const socketHandshake = page.waitForResponse(
+    (response) =>
+      response.url().includes('/socket.io/') &&
+      response.url().includes('transport=polling') &&
+      response.status() === 200,
+  )
   await page.goto('/')
+  await socketHandshake
   await expect(page.getByTestId('home-shell')).toBeVisible()
   const search = page.getByRole('searchbox', { name: 'Find rooms and people' })
   await search.fill('room')
@@ -40,14 +47,19 @@ test('retries a failed canonical Home refresh while the socket stays connected',
     verified: true,
   })
   const page = await signedIn.context.newPage()
+  const socketHandshake = page.waitForResponse(
+    (response) =>
+      response.url().includes('/socket.io/') &&
+      response.url().includes('transport=polling') &&
+      response.status() === 200,
+  )
   await page.goto('/')
+  await socketHandshake
   await expect(page.getByTestId('home-shell')).toBeVisible()
 
   let shouldFail = false
-  let failed = false
   await page.route('**/_serverFn/**', async (route) => {
-    if (shouldFail && !failed) {
-      failed = true
+    if (shouldFail) {
       await route.abort()
       return
     }
@@ -63,6 +75,7 @@ test('retries a failed canonical Home refresh while the socket stays connected',
   )
   await expect(page.getByTestId('home-connection-retry')).toBeEnabled()
 
+  shouldFail = false
   await page.getByTestId('home-connection-retry').click()
   await expect(page.getByTestId('home-connection-status')).toHaveCount(0)
   await expect(page.getByTestId('home-shell')).toBeVisible()
