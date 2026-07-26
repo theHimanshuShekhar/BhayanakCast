@@ -1,5 +1,9 @@
 export const OPERATOR_TIME_ZONE =
-  import.meta.env.PUBLIC_OPERATOR_TIME_ZONE || 'UTC'
+  import.meta.env?.PUBLIC_OPERATOR_TIME_ZONE ||
+  (typeof process !== 'undefined'
+    ? process.env.PUBLIC_OPERATOR_TIME_ZONE
+    : undefined) ||
+  'UTC'
 
 export function operatorDay(
   instant = new Date(),

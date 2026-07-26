@@ -16,8 +16,8 @@ async function seedPastStream(authSessions: AuthSessionFixture) {
 
 const stages = [
   { name: 'small', width: 390, left: 0, right: 0 },
-  { name: 'medium', width: 1024, left: 72, right: 0 },
-  { name: 'wide', width: 1440, left: 216, right: 280 },
+  { name: 'medium', width: 1024, left: 56, right: 0 },
+  { name: 'wide', width: 1440, left: 56, right: 280 },
 ] as const
 const themes = ['light', 'dark'] as const
 
@@ -212,12 +212,15 @@ async function expectKeyboardOrder(
   await page.evaluate(() => document.querySelector('#keyboard-order-sentinel')?.remove())
 }
 
-async function expectMediumTooltips(page: Page) {
+async function expectIconRailTooltips(page: Page) {
   const controls = page.getByTestId('home-navigation').locator('[data-tooltip]:visible')
   const count = await controls.count()
-  expect(count).toBeGreaterThanOrEqual(4)
+  expect(count).toBeGreaterThan(0)
   for (let index = 0; index < count; index += 1) {
     const control = controls.nth(index)
+    expect(await control.evaluate((element) => getComputedStyle(element).position)).not.toBe(
+      'static',
+    )
     await control.hover()
     const content = await control.evaluate(
       (element) => getComputedStyle(element, '::after').content,
@@ -235,14 +238,14 @@ async function expectMediumTooltips(page: Page) {
 }
 
 function anonymousKeyboardOrder(stage: (typeof stages)[number], theme: (typeof themes)[number]) {
-  const profile = stage.name === 'small' ? ['Profile — sign in with Discord'] : []
-  const account = stage.name === 'wide' ? [] : ['Sign in with Discord']
+  const discord = stage.name === 'small' ? ['Continue with Discord'] : []
+  const account = stage.name === 'medium' ? ['Sign in with Discord'] : []
   const utilities = stage.name === 'wide' ? ['Sign in with Discord'] : ['Clubhouse statistics']
   const filters = stage.name === 'small' ? ['Filters'] : ['Category', 'Add tag']
   return [
     'Home',
     'Create room',
-    ...profile,
+    ...discord,
     theme === 'light' ? 'Dark theme' : 'Light theme',
     ...account,
     'Find rooms and people',
@@ -281,11 +284,25 @@ test('anonymous Home shell keeps one responsive tree in both themes', async ({
       try {
         await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
         await expectShell(page, stage)
-        await expect(page.getByRole('button', { name: 'Sign in with Discord', exact: true })).toBeVisible()
+        await expect(page.getByRole('button', {
+          name: stage.name === 'small' ? 'Continue with Discord' : 'Sign in with Discord',
+          exact: true,
+        })).toBeVisible()
         await expect(page.getByRole('button', { name: 'Log out' })).toHaveCount(0)
         await expect(page.getByText(/accounts? connected/i)).toBeVisible()
-        await expectKeyboardOrder(page, anonymousKeyboardOrder(stage, theme), stage.name === 'medium')
-        if (stage.name === 'medium') await expectMediumTooltips(page)
+        await expectKeyboardOrder(page, anonymousKeyboardOrder(stage, theme), stage.name !== 'small')
+        if (stage.name === 'small') {
+          const discord = page
+            .getByTestId('home-bottom-navigation')
+            .getByRole('button', { name: 'Continue with Discord' })
+          await expect(discord).toBeVisible()
+          await expect(discord).toHaveText('Discord')
+          const icon = discord.locator('svg')
+          await expect(icon).toBeVisible()
+          await expect(icon).toHaveAttribute('aria-hidden', 'true')
+          await expect(page.locator('.home-top-account--anonymous')).toBeHidden()
+        }
+        if (stage.name !== 'small') await expectIconRailTooltips(page)
       } finally {
         await context.close()
       }
@@ -357,6 +374,16 @@ test('authenticated Home shell exposes the account popout at every stage', async
       await expect(account).toHaveAttribute('aria-expanded', 'true')
       const accountMenu = page.getByRole('menu')
       await expect(accountMenu.getByRole('menuitem', { name: 'Profile', exact: true })).toBeFocused()
+      if (stage.name === 'wide') {
+        const [accountBox, menuBox] = await Promise.all([
+          account.boundingBox(),
+          accountMenu.boundingBox(),
+        ])
+        expect(accountBox).not.toBeNull()
+        expect(menuBox).not.toBeNull()
+        expect(menuBox!.x).toBeGreaterThanOrEqual(accountBox!.x + accountBox!.width + 12)
+        expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(stage.width)
+      }
       await page.keyboard.press('ArrowDown')
       await expect(accountMenu.getByRole('menuitem', { name: 'Log out' })).toBeFocused()
       await expect(
@@ -375,9 +402,9 @@ test('authenticated Home shell exposes the account popout at every stage', async
       await expectKeyboardOrder(
         page,
         authenticatedKeyboardOrder(stage, theme),
-        stage.name === 'medium',
+        stage.name !== 'small',
       )
-      if (stage.name === 'medium') await expectMediumTooltips(page)
+      if (stage.name !== 'small') await expectIconRailTooltips(page)
     }
   }
 })
@@ -451,7 +478,7 @@ test('Admin navigation is visible only to an authorized Account', async ({ authS
         ...(stage.name === 'small' ? ['Filters'] : ['Category', 'Add tag']),
         stage.name === 'wide' ? 'Start a room' : 'Clubhouse statistics',
       ],
-      stage.name === 'medium',
+      stage.name !== 'small',
     )
   }
 })

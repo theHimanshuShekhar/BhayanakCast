@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { authClient } from './auth-client'
 
 export interface SignInButtonProps {
   ariaLabel?: string
   callbackURL?: string
   className?: string
+  icon?: ReactNode
   label?: string
 }
 
@@ -12,6 +13,7 @@ export function SignInButton({
   ariaLabel,
   callbackURL,
   className,
+  icon,
   label = 'Sign in with Discord',
 }: SignInButtonProps) {
   const [isPending, setIsPending] = useState(false)
@@ -44,6 +46,7 @@ export function SignInButton({
         type="button"
         onClick={signIn}
       >
+        {icon}
         {isPending ? 'Opening Discord…' : label}
       </button>
       {error && <p className="auth-error" role="alert">{error}</p>}

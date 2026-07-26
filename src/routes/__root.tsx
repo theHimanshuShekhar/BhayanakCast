@@ -27,6 +27,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         content: 'Discover small social screen-sharing rooms.',
       },
     ],
+    links: [{ rel: 'icon', href: '/favicon.ico', type: 'image/x-icon' }],
   }),
   loader: () => getThemePreference(),
   component: RootComponent,

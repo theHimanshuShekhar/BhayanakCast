@@ -8,9 +8,9 @@
     "pnpm": "11.11.0"
   },
   "scripts": {
-    "dev": "tsx watch server/dev.ts",
+    "dev": "tsx watch --env-file-if-exists=.env server/dev.ts",
     "build": "rsbuild build",
-    "start": "node server/index.mjs",
+    "start": "node --env-file-if-exists=.env server/index.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
