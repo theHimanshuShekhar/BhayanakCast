@@ -43,7 +43,7 @@ export function HomeNavigation({
       data-testid="home-navigation"
     >
       <div className="home-top-bar" data-testid="home-top-bar">
-        <span aria-label="BhayanakCast" className="home-brand-mark">B</span>
+        <span aria-label="BhayanakCast" className="home-brand-mark">BC</span>
         <HomeSectionBoundary
           failed={presenceFailed}
           label="Connected presence"
@@ -94,7 +94,11 @@ export function HomeNavigation({
             aria-current={currentPage === 'profile' ? 'page' : undefined}
             className={`home-nav-item--profile${currentPage === 'profile' ? ' home-nav-item--current' : ''}`}
           >
-            <SignInButton ariaLabel="Profile — sign in with Discord" label="Profile" />
+            <SignInButton
+              ariaLabel="Continue with Discord"
+              icon={<DiscordIcon />}
+              label="Discord"
+            />
           </div>
         )}
         {session?.isPlatformAdmin && (
@@ -170,6 +174,16 @@ function CreateIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24">
       <path d="M12 5v14M5 12h14" />
+    </svg>
+  )
+}
+
+function DiscordIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="M8 8.5a9 9 0 0 1 8 0l1.5 6.5a10 10 0 0 1-3 1.5l-.7-1a8 8 0 0 0 1.2-.6 7 7 0 0 1-6 0 8 8 0 0 0 1.2.6l-.7 1a10 10 0 0 1-3-1.5Z" />
+      <circle cx="10" cy="12.5" r="0.8" />
+      <circle cx="14" cy="12.5" r="0.8" />
     </svg>
   )
 }
