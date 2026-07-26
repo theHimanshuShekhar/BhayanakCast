@@ -6,15 +6,16 @@ const EXPIRY_FORMATTER = new Intl.DateTimeFormat('en-US', {
 import { useState } from 'react'
 import { leaveRoom } from './room-queries'
 import type { MembershipConfirmation } from '../../server/rooms/room-service'
-import type { RoomAdmitted } from './room-types'
+import type { RoomAdmitted, RoomSelfMembership } from './room-types'
 
 interface RoomAdmittedBoundaryProps {
   readonly room: RoomAdmitted
-  readonly onLeft: () => void
+  readonly self: RoomSelfMembership
+  readonly onLeft: (roomState: 'active' | 'empty-grace' | 'ended') => void
   readonly onConfirmation: (confirmation: MembershipConfirmation) => void
 }
 
-export function RoomAdmittedBoundary({ room, onLeft, onConfirmation }: RoomAdmittedBoundaryProps) {
+export function RoomAdmittedBoundary({ room, self, onLeft, onConfirmation }: RoomAdmittedBoundaryProps) {
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -26,10 +27,10 @@ export function RoomAdmittedBoundary({ room, onLeft, onConfirmation }: RoomAdmit
       const result = await leaveRoom({
         data: {
           roomId: room.id,
-          membershipId: room.membership.id,
+          membershipId: self.id,
         },
       })
-      if (result.status === 'left') onLeft()
+      if (result.status === 'left') onLeft(result.roomState)
       else if (result.status === 'confirmation-required') onConfirmation(result.confirmation)
       else setError('You are no longer a member of this room.')
     } catch {
@@ -41,8 +42,8 @@ export function RoomAdmittedBoundary({ room, onLeft, onConfirmation }: RoomAdmit
 
   return (
     <main className="room-boundary room-boundary--admitted" data-room-state="admitted">
-      <p className="room-boundary__eyebrow">{room.membership.role === 'host' ? 'Host' : 'Member'}</p>
-      <h1>{room.name}</h1>
+      <p className="room-boundary__eyebrow">{self.role === 'host' ? 'Host' : 'Member'}</p>
+      <h1 data-room-primary-heading="" tabIndex={-1}>{room.name}</h1>
       <dl className="room-boundary__facts">
         <div><dt>Visibility</dt><dd>{room.visibility}</dd></div>
         <div><dt>Members</dt><dd>{room.memberCount} / 10</dd></div>

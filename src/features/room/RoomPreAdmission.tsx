@@ -3,18 +3,16 @@ import { admitRoom } from './room-queries'
 import { authClient } from '../auth/auth-client'
 import { safeOAuthCallbackPath } from '../auth/SignInButton'
 import type { MembershipConfirmation } from '../../server/rooms/room-service'
-import type { RoomPresent } from './room-types'
+import type { RoomPreAdmission as RoomPreAdmissionView } from './room-types'
 
 interface RoomPreAdmissionProps {
-  readonly room: RoomPresent
-  readonly authenticated: boolean
+  readonly room: RoomPreAdmissionView
   readonly onJoined: () => void
   readonly onConfirmation: (confirmation: MembershipConfirmation, password?: string) => void
   readonly onRefresh: () => Promise<unknown>
 }
 export function RoomPreAdmission({
   room,
-  authenticated,
   onJoined,
   onConfirmation,
   onRefresh,
@@ -28,7 +26,7 @@ export function RoomPreAdmission({
     if (full || pending) return
     setError(null)
     setPending(true)
-    if (!authenticated) {
+    if (!room.viewerAuthenticated) {
       try {
         const result = await authClient.signIn.social({
           provider: 'discord',
@@ -74,14 +72,14 @@ export function RoomPreAdmission({
   return (
     <section className="room-boundary room-boundary--pre-admission" data-room-state="pre-admission">
       <p className="room-boundary__eyebrow">{room.visibility === 'private' ? 'Private Room' : 'Public Room'}</p>
-      <h1>{room.name}</h1>
+      <h1 data-room-primary-heading="" tabIndex={-1}>{room.name}</h1>
       {room.category && <p className="room-boundary__category">{room.category}</p>}
       <p>Join explicitly to enter this room. Opening this link does not join you.</p>
       <dl className="room-boundary__facts">
         <div><dt>Members</dt><dd>{room.memberCount} / 10</dd></div>
         <div><dt>Streams</dt><dd>{room.streamCount}</dd></div>
       </dl>
-      {authenticated && room.visibility === 'private' && !full && (
+      {room.viewerAuthenticated && room.visibility === 'private' && !full && (
         <label className="room-boundary__password">
           Password
           <input
@@ -96,7 +94,7 @@ export function RoomPreAdmission({
       <div className="room-boundary__actions">
         <a className="room-boundary__back" href="/">Back / Home</a>
         <button aria-busy={pending} disabled={pending || full} type="button" onClick={join}>
-          {full ? 'Full' : pending ? (authenticated ? 'Joining…' : 'Opening Discord…') : 'Join'}
+          {full ? 'Full' : pending ? (room.viewerAuthenticated ? 'Joining…' : 'Opening Discord…') : 'Join'}
         </button>
       </div>
     </section>

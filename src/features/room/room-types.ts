@@ -1,8 +1,14 @@
-import type { RoomBoundaryProjection } from '../../server/rooms/room-service'
+import type {
+  AdmittedRoom,
+  PastStreamRoom,
+  PreAdmissionRoom,
+  RoomRouteProjection,
+  SelfMembership,
+} from '../../server/rooms/room-projection'
 
-export type RoomView = RoomBoundaryProjection
-export type RoomPresent = Exclude<RoomView, { status: 'not-found' }>
-export type RoomEnded = RoomPresent & { status: 'ended' }
-export type RoomPreAdmission = RoomPresent & { status: 'pre-admission' }
-export type RoomAdmitted = Extract<RoomView, { status: 'admitted' }>
+export type RoomView = RoomRouteProjection
+export type RoomPreAdmission = PreAdmissionRoom
+export type RoomAdmitted = AdmittedRoom
+export type RoomEnded = PastStreamRoom
+export type RoomSelfMembership = SelfMembership
 export type RoomConsequence = 'transfer-host' | 'stop-stream'
