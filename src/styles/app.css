@@ -593,6 +593,10 @@ a {
   color: var(--action);
 }
 
+.home-nav-item--current .sign-in-button {
+  color: inherit;
+}
+
 .home-nav-item--create {
   color: var(--action);
 }
@@ -620,6 +624,13 @@ a {
   position: relative;
   z-index: var(--z-content);
   margin-bottom: 1rem;
+}
+
+.home-connection-status {
+  margin: 0 0 0.75rem;
+  color: var(--ink-secondary);
+  font-size: var(--text-label);
+  font-weight: 650;
 }
 
 .home-search-utilities--active {
@@ -1364,6 +1375,14 @@ a {
   font-weight: 750;
 }
 
+.profile-desktop-account {
+  display: none;
+}
+
+.profile-page .profile-navigation {
+  display: contents;
+}
+
 .public-profile {
   width: min(100%, 70rem);
   min-height: 100vh;
@@ -1371,7 +1390,7 @@ a {
   padding:
     max(calc(var(--spacing) * 16), calc(var(--safe-area-top) + 4rem))
     max(calc(var(--spacing) * 4), var(--safe-area-right))
-    max(calc(var(--spacing) * 10), var(--safe-area-bottom))
+    calc(4rem + var(--safe-area-bottom) + 1.5rem)
     max(calc(var(--spacing) * 4), var(--safe-area-left));
 }
 
@@ -1417,7 +1436,7 @@ a {
 }
 
 .public-profile__identity p,
-.public-profile__identity h1 {
+.public-profile__identity h2 {
   margin: 0;
 }
 
@@ -1426,11 +1445,13 @@ a {
   font-size: var(--text-meta);
 }
 
-.public-profile__identity h1 {
+.public-profile__identity h2 {
+  min-width: 0;
   overflow-wrap: anywhere;
   font-size: var(--text-page);
   text-wrap: balance;
 }
+
 
 .public-profile__metrics {
   display: flex;
@@ -1485,7 +1506,85 @@ a {
   border-radius: var(--radius-pill);
   object-fit: cover;
 }
+
+.profile-preference,
+.profile-muted-accounts {
+  margin-top: calc(var(--spacing) * 8);
+  border-top: 1px solid var(--border);
+  padding-top: calc(var(--spacing) * 6);
+}
+
+.profile-preference h2,
+.profile-muted-accounts h2 {
+  margin: 0;
+}
+
+.profile-muted-accounts__list {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+  margin: calc(var(--spacing) * 4) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.profile-muted-accounts__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
+}
+
+.profile-muted-accounts__identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: calc(var(--spacing) * 3);
+}
+
+.profile-muted-accounts__identity img,
+.profile-muted-accounts__avatar-fallback {
+  display: grid;
+  width: calc(var(--spacing) * 12);
+  height: calc(var(--spacing) * 12);
+  flex: none;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  background: var(--action-soft);
+  color: var(--action);
+  object-fit: cover;
+  font-weight: 700;
+}
+@media (max-width: 47.999rem) {
+  .public-profile__home {
+    display: none;
+  }
+  body:has(.profile-page) > .root-controls {
+    display: none;
+  }
+}
+
 @media (min-width: 48rem) {
+  .profile-navigation .home-navigation {
+    display: none;
+  }
+
+  .profile-desktop-account {
+    display: block;
+    position: relative;
+  }
+
+  .profile-desktop-account .account-menu__popover {
+    position: absolute;
+    inset: calc(100% + 0.5rem) 0 auto auto;
+  }
+
+  .public-profile__identity > div {
+    min-width: 0;
+  }
+
   html {
     scroll-padding-block: 1rem;
   }
@@ -1999,5 +2098,219 @@ a {
 
   .live-pulse {
     animation-name: none !important;
+  }
+}
+.create-room-dialog,
+.membership-consequences-dialog {
+  width: min(38rem, calc(100vw - 2rem));
+  max-width: 100%;
+  max-height: min(46rem, calc(100dvh - 2rem));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-raised);
+  color: var(--ink);
+  padding: 0;
+}
+
+.create-room-dialog::backdrop,
+.membership-consequences-dialog::backdrop {
+  background: rgb(9 14 26 / 0.66);
+}
+
+.create-room-dialog__panel,
+.membership-consequences-dialog__panel {
+  display: grid;
+  gap: 1rem;
+  max-height: inherit;
+  overflow: auto;
+  padding: 1.5rem;
+}
+
+.create-room-dialog__panel h2,
+.membership-consequences-dialog__panel h2 {
+  margin: 0;
+  font-size: var(--text-section);
+}
+
+.create-room-dialog__panel > label,
+.room-boundary__password {
+  display: grid;
+  gap: 0.375rem;
+  color: var(--ink-secondary);
+  font-weight: 650;
+}
+
+.create-room-dialog input,
+.room-boundary__password input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  padding: 0.625rem 0.75rem;
+}
+
+.create-room-dialog fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 0.75rem;
+}
+
+.create-room-dialog fieldset label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.form-hint {
+  color: var(--ink-muted);
+  font-size: var(--text-label);
+  font-weight: 450;
+}
+
+.form-error {
+  margin: 0;
+  color: var(--danger);
+  font-weight: 650;
+}
+
+.create-room-dialog__actions,
+.membership-consequences-dialog__actions,
+.room-boundary__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.create-room-dialog button,
+.membership-consequences-dialog button,
+.room-boundary button,
+.room-boundary__back {
+  min-height: 2.75rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--ink);
+  cursor: pointer;
+  padding: 0.5rem 0.875rem;
+  text-decoration: none;
+}
+
+.create-room-dialog button:last-child,
+.membership-consequences-dialog button:last-child,
+.room-boundary button {
+  border-color: var(--action);
+  background: var(--action);
+  color: var(--action-ink);
+}
+
+.create-room-dialog button:disabled,
+.membership-consequences-dialog button:disabled,
+.room-boundary button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.room-boundary {
+  width: min(44rem, calc(100% - 2rem));
+  min-height: min(40rem, calc(100dvh - 2rem));
+  box-sizing: border-box;
+  margin: 2rem auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-raised);
+  padding: clamp(1.25rem, 4vw, 3rem);
+}
+
+.room-boundary h1 {
+  margin: 0;
+  font-size: clamp(2rem, 5vw, 3rem);
+}
+
+.room-boundary__eyebrow {
+  margin: 0 0 0.5rem;
+  color: var(--ink-secondary);
+  font-size: var(--text-label);
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.room-boundary__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: 0.75rem;
+  margin: 2rem 0;
+}
+
+.room-boundary__facts div {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-subtle);
+  padding: 0.75rem;
+}
+
+.room-boundary__facts dt {
+  color: var(--ink-muted);
+  font-size: var(--text-label);
+}
+
+.room-boundary__facts dd {
+  margin: 0.25rem 0 0;
+  font-size: var(--text-card);
+  font-weight: 700;
+}
+
+.room-boundary__actions {
+  justify-content: space-between;
+  margin-top: 2rem;
+}
+
+.room-boundary__error {
+  width: min(44rem, calc(100% - 2rem));
+  margin: -1rem auto 1rem;
+}
+
+@media (max-width: 47.999rem) {
+  .create-room-dialog,
+  .membership-consequences-dialog {
+    width: 100%;
+    max-width: none;
+    height: 100dvh;
+    max-height: none;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .create-room-dialog__panel,
+  .membership-consequences-dialog__panel {
+    min-height: 100%;
+    box-sizing: border-box;
+    padding:
+      max(1rem, var(--safe-area-top))
+      max(1rem, var(--safe-area-right))
+      max(1rem, calc(var(--safe-area-bottom) + 1rem))
+      max(1rem, var(--safe-area-left));
+  }
+
+  .room-boundary {
+    width: 100%;
+    min-height: 100dvh;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    padding:
+      max(1.25rem, var(--safe-area-top))
+      max(1rem, var(--safe-area-right))
+      max(1.25rem, calc(var(--safe-area-bottom) + 1rem))
+      max(1rem, var(--safe-area-left));
   }
 }

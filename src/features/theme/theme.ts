@@ -2,7 +2,19 @@ export type Theme = 'light' | 'dark'
 
 export const THEME_STORAGE_KEY = 'bhayanakcast.theme'
 
-export const THEME_BOOTSTRAP_SCRIPT = `(()=>{let t;try{t=localStorage.getItem('${THEME_STORAGE_KEY}')}catch{}if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';const r=document.documentElement;r.dataset.theme=t;r.style.colorScheme=t;let m=document.querySelector('meta[name="theme-color"]');if(!m){m=document.createElement('meta');m.name='theme-color';m.dataset.light='#F6F8FC';m.dataset.dark='#0D1422';document.head.append(m)}m.content=m.dataset[t]})()`
+export interface ThemeBootstrapPreference {
+  readonly authenticated: boolean
+  readonly theme: Theme | null
+}
+
+export function createThemeBootstrapScript(
+  preference: ThemeBootstrapPreference = { authenticated: false, theme: null },
+) {
+  const serialized = JSON.stringify(preference)
+  return `(()=>{const a=${serialized};let o=a.authenticated?a.theme:null;if(!a.authenticated){try{o=localStorage.getItem('${THEME_STORAGE_KEY}')}catch{}}if(o!=='light'&&o!=='dark')o=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';const r=document.documentElement;r.dataset.theme=o;r.style.colorScheme=o;let m=document.querySelector('meta[name="theme-color"]');if(!m){m=document.createElement('meta');m.name='theme-color';m.dataset.light='#F6F8FC';m.dataset.dark='#0D1422';document.head.append(m)}m.content=m.dataset[o]})()`
+}
+
+export const THEME_BOOTSTRAP_SCRIPT = createThemeBootstrapScript()
 
 type ReadableStorage = Pick<Storage, 'getItem'>
 type WritableStorage = Pick<Storage, 'setItem'>

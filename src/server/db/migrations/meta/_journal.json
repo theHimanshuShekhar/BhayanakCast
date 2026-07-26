@@ -50,6 +50,27 @@
       "when": 1784041547515,
       "tag": "0006_enforce_stream_room_ownership",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1784380000000,
+      "tag": "0007_persist_theme_preference",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1784388000000,
+      "tag": "0008_chat_mutes",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1784390850407,
+      "tag": "0009_deletion_requests",
+      "breakpoints": true
     }
   ]
 }

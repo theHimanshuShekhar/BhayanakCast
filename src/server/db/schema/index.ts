@@ -5,6 +5,9 @@ import { room } from './rooms'
 import { stream } from './streams'
 import { streamSubscription } from './subscriptions'
 
+import { accountPreference } from './preferences'
+import { chatMute } from './chat-mutes'
+import { deletionRequest, deletionRequestAudit } from './deletion-requests'
 export const databaseSchema = {
   ...authSchema,
   accountState,
@@ -14,4 +17,8 @@ export const databaseSchema = {
   roomBan,
   stream,
   streamSubscription,
+  accountPreference,
+  chatMute,
+  deletionRequest,
+  deletionRequestAudit,
 }

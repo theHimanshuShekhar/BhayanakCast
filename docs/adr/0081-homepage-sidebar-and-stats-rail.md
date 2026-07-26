@@ -13,7 +13,7 @@ Desktop Home uses three structural regions:
 
 1. A persistent left sidebar with a large `B` brand mark, a live count of distinct connected signed-in Accounts with a presence icon, a prominent Create Room button, and—when signed in—the current Account avatar anchored at the bottom. Activating the avatar opens a popout with Profile and Log out actions.
 2. The central search-first discovery column with search/filters, the featured Live Room and ranked room list, then ten recent Past Streams.
-3. A right rail with global statistics plus an authentication-dependent action section: signed-in Accounts see a compact Create Room launch panel with short clubhouse context and one button that opens the full creation dialog; anonymous visitors see Discord Log in.
+3. A right rail with global statistics plus a compact Create Room launch panel with short clubhouse context. Its button opens the shared creation dialog for an Account; for an Anonymous visitor, the same `Create Room` action starts full-page Discord OAuth and returns to Home with a blank dialog.
 
 The global statistics are Live Rooms, active Streams, current Room Memberships, rooms created today, and today's peak connected signed-in Accounts. “Today” uses one configured operator timezone for every viewer.
 

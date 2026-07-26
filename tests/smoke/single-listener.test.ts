@@ -9,6 +9,7 @@ const LISTENING = /BhayanakCast listening on http:\/\/127\.0\.0\.1:(\d+)/
 let server: ChildProcessWithoutNullStreams
 let origin: string
 let socket: Socket | undefined
+let rawSocket: WebSocket | undefined
 
 beforeAll(async () => {
   server = spawn(process.execPath, ['server/index.mjs'], {
@@ -63,13 +64,14 @@ describe('production single listener', () => {
     expect(payload).toMatch(/^0\{.*"sid"/)
   })
 
-  test('closes an upgraded Socket.IO connection during shutdown', async () => {
+  test('rejects unauthenticated upgraded Socket.IO connections', async () => {
     socket = io(origin, { transports: ['websocket'] })
-    await new Promise<void>((resolve, reject) => {
-      socket!.once('connect', resolve)
-      socket!.once('connect_error', reject)
+    const error = await new Promise<Error>((resolve, reject) => {
+      socket!.once('connect_error', resolve)
+      socket!.once('connect', () => reject(new Error('unauthenticated socket connected')))
     })
-    expect(socket.connected).toBe(true)
+    expect(error.message).toContain('Authentication required')
+    expect(socket.connected).toBe(false)
   })
 
   test('lets Start own unknown routes', async () => {
@@ -88,5 +90,24 @@ describe('production single listener', () => {
       req.end()
     })
     expect(status).toBe(404)
+  })
+
+  test('closes an upgraded Socket.IO transport during shutdown', async () => {
+    rawSocket = new WebSocket(
+      `${origin.replace(/^http/, 'ws')}/socket.io/?EIO=4&transport=websocket`,
+    )
+    await new Promise<void>((resolve, reject) => {
+      rawSocket!.addEventListener('message', () => resolve(), { once: true })
+      rawSocket!.addEventListener('error', () => reject(new Error('websocket upgrade failed')), {
+        once: true,
+      })
+    })
+    const closed = new Promise<void>((resolve) => {
+      rawSocket!.addEventListener('close', () => resolve(), { once: true })
+    })
+    const exited = once(server, 'exit')
+    server.kill('SIGTERM')
+    await Promise.all([closed, exited])
+    expect(rawSocket.readyState).toBe(WebSocket.CLOSED)
   })
 })

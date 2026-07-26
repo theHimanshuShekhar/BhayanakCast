@@ -1,5 +1,18 @@
 import type { Browser, BrowserContext, Page } from '@playwright/test'
-import { expect, test } from './fixtures'
+import { expect, test, type AuthSessionFixture } from './fixtures'
+
+async function seedPastStream(authSessions: AuthSessionFixture) {
+  await authSessions.sql(
+    `INSERT INTO room (id, name, visibility, password_hash, created_at, ended_at)
+     VALUES ($1, $2, 'public', NULL, $3, $4)`,
+    [
+      '30000000-0000-4000-8000-000000000001',
+      'Shell Past Stream',
+      '2026-07-15T14:00:00.000Z',
+      '2026-07-15T15:00:00.000Z',
+    ],
+  )
+}
 
 const stages = [
   { name: 'small', width: 390, left: 0, right: 0 },
@@ -225,6 +238,7 @@ function anonymousKeyboardOrder(stage: (typeof stages)[number], theme: (typeof t
   const profile = stage.name === 'small' ? ['Profile — sign in with Discord'] : []
   const account = stage.name === 'wide' ? [] : ['Sign in with Discord']
   const utilities = stage.name === 'wide' ? ['Sign in with Discord'] : ['Clubhouse statistics']
+  const filters = stage.name === 'small' ? ['Filters'] : ['Category', 'Add tag']
   return [
     'Home',
     'Create room',
@@ -232,6 +246,7 @@ function anonymousKeyboardOrder(stage: (typeof stages)[number], theme: (typeof t
     theme === 'light' ? 'Dark theme' : 'Light theme',
     ...account,
     'Find rooms and people',
+    ...filters,
     ...utilities,
   ]
 }
@@ -245,6 +260,7 @@ function authenticatedKeyboardOrder(stage: (typeof stages)[number], theme: (type
     theme === 'light' ? 'Dark theme' : 'Light theme',
     'Home Shell Member account',
     'Find rooms and people',
+    ...(stage.name === 'small' ? ['Filters'] : ['Category', 'Add tag']),
     stage.name === 'wide' ? 'Start a room' : 'Clubhouse statistics',
   ]
 }
@@ -253,6 +269,7 @@ test('anonymous Home shell keeps one responsive tree in both themes', async ({
   authSessions,
   browser,
 }) => {
+  await seedPastStream(authSessions)
   for (const theme of themes) {
     for (const stage of stages) {
       const { context, page } = await openAnonymous(
@@ -314,6 +331,7 @@ test('authenticated Home shell exposes the account popout at every stage', async
     email: 'home-shell@example.test',
     verified: true,
   })
+  await seedPastStream(authSessions)
   const page = await signedIn.context.newPage()
 
   for (const theme of themes) {
@@ -402,6 +420,7 @@ test('Admin navigation is visible only to an authorized Account', async ({ authS
     email: 'home-admin@example.test',
     verified: true,
   })
+  await seedPastStream(authSessions)
   await setTheme(admin.context, 'light')
   const page = await admin.context.newPage()
   for (const stage of stages) {
@@ -429,6 +448,7 @@ test('Admin navigation is visible only to an authorized Account', async ({ authS
         'Dark theme',
         'Home Admin account',
         'Find rooms and people',
+        ...(stage.name === 'small' ? ['Filters'] : ['Category', 'Add tag']),
         stage.name === 'wide' ? 'Start a room' : 'Clubhouse statistics',
       ],
       stage.name === 'medium',
@@ -443,7 +463,7 @@ test('query mode replaces Past Streams with Profiles without duplicating Home', 
   const { context, page } = await openAnonymous(browser, authSessions.origin, 1024, 'light')
   try {
     await page.goto('/?q=member')
-    await expect(page.getByRole('heading', { name: 'Live Rooms' })).toHaveCount(1)
+    await expect(page.getByRole('heading', { name: 'Active Rooms' })).toHaveCount(1)
     await expect(page.getByRole('heading', { name: 'Public Profiles' })).toHaveCount(1)
     await expect(page.getByRole('heading', { name: 'Past Streams' })).toHaveCount(0)
     const order = await page.locator('[data-home-center-region]').evaluateAll((regions) =>

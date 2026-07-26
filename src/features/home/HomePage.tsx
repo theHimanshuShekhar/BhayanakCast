@@ -1,5 +1,7 @@
+import { useCallback, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { SessionProjection } from '../auth/auth-client'
+import { CreateRoomDialog } from './CreateRoomDialog'
 import { HomeNavigation } from './HomeNavigation'
 import { HomeSections } from './HomeSections'
 import { HomeUtilities } from './HomeUtilities'
@@ -19,6 +21,11 @@ interface HomePageProps {
 }
 
 export function HomePage({ search, session }: HomePageProps) {
+  const [realtimeRefreshVersion, setRealtimeRefreshVersion] = useState(0)
+  const onCanonicalRefresh = useCallback(
+    () => setRealtimeRefreshVersion((version) => version + 1),
+    [],
+  )
   const roomsOptions = homeRoomsQueryOptions(search)
   const profilesOptions = homeProfilesQueryOptions(search.q)
   const pastStreamsOptions = pastStreamsQueryOptions(!search.q)
@@ -53,6 +60,7 @@ export function HomePage({ search, session }: HomePageProps) {
           statisticsFailed={statistics.isError}
           statisticsPending={statistics.isPending}
           statisticsQueryKey={statisticsOptions.queryKey}
+          onCanonicalRefresh={onCanonicalRefresh}
         />
         <HomeSections
           pastStreams={{
@@ -76,7 +84,9 @@ export function HomePage({ search, session }: HomePageProps) {
             updating: rooms.isPlaceholderData,
           }}
           search={search}
+          realtimeRefreshVersion={realtimeRefreshVersion}
         />
+      <CreateRoomDialog session={session} />
       </main>
     </div>
   )

@@ -34,6 +34,9 @@ export class ServerRuntime {
   getDatabasePool(): Pool | undefined {
     return this.database
   }
+  getValkey(): Redis | undefined {
+    return this.valkey
+  }
 
   async sql<T extends QueryResultRow = QueryResultRow>(
     text: string,

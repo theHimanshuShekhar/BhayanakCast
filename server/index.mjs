@@ -49,7 +49,6 @@ if (usesEphemeralTestOrigin) {
   process.env.BETTER_AUTH_URL = `http://${HOST}`
 }
 const runtime = startModule.createServerRuntime(process.env)
-startModule.bindServerRuntime(runtime)
 const trustedProxyIps = startModule.parseTrustedProxyIps(
   process.env.TRUSTED_PROXY_IPS,
 )
@@ -75,7 +74,11 @@ const server = createServer(async (request, response) => {
   }
 })
 
-const sockets = startModule.attachSocketServer(server)
+const sockets = startModule.attachSocketServer(
+  server,
+  runtime.getDatabasePool(),
+)
+startModule.bindServerRuntime(runtime, server)
 server.listen(PORT, HOST, () => {
   const address = server.address()
   const port = typeof address === 'object' && address ? address.port : PORT
