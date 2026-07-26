@@ -10,7 +10,7 @@ export const Route = createFileRoute('/rooms/$roomId')({
     if (!ROOM_ID.test(params.roomId)) throw notFound()
     const options = roomProjectionQueryOptions(params.roomId)
     const room = await context.queryClient.ensureQueryData(options)
-    if (room.status === 'not-found') throw notFound()
+    if (!room) throw notFound()
     return { room }
   },
   head: () => ({

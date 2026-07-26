@@ -29,6 +29,10 @@ import {
   RoomRepository,
   type RoomRecord,
 } from './room-repository'
+import {
+  selectRoomRouteProjection,
+  type RoomRouteProjection,
+} from './room-projection'
 import type { HomeEventPublisher } from '../realtime/home-events'
 import { readAccountAccessPolicy } from '../auth/account-access-policy'
 
@@ -152,29 +156,6 @@ export type RoomInspection =
     }
 
 export type SanctionType = 'room_creation' | 'all_access'
-interface RoomBoundaryDetails {
-  readonly id: string
-  readonly name: string
-  readonly category: string | null
-  readonly tags: readonly string[]
-  readonly visibility: RoomVisibility
-  readonly memberCount: number
-  readonly streamCount: number
-  readonly expiresAt: Date
-  readonly admission: 'open' | 'password-required' | 'full' | 'member' | 'ended'
-  readonly viewerAuthenticated: boolean
-}
-export type RoomBoundaryProjection =
-  | { readonly status: 'not-found'; readonly viewerAuthenticated: boolean }
-  | (RoomBoundaryDetails & {
-      readonly status: 'pre-admission' | 'ended'
-      readonly membership: null
-    })
-  | (RoomBoundaryDetails & {
-      readonly status: 'admitted'
-      readonly admission: 'member'
-      readonly membership: Pick<MembershipProjection, 'role' | 'id'>
-    })
 export interface AffectedRoomTransition {
   readonly roomId: string
 }
@@ -730,50 +711,75 @@ export class RoomService {
     }
   }
 
-  async inspectBoundary(
+  async inspectRouteProjection(
     roomId: string,
     accountId: string | null,
-  ): Promise<RoomBoundaryProjection> {
-    const inspection = await this.inspectPreAdmission(roomId, accountId)
-    if (inspection.status === 'not-found') {
-      return { status: 'not-found', viewerAuthenticated: accountId !== null }
-    }
-    const membership =
-      accountId && inspection.admission === 'member'
-        ? await this.currentMembership(accountId)
-        : null
-    const streamResult = await this.configuration.pool.query<{ count: number }>(
-      `SELECT count(*)::int AS count
-         FROM stream
-        WHERE room_id = $1 AND ended_at IS NULL`,
-      [roomId],
+  ): Promise<RoomRouteProjection | null> {
+    await this.endDueRooms()
+    const result = await this.configuration.pool.query<{
+      id: string
+      name: string
+      category: string | null
+      tags: string[]
+      visibility: RoomVisibility
+      createdAt: Date
+      endedAt: Date | null
+      memberCount: number
+      streamCount: number
+      membershipId: string | null
+      membershipRole: 'host' | 'member' | null
+    }>(
+      `SELECT room.id,
+              room.name,
+              room.category,
+              room.tags,
+              room.visibility,
+              room.created_at AS "createdAt",
+              room.ended_at AS "endedAt",
+              (
+                SELECT count(*)::int
+                  FROM room_membership
+                 WHERE room_id = room.id
+                   AND (room.ended_at IS NOT NULL OR left_at IS NULL)
+              ) AS "memberCount",
+              (
+                SELECT count(*)::int
+                  FROM stream
+                 WHERE room_id = room.id
+                   AND (room.ended_at IS NOT NULL OR ended_at IS NULL)
+              ) AS "streamCount",
+              self.id AS "membershipId",
+              self.role AS "membershipRole"
+         FROM room
+         LEFT JOIN room_membership self
+           ON self.room_id = room.id
+          AND self.account_id = $2
+          AND self.left_at IS NULL
+        WHERE room.id = $1`,
+      [roomId, accountId],
     )
-    const details = {
-      id: inspection.id,
-      name: inspection.name,
-      category: inspection.category,
-      tags: inspection.tags,
-      visibility: inspection.visibility,
-      memberCount: inspection.memberCount,
-      expiresAt: inspection.expiresAt,
-      admission: inspection.admission,
-      streamCount: streamResult.rows[0]?.count ?? 0,
+    const row = result.rows[0]
+    return selectRoomRouteProjection({
+      room: row
+        ? {
+            id: row.id,
+            name: row.name,
+            category: row.category,
+            tags: row.tags,
+            visibility: row.visibility,
+            createdAt: row.createdAt,
+            endedAt: row.endedAt,
+          }
+        : null,
+      memberCount: row?.memberCount ?? 0,
+      streamCount: row?.streamCount ?? 0,
+      self:
+        row?.membershipId && row.membershipRole
+          ? { id: row.membershipId, role: row.membershipRole }
+          : null,
       viewerAuthenticated: accountId !== null,
-    }
-    if (inspection.status === 'ended') {
-      return { ...details, status: 'ended' as const, membership: null }
-    }
-    if (inspection.admission === 'member' && membership?.roomId === roomId) {
-      return {
-        ...details,
-        status: 'admitted' as const,
-        admission: 'member' as const,
-        membership: { id: membership.id, role: membership.role },
-      }
-    }
-    return { ...details, status: 'pre-admission' as const, membership: null }
+    })
   }
-
   async setDeletionPending(accountId: string, pending: boolean) {
     const affectedRooms = await this.transaction((client) =>
       this.setDeletionPendingInTransaction(client, accountId, pending),

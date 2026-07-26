@@ -89,7 +89,7 @@ function validateCreateRoomCommand(value: unknown): {
 
 export function validateRoomId(value: unknown): string {
   if (typeof value !== 'string' || !ROOM_ID.test(value)) throw new TypeError('Invalid room id')
-  return value
+  return value.toLowerCase()
 }
 
 export function validateConfirmation(value: unknown): MembershipConfirmation | undefined {

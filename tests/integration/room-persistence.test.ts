@@ -203,7 +203,7 @@ describe('room persistence and admission', () => {
     }))
     expect(JSON.stringify(result)).not.toContain('correct horse battery')
     expect(JSON.stringify(result)).not.toContain('passwordHash')
-    const boundary = await fixture.service.inspectBoundary(result.room.id, member)
+    const boundary = await fixture.service.inspectRouteProjection(result.room.id, member)
     expect(JSON.stringify(boundary)).not.toContain('correct horse battery')
     expect(JSON.stringify(boundary)).not.toContain('passwordHash')
     await expect(
@@ -218,6 +218,45 @@ describe('room persistence and admission', () => {
     )
     expect(stored.rows[0]?.passwordHash).toBeTruthy()
     expect(stored.rows[0]?.passwordHash).not.toContain('correct horse battery')
+  })
+
+  test('projects canonical admitted, forced-departure, ended, and missing states', async () => {
+    const fixture = await createFixture()
+    const [owner, member] = await Promise.all([fixture.account(), fixture.account()])
+    const room = created(await fixture.service.createRoom(owner, { name: 'Projection lifecycle' }))
+
+    await expect(
+      fixture.service.inspectRouteProjection(room.room.id, owner),
+    ).resolves.toMatchObject({ kind: 'admitted', self: { role: 'host' } })
+    await expect(
+      fixture.service.inspectRouteProjection(room.room.id, member),
+    ).resolves.toMatchObject({ kind: 'preAdmission', room: { admission: 'open' } })
+
+    await expect(fixture.service.admit(member, room.room.id)).resolves.toMatchObject({ status: 'joined' })
+    await expect(
+      fixture.service.inspectRouteProjection(room.room.id, member),
+    ).resolves.toMatchObject({ kind: 'admitted', self: { role: 'member' } })
+    await expect(
+      fixture.service.banAccount(owner, room.room.id, member),
+    ).resolves.toMatchObject({ status: 'banned' })
+    await expect(
+      fixture.service.inspectRouteProjection(room.room.id, member),
+    ).resolves.toMatchObject({ kind: 'preAdmission' })
+
+    await fixture.pool.query(
+      'INSERT INTO stream (id, room_id, membership_id, started_at) VALUES ($1, $2, $3, $4)',
+      [randomUUID(), room.room.id, room.membership.id, new Date(fixture.now.value)],
+    )
+    fixture.now.value += 12 * HOUR_MS + 1
+    await expect(
+      fixture.service.inspectRouteProjection(room.room.id, owner),
+    ).resolves.toMatchObject({
+      kind: 'pastStream',
+      room: { memberCount: 2, streamCount: 1 },
+    })
+    await expect(
+      fixture.service.inspectRouteProjection(randomUUID(), owner),
+    ).resolves.toBeNull()
   })
 
   test('rechecks a target that becomes private while admission waits for its lock', async () => {

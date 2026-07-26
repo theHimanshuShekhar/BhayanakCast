@@ -1,4 +1,4 @@
-import { queryOptions } from '@tanstack/react-query'
+import { queryOptions, type QueryClient } from '@tanstack/react-query'
 import { createServerFn } from '@tanstack/react-start'
 import { getRequest } from '@tanstack/react-start/server'
 import {
@@ -15,13 +15,37 @@ import type {
   AdmitResult,
   LeaveResult,
   MembershipConfirmation,
-  RoomBoundaryProjection,
 } from '../../server/rooms/room-service'
+import type { RoomRouteProjection } from '../../server/rooms/room-projection'
+import { normalizeHomeRealtimeEvent } from '../../server/realtime/home-events'
 
-export type RoomProjectionResult = RoomBoundaryProjection
+export type RoomProjectionResult = RoomRouteProjection | null
 
 export const roomQueryKeys = {
   projection: (roomId: string) => ['room', 'projection', roomId] as const,
+}
+
+export function invalidateRoomProjection(
+  queryClient: QueryClient,
+  roomId: string,
+): Promise<void> {
+  const canonicalRoomId = validateRoomId(roomId)
+  return queryClient.invalidateQueries({
+    queryKey: roomQueryKeys.projection(canonicalRoomId),
+    exact: true,
+    refetchType: 'active',
+  })
+}
+
+export function applyRoomProjectionRealtimeEvent(
+  queryClient: QueryClient,
+  roomId: string,
+  value: unknown,
+): Promise<void> | undefined {
+  const canonicalRoomId = validateRoomId(roomId)
+  const event = normalizeHomeRealtimeEvent(value)
+  if (!event || !('roomId' in event) || event.roomId.toLowerCase() !== canonicalRoomId) return
+  return invalidateRoomProjection(queryClient, canonicalRoomId)
 }
 
 export function roomProjectionQueryOptions(roomId: string) {
@@ -35,9 +59,9 @@ export function roomProjectionQueryOptions(roomId: string) {
 
 export const getRoomProjection = createServerFn({ method: 'GET' })
   .validator(validateRoomId)
-  .handler(async ({ data }): Promise<RoomBoundaryProjection> => {
+  .handler(async ({ data }): Promise<RoomProjectionResult> => {
     const session = await currentSession()
-    return getProductionRoomService().inspectBoundary(data, session?.id ?? null)
+    return getProductionRoomService().inspectRouteProjection(data, session?.id ?? null)
   })
 
 export const admitRoom = createServerFn({ method: 'POST' })
