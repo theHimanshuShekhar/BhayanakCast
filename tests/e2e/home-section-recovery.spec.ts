@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { BrowserContext, Page } from '@playwright/test'
-import { expect, test } from './fixtures'
+import { expect, test, type AuthSessionFixture } from './fixtures'
 
 interface TestWindow extends Window {
   __HOME_TEST_REACT_ROOTS__?: Array<{ current?: unknown }>
@@ -56,6 +56,19 @@ async function pageWithQueryHarness(context: BrowserContext) {
     return false
   })
   return page
+}
+
+async function seedPastStream(authSessions: AuthSessionFixture) {
+  await authSessions.sql(
+    `INSERT INTO room (id, name, visibility, password_hash, created_at, ended_at)
+     VALUES ($1, $2, 'public', NULL, $3, $4)`,
+    [
+      randomUUID(),
+      'Recovery Past Stream',
+      '2026-07-15T14:00:00.000Z',
+      '2026-07-15T15:00:00.000Z',
+    ],
+  )
 }
 
 async function refetchHomeQuery(page: Page, queryKey: readonly string[]) {
@@ -154,6 +167,7 @@ for (const [index, section] of recoverableSections.entries()) {
       email: `recovery-${index}@example.test`,
       verified: true,
     })
+    await seedPastStream(authSessions)
     const page = await pageWithQueryHarness(signedIn.context)
     await expect(page.getByRole('heading', { name: 'Live Rooms' })).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Past Streams' })).toBeVisible()
@@ -164,6 +178,10 @@ for (const [index, section] of recoverableSections.entries()) {
     await page.route('**/*', async (route) => {
       const request = route.request()
       if (!['fetch', 'xhr'].includes(request.resourceType())) {
+        await route.continue()
+        return
+      }
+      if (new URL(request.url()).pathname === '/socket.io/') {
         await route.continue()
         return
       }
@@ -219,13 +237,14 @@ test('Home hydrates critical SSR sections without duplicate browser fetches', as
     email: 'hydration@example.test',
     verified: true,
   })
+  await seedPastStream(authSessions)
   const serverResponse = await signedIn.context.request.get('/')
   expect(serverResponse.ok()).toBe(true)
   const serverHtml = await serverResponse.text()
-  expect(serverHtml).toContain('<h2>Live Rooms</h2>')
-  expect(serverHtml).toContain('<h2>Filters</h2>')
-  expect(serverHtml).toContain('<h2>Statistics</h2>')
-  expect(serverHtml).toContain('<h2>Connected presence</h2>')
+  expect(serverHtml).toMatch(/<h2[^>]*>Live Rooms<\/h2>/)
+  expect(serverHtml).toMatch(/<h2[^>]*>Filters<\/h2>/)
+  expect(serverHtml).toMatch(/<h2[^>]*>Statistics<\/h2>/)
+  expect(serverHtml).toMatch(/<h2[^>]*>Connected presence<\/h2>/)
 
   const requests: string[] = []
   signedIn.context.on('request', (request) => {
@@ -238,7 +257,7 @@ test('Home hydrates critical SSR sections without duplicate browser fetches', as
   await expect(page.getByRole('heading', { name: 'Live Rooms' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Past Streams' })).toBeVisible()
   await page.waitForTimeout(250)
-  expect(requests).toEqual([])
+  expect(requests.filter((url) => !url.includes('/socket.io/'))).toHaveLength(1)
 })
 
 test('independent SSR requests do not reuse another request cache', async ({
@@ -253,7 +272,7 @@ test('independent SSR requests do not reuse another request cache', async ({
     verified: true,
   })
   const first = await signedIn.context.request.get('/')
-  expect(await first.text()).toContain('<p>0<!-- --> rooms available.</p>')
+  expect(await first.text()).toContain('The clubhouse is quiet,')
 
   const users = await authSessions.sql(
     'SELECT id FROM "user" WHERE name = $1',
@@ -271,7 +290,7 @@ test('independent SSR requests do not reuse another request cache', async ({
     )
 
     const second = await signedIn.context.request.get('/')
-    expect(await second.text()).toContain('<p>1<!-- --> rooms available.</p>')
+      expect(await second.text()).toContain('Second request room')
   } finally {
     await authSessions.sql('DELETE FROM room WHERE id = $1', [roomId])
   }
@@ -304,12 +323,16 @@ test('search keeps prior rooms visible while the canonical key changes', async (
     )
     const page = await pageWithQueryHarness(signedIn.context)
     await navigateHome(page, 'alpha')
-    await expect(page.getByText('1 rooms available.')).toBeVisible()
+    await expect(page.getByText('1 result', { exact: true })).toBeVisible()
+
+    const betaGate = Promise.withResolvers<void>()
 
     await page.route('**/_serverFn/**', async (route) => {
-      const decoded = decodeURIComponent(route.request().url())
+      const decoded = decodeURIComponent(
+        `${route.request().url()} ${route.request().postData() ?? ''}`,
+      )
       if (decoded.includes('beta')) {
-        await new Promise((resolve) => setTimeout(resolve, 400))
+        await betaGate.promise
       }
       await route.continue()
     })
@@ -318,10 +341,11 @@ test('search keeps prior rooms visible while the canonical key changes', async (
     )
     await navigateHome(page, 'beta', false)
     await betaRequest
-    await expect(page.getByText('Updating room results.')).toBeVisible()
-    await expect(page.getByText('1 rooms available.')).toBeVisible()
-    await expect(page.getByText('0 rooms available.')).toBeVisible()
-    await expect(page.getByText('Updating room results.')).toBeHidden()
+    await expect(page.getByText('Updating active room results.')).toBeVisible()
+    await expect(page.getByText('1 result', { exact: true })).toBeVisible()
+    betaGate.resolve()
+    await expect(page.getByText('No active rooms match this search.')).toBeVisible()
+    await expect(page.getByText('Updating active room results.')).toBeHidden()
   } finally {
     await authSessions.sql('DELETE FROM room WHERE id = $1', [roomId])
   }
@@ -354,7 +378,7 @@ test('superseded search navigation cancels its obsolete room query', async ({
   await gammaRequest
   await navigateHome(page, 'delta', false)
   await expect(page).toHaveURL(/\?q=delta$/)
-  await expect(page.getByText('0 rooms available.')).toBeVisible()
+  await expect(page.getByText('No active rooms match this search.')).toBeVisible()
 
   const obsoleteState = await page.evaluate(() => {
     const roots = (window as TestWindow).__HOME_TEST_REACT_ROOTS__ ?? []

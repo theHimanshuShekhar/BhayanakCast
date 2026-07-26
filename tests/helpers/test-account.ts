@@ -9,6 +9,7 @@ import { mapDiscordProfile } from '../../src/server/auth/discord-profile'
 import { migrateAuthDatabase } from '../../src/server/db/migrate'
 import type { SessionProjection } from '../../src/server/auth/session'
 import type { IntegrationContext } from '../setup/integration'
+import { createDeletionService, type DeletionRequestStatus } from '../../src/server/profile/deletion-service'
 
 export interface DiscordTestProfile {
   id: string
@@ -41,6 +42,10 @@ export interface TestAccountHarness {
   ): Promise<SessionProjection | null>
   inspectSession(sessionCookie: string): Promise<InspectedTestSession>
   signOut(sessionCookie: string): Promise<void>
+  respondToDeletion(
+    accountId: string,
+    status: Extract<DeletionRequestStatus, 'approved' | 'rejected'>,
+  ): Promise<void>
   revokeSession(sessionCookie: string): Promise<void>
   inspectDiscordTokens(discordId: string): Promise<StoredDiscordOAuthTokens>
   now(): number
@@ -233,6 +238,12 @@ export async function createTestAccountHarness(
           throw new Error(
             `Sign-out failed (${response.status}): ${await response.text()}`,
           )
+        }
+      },
+      async respondToDeletion(accountId, status) {
+        const result = await createDeletionService(pool).respond(accountId, status)
+        if (result.status !== status) {
+          throw new Error(`Deletion request was not ${status}`)
         }
       },
       async revokeSession(sessionCookie) {

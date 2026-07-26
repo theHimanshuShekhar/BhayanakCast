@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import type { Pool } from 'pg'
 import { endRoom, roomEndDeadline } from '../rooms/end-room'
+import {
+  AccountAccessDeniedError,
+  requireAccountMutation,
+} from '../auth/account-access-policy'
+import type { HomeEventPublisher } from '../realtime/home-events'
 
 
 export type SubscriptionResult =
@@ -10,6 +15,7 @@ export type SubscriptionResult =
       readonly streamId: string
     }
   | { readonly status: 'viewer-not-admitted' }
+  | { readonly status: 'account-read-only' | 'all-access-sanctioned' }
   | { readonly status: 'stream-unavailable' }
   | { readonly status: 'own-stream' }
 
@@ -18,12 +24,24 @@ export interface ActiveSubscription {
   readonly streamId: string
   readonly startedAt: Date
 }
-
 export class SubscriptionService {
+  private readonly publishHomeEvent: HomeEventPublisher
+
   constructor(
     private readonly pool: Pool,
     private readonly now: () => Date = () => new Date(),
-  ) {}
+    publishHomeEvent?: HomeEventPublisher,
+  ) {
+    this.publishHomeEvent = publishHomeEvent ?? (() => {})
+  }
+
+  private emitHomeEvent(event: Parameters<HomeEventPublisher>[0]) {
+    try {
+      this.publishHomeEvent(event)
+    } catch {
+      // Home notifications are best effort after the stream transaction commits.
+    }
+  }
 
   async subscribe(
     viewerMembershipId: string,
@@ -32,13 +50,46 @@ export class SubscriptionService {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
-      const observedViewer = await client.query<{ roomId: string }>(
-        'SELECT room_id AS "roomId" FROM room_membership WHERE id = $1',
+      const observedViewer = await client.query<{ roomId: string; accountId: string }>(
+        `SELECT room_id AS "roomId", account_id AS "accountId"
+           FROM room_membership
+          WHERE id = $1`,
         [viewerMembershipId],
       )
       if (!observedViewer.rows[0]) {
         await client.query('ROLLBACK')
         return { status: 'viewer-not-admitted' }
+      }
+      await client.query(
+        'SELECT id FROM "user" WHERE id = $1 FOR UPDATE',
+        [observedViewer.rows[0].accountId],
+      )
+      let access
+      try {
+        access = await requireAccountMutation(
+          client,
+          observedViewer.rows[0].accountId,
+          'stream-subscribe',
+          this.now(),
+        )
+      } catch (error) {
+        if (!(error instanceof AccountAccessDeniedError)) throw error
+        await client.query('ROLLBACK')
+        return {
+          status:
+            error.state === 'sanctioned'
+              ? ('all-access-sanctioned' as const)
+              : ('account-read-only' as const),
+        }
+      }
+      if (!access.canMutate('stream-subscribe')) {
+        await client.query('ROLLBACK')
+        return {
+          status:
+            access.state === 'sanctioned'
+              ? ('all-access-sanctioned' as const)
+              : ('account-read-only' as const),
+        }
       }
       const observedTarget = await client.query<{
         roomId: string
@@ -80,6 +131,10 @@ export class SubscriptionService {
       if (deadline.getTime() <= instant.getTime()) {
         await endRoom(client, observedViewer.rows[0].roomId, deadline)
         await client.query('COMMIT')
+        this.emitHomeEvent({
+          type: 'room-ended',
+          roomId: observedViewer.rows[0].roomId,
+        })
         return { status: 'stream-unavailable' }
       }
 

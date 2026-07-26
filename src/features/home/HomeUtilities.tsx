@@ -3,6 +3,7 @@ import type { QueryKey } from '@tanstack/react-query'
 import { SignInButton } from '../auth/SignInButton'
 import type { SessionProjection } from '../auth/auth-client'
 import { CreateRoomButton } from './HomeNavigation'
+import { HomeRealtimeBridge } from './home-realtime'
 import { HomeSearch as HomeSearchController } from './HomeSearch'
 import { HomeSectionBoundary } from './HomeSectionBoundary'
 import { HomeMetricsSkeleton } from './HomeSectionSkeletons'
@@ -19,6 +20,7 @@ interface HomeUtilitiesProps {
   readonly statisticsPending: boolean
   readonly statisticsFailed: boolean
   readonly statisticsQueryKey: QueryKey
+  readonly onCanonicalRefresh: () => void
 }
 
 export function HomeUtilities({
@@ -32,6 +34,7 @@ export function HomeUtilities({
   statisticsPending,
   statisticsFailed,
   statisticsQueryKey,
+  onCanonicalRefresh,
 }: HomeUtilitiesProps) {
   const hasActiveSearch = Boolean(search.q || search.category || search.tags?.length)
 
@@ -41,6 +44,10 @@ export function HomeUtilities({
         className={`home-search-utilities${hasActiveSearch ? ' home-search-utilities--active' : ''}`}
         data-home-center-region="search"
       >
+        <HomeRealtimeBridge
+          enabled={Boolean(session)}
+          onCanonicalRefresh={onCanonicalRefresh}
+        />
         <HomeSearchController
           facets={facets}
           facetsFailed={facetsFailed}

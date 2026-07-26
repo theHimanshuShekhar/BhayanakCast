@@ -22,6 +22,10 @@ export interface AuthSessionFixture {
   ): Promise<AuthenticatedBrowserContext>
   inspectDiscordTokens(discordId: string): Promise<StoredDiscordOAuthTokens>
   sql(text: string, values?: unknown[]): Promise<unknown[]>
+  respondToDeletion(
+    accountId: string,
+    status: 'approved' | 'rejected',
+  ): Promise<void>
 }
 
 export const test = base.extend<{ authSessions: AuthSessionFixture }>({
@@ -41,6 +45,9 @@ export const test = base.extend<{ authSessions: AuthSessionFixture }>({
       await use({
         origin: server.origin,
         sql: server.sql,
+        respondToDeletion(accountId, status) {
+          return accounts!.respondToDeletion(accountId, status)
+        },
         async createBrowserContext(profile) {
           const signedIn = await accounts!.signInDiscord(profile)
           const separator = signedIn.sessionCookie.indexOf('=')

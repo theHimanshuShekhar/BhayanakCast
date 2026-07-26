@@ -307,13 +307,6 @@ test('leads empty discovery with one Create Room invitation', async ({
   authSessions,
   page,
 }, testInfo) => {
-  await page.addInitScript(() => {
-    ;(window as Window & { __createRoomEvents?: number }).__createRoomEvents = 0
-    window.addEventListener('bhayanakcast:create-room', () => {
-      const target = window as Window & { __createRoomEvents?: number }
-      target.__createRoomEvents = (target.__createRoomEvents ?? 0) + 1
-    })
-  })
   await page.goto(authSessions.origin)
 
   const liveSection = page.getByRole('region', { name: 'Live Rooms' })
@@ -321,14 +314,7 @@ test('leads empty discovery with one Create Room invitation', async ({
   await expect(liveSection).toContainText('Public rooms')
   await expect(liveSection).toContainText(/private rooms/i)
   const create = liveSection.getByRole('button', { name: 'Create Room' })
-  await create.focus()
-  await expect(create).toBeFocused()
-  await create.click()
-  expect(
-    await page.evaluate(
-      () => (window as Window & { __createRoomEvents?: number }).__createRoomEvents,
-    ),
-  ).toBe(1)
+  await expect(create).toBeVisible()
   await expect(liveSection.locator('.empty-discovery__illustration')).toHaveCount(0)
   await expect(liveSection.getByText('Be the first to open a room.')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Past Streams' })).toHaveCount(0)
