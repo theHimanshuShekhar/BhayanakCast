@@ -61,11 +61,7 @@ export function ThemeToggle({ initialPreference }: ThemeToggleProps) {
   })
   const isThemeMutationPending =
     useIsMutating({ mutationKey: themePreferenceMutationKey }) > 0
-  const [theme, setTheme] = useState<Theme | null>(() => {
-    if (typeof document === 'undefined') return null
-    const value = document.documentElement.dataset.theme
-    return value === 'light' || value === 'dark' ? value : null
-  })
+  const [theme, setTheme] = useState<Theme | null>(null)
   const toggleRef = useRef<HTMLButtonElement>(null)
 
   useThemeLayoutEffect(() => {
