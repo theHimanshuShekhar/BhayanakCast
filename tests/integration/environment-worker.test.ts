@@ -1,20 +1,24 @@
 import { expect, test } from 'vitest'
-import { createTestCoordinator } from '../helpers/test-coordinator'
+import { createTestEnvironment } from '../helpers/test-environment'
+import { startTestServer } from '../helpers/test-server'
 import { getIntegrationContext } from '../setup/integration'
 
-test('worker B cannot observe worker A resources', async () => {
-  const context = await getIntegrationContext()
-  const coordinator = await createTestCoordinator()
+test('an independently bound environment cannot observe another environment resources', async () => {
+  const first = await getIntegrationContext()
+  const secondEnvironment = await createTestEnvironment(`${first.workerId}-peer`)
+  const secondServer = await startTestServer(secondEnvironment)
   try {
-    const first = await coordinator.receive()
+    await first.server.sql('CREATE TABLE marker (value text)')
+    await first.server.sql('INSERT INTO marker VALUES ($1)', ['A'])
+    await first.server.set('marker', 'A')
 
-    expect(context.workerId).not.toBe(first.workerId)
-    expect(context.environment.schema).not.toBe(first.schema)
-    expect(context.environment.valkeyPrefix).not.toBe(first.valkeyPrefix)
-    expect(context.server.port).not.toBe(first.port)
-    await expect(context.server.sql('SELECT * FROM marker')).rejects.toThrow()
-    expect(await context.server.get('marker')).toBeNull()
+    expect(secondEnvironment.schema).not.toBe(first.environment.schema)
+    expect(secondEnvironment.valkeyPrefix).not.toBe(first.environment.valkeyPrefix)
+    expect(secondServer.port).not.toBe(first.server.port)
+    await expect(secondServer.sql('SELECT * FROM marker')).rejects.toThrow()
+    expect(await secondServer.get('marker')).toBeNull()
   } finally {
-    await coordinator.cleanup()
+    await secondServer.stop()
+    await secondEnvironment.cleanup()
   }
 })
