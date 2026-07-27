@@ -21,6 +21,9 @@ export const room = pgTable(
     createdBy: text('created_by').references(() => user.id),
     createdAt: timestamp('created_at').notNull(),
     emptyAt: timestamp('empty_at'),
+    warning30SentAt: timestamp('warning_30_sent_at'),
+    warning10SentAt: timestamp('warning_10_sent_at'),
+    warning1SentAt: timestamp('warning_1_sent_at'),
     endedAt: timestamp('ended_at'),
   },
   (table) => [

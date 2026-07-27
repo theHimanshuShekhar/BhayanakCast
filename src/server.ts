@@ -18,7 +18,6 @@ import { bindChatMuteRuntime } from './server/profile/chat-mute-service'
 import { homePresence } from './server/home/home-presence'
 import {
   createHomeEventHub,
-  HOME_ACCOUNT_REPLACED_EVENT,
   HOME_ACCOUNT_REVOKED_EVENT,
   HOME_SOCKET_EVENT,
   type HomeEventPublisher,
@@ -26,6 +25,7 @@ import {
   type HomeRealtimeEvent,
 } from './server/realtime/home-events'
 import { RoomService } from './server/rooms/room-service'
+import { ConnectionRegistry, type RegisteredConnection } from './server/realtime/connection-registry'
 import { bindDeletionRuntime } from './server/profile/deletion-service'
 import type { ServerRuntime } from './server/runtime'
 export { createServerRuntime } from './server/runtime'
@@ -33,6 +33,7 @@ export {
   parseTrustedProxyIps,
   resolveTrustedClientIp,
 } from './server/auth/session'
+const roomServicesByServer = new WeakMap<HttpServer, RoomService>()
 const homeEventHubs = new WeakMap<HttpServer, HomeEventHub>()
 
 export function bindServerRuntime(runtime: ServerRuntime, server: HttpServer) {
@@ -51,9 +52,11 @@ export function bindServerRuntime(runtime: ServerRuntime, server: HttpServer) {
           publishHomeEvent: (event) => publishHomeEvent(server, event),
           now: () => new Date(runtime.clock.now()),
           revokeConnections: () => undefined,
+          clock: runtime.clock,
         })
       : undefined
   if (roomService) bindRoomService(roomService)
+  if (roomService) roomServicesByServer.set(server, roomService)
   bindDeletionRuntime({
     pool,
     roomService,
@@ -76,14 +79,37 @@ export function attachSocketServer(server: HttpServer, databasePool?: Pool) {
     serveClient: false,
   })
   const eventHub = createHomeEventHub()
-  const socketsByAccount = new Map<string, SocketConnection>()
+  const connectionRegistry = new ConnectionRegistry()
+  const terminalConnections = new WeakSet<RegisteredConnection>()
   const claimsByAccount = new Map<string, { readonly socket: SocketConnection; readonly generation: number }>()
   const generationsByAccount = new Map<string, number>()
+  const roomService = roomServicesByServer.get(server)
+  const accountOperations = new Map<string, Promise<unknown>>()
+  const runAccountOperation = <T>(
+    accountId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> => {
+    const prior = accountOperations.get(accountId) ?? Promise.resolve()
+    const next = prior.catch(() => undefined).then(operation)
+    let tracked!: Promise<unknown>
+    tracked = next.then(
+      () => {
+        if (accountOperations.get(accountId) === tracked) accountOperations.delete(accountId)
+      },
+      () => {
+        if (accountOperations.get(accountId) === tracked) accountOperations.delete(accountId)
+      },
+    )
+    accountOperations.set(accountId, tracked)
+    return next
+  }
   homeEventHubs.set(server, eventHub)
   bindDeletionRuntime({
     revokeConnections: (accountId) => {
       for (const socket of sockets.sockets.sockets.values()) {
         if (socket.data.accountId === accountId) {
+          const connection = socket as unknown as RegisteredConnection
+          terminalConnections.add(connection)
           socket.emit(HOME_ACCOUNT_REVOKED_EVENT)
           socket.disconnect(true)
         }
@@ -96,7 +122,9 @@ export function attachSocketServer(server: HttpServer, databasePool?: Pool) {
     try {
       const headers = new Headers()
       for (const [name, value] of Object.entries(socket.handshake.headers)) {
-        if (value !== undefined) headers.set(name, Array.isArray(value) ? value.join(', ') : value)
+        if (value !== undefined) {
+          headers.set(name, Array.isArray(value) ? value.join(', ') : value)
+        }
       }
       const session = await readSessionProjection(getProductionAuth(), headers)
       if (!session) return next(new Error('Authentication required'))
@@ -112,55 +140,90 @@ export function attachSocketServer(server: HttpServer, databasePool?: Pool) {
       return next(new Error('Authentication required'))
     }
   })
+
   sockets.on('connection', (socket) => {
     const accountId = socket.data.accountId
-    if (typeof accountId !== 'string') return socket.disconnect(true)
-    const generation = (generationsByAccount.get(accountId) ?? 0) + 1
-    generationsByAccount.set(accountId, generation)
-    claimsByAccount.set(accountId, { socket, generation })
+    if (typeof accountId !== 'string') {
+      socket.disconnect(true)
+      return
+    }
+    const connection = socket as unknown as RegisteredConnection
     let activated = false
+    let handledDisconnect = false
     let unsubscribe: () => void = () => {}
     const removePresence = () => {
-      if (claimsByAccount.get(accountId)?.socket === socket) {
-        claimsByAccount.delete(accountId)
-      }
-      if (socketsByAccount.get(accountId) === socket) socketsByAccount.delete(accountId)
-      unsubscribe()
-      if (!activated) return
-      homePresence.remove(accountId, socket.id)
-      eventHub.publish({
-        type: 'presence',
-        connectedAccountCount: homePresence.count(),
-      })
+      if (handledDisconnect) return
+      handledDisconnect = true
+      void runAccountOperation(accountId, async () => {
+        if (claimsByAccount.get(accountId)?.socket === socket) {
+          claimsByAccount.delete(accountId)
+        }
+        connectionRegistry.remove(accountId, connection)
+        if (!activated) return
+        unsubscribe()
+        homePresence.remove(accountId, socket.id)
+        eventHub.publish({
+          type: 'presence',
+          connectedAccountCount: homePresence.count(),
+        })
+        if (!terminalConnections.has(connection)) {
+          await roomService?.handleUnexpectedDisconnect(accountId)
+        }
+        terminalConnections.delete(connection)
+      }).catch(() => undefined)
     }
     socket.on('disconnect', removePresence)
-    try {
+    void runAccountOperation(accountId, async () => {
+      const generation = (generationsByAccount.get(accountId) ?? 0) + 1
+      generationsByAccount.set(accountId, generation)
+      claimsByAccount.set(accountId, { socket, generation })
       const claim = claimsByAccount.get(accountId)
-      if (
-        !socket.connected ||
-        !claim ||
-        claim.socket !== socket ||
-        claim.generation !== generation
-      ) {
+      if (!socket.connected || !claim || claim.socket !== socket || claim.generation !== generation) {
         socket.disconnect(true)
         return
       }
-      const previous = socketsByAccount.get(accountId)
-      socketsByAccount.set(accountId, socket)
-      homePresence.add(accountId, socket.id)
-      activated = true
-      unsubscribe = eventHub.subscribe((event) => socket.emit(HOME_SOCKET_EVENT, event))
-      if (previous && previous !== socket) {
-        previous.emit(HOME_ACCOUNT_REPLACED_EVENT)
-        previous.disconnect(true)
+      let displacedRoomId: string | undefined
+      const previous = connectionRegistry.current(accountId)
+      if (previous && previous !== connection) {
+        terminalConnections.add(previous)
+        try {
+          const previousSocket = previous as unknown as SocketConnection
+          const departure =
+            previousSocket.connected === false
+              ? await roomService?.handleUnexpectedDisconnect(accountId)
+              : await roomService?.terminalDeparture(accountId, 'displacement')
+          if (departure && 'roomId' in departure) displacedRoomId = departure.roomId
+        } catch (error) {
+          terminalConnections.delete(previous)
+          throw error
+        }
       }
+      try {
+        connectionRegistry.register(accountId, connection)
+      } catch (error) {
+        if (previous) terminalConnections.delete(previous)
+        throw error
+      }
+      const currentClaim = claimsByAccount.get(accountId)
+      if (!currentClaim || currentClaim.socket !== socket || currentClaim.generation !== generation) {
+        socket.disconnect(true)
+        return
+      }
+      activated = true
+      homePresence.add(accountId, socket.id)
+      unsubscribe = eventHub.subscribe((event) => socket.emit(HOME_SOCKET_EVENT, event))
+      if (displacedRoomId) {
+        socket.emit(HOME_SOCKET_EVENT, {
+          type: 'room-discovery',
+          roomId: displacedRoomId,
+        })
+      }
+      await roomService?.reclaimMembership(accountId)
       eventHub.publish({
         type: 'presence',
         connectedAccountCount: homePresence.count(),
       })
-    } catch {
-      socket.disconnect(true)
-    }
+    }).catch(() => socket.disconnect(true))
   })
   return sockets
 }
