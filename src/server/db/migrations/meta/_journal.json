@@ -71,6 +71,13 @@
       "when": 1784390850407,
       "tag": "0009_deletion_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1784394000000,
+      "tag": "0010_room_lifecycle",
+      "breakpoints": true
     }
   ]
 }

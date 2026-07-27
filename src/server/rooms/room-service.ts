@@ -35,6 +35,15 @@ import {
 } from './room-projection'
 import type { HomeEventPublisher } from '../realtime/home-events'
 import { readAccountAccessPolicy } from '../auth/account-access-policy'
+import type { Clock } from '../time'
+import {
+  MembershipService,
+  type DepartureResult,
+  type ReclaimResult,
+  type UnexpectedDisconnectResult,
+  type TerminalDepartureReason,
+} from './membership-service'
+import { RoomLifecycle, type RoomLifecycleWarning } from './room-lifecycle'
 
 const ROOM_CAPACITY = 10
 const SANCTION_DEFAULT_MS = 7 * 24 * 60 * 60 * 1_000
@@ -165,6 +174,7 @@ export interface RoomServiceConfiguration {
   readonly valkey: Redis
   readonly valkeyPrefix: string
   readonly now?: () => Date
+  readonly clock?: Clock
   readonly publishHomeEvent?: HomeEventPublisher
   readonly revokeConnections: (accountId: string) => Promise<void> | void
 }
@@ -174,14 +184,75 @@ export class RoomService {
   private readonly now: () => Date
   private readonly publishHomeEvent: HomeEventPublisher
   private readonly revokeConnections: (accountId: string) => Promise<void> | void
+  private readonly membershipService: MembershipService
+  private readonly lifecycle?: RoomLifecycle
+  private readonly initialization: Promise<void>
 
   constructor(private readonly configuration: RoomServiceConfiguration) {
     this.repository = new RoomRepository(configuration.pool)
     this.now = configuration.now ?? (() => new Date())
     this.revokeConnections = configuration.revokeConnections
     this.publishHomeEvent = configuration.publishHomeEvent ?? (() => {})
+    let membershipService!: MembershipService
+    const lifecycle = configuration.clock
+      ? new RoomLifecycle({
+          pool: configuration.pool,
+          clock: configuration.clock,
+          onWarning: (warning: RoomLifecycleWarning) =>
+            this.emitHomeEvent({
+              type: 'room-warning',
+              roomId: warning.roomId,
+              minutes: warning.minutes,
+            }),
+          onRoomEnded: (roomId) => this.emitHomeEvent({ type: 'room-ended', roomId }),
+          onReconnectExpired: async (membershipId, reconnectUntil) => {
+            const result = await membershipService.expireReconnect(membershipId, reconnectUntil)
+            await this.publishMembershipTransition(result)
+            return result
+          },
+          onError: (error) => {
+            console.error('Room lifecycle callback failed', error)
+          },
+        })
+      : undefined
+    membershipService = new MembershipService({
+      pool: configuration.pool,
+      now: this.now,
+      clock: configuration.clock,
+      scheduleReconnect: lifecycle
+        ? (membershipId, reconnectUntil) =>
+            lifecycle.scheduleMembership(membershipId, reconnectUntil)
+        : undefined,
+    })
+    this.membershipService = membershipService
+    this.lifecycle = lifecycle
+    this.initialization = lifecycle ? this.recoverLifecycle(lifecycle) : Promise.resolve()
+  }
+  private async recoverLifecycle(lifecycle: RoomLifecycle): Promise<void> {
+    for (;;) {
+      try {
+        await lifecycle.recover()
+        return
+      } catch (error) {
+        console.error('Room lifecycle recovery failed', error)
+        await new Promise<void>((resolve) => setTimeout(resolve, 1_000))
+      }
+    }
   }
 
+  async ready(): Promise<void> {
+    await this.initialization
+  }
+
+  async scheduleRoom(roomId: string): Promise<void> {
+    await this.initialization
+    await this.lifecycle?.scheduleRoom(roomId)
+  }
+
+  async drainLifecycle(): Promise<void> {
+    await this.initialization
+    await this.lifecycle?.drain()
+  }
   private emitHomeEvent(event: Parameters<HomeEventPublisher>[0]) {
     try {
       this.publishHomeEvent(event)
@@ -195,6 +266,7 @@ export class RoomService {
   ): Promise<void> {
     for (const transition of transitions) {
       await this.publishRoomMembership(transition.roomId)
+      await this.scheduleRoom(transition.roomId)
     }
   }
 
@@ -370,7 +442,7 @@ export class RoomService {
     if (result.status === 'created') {
       await this.publishRoomTransitions(affectedRooms)
       this.emitHomeEvent({ type: 'room-discovery', roomId: result.room.id })
-      await this.publishRoomMembership(result.room.id)
+      await this.publishRoomTransitions([{ roomId: result.room.id }])
     }
     return result
   }
@@ -572,10 +644,12 @@ export class RoomService {
         roomId,
       ).catch(() => false)
     }
+    if (result.status === 'joined') {
+      affectedRooms.push({ roomId: result.membership.roomId })
+    }
     await this.publishRoomTransitions(affectedRooms)
     if (result.status === 'joined') {
       this.emitHomeEvent({ type: 'room-discovery', roomId: result.membership.roomId })
-      await this.publishRoomMembership(result.membership.roomId)
     }
     return result
   }
@@ -672,9 +746,40 @@ export class RoomService {
     return result
   }
 
+  private async publishMembershipTransition(
+    result: DepartureResult | ReclaimResult | UnexpectedDisconnectResult,
+  ): Promise<void> {
+    if (!('roomId' in result) || !result.roomId) return
+    await this.publishRoomTransitions([{ roomId: result.roomId }])
+  }
   async currentMembership(accountId: string): Promise<MembershipProjection | null> {
     const membership = await this.repository.currentMembership(accountId)
     return membership ? membershipProjection(membership) : null
+  }
+
+  async handleUnexpectedDisconnect(
+    accountId: string,
+  ): Promise<UnexpectedDisconnectResult> {
+    const result = await this.membershipService.unexpectedDisconnect(accountId)
+    await this.publishMembershipTransition(result)
+    return result
+  }
+
+  async reclaimMembership(accountId: string): Promise<ReclaimResult> {
+    const result = await this.membershipService.reclaim(accountId)
+    if (result.status === 'reclaimed' || result.status === 'expired') {
+      await this.publishMembershipTransition(result)
+    }
+    return result
+  }
+
+  async terminalDeparture(
+    accountId: string,
+    reason: TerminalDepartureReason,
+  ): Promise<DepartureResult> {
+    const result = await this.membershipService.depart(accountId, reason)
+    await this.publishMembershipTransition(result)
+    return result
   }
 
   async inspectPreAdmission(
