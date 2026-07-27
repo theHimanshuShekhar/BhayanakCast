@@ -24,6 +24,7 @@ export const roomMembership = pgTable(
       .references(() => user.id),
     role: text('role').notNull().default('member'),
     joinedAt: timestamp('joined_at').notNull(),
+    reconnectUntil: timestamp('reconnect_until'),
     leftAt: timestamp('left_at'),
   },
   (table) => [

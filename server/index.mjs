@@ -74,11 +74,11 @@ const server = createServer(async (request, response) => {
   }
 })
 
+startModule.bindServerRuntime(runtime, server)
 const sockets = startModule.attachSocketServer(
   server,
   runtime.getDatabasePool(),
 )
-startModule.bindServerRuntime(runtime, server)
 server.listen(PORT, HOST, () => {
   const address = server.address()
   const port = typeof address === 'object' && address ? address.port : PORT
