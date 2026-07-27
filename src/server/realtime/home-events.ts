@@ -41,6 +41,12 @@ export interface HomeRoomEndedEvent {
   readonly roomId: string
 }
 
+
+export interface HomeRoomWarningEvent {
+  readonly type: 'room-warning'
+  readonly roomId: string
+  readonly minutes: 30 | 10 | 1
+}
 export interface HomeRoomDiscoveryEvent {
   readonly type: 'room-discovery'
   readonly roomId: string
@@ -56,6 +62,7 @@ export type HomeRealtimeEvent =
   | HomeRoomValuePatch
   | HomeRoomMembershipEvent
   | HomeRoomEndedEvent
+  | HomeRoomWarningEvent
   | HomeRoomDiscoveryEvent
   | HomePresenceEvent
 
@@ -98,6 +105,10 @@ export function normalizeHomeRealtimeEvent(value: unknown): HomeRealtimeEvent | 
   }
   if (!roomId) return null
 
+  if (value.type === 'room-warning') {
+    if (value.minutes !== 30 && value.minutes !== 10 && value.minutes !== 1) return null
+    return { type: 'room-warning', roomId, minutes: value.minutes }
+  }
   if (value.type === 'room-ended' || value.type === 'room-discovery') {
     return { type: value.type, roomId }
   }

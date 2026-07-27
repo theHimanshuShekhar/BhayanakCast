@@ -38,8 +38,8 @@ const server = createServer((request, response) => {
     response.end('Page not found')
   })
 })
-const sockets = attachSocketServer(server, runtime.getDatabasePool())
 bindServerRuntime(runtime, server)
+const sockets = attachSocketServer(server, runtime.getDatabasePool())
 dev.connectWebSocket({ server })
 server.listen(port, host, async () => {
   await dev.afterListen()
