@@ -28,12 +28,14 @@ async function createFixture() {
   })
   await valkey.connect()
   const clock = new TestClock(1_000_000)
+  const homeEvents: Array<{ readonly type: string; readonly roomId?: string }> = []
   const rooms = new RoomService({
     pool,
     valkey,
     valkeyPrefix: `${context.environment.valkeyPrefix}room-roster:`,
     now: () => new Date(clock.now()),
     revokeConnections: () => undefined,
+    publishHomeEvent: (event) => homeEvents.push(event),
   })
   const account = async (name: string) => {
     const id = randomUUID()
@@ -46,7 +48,7 @@ async function createFixture() {
   fixtures.push(async () => {
     await Promise.all([pool.end(), valkey.quit()])
   })
-  return { pool, clock, rooms, account }
+  return { pool, clock, rooms, account, homeEvents }
 }
 
 function created(result: Awaited<ReturnType<RoomService['createRoom']>>) {
@@ -197,5 +199,46 @@ describe('room roster projection', () => {
 
     const projection = await admitted(fixture.rooms, host, room.room.id)
     expect(projection.room.roster.map((member) => member.displayName)).toEqual(['Hana'])
+  })
+  // The room page has no channel of its own: RoomRoute listens on the Home
+  // socket and `applyRoomProjectionRealtimeEvent` turns any event carrying this
+  // room's id into a projection invalidation. This proves the producing half —
+  // that a membership change actually emits one — so the roster is live rather
+  // than load-time only.
+  test('emits a room-membership event on join and on leave so the roster refetches', async () => {
+    const fixture = await createFixture()
+    const host = await fixture.account('Hana')
+    const joiner = await fixture.account('Jules')
+    const room = created(await fixture.rooms.createRoom(host, { name: 'Live roster room' }))
+
+    fixture.homeEvents.length = 0
+    fixture.clock.advanceTo(fixture.clock.now() + 60_000)
+    expect((await fixture.rooms.admit(joiner, room.room.id)).status).toBe('joined')
+
+    expect(
+      fixture.homeEvents.filter(
+        (event) => event.type === 'room-membership' && event.roomId === room.room.id,
+      ),
+    ).not.toHaveLength(0)
+    expect(
+      (await admitted(fixture.rooms, host, room.room.id)).room.roster.map(
+        (member) => member.displayName,
+      ),
+    ).toEqual(['Hana', 'Jules'])
+
+    fixture.homeEvents.length = 0
+    const departure = await fixture.rooms.terminalDeparture(joiner, 'displacement')
+    expect(departure.status).not.toBe('not-member')
+
+    expect(
+      fixture.homeEvents.filter(
+        (event) => event.type === 'room-membership' && event.roomId === room.room.id,
+      ),
+    ).not.toHaveLength(0)
+    expect(
+      (await admitted(fixture.rooms, host, room.room.id)).room.roster.map(
+        (member) => member.displayName,
+      ),
+    ).toEqual(['Hana'])
   })
 })

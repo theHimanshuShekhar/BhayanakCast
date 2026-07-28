@@ -219,11 +219,36 @@ pre-admission, where `0003` forbids a roster. Covered by `tests/unit/room-roster
 and `tests/integration/room-roster.test.ts` (ordering per viewer, identity and stream
 state, public and private pre-admission exclusion, displacement, departure).
 
-**Step 4 (room-scoped realtime channel) is not started.** `src/server/realtime/` has
-`connection-registry.ts` and `home-events.ts` only, so this is greenfield: server event
-union, socket room fan-out, client bridge, and normalizers. Until it lands the mosaic is
-correct on load and stale afterwards. It gates nothing in Phase 3 but should land before
-Phase 4 leans on live tile state.
+**Step 4 — reassessed 2026-07-28: the roster is already live; a dedicated channel is
+deferred to Phase 4.**
+
+The earlier note here said "the mosaic is correct on load and stale afterwards". That was
+wrong, written without reading `src/features/room/room-queries.ts:39`. The room page has
+no channel of its own because it does not need one yet:
+
+- `RoomRoute` opens the same Socket.IO connection and binds `HOME_SOCKET_EVENT`
+  (`RoomRoute.tsx:63`).
+- `applyRoomProjectionRealtimeEvent` normalizes the event and, if it carries this room's
+  id, invalidates the canonical projection — which refetches the roster.
+- Every membership transition reaches that event. `admit`, `leave`,
+  `handleUnexpectedDisconnect`, `reclaimMembership`, and `terminalDeparture` all route
+  through `publishRoomTransitions` → `publishRoomMembership` → a `room-membership` event
+  (`room-service.ts:1134`).
+
+The producing half is now covered by `tests/integration/room-roster.test.ts` ("emits a
+room-membership event on join and on leave"), and the consuming half by the existing
+`tests/unit/room-realtime.test.ts` cases. Invalidate-and-refetch is also the safer shape
+here: the `room-membership` payload is public counts only, so no identity crosses the
+wire to non-members (`0003`).
+
+**What a room-scoped channel is actually for, and why it waits.** Phase 4 and 5 introduce
+state where refetching the whole projection is the wrong tool — WebRTC signaling
+(`0104`), watcher stacks and per-tile connection state (`0101`), typing presence
+(`0102`, explicitly never persisted). Those need a dedicated union with real payloads and
+admitted-only fan-out. Building the union now, before any of those events exist, would be
+a scaffold with nothing to carry. Land it with the first Phase 4 event that needs it,
+mirroring the `HomeRealtimeEvent` discriminated-union + `normalize…` validator pattern
+per `0030`.
 
 ---
 
@@ -292,7 +317,7 @@ already computes it. Remaining per ADR `0103`:
 
 ---
 
-## Phase 7 — Typography
+## Phase 7 — Typography — **verified 2026-07-28**
 
 **Already decided by ADR `0096`; this is a confirmation, not an open choice.** `0096`:
 *"Self-host Source Sans 3 variable WOFF2 assets; do not depend on a third-party font
@@ -301,6 +326,12 @@ sans fallback."* The design specifies Inter throughout; the ADR wins, so the app
 the already-vendored `public/fonts/source-sans-3-latin.woff2` and Inter is not
 introduced. Phase 7's remaining work is verification only: confirm nothing has crept in
 a third-party font request, and confirm no second family is loaded.
+
+**Verified 2026-07-28 — clean.** `src/styles/app.css` has exactly one `@font-face`, and
+it points at the vendored `public/fonts/source-sans-3-latin.woff2`. `font-family` appears
+twice in the whole of `src/`: the face declaration and the `"Source Sans 3", ui-sans-serif,
+system-ui, sans-serif` stack at `app.css:159`. No `fonts.googleapis.com`, no
+`fonts.gstatic.com`, no `@import url(...)`, no Inter. Nothing to change.
 
 The live open question in this area is not the family but the **scale** — see the
 `0096` type-scale divergence recorded in the Home audit above.
@@ -337,8 +368,18 @@ and running the suite on `HEAD` before diagnosing any new failure.
 
 ## Sequencing
 
-Phases 1 and 2 are independent of everything else and can ship immediately. Phase 3 gates
-4, 5, and 6. Phase 7 is a one-line decision that should be made before any further CSS work.
+Phases 1, 2, 3, and 7 are done as of 2026-07-28. What remains is Phases 4, 5, and 6 —
+the room product itself.
+
+Phase 4 is the gate and the bulk of it: ADR `0104` media transport is native
+`RTCPeerConnection` signaled over the existing Socket.IO connection, and the plan already
+flags it as *"the single largest piece of remaining work in the repository"*, to be
+planned separately from the design import. Phase 5 (companion dock, chat persistence) can
+proceed in parallel with it — its only dependency is the roster, which now exists — and
+Phase 6 is mostly surfacing lifecycle state that `RoomLifecycle` already computes.
+
+Recommended order: scope Phase 4 on its own before writing any of it; take Phase 5's
+migration and dock shell first if a shippable increment is wanted sooner.
 
 The honest summary: Phase 1 is an afternoon, Phase 2 is a day, and Phases 3–6 are the room
 product — largely unbuilt, fully specified by ADRs `0100`–`0104`, and only incidentally a
