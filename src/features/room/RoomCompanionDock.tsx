@@ -25,12 +25,18 @@ export function RoomCompanionDock({
   memberCount,
   sheet,
   onDismissSheet,
+  onReport,
+  hostActions,
 }: Readonly<{
   realtime: RoomRealtime
   roomId: string
   roster: readonly RoomRosterMember[]
   selfMembershipId: string
   memberCount: number
+  /** People rows carry the same member and Host actions as the tiles, so
+      safety never depends on hover or on a particular panel (ADR 0102). */
+  onReport: (member: RoomRosterMember) => void
+  hostActions: ((member: RoomRosterMember) => void) | null
   /** Below 768px the dock is a bottom sheet the control bar opens on a tab
       (ADR 0103); null means the desktop dock. */
   sheet: DockTab | null
@@ -48,6 +54,7 @@ export function RoomCompanionDock({
   const panelRef = useRef<HTMLDivElement | null>(null)
   const seen = useRef({ chat: realtime.messages.length, activity: 0 })
   const [unread, setUnread] = useState({ chat: 0, activity: 0 })
+  const [newActivity, setNewActivity] = useState(false)
 
   useEffect(() => {
     if (tab === 'chat') {
@@ -63,6 +70,9 @@ export function RoomCompanionDock({
     if (tab === 'activity') {
       seen.current.activity = realtime.activity.length
       setUnread((current) => (current.activity === 0 ? current : { ...current, activity: 0 }))
+      // Reading older entries is not an invitation to be scrolled away from
+      // them: a cue appears instead, and only you dismiss it (ADR 0102).
+      if (!atBottom(panelRef.current)) setNewActivity(true)
       return
     }
     const missed = realtime.activity.length - seen.current.activity
@@ -137,6 +147,7 @@ export function RoomCompanionDock({
         role="tabpanel"
         onScroll={(event) => {
           scrollPositions.current[tab] = event.currentTarget.scrollTop
+          if (tab === 'activity' && atBottom(event.currentTarget)) setNewActivity(false)
         }}
       >
         {tab === 'chat' && (
@@ -186,6 +197,18 @@ export function RoomCompanionDock({
                     .filter(Boolean)
                     .join(' · ')}
                 </span>
+                {member.membershipId !== selfMembershipId && (
+                  <span className="room-people__actions">
+                    <button type="button" onClick={() => onReport(member)}>
+                      Report
+                    </button>
+                    {hostActions && (
+                      <button type="button" onClick={() => hostActions(member)}>
+                        Host tools
+                      </button>
+                    )}
+                  </span>
+                )}
               </li>
             ))}
           </ul>
@@ -211,6 +234,12 @@ export function RoomCompanionDock({
           </ul>
         )}
       </div>
+
+      {tab === 'activity' && newActivity && (
+        <button className="room-activity__cue" type="button" onClick={scrollToLatestActivity}>
+          New activity
+        </button>
+      )}
 
       {tab === 'chat' && (
         <form
@@ -267,6 +296,12 @@ export function RoomCompanionDock({
     setTab(next)
   }
 
+  function scrollToLatestActivity() {
+    const panel = panelRef.current
+    if (panel) panel.scrollTop = panel.scrollHeight
+    setNewActivity(false)
+  }
+
   function discard(mutationId: string) {
     setPending((current) => current.filter((entry) => entry.mutationId !== mutationId))
   }
@@ -291,6 +326,15 @@ export function RoomCompanionDock({
       ),
     )
   }
+}
+
+/** Within a line of the newest entry still counts as reading the latest, so
+    the cue never appears for a scroll position that is already at the end. */
+export function atBottom(
+  panel: Pick<HTMLElement, 'scrollTop' | 'clientHeight' | 'scrollHeight'> | null,
+): boolean {
+  if (!panel) return true
+  return panel.scrollHeight - panel.scrollTop - panel.clientHeight <= 24
 }
 
 function DockTabButton({
