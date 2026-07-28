@@ -35,6 +35,7 @@ import {
   type RoomRouteProjection,
 } from './room-projection'
 import type { RoomRosterMember } from './room-roster'
+import type { RoomEventPublisher } from '../realtime/room-events'
 import type { HomeEventPublisher } from '../realtime/home-events'
 import { readAccountAccessPolicy } from '../auth/account-access-policy'
 import type { Clock } from '../time'
@@ -183,6 +184,9 @@ export interface RoomServiceConfiguration {
   readonly now?: () => Date
   readonly clock?: Clock
   readonly publishHomeEvent?: HomeEventPublisher
+  /** Room-scoped fan-out. Lifetime warnings are canonical Activity entries
+      inside the room as well as Home badges (ADR 0103). */
+  readonly publishRoomEvent?: RoomEventPublisher
   readonly revokeConnections: (accountId: string) => Promise<void> | void
 }
 
@@ -205,13 +209,28 @@ export class RoomService {
       ? new RoomLifecycle({
           pool: configuration.pool,
           clock: configuration.clock,
-          onWarning: (warning: RoomLifecycleWarning) =>
+          onWarning: (warning: RoomLifecycleWarning) => {
             this.emitHomeEvent({
               type: 'room-warning',
               roomId: warning.roomId,
               minutes: warning.minutes,
-            }),
-          onRoomEnded: (roomId) => this.emitHomeEvent({ type: 'room-ended', roomId }),
+            })
+            configuration.publishRoomEvent?.({
+              type: 'activity',
+              roomId: warning.roomId,
+              entry: {
+                id: randomUUID(),
+                kind: 'room-warning',
+                displayName: null,
+                at: this.now().toISOString(),
+                minutes: warning.minutes,
+              },
+            })
+          },
+          onRoomEnded: (roomId) => {
+            this.emitHomeEvent({ type: 'room-ended', roomId })
+            configuration.publishRoomEvent?.({ type: 'room-ended', roomId })
+          },
           onReconnectExpired: async (membershipId, reconnectUntil) => {
             const result = await membershipService.expireReconnect(membershipId, reconnectUntil)
             await this.publishMembershipTransition(result)
@@ -273,6 +292,12 @@ export class RoomService {
   ): Promise<void> {
     for (const transition of transitions) {
       await this.publishRoomMembership(transition.roomId)
+      // Rosters, watcher stacks and Stream counts all move together, so the
+      // room refetches its projection on any membership transition.
+      this.configuration.publishRoomEvent?.({
+        type: 'membership-changed',
+        roomId: transition.roomId,
+      })
       await this.scheduleRoom(transition.roomId)
     }
   }
@@ -844,6 +869,7 @@ export class RoomService {
       membershipId: string | null
       membershipRole: 'host' | 'member' | null
       roster: readonly RosterRow[]
+      watchingStreamId: string | null
     }>(
       `SELECT room.id,
               room.name,
@@ -874,7 +900,8 @@ export class RoomService {
               CASE
                 WHEN self.id IS NULL THEN '[]'::json
                 ELSE COALESCE(roster.items, '[]'::json)
-              END AS roster
+              END AS roster,
+              self_watch.stream_id AS "watchingStreamId"
          FROM room
          LEFT JOIN room_membership self
            ON self.room_id = room.id
@@ -889,7 +916,9 @@ export class RoomService {
                       'avatarUrl', account.image,
                       'role', membership.role,
                       'joinedAt', membership.joined_at,
-                      'streamId', live_stream.id
+                      'streamId', live_stream.id,
+                      'watcherCount', COALESCE(watchers.total, 0),
+                      'watchers', COALESCE(watchers.items, '[]'::json)
                     )
                   ) AS items
              FROM room_membership membership
@@ -897,9 +926,42 @@ export class RoomService {
              LEFT JOIN stream live_stream
                ON live_stream.membership_id = membership.id
               AND live_stream.ended_at IS NULL
+             -- ADR 0101's watcher stack: up to three avatars plus the total,
+             -- ordered by watch start so visible avatars stay stable.
+             LEFT JOIN LATERAL (
+               SELECT count(*)::int AS total,
+                      json_agg(
+                        json_build_object(
+                          'accountId', visible."accountId",
+                          'displayName', visible."displayName",
+                          'avatarUrl', visible."avatarUrl"
+                        ) ORDER BY visible.rank
+                      ) FILTER (WHERE visible.rank <= 3) AS items
+                 FROM (
+                   SELECT watcher_account.id AS "accountId",
+                          watcher_account.name AS "displayName",
+                          watcher_account.image AS "avatarUrl",
+                          row_number() OVER (
+                            ORDER BY subscription.started_at ASC, subscription.id ASC
+                          ) AS rank
+                     FROM stream_subscription subscription
+                     JOIN room_membership watcher
+                       ON watcher.id = subscription.viewer_membership_id
+                     JOIN "user" watcher_account ON watcher_account.id = watcher.account_id
+                    WHERE subscription.stream_id = live_stream.id
+                      AND subscription.ended_at IS NULL
+                 ) visible
+             ) watchers ON live_stream.id IS NOT NULL
             WHERE membership.room_id = room.id
               AND membership.left_at IS NULL
          ) roster ON true
+         LEFT JOIN LATERAL (
+           SELECT subscription.stream_id
+             FROM stream_subscription subscription
+            WHERE subscription.viewer_membership_id = self.id
+              AND subscription.ended_at IS NULL
+            LIMIT 1
+         ) self_watch ON self.id IS NOT NULL
         WHERE room.id = $1`,
       [roomId, accountId],
     )
@@ -924,6 +986,7 @@ export class RoomService {
           ? { id: row.membershipId, role: row.membershipRole }
           : null,
       viewerAuthenticated: accountId !== null,
+      watchingStreamId: row?.watchingStreamId ?? null,
       roster: (row?.roster ?? []).map((member) => ({
         ...member,
         joinedAt: new Date(member.joinedAt),
@@ -1097,6 +1160,93 @@ export class RoomService {
     return result
   }
 
+  /** Host Settings: metadata and privacy. The same normalization the create
+      form uses runs here, so an edited room cannot hold a value a new room
+      could not (ADR 0060). */
+  async updateRoom(
+    hostAccountId: string,
+    roomId: string,
+    input: RoomInput,
+  ): Promise<
+    | { readonly status: 'updated' }
+    | { readonly status: 'forbidden' | 'ended' | 'password-required' }
+  > {
+    const normalized = normalizeRoomInput(input)
+    if (normalized.visibility === 'private' && !normalized.password) {
+      // Only when the room is becoming private: an already-private room keeps
+      // the password it has unless a new one is supplied.
+      const current = await this.repository.room(roomId)
+      if (!current?.passwordHash) return { status: 'password-required' }
+    }
+    const passwordHash = normalized.password
+      ? await hashPassword(normalized.password)
+      : null
+    return this.transaction(async (client) => {
+      if (!(await this.lockAccount(client, hostAccountId))) {
+        return { status: 'forbidden' as const }
+      }
+      const access = await readAccountAccessPolicy(client, hostAccountId, this.now())
+      if (!access?.canMutate('moderate')) return { status: 'forbidden' as const }
+      await this.lockRooms(client, [roomId])
+      const instant = this.now()
+      if (await this.closeRoomIfDue(client, roomId, instant)) {
+        return { status: 'ended' as const }
+      }
+      const host = await this.repository.currentMembership(hostAccountId, client, true)
+      if (!host || host.roomId !== roomId || host.role !== 'host') {
+        return { status: 'forbidden' as const }
+      }
+      await client.query(
+        `UPDATE room
+            SET name = $2,
+                category = $3,
+                description = $4,
+                tags = $5,
+                visibility = $6,
+                password_hash = CASE
+                  WHEN $6 = 'public' THEN NULL
+                  WHEN $7::text IS NOT NULL THEN $7
+                  ELSE password_hash
+                END
+          WHERE id = $1`,
+        [
+          roomId,
+          normalized.name,
+          normalized.category ?? null,
+          normalized.description ?? null,
+          normalized.tags,
+          normalized.visibility,
+          passwordHash,
+        ],
+      )
+      return { status: 'updated' as const }
+    }).then(async (result) => {
+      if (result.status === 'updated') await this.publishRoomTransitions([{ roomId }])
+      return result
+    })
+  }
+
+  /** The Bans tab. Host-only: a ban list is moderation state, not room state. */
+  async listBans(hostAccountId: string, roomId: string) {
+    const host = await this.repository.currentMembership(hostAccountId)
+    if (!host || host.roomId !== roomId || host.role !== 'host') return null
+    const result = await this.configuration.pool.query<{
+      accountId: string
+      displayName: string
+      createdAt: Date
+    }>(
+      `SELECT room_ban.account_id AS "accountId",
+              account.name AS "displayName",
+              room_ban.created_at AS "createdAt"
+         FROM room_ban
+         JOIN "user" account ON account.id = room_ban.account_id
+        WHERE room_ban.room_id = $1 AND room_ban.cleared_at IS NULL
+        ORDER BY room_ban.created_at DESC`,
+      [roomId],
+    )
+    return result.rows
+  }
+
   async endDueRooms() {
     const instant = this.now()
     const endedRoomIds: string[] = []
@@ -1131,7 +1281,9 @@ export class RoomService {
     return count
   }
 
-  private async publishRoomMembership(roomId: string): Promise<void> {
+  /** Recomputes and broadcasts a room's Home-visible counts. Public because
+      stream start/stop changes the Stream count without touching membership. */
+  async publishRoomMembership(roomId: string): Promise<void> {
     try {
       const result = await this.configuration.pool.query<{
         memberCount: number

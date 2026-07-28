@@ -1,19 +1,24 @@
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { leaveRoom } from './room-queries'
+import { banRoomMember, chatHistoryQueryOptions, leaveRoom } from './room-queries'
+import { RoomCompanionDock } from './RoomCompanionDock'
+import { RoomControlShelf } from './RoomControlShelf'
 import { RoomMemberMosaic } from './RoomMemberMosaic'
+import { RoomReportDialog, type ReportTarget } from './RoomReportDialog'
+import { RoomSettingsDialog } from './RoomSettingsDialog'
 import { RoomFact, RoomHeader, RoomShell, expiresInLabel } from './RoomShell'
+import { useRoomMedia } from './useRoomMedia'
+import { useRoomRealtime, type RoomSocket } from './useRoomRealtime'
 import type { MembershipConfirmation } from '../../server/rooms/room-service'
 import type { RoomAdmitted, RoomSelfMembership } from './room-types'
 
-const EXPIRY_FORMATTER = new Intl.DateTimeFormat('en-US', {
-  dateStyle: 'medium',
-  timeStyle: 'short',
-  timeZone: 'UTC',
-})
+type DockTab = 'chat' | 'people' | 'activity'
 
 interface RoomAdmittedBoundaryProps {
   readonly room: RoomAdmitted
   readonly self: RoomSelfMembership
+  /** The room shares Home's single Socket.IO connection (ADR 0104). */
+  readonly socket: RoomSocket | null
   readonly onLeft: (roomState: 'active' | 'empty-grace' | 'ended') => void
   readonly onConfirmation: (confirmation: MembershipConfirmation) => void
 }
@@ -21,11 +26,35 @@ interface RoomAdmittedBoundaryProps {
 export function RoomAdmittedBoundary({
   room,
   self,
+  socket,
   onLeft,
   onConfirmation,
 }: RoomAdmittedBoundaryProps) {
+  const queryClient = useQueryClient()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [sheet, setSheet] = useState<DockTab | null>(null)
+  const [report, setReport] = useState<ReportTarget | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const history = useQuery(chatHistoryQueryOptions(room.id))
+  const realtime = useRoomRealtime({
+    socket,
+    roomId: room.id,
+    admitted: true,
+    history: history.data ?? [],
+    queryClient,
+  })
+  const media = useRoomMedia({
+    roomId: room.id,
+    realtime,
+    connection: realtime.connection,
+  })
+
+  // ADR 0103: only the one-minute warning raises the countdown's prominence,
+  // and it never says why the room is ending.
+  const lastWarning = [...realtime.activity]
+    .reverse()
+    .find((entry) => entry.kind === 'room-warning')?.minutes
 
   const leave = async () => {
     if (pending) return
@@ -66,10 +95,18 @@ export function RoomAdmittedBoundary({
                 {room.memberCount} of {room.capacity} here
               </RoomFact>
               <RoomFact tone="warning">
-                <time dateTime={room.expiresAt.toISOString()}>
+                <time
+                  data-countdown={lastWarning === 1 ? 'urgent' : 'normal'}
+                  dateTime={room.expiresAt.toISOString()}
+                >
                   {expiresInLabel(room.expiresAt)}
                 </time>
               </RoomFact>
+              {self.role === 'host' && (
+                <button type="button" onClick={() => setSettingsOpen(true)}>
+                  Room settings
+                </button>
+              )}
             </>
           }
           name={room.name}
@@ -77,27 +114,33 @@ export function RoomAdmittedBoundary({
         />
 
         <div className="room-stage">
-          <div
-            className="room-spotlight"
-            data-spotlight={room.streamCount > 0 ? 'available' : 'quiet'}
+          <section
+            aria-label="Streams and members"
+            className="room-stage__canvas"
+            data-connection={realtime.connection}
           >
-            <p className="room-spotlight__state">
-              {room.streamCount > 0
-                ? `${room.streamCount} ${room.streamCount === 1 ? 'screen is' : 'screens are'} being shared in this room.`
-                : 'Nobody is sharing a screen yet.'}
-            </p>
-            <p className="room-spotlight__note">
-              Watching and sharing are not wired up yet — this room tracks who is
-              in it and how many screens are up.
-            </p>
-          </div>
-
-          <section aria-label="Members" className="room-stage__members">
-            <h2 className="visually-hidden">Members</h2>
-            <RoomMemberMosaic roster={room.roster} selfMembershipId={self.id} />
-            <p className="room-stage__seats-label tabular-nums">
-              {room.memberCount} of {room.capacity} seats taken
-            </p>
+            <h2 className="visually-hidden">Streams and members</h2>
+            <RoomMemberMosaic
+              hostActions={
+                self.role === 'host'
+                  ? (member) => {
+                      void banRoomMember({
+                        data: { roomId: room.id, accountId: member.accountId },
+                      })
+                    }
+                  : null
+              }
+              media={media}
+              onReport={(member) =>
+                setReport({
+                  type: member.streamId ? 'stream' : 'account',
+                  id: member.streamId ?? member.accountId,
+                  label: member.displayName,
+                })
+              }
+              roster={room.roster}
+              selfMembershipId={self.id}
+            />
           </section>
 
           {error && (
@@ -106,53 +149,63 @@ export function RoomAdmittedBoundary({
             </p>
           )}
 
-          <div className="room-controls">
-            <a className="room-boundary__back" href="/">
-              Back to Home
-            </a>
-            <button
-              aria-busy={pending}
-              className="room-controls__leave"
-              disabled={pending}
-              type="button"
-              onClick={leave}
-            >
-              {pending ? 'Leaving…' : 'Leave'}
-            </button>
-          </div>
+          <RoomControlShelf
+            connection={realtime.connection}
+            leavePending={pending}
+            media={media}
+            onLeave={leave}
+          />
         </div>
 
-        <aside aria-label="Room details" className="room-panel">
-          <h2>Room details</h2>
-          <dl className="room-panel__facts">
-            <div>
-              <dt>Visibility</dt>
-              <dd>{room.visibility === 'private' ? 'Private' : 'Public'}</dd>
-            </div>
-            <div>
-              <dt>Your role</dt>
-              <dd>{self.role === 'host' ? 'Host' : 'Member'}</dd>
-            </div>
-            <div>
-              <dt>Members</dt>
-              <dd className="tabular-nums">
-                {room.memberCount} / {room.capacity}
-              </dd>
-            </div>
-            <div>
-              <dt>Streams</dt>
-              <dd className="tabular-nums">{room.streamCount}</dd>
-            </div>
-            <div>
-              <dt>Expires</dt>
-              <dd>
-                <time dateTime={room.expiresAt.toISOString()}>
-                  {EXPIRY_FORMATTER.format(room.expiresAt)} UTC
-                </time>
-              </dd>
-            </div>
-          </dl>
-        </aside>
+        <RoomCompanionDock
+          memberCount={room.memberCount}
+          onDismissSheet={() => setSheet(null)}
+          realtime={realtime}
+          roomId={room.id}
+          roster={room.roster}
+          selfMembershipId={self.id}
+          sheet={sheet}
+        />
+
+        {/* Below 768px this is the only room control surface (ADR 0103). */}
+        <nav aria-label="Room controls" className="room-mobile-bar">
+          <button
+            data-disabled-reason={media.supported ? undefined : 'Desktop only'}
+            disabled={!media.supported || realtime.connection !== 'live'}
+            type="button"
+            onClick={() => void media.startPublishing()}
+          >
+            {media.supported ? 'Stream' : 'Desktop only'}
+          </button>
+          {(['chat', 'people', 'activity'] as const).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setSheet((current) => (current === tab ? null : tab))}
+            >
+              {tab === 'chat' ? 'Chat' : tab === 'people' ? 'People' : 'Activity'}
+            </button>
+          ))}
+          <button disabled={pending} type="button" onClick={leave}>
+            Leave
+          </button>
+        </nav>
+
+        <RoomReportDialog
+          roomId={room.id}
+          target={report}
+          onClose={() => setReport(null)}
+          onSubmitted={() => {
+            if (report?.type === 'stream') void media.stopWatchingStream()
+          }}
+        />
+        {self.role === 'host' && (
+          <RoomSettingsDialog
+            open={settingsOpen}
+            room={room}
+            onClose={() => setSettingsOpen(false)}
+          />
+        )}
       </main>
     </RoomShell>
   )

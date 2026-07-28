@@ -20,6 +20,7 @@ import {
   leaveRoom,
   roomProjectionQueryOptions,
 } from './room-queries'
+import type { RoomSocket } from './useRoomRealtime'
 import type { RoomView } from './room-types'
 
 interface RoomRouteProps {
@@ -93,6 +94,7 @@ export function RoomRoute({ roomId, initialRoom }: RoomRouteProps) {
   const [error, setError] = useState<string | null>(null)
   const [commandPending, setCommandPending] = useState(false)
   const [replacedRoomId, setReplacedRoomId] = useState<string | null>(null)
+  const [roomSocket, setRoomSocket] = useState<RoomSocket | null>(null)
   const projection =
     replacedRoomId === roomId && canonicalProjection?.kind === 'admitted'
       ? projectDisplacedRoom(canonicalProjection)
@@ -105,7 +107,10 @@ export function RoomRoute({ roomId, initialRoom }: RoomRouteProps) {
   useEffect(() => {
     if (!authenticated) return
     const socket = io({ path: '/socket.io/', withCredentials: true })
-    return bindRoomProjectionSocket(socket, {
+    // The room's realtime surface shares this one connection (ADR 0104); a
+    // second `io()` would displace it in the connection registry.
+    setRoomSocket(socket)
+    const unbind = bindRoomProjectionSocket(socket, {
       onRefresh: () => {
         void invalidateRoomProjection(queryClient, roomId)
       },
@@ -120,6 +125,10 @@ export function RoomRoute({ roomId, initialRoom }: RoomRouteProps) {
       },
       onReplacement: () => setReplacedRoomId(roomId),
     })
+    return () => {
+      setRoomSocket(null)
+      unbind()
+    }
   }, [authenticated, queryClient, roomId])
 
   useEffect(() => {
@@ -145,6 +154,7 @@ export function RoomRoute({ roomId, initialRoom }: RoomRouteProps) {
         <RoomAdmittedBoundary
           room={projection.room}
           self={projection.self}
+          socket={roomSocket}
           onConfirmation={(next) => {
             setError(null)
             setConfirmationAction('leave')

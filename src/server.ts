@@ -15,6 +15,7 @@ import { bindHomeRuntime } from './server/home/home-functions'
 import { bindRoomService } from './features/home/create-room'
 import { bindPreferenceRuntime } from './server/profile/preference-service'
 import { bindChatMuteRuntime } from './server/profile/chat-mute-service'
+import { bindReportRuntime } from './server/moderation/report-service'
 import { homePresence } from './server/home/home-presence'
 import {
   createHomeEventHub,
@@ -25,6 +26,21 @@ import {
   type HomeRealtimeEvent,
 } from './server/realtime/home-events'
 import { RoomService } from './server/rooms/room-service'
+import { StreamService } from './server/streams/stream-service'
+import { SubscriptionService } from './server/streams/subscription-service'
+import { ChatService } from './server/rooms/chat-service'
+import { bindRoomRealtimeRuntime, roomRealtime } from './server/rooms/room-runtime'
+import {
+  createRoomEventHub,
+  ROOM_JOIN_COMMAND,
+  ROOM_LEAVE_COMMAND,
+  ROOM_SIGNAL_COMMAND,
+  ROOM_SOCKET_EVENT,
+  ROOM_TYPING_COMMAND,
+  normalizeSignalPayload,
+  type RoomEventHub,
+  type RoomRealtimeEvent,
+} from './server/realtime/room-events'
 import { ConnectionRegistry, type RegisteredConnection } from './server/realtime/connection-registry'
 import { bindDeletionRuntime } from './server/profile/deletion-service'
 import type { ServerRuntime } from './server/runtime'
@@ -35,6 +51,7 @@ export {
 } from './server/auth/session'
 const roomServicesByServer = new WeakMap<HttpServer, RoomService>()
 const homeEventHubs = new WeakMap<HttpServer, HomeEventHub>()
+const roomEventHubs = new WeakMap<HttpServer, RoomEventHub>()
 
 export function bindServerRuntime(runtime: ServerRuntime, server: HttpServer) {
   const pool = runtime.getDatabasePool()
@@ -50,6 +67,7 @@ export function bindServerRuntime(runtime: ServerRuntime, server: HttpServer) {
           valkey,
           valkeyPrefix: `${runtime.bindings.valkeyPrefix}room:`,
           publishHomeEvent: (event) => publishHomeEvent(server, event),
+          publishRoomEvent: (event) => publishRoomEvent(server, event),
           now: () => new Date(runtime.clock.now()),
           revokeConnections: () => undefined,
           clock: runtime.clock,
@@ -62,6 +80,26 @@ export function bindServerRuntime(runtime: ServerRuntime, server: HttpServer) {
     roomService,
   })
   bindChatMuteRuntime({ pool })
+  bindReportRuntime({ pool })
+  if (pool) {
+    const now = () => new Date(runtime.clock.now())
+    bindRoomRealtimeRuntime({
+      streams: new StreamService({
+        pool,
+        now,
+        onRoomChanged: (roomId) => roomService?.publishRoomMembership(roomId),
+      }),
+      subscriptions: new SubscriptionService(pool, now, (event) =>
+        publishHomeEvent(server, event),
+      ),
+      chat: new ChatService({ pool, now }),
+      publish: (event) => publishRoomEvent(server, event),
+    })
+  }
+}
+
+export function publishRoomEvent(server: HttpServer, event: RoomRealtimeEvent) {
+  roomEventHubs.get(server)?.publish(event)
 }
 
 export function publishHomeEvent(server: HttpServer, event: HomeRealtimeEvent) {
@@ -79,6 +117,8 @@ export function attachSocketServer(server: HttpServer, databasePool?: Pool) {
     serveClient: false,
   })
   const eventHub = createHomeEventHub()
+  const roomHub = createRoomEventHub()
+  roomEventHubs.set(server, roomHub)
   const connectionRegistry = new ConnectionRegistry()
   const terminalConnections = new WeakSet<RegisteredConnection>()
   const claimsByAccount = new Map<string, { readonly socket: SocketConnection; readonly generation: number }>()
@@ -173,6 +213,92 @@ export function attachSocketServer(server: HttpServer, databasePool?: Pool) {
       }).catch(() => undefined)
     }
     socket.on('disconnect', removePresence)
+
+    // Room realtime. ADR 0104 authorizes every client-initiated command
+    // against the account's own admitted membership, so nothing here trusts a
+    // client-supplied membership or peer identifier.
+    let leaveRoomChannel: () => void = () => {}
+    let roomMembership: {
+      readonly roomId: string
+      readonly membershipId: string
+      readonly displayName: string
+    } | null = null
+    const detachRoom = () => {
+      leaveRoomChannel()
+      leaveRoomChannel = () => {}
+      roomMembership = null
+    }
+    socket.on('disconnect', detachRoom)
+
+    socket.on(ROOM_JOIN_COMMAND, async (value: unknown, ack?: (result: unknown) => void) => {
+      const roomId = typeof value === 'string' ? value : null
+      if (!roomId || !roomService) return ack?.({ status: 'rejected' })
+      const projection = await roomService.inspectRouteProjection(roomId, accountId)
+      if (projection?.kind !== 'admitted') return ack?.({ status: 'rejected' })
+      const self = projection.room.roster.find(
+        (member) => member.membershipId === projection.self.id,
+      )
+      detachRoom()
+      roomMembership = {
+        roomId: projection.room.id,
+        membershipId: projection.self.id,
+        displayName: self?.displayName ?? '',
+      }
+      // Mutes are read once per join: a mute takes effect for messages that
+      // arrive after it, and rejoining is what re-reads the list (ADR 0102).
+      const muted = new Set((await roomRealtime().chat?.mutedAccountIds(accountId).catch(() => [])) ?? [])
+      leaveRoomChannel = roomHub.subscribe(projection.room.id, (event) => {
+        if ('accountId' in event && muted.has(event.accountId)) return
+        if (event.type === 'chat-message' && muted.has(event.message.accountId)) return
+        socket.emit(ROOM_SOCKET_EVENT, event)
+      })
+      ack?.({ status: 'joined', membershipId: projection.self.id })
+    })
+
+    socket.on(ROOM_LEAVE_COMMAND, (_value: unknown, ack?: (result: unknown) => void) => {
+      detachRoom()
+      ack?.({ status: 'left' })
+    })
+
+    socket.on(ROOM_TYPING_COMMAND, (value: unknown, ack?: (result: unknown) => void) => {
+      const current = roomMembership
+      if (!current) return ack?.({ status: 'rejected' })
+      roomHub.publish({
+        type: 'typing',
+        roomId: current.roomId,
+        membershipId: current.membershipId,
+        accountId,
+        displayName: current.displayName,
+        typing: value === true,
+      })
+      ack?.({ status: 'accepted' })
+    })
+
+    socket.on(ROOM_SIGNAL_COMMAND, async (value: unknown, ack?: (result: unknown) => void) => {
+      const current = roomMembership
+      const command = value as { subscriptionId?: unknown; signal?: unknown } | null
+      const subscriptionId =
+        command && typeof command.subscriptionId === 'string' ? command.subscriptionId : null
+      const signal = normalizeSignalPayload(command?.signal)
+      if (!current || !subscriptionId || !signal) return ack?.({ status: 'rejected' })
+      const parties = await roomRealtime().subscriptions?.parties(subscriptionId)
+      if (!parties || parties.roomId !== current.roomId) return ack?.({ status: 'rejected' })
+      const recipient =
+        parties.viewerAccountId === accountId
+          ? parties.publisherAccountId
+          : parties.publisherAccountId === accountId
+            ? parties.viewerAccountId
+            : null
+      if (!recipient) return ack?.({ status: 'rejected' })
+      claimsByAccount.get(recipient)?.socket.emit(ROOM_SOCKET_EVENT, {
+        type: 'signal',
+        roomId: parties.roomId,
+        streamId: parties.streamId,
+        subscriptionId,
+        signal,
+      })
+      ack?.({ status: 'relayed' })
+    })
     void runAccountOperation(accountId, async () => {
       const generation = (generationsByAccount.get(accountId) ?? 0) + 1
       generationsByAccount.set(accountId, generation)

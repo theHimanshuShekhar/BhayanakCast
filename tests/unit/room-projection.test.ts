@@ -23,6 +23,7 @@ const snapshot = (
   self: null,
   viewerAuthenticated: false,
   roster: [],
+  watchingStreamId: null,
   ...overrides,
 })
 
