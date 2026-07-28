@@ -1,14 +1,19 @@
-import { expect, test } from '@playwright/test'
+import { expect } from '@playwright/test'
+// The project fixture provisions a migrated per-worker schema and its own
+// server. Using the bare fixture made these specs depend on whoever had
+// migrated the default schema first, which is what made them order-dependent.
+import { test } from './fixtures'
 
 const STORAGE_KEY = 'bhayanakcast.theme'
 
 test('follows the system theme and ignores an invalid override', async ({
+  authSessions,
   page,
 }) => {
   await page.emulateMedia({ colorScheme: 'dark' })
   await page.addInitScript((key) => localStorage.setItem(key, 'sepia'), STORAGE_KEY)
 
-  await page.goto('/')
+  await page.goto(authSessions.origin)
 
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
   await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute(
@@ -18,12 +23,13 @@ test('follows the system theme and ignores an invalid override', async ({
 })
 
 test('a persisted light override wins over a dark system before readiness', async ({
+  authSessions,
   page,
 }) => {
   await page.emulateMedia({ colorScheme: 'dark' })
   await page.addInitScript((key) => localStorage.setItem(key, 'light'), STORAGE_KEY)
 
-  await page.goto('/')
+  await page.goto(authSessions.origin)
 
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
   await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute(
@@ -33,6 +39,7 @@ test('a persisted light override wins over a dark system before readiness', asyn
 })
 
 test('theme controls work when browser storage access is denied', async ({
+  authSessions,
   page,
 }) => {
   const pageErrors: Error[] = []
@@ -46,7 +53,7 @@ test('theme controls work when browser storage access is denied', async ({
     Storage.prototype.setItem = denied
   })
 
-  await page.goto('/')
+  await page.goto(authSessions.origin)
   await page.emulateMedia({ colorScheme: 'dark' })
 
   const toggle = page.locator('.theme-toggle')
@@ -60,10 +67,11 @@ test('theme controls work when browser storage access is denied', async ({
 })
 
 test('the visible toggle persists an anonymous override across reloads', async ({
+  authSessions,
   page,
 }) => {
   await page.emulateMedia({ colorScheme: 'light' })
-  await page.goto('/')
+  await page.goto(authSessions.origin)
 
   const toggle = page.locator('.theme-toggle')
   await expect(toggle).toHaveAttribute('aria-label', 'Dark theme')
@@ -87,6 +95,7 @@ test('the visible toggle persists an anonymous override across reloads', async (
 })
 
 test('applies the theme in the head before document readiness', async ({
+  authSessions,
   page,
 }) => {
   await page.emulateMedia({ colorScheme: 'dark' })
@@ -100,7 +109,7 @@ test('applies the theme in the head before document readiness', async ({
       { once: true },
     )
   })
-  await page.goto('/')
+  await page.goto(authSessions.origin)
 
   await expect(page.locator('script[data-theme-bootstrap]')).toHaveCount(1)
   await expect(page.locator('html')).toHaveAttribute(
@@ -109,8 +118,8 @@ test('applies the theme in the head before document readiness', async ({
   )
 })
 
-test('publishes the root metadata contract', async ({ page }) => {
-  await page.goto('/')
+test('publishes the root metadata contract', async ({ authSessions, page }) => {
+  await page.goto(authSessions.origin)
 
   await expect(page).toHaveTitle('BhayanakCast')
   await expect(page.locator('meta[name="description"]')).toHaveAttribute(
@@ -128,9 +137,10 @@ test('publishes the root metadata contract', async ({ page }) => {
 })
 
 test('the root control reserves space instead of overlaying route content', async ({
+  authSessions,
   page,
 }) => {
-  await page.goto('/missing')
+  await page.goto(`${authSessions.origin}/missing`)
 
   const layout = await page.evaluate(() => {
     const toggle = document.querySelector('.theme-toggle')
@@ -150,10 +160,11 @@ test('the root control reserves space instead of overlaying route content', asyn
 })
 
 test('reduced motion removes animated transforms without breaking layout transforms', async ({
+  authSessions,
   page,
 }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
-  await page.goto('/')
+  await page.goto(authSessions.origin)
 
   const motion = await page.evaluate(() => {
     const animated = document.createElement('div')

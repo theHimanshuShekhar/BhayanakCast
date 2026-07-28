@@ -63,6 +63,11 @@ export interface AdmittedRoom extends RoomRouteDetails {
 
 export interface PastStreamRoom extends RoomRouteDetails {
   readonly endedAt: Date
+  /** The account's realtime connection is account-scoped, not room-scoped, so
+      the route needs to know a signed-in viewer is still signed in here — an
+      ended room must not tear down the connection their other memberships and
+      Home presence depend on. */
+  readonly viewerAuthenticated: boolean
 }
 
 export type RoomRouteProjection =
@@ -117,7 +122,14 @@ export function selectRoomRouteProjection(
     capacity: ROOM_CAPACITY,
   }
   if (room.endedAt) {
-    return { kind: 'pastStream', room: { ...details, endedAt: room.endedAt } }
+    return {
+      kind: 'pastStream',
+      room: {
+        ...details,
+        endedAt: room.endedAt,
+        viewerAuthenticated: snapshot.viewerAuthenticated,
+      },
+    }
   }
   const expiresAt = new Date(room.createdAt.getTime() + ROOM_LIFETIME_MS)
   if (snapshot.self) {

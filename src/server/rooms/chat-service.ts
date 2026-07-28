@@ -4,11 +4,11 @@ import {
   AccountAccessDeniedError,
   requireAccountMutation,
 } from '../auth/account-access-policy'
-import type { RoomChatMessage } from '../realtime/room-events'
+import { CHAT_BODY_LIMIT, type RoomChatMessage } from '../realtime/room-events'
 
 /** ADR 0071. Also the realtime window: nothing older is ever sent live. */
 export const CHAT_HISTORY_LIMIT = 50
-export const CHAT_BODY_LIMIT = 500
+export { CHAT_BODY_LIMIT }
 
 export type SendChatResult =
   | { readonly status: 'sent'; readonly message: RoomChatMessage }

@@ -187,7 +187,11 @@ test('anonymous direct Profile access keeps the Discord gate and one document sc
   const { context, page } = await openProfile(browser, authSessions.origin, stages[0], 'light')
   try {
     await expect(page.getByText('Sign in to see your public activity and account details.', { exact: true })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Continue with Discord', exact: true })).toBeVisible()
+    // Scoped to the gate: the navigation rail carries its own sign-in control
+    // with the same accessible name, and this assertion is about the gate.
+    await expect(
+      page.getByRole('main').getByRole('button', { name: 'Continue with Discord', exact: true }),
+    ).toBeVisible()
     await expect(page.getByRole('heading', { name: PROFILE.global_name, exact: true })).toHaveCount(0)
     await expect(page.getByRole('navigation', { name: 'Primary' })).toHaveCount(1)
     await expect(page.getByTestId('profile-navigation')).toBeVisible()

@@ -102,7 +102,8 @@ export function RoomRoute({ roomId, initialRoom }: RoomRouteProps) {
   const previousKind = useRef(projection?.kind)
   const authenticated =
     projection?.kind === 'admitted' ||
-    (projection?.kind === 'preAdmission' && projection.room.viewerAuthenticated)
+    ((projection?.kind === 'preAdmission' || projection?.kind === 'pastStream') &&
+      projection.room.viewerAuthenticated)
 
   useEffect(() => {
     if (!authenticated) return
