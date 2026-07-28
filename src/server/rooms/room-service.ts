@@ -1227,6 +1227,17 @@ export class RoomService {
           passwordHash,
         ],
       )
+      if (normalized.visibility === 'private') {
+        // A preview stored under the public rule is a readable thumbnail
+        // (ADR 0035). Retire it now rather than serving it until the next
+        // upload replaces it at the private width.
+        await client.query(
+          `UPDATE stream
+              SET preview_key = NULL, preview_updated_at = NULL
+            WHERE room_id = $1 AND ended_at IS NULL AND preview_key IS NOT NULL`,
+          [roomId],
+        )
+      }
       return { status: 'updated' as const }
     }).then(async (result) => {
       if (result.status === 'updated') await this.publishRoomTransitions([{ roomId }])

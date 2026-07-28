@@ -225,6 +225,28 @@ describe('stream previews', () => {
     expect(await fixture.previews.read(stored.previewKey)).toBeNull()
   })
 
+  test('retires a public preview when the room turns private', async () => {
+    const fixture = await createFixture()
+    const { host, roomId } = await streaming(fixture)
+    const stored = await fixture.previews.store(host, webp(640, 360))
+    if (stored.status !== 'stored') throw new Error('Expected a stored preview')
+
+    expect(
+      await fixture.rooms.updateRoom(host, roomId, {
+        name: 'Now private',
+        visibility: 'private',
+        password: 'correct horse battery',
+      }),
+    ).toEqual({ status: 'updated' })
+
+    expect(await fixture.previews.read(stored.previewKey)).toBeNull()
+    const row = await fixture.pool.query(
+      'SELECT preview_key, preview_updated_at FROM stream WHERE room_id = $1',
+      [roomId],
+    )
+    expect(row.rows[0]).toEqual({ preview_key: null, preview_updated_at: null })
+  })
+
   test('serves nothing for a key nobody holds', async () => {
     const fixture = await createFixture()
     expect(await fixture.previews.read(randomUUID())).toBeNull()
