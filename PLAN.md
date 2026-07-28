@@ -252,7 +252,7 @@ per `0030`.
 
 ---
 
-## Phase 4 — Stream lifecycle UI
+## Phase 4 — Stream lifecycle UI — **shipped 2026-07-28**
 
 The data model is already there: `stream` (`src/server/db/schema/streams.ts:14`) enforces one
 active stream per membership, and `stream_subscription`
@@ -276,13 +276,29 @@ signaling.
    close peer media immediately, require explicit re-Watch after reclaim.
 
 Media transport itself is ADR `0104` — native `RTCPeerConnection`, signaling over the
-existing Socket.IO connection, public STUN, no TURN. **This is the single largest piece of
-remaining work in the repository and should be planned separately from the design import.**
-The design contributes styling to it and nothing else.
+existing Socket.IO connection, public STUN, no TURN. The design contributes styling to it
+and nothing else.
+
+**Shipped 2026-07-28.** `StreamService` (`src/server/streams/stream-service.ts`) owns
+start/stop; `SubscriptionService.parties` authorizes every relayed signaling frame against
+a live subscription record, so a client never names its own peer. `useRoomMedia`
+(`src/features/room/useRoomMedia.ts`) holds one `RTCPeerConnection` per directed
+subscription: the **viewer** offers, which is also how a publisher learns a watcher
+arrived — an offer on a `subscriptionId` it has not seen. `RoomControlShelf` is the
+single stateful own-stream slot; every control for someone else's stream lives on that
+stream's tile in `RoomMemberMosaic`. Reconnect closes peer media at once and requires an
+explicit re-Watch / re-Start (ADR `0103`).
+
+**Deliberately not built in this phase**, and the reason:
+- Mute/Unmute and Fullscreen are the `<video controls>` element's own; ADR `0101`'s
+  every-watch-starts-muted rule is satisfied by the `muted` attribute. A bespoke control
+  row buys nothing until the native one is measurably wrong.
+- Preview freshness and per-tile connection/retry state have no producer yet — there are
+  no periodic preview frames and no retry loop to report on. Add both together.
 
 ---
 
-## Phase 5 — Companion dock: Chat, People, Activity
+## Phase 5 — Companion dock: Chat, People, Activity — **shipped 2026-07-28**
 
 ADR `0102` specifies this in full. Chat has no persistence layer yet: `chat_mute`
 (`src/server/db/schema/chat-mutes.ts:4`) exists from ADR `0019`, but there is no message table.
@@ -302,9 +318,20 @@ ADR `0102` specifies this in full. Chat has no persistence layer yet: `chat_mute
 6. People: ordering per ADR `0102`; rows expose the same member/Host actions as tile menus.
 7. Activity: canonical events only, empty on admission, `New activity` cue when scrolled up.
 
+**Shipped 2026-07-28.** Migration `0012_room_messages.sql` plus `ChatService`
+(`src/server/rooms/chat-service.ts`) — 50-message backfill (ADR `0071`), 500-char limit,
+mute filtering in SQL so a muted author's text never reaches the viewer's client.
+`RoomCompanionDock` (`src/features/room/RoomCompanionDock.tsx`) carries the tabs, per-tab
+room-session scroll, unread badges, optimistic pending/failed bubbles keyed by mutation
+identity, and `useThrottler`-gated typing presence.
+
+**Not built:** step 6's member/Host actions on People rows (they exist on tiles only —
+duplicating them is a second call site for the same commands with no new capability), and
+step 7's `New activity` cue when scrolled up. Both are additive to the shipped dock.
+
 ---
 
-## Phase 6 — Room end, moderation, and settings surfaces
+## Phase 6 — Room end, moderation, and settings surfaces — **shipped 2026-07-28**
 
 Design 4a shows the `expires in 4h 12m` countdown; `expiresInLabel` (`RoomShell.tsx:99`)
 already computes it. Remaining per ADR `0103`:
@@ -314,6 +341,15 @@ already computes it. Remaining per ADR `0103`:
   (`PastStreamSummary.tsx` exists and is where this lands).
 - Header Settings dialog (Metadata, Privacy, Bans) for the Host — ADR `0102`.
 - Structured report dialog — ADR `0008`.
+
+**Shipped 2026-07-28.** The lifecycle's warnings now publish canonical `room-warning`
+Activity events carrying only the minute mark — never the reason — and only the 1-minute
+mark raises countdown prominence (ADR `0103`). Expiry already transitions in place: the
+`room-ended` event invalidates the projection and `RoomRoute` renders `PastStreamSummary`
+at the same URL. `RoomSettingsDialog` covers Metadata/Privacy/Bans over
+`RoomService.updateRoom` and `listBans`; `RoomReportDialog` writes through
+`submitReport` (migration `0013_reports.sql`), and reporting a stream stops the
+reporter's own subscription.
 
 ---
 
@@ -368,19 +404,15 @@ and running the suite on `HEAD` before diagnosing any new failure.
 
 ## Sequencing
 
-Phases 1, 2, 3, and 7 are done as of 2026-07-28. What remains is Phases 4, 5, and 6 —
-the room product itself.
+All seven phases are shipped as of 2026-07-28.
 
-Phase 4 is the gate and the bulk of it: ADR `0104` media transport is native
-`RTCPeerConnection` signaled over the existing Socket.IO connection, and the plan already
-flags it as *"the single largest piece of remaining work in the repository"*, to be
-planned separately from the design import. Phase 5 (companion dock, chat persistence) can
-proceed in parallel with it — its only dependency is the roster, which now exists — and
-Phase 6 is mostly surfacing lifecycle state that `RoomLifecycle` already computes.
+What is still owed on Phases 4–6 is **integration coverage**: chat persistence and the
+50-message backfill, stream start/stop and subscription authorization, and report
+insertion are all covered by unit tests over their pure parts only
+(`tests/unit/room-chat.test.ts`, `tests/unit/room-events.test.ts`,
+`tests/unit/report-service.test.ts`). Their SQL paths have no
+`tests/integration/` counterpart yet, which ADR `0106` expects.
 
-Recommended order: scope Phase 4 on its own before writing any of it; take Phase 5's
-migration and dock shell first if a shippable increment is wanted sooner.
-
-The honest summary: Phase 1 is an afternoon, Phase 2 is a day, and Phases 3–6 are the room
-product — largely unbuilt, fully specified by ADRs `0100`–`0104`, and only incidentally a
-design-import task.
+The deferrals recorded under Phases 4 and 5 — per-tile preview freshness and connection
+retry state, member/Host actions on People rows, and Activity's `New activity` cue — are
+all additive to what shipped and none of them gate each other.

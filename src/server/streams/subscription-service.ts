@@ -218,6 +218,85 @@ export class SubscriptionService {
     }
   }
 
+  /** Explicit Stop Watching, and the teardown ADR 0101 requires before a switch
+      or on report/leave/displacement. Returns the closed subscription so the
+      caller can tell the publisher to close its peer connection (ADR 0104). */
+  async unsubscribe(viewerMembershipId: string): Promise<ActiveSubscription | null> {
+    const result = await this.pool.query<ActiveSubscription>(
+      `UPDATE stream_subscription
+          SET ended_at = $2
+        WHERE viewer_membership_id = $1 AND ended_at IS NULL
+    RETURNING id, stream_id AS "streamId", started_at AS "startedAt"`,
+      [viewerMembershipId, this.now()],
+    )
+    return result.rows[0] ?? null
+  }
+
+  /** Watchers of one Stream, oldest first — ADR 0101 orders the watcher stack
+      by watch start so the visible avatars stay stable. */
+  async watchers(streamId: string): Promise<readonly {
+    readonly membershipId: string
+    readonly accountId: string
+    readonly displayName: string
+    readonly avatarUrl: string | null
+  }[]> {
+    const result = await this.pool.query<{
+      membershipId: string
+      accountId: string
+      displayName: string
+      avatarUrl: string | null
+    }>(
+      `SELECT membership.id AS "membershipId",
+              membership.account_id AS "accountId",
+              account.name AS "displayName",
+              account.image AS "avatarUrl"
+         FROM stream_subscription
+         JOIN room_membership membership
+           ON membership.id = stream_subscription.viewer_membership_id
+         JOIN "user" account ON account.id = membership.account_id
+        WHERE stream_subscription.stream_id = $1
+          AND stream_subscription.ended_at IS NULL
+        ORDER BY stream_subscription.started_at ASC, stream_subscription.id ASC`,
+      [streamId],
+    )
+    return result.rows
+  }
+
+  /** The two accounts a directed subscription connects. ADR 0104 authorizes
+      every signaling frame against the live subscription record, so relaying a
+      frame means proving the sender is one of these two and delivering it to
+      the other — never to a client-named peer. */
+  async parties(subscriptionId: string): Promise<{
+    readonly roomId: string
+    readonly streamId: string
+    readonly viewerAccountId: string
+    readonly publisherAccountId: string
+  } | null> {
+    const result = await this.pool.query<{
+      roomId: string
+      streamId: string
+      viewerAccountId: string
+      publisherAccountId: string
+    }>(
+      `SELECT stream.room_id AS "roomId",
+              stream.id AS "streamId",
+              viewer.account_id AS "viewerAccountId",
+              publisher.account_id AS "publisherAccountId"
+         FROM stream_subscription
+         JOIN room_membership viewer
+           ON viewer.id = stream_subscription.viewer_membership_id
+         JOIN stream ON stream.id = stream_subscription.stream_id
+         JOIN room_membership publisher ON publisher.id = stream.membership_id
+        WHERE stream_subscription.id = $1
+          AND stream_subscription.ended_at IS NULL
+          AND stream.ended_at IS NULL
+          AND viewer.left_at IS NULL
+          AND publisher.left_at IS NULL`,
+      [subscriptionId],
+    )
+    return result.rows[0] ?? null
+  }
+
   async current(viewerMembershipId: string): Promise<ActiveSubscription | null> {
     const result = await this.pool.query<ActiveSubscription>(
       `SELECT id, stream_id AS "streamId", started_at AS "startedAt"

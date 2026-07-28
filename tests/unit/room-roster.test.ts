@@ -14,6 +14,8 @@ const member = (
   role: 'member',
   joinedAt: new Date('2026-01-01T00:00:00.000Z'),
   streamId: null,
+  watcherCount: 0,
+  watchers: [],
   ...overrides,
 })
 

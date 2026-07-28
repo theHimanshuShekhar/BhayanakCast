@@ -9,6 +9,16 @@ export interface RoomRosterMember {
       sharing. A presence tile is a member without a Stream, never a member the
       roster left out. */
   readonly streamId: string | null
+  /** ADR 0101's informational watcher stack: up to three watchers plus the
+      total. Empty for a member who is not streaming. */
+  readonly watcherCount: number
+  readonly watchers: readonly RoomWatcher[]
+}
+
+export interface RoomWatcher {
+  readonly accountId: string
+  readonly displayName: string
+  readonly avatarUrl: string | null
 }
 
 /** ADR 0101's stable mosaic order: the viewer, then the Host, then everyone

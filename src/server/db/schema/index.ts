@@ -7,6 +7,8 @@ import { streamSubscription } from './subscriptions'
 
 import { accountPreference } from './preferences'
 import { chatMute } from './chat-mutes'
+import { message } from './messages'
+import { report } from './reports'
 import { deletionRequest, deletionRequestAudit } from './deletion-requests'
 export const databaseSchema = {
   ...authSchema,
@@ -19,6 +21,8 @@ export const databaseSchema = {
   streamSubscription,
   accountPreference,
   chatMute,
+  message,
+  report,
   deletionRequest,
   deletionRequestAudit,
 }

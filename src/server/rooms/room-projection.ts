@@ -28,6 +28,8 @@ export interface RoomProjectionSnapshot {
       ADR 0003 hides participant identities until admission, so a caller with no
       current membership must pass an empty roster. */
   readonly roster: readonly RoomRosterMember[]
+  /** The viewer's one active remote subscription (ADR 0101), or null. */
+  readonly watchingStreamId: string | null
 }
 
 interface RoomRouteDetails {
@@ -52,6 +54,8 @@ export interface PreAdmissionRoom extends RoomRouteDetails {
 
 export interface AdmittedRoom extends RoomRouteDetails {
   readonly expiresAt: Date
+  /** The viewer's single active watch. ADR 0101 permits exactly one. */
+  readonly watchingStreamId: string | null
   /** Ordered per ADR 0101. Present on the admitted projection only; the
       pre-admission and Past Stream projections deliberately have no roster. */
   readonly roster: readonly RoomRosterMember[]
@@ -79,7 +83,12 @@ export function projectDisplacedRoom(
   // Drop the roster explicitly rather than spreading the admitted room: a
   // displaced member is outside the room again, and ADR 0003 keeps identities
   // on the admitted side of that line.
-  const { roster: _roster, expiresAt, ...details } = projection.room
+  const {
+    roster: _roster,
+    watchingStreamId: _watchingStreamId,
+    expiresAt,
+    ...details
+  } = projection.room
   return {
     kind: 'preAdmission',
     room: {
@@ -118,6 +127,7 @@ export function selectRoomRouteProjection(
         ...details,
         expiresAt,
         roster: orderRoomRoster(snapshot.roster, snapshot.self.id),
+        watchingStreamId: snapshot.watchingStreamId,
       },
       self: snapshot.self,
     }
