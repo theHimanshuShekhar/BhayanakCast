@@ -13,6 +13,7 @@ export function PastStreamSummary({ room }: Readonly<{ room: RoomEnded }>) {
       <main className="room-boundary room-boundary--ended" data-room-state="ended">
         <RoomHeader
           category={room.category}
+          description={room.description}
           eyebrow="Past Stream"
           facts={
             <>

@@ -15,6 +15,7 @@ export interface RoomRecord {
   readonly id: string
   readonly name: string
   readonly category: string | null
+  readonly description: string | null
   readonly tags: string[]
   readonly visibility: 'public' | 'private'
   readonly passwordHash: string | null
@@ -51,7 +52,7 @@ export class RoomRepository {
     forUpdate = false,
   ): Promise<RoomRecord | null> {
     const result = await executor.query<RoomRecord>(
-      `SELECT id, name, category, tags, visibility,
+      `SELECT id, name, category, description, tags, visibility,
               password_hash AS "passwordHash",
               created_at AS "createdAt",
               empty_at AS "emptyAt",

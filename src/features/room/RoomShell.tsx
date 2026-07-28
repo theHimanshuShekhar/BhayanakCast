@@ -27,6 +27,7 @@ export function RoomHeader({
   eyebrowTone = 'neutral',
   name,
   category,
+  description,
   tags,
   facts,
 }: Readonly<{
@@ -34,6 +35,7 @@ export function RoomHeader({
   eyebrowTone?: 'host' | 'live' | 'neutral'
   name: string
   category: string | null
+  description: string | null
   tags: readonly string[]
   facts: ReactNode
 }>) {
@@ -46,7 +48,15 @@ export function RoomHeader({
         <h1 data-room-primary-heading="" tabIndex={-1}>
           {name}
         </h1>
-        {category && <p className="room-header__category">{category}</p>}
+        {(category || description) && (
+          <p className="room-header__category">
+            {category}
+            {category && description && <span aria-hidden="true"> · </span>}
+            {description && (
+              <span className="room-header__description">{description}</span>
+            )}
+          </p>
+        )}
         {tags.length > 0 && (
           <div className="room-header__tags">
             {tags.map((tag) => (

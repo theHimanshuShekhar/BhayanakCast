@@ -29,6 +29,7 @@ const room = (id: string, memberCount = 2): ActiveRoomSummary => ({
   id,
   name: id,
   category: null,
+  description: null,
   tags: [],
   visibility: 'public',
   memberCount,

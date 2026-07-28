@@ -155,4 +155,30 @@ describe('room input policy', () => {
       }),
     )
   })
+  test('collapses a pasted multi-line description onto one line', () => {
+    expect(
+      normalizeRoomInput(
+        room({ description: '  First line.\r\n\n   Second line.  ' }),
+      ).description,
+    ).toBe('First line. Second line.')
+  })
+
+  test('omits a description that is absent or normalizes to nothing', () => {
+    expect(normalizeRoomInput(room()).description).toBeUndefined()
+    expect(normalizeRoomInput(room({ description: '   ' })).description).toBeUndefined()
+    expect(normalizeRoomInput(room({ description: null })).description).toBeUndefined()
+  })
+
+  test('enforces arbitrary visible-character description lengths', () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 1, max: 160 }), (length) => {
+        const description = '💀'.repeat(length)
+        if (length <= 140) {
+          expect(normalizeRoomInput(room({ description })).description).toBe(description)
+        } else {
+          expectInputError(room({ description }), 'ROOM_DESCRIPTION_LENGTH')
+        }
+      }),
+    )
+  })
 })

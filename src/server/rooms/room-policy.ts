@@ -7,6 +7,7 @@ export type RoomVisibility = 'public' | 'private'
 export interface RoomInput {
   name: string
   category?: string | null
+  description?: string | null
   tags?: readonly string[] | null
   visibility?: RoomVisibility
   password?: string | null
@@ -15,6 +16,7 @@ export interface RoomInput {
 export interface NormalizedRoomInput {
   name: string
   category?: string
+  description?: string
   tags: string[]
   visibility: RoomVisibility
   password?: string
@@ -23,6 +25,7 @@ export interface NormalizedRoomInput {
 export type RoomInputErrorCode =
   | 'ROOM_NAME_LENGTH'
   | 'ROOM_CATEGORY_LENGTH'
+  | 'ROOM_DESCRIPTION_LENGTH'
   | 'ROOM_TAG_COUNT'
   | 'ROOM_TAG_LENGTH'
   | 'ROOM_PASSWORD_LENGTH'
@@ -37,6 +40,8 @@ export class RoomInputError extends Error {
 const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
 
 const normalizeText = (value: string) => value.normalize('NFKC').trim()
+
+const collapseLines = (value: string) => value.replace(/\s*[\r\n]+\s*/g, ' ')
 
 const visibleCharacterCount = (value: string) =>
   Array.from(graphemeSegmenter.segment(value)).length
@@ -58,6 +63,12 @@ export const normalizeRoomInput = (input: RoomInput): NormalizedRoomInput => {
   const category = input.category == null ? undefined : normalizeText(input.category)
   if (category) assertVisibleLength(category, 0, 32, 'ROOM_CATEGORY_LENGTH')
 
+  // ADR 0060: a blurb, on one line. Collapsing newlines before measuring keeps
+  // a pasted paragraph from spending its budget on whitespace.
+  const description =
+    input.description == null ? undefined : normalizeText(collapseLines(input.description))
+  if (description) assertVisibleLength(description, 0, 140, 'ROOM_DESCRIPTION_LENGTH')
+
   const tags = [
     ...new Set((input.tags ?? []).map(normalizeText).filter((tag) => tag.length > 0)),
   ]
@@ -67,9 +78,15 @@ export const normalizeRoomInput = (input: RoomInput): NormalizedRoomInput => {
   }
 
   const visibility = input.visibility ?? 'public'
-  if (visibility === 'public') return { name, ...(category && { category }), tags, visibility }
+  const metadata = {
+    name,
+    ...(category && { category }),
+    ...(description && { description }),
+    tags,
+  }
+  if (visibility === 'public') return { ...metadata, visibility }
 
   const password = input.password ?? ''
   assertVisibleLength(password, 8, Number.POSITIVE_INFINITY, 'ROOM_PASSWORD_LENGTH')
-  return { name, ...(category && { category }), tags, visibility, password }
+  return { ...metadata, visibility, password }
 }

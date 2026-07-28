@@ -118,45 +118,63 @@ documented baseline below. Two further specs failed once and passed on retry:
 
 ---
 
-## Phase 2 — Room description blurb — **blocked: contradicts ADR `0060`**
+## Phase 2 — Room description blurb — **shipped 2026-07-28**
 
-`0060` decides that Create Room takes a name, an optional category, and up to five
-optional tags, and states plainly: *"V1 provides no long-form room description or
-predefined taxonomy."* Its consequence gives the reason — *"Avoiding a description field
-keeps a larger persistent, searchable, and moderatable content surface out of V1."* That
-is exactly the question step 5 below asks, already answered.
+`0060` originally decided that Create Room takes a name, an optional category, and up to
+five optional tags, stating *"V1 provides no long-form room description or predefined
+taxonomy"* — with the consequence *"Avoiding a description field keeps a larger
+persistent, searchable, and moderatable content surface out of V1."* That is exactly the
+question step 5 of the original plan asked, and it had already been answered against
+building this.
 
-The cost is real and not hypothetical: `0033` indexes the Home page, so the blurb would
-be a persistent, anonymous-readable, search-indexed, user-authored text surface behind
-only best-effort moderation (`0025`) and report-driven enforcement (`0008`). `0045` would
-also have to extend Host settings to cover it.
+The blocker was put to the user in a grilling session on 2026-07-28. The decision was to
+build the field and amend `0060` in place rather than supersede it. Nine decisions came
+out of that session and are now recorded in the ADRs themselves:
 
-Note too that the design's line — `Two screens up — rewriting the auth flow. Coding
-· #typescript` — is half derived and half authored, and the derived half already ships:
-`N screens shared` in the mosaic summary plus the category/tag chips at
-`LiveRoomCard.tsx:44`. Only the authored clause is missing, and that clause is precisely
-what `0060` refused.
+1. **Build it** — a 140-character single-line optional blurb, not the design's 240.
+2. **Amend `0060` in place** (the repo has never superseded an ADR); the sentence now
+   reads *"V1 provides no predefined taxonomy."*
+3. **Display only** — search does not match on it (`0094`).
+4. **Newlines collapse** to a single space before the length is measured.
+5. **Length lives in `room-policy.ts`**, not a DB check constraint, matching the
+   precedent set by `room.name` and `room.category` — neither has one.
+6. **Retained on ended rooms** — Past Stream cards and the ended-room header show it.
+   `0075`'s twelve-hour room lifetime does not bound it; `0004` retains Past Stream
+   metadata indefinitely.
+7. **Survives account deletion** — deletion anonymizes attribution, not room metadata.
+   Explicitly not chat's treatment.
+8. **Rendered on four surfaces** — Home cards, search rows, pre-admission, and the room
+   header — plus the Past Stream summary.
+9. **Moderation accepted as a stated cost** — permanent public authored text moderated
+   only by Host-clear and `0008` reports under `0025` best-effort review. Written into
+   `0060`'s consequences rather than left implied.
 
-**Recommendation: withdraw the phase.** Building it requires superseding `0060` with a
-new ADR that accepts the moderation surface; do not add the column under the existing
-one. The steps below are kept for whoever makes that call.
+ADRs amended: `0060`, `0045` (Host settings can clear it), `0094` (search row contents,
+density clamp, no match), `0097` (OAuth non-carry list), `0100` (header's second line,
+header stays two lines), `0004` (retention). `CONTEXT.md:100` and `:121` mirrored.
 
-The design's featured card and three-up cards carry a one-line blurb (`Two screens up —
-rewriting the auth flow.`). No column backs it.
+**What shipped:**
 
-1. Migration `0011_room_description.sql` — `room.description text`, nullable, length-capped
-   by a check constraint (240 chars matches the design's line budget).
-2. `src/server/db/schema/rooms.ts`, `src/server/home/home-repository.ts` projection, and
-   `ActiveRoomSummary` in `src/features/home/home-types.ts`.
-3. `src/features/home/CreateRoomDialog.tsx` — optional field, plain text, same validation
-   shape as the name field.
-4. Render in `LiveRoomCard` (featured and grid) and `RoomSearchResult`.
-5. Content policy: the blurb is user-authored text on an anonymous-readable surface. It
-   falls under ADR `0018` (general-audience content policy) and ADR `0026` (English only) —
-   confirm no new moderation surface is needed, or note the gap.
+1. `src/server/db/migrations/0011_room_description.sql` — `room.description text`,
+   nullable, no check constraint (decision 5).
+2. `src/server/db/schema/rooms.ts`; `room-policy.ts` gained `ROOM_DESCRIPTION_LENGTH`
+   with the existing NFKC-trim-grapheme treatment plus newline collapse.
+3. Server projections: `room-repository.ts`, `room-service.ts` (creation digest, INSERT,
+   `RoomProjection`, route-projection query), `room-projection.ts` (pre-admission,
+   admitted, and Past Stream details), `home-repository.ts` (discovery, search, past
+   streams, and the profile's past-stream lateral).
+4. Client: `home-types.ts`, `CreateRoomDialog.tsx` (optional field, 140-char cap),
+   `LiveRoomCard`, `RoomSearchResult`, `RoomPreAdmission`, `RoomHeader`,
+   `PastStreamSummary`, and CSS clamps (two lines on a card, one in a search row, one in
+   the header).
+5. Tests: three unit cases in `room-policy.test.ts` (newline collapse, absent/blank
+   omission, property-based 140-grapheme cap) and one integration case in
+   `room-persistence.test.ts` covering the round trip through pre-admission and admitted
+   projections.
 
-**Why separate from Phase 1:** it is the only Home-surface item requiring a migration, so
-it should not block the copy work.
+Verified: typecheck clean, 117 unit, 96 integration, 70 e2e passed with the five
+documented baseline failures unchanged (`create-and-open-room.spec.ts:111`, `:321`,
+`profile-responsive.spec.ts:183`, `:202`, `:226`).
 
 ---
 

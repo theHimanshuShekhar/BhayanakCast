@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-11
+- **Amended:** 2026-07-28 — the header's second line carries the room description added by ADR 0060.
 
 ## Context
 
@@ -17,7 +18,7 @@ Use a fixed-viewport admitted-room workspace on desktop. It contains:
 4. an integrated control shelf directly below the canvas; and
 5. at 1280px and above, a persistent 360px right companion dock.
 
-The room header's first line contains Back/Home, room name, Public/Private and Full/live state, and Host-only Settings. Its second line contains category/tags, current Host avatar/name, member and active Stream counts, and the persistent 12-hour lifetime countdown. Leave belongs in the control shelf rather than competing with room identity.
+The room header's first line contains Back/Home, room name, Public/Private and Full/live state, and Host-only Settings. Its second line contains the room description when present, category/tags, current Host avatar/name, member and active Stream counts, and the persistent 12-hour lifetime countdown. The header stays two lines: the description is clamped to the space it has and never wraps the header into a third row or displaces the countdown. Leave belongs in the control shelf rather than competing with room identity.
 
 The media canvas and companion content may scroll within their bounded workspace regions; the ordinary desktop room has no document scroll. Header and control shelf remain available. The mosaic uses stable tile order and scrolls before a normal grid cell would fall below 240px wide; each cell's visual region targets 16:9 and its footer adds height outside that region. Chat, People, and Activity own bounded scrolling appropriate to live work surfaces.
 

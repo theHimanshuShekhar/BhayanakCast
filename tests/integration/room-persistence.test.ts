@@ -138,6 +138,41 @@ describe('room persistence and admission', () => {
     })
   })
 
+  test('persists an optional description and carries it onto every room projection', async () => {
+    const fixture = await createFixture()
+    const [owner, visitor] = await Promise.all([fixture.account(), fixture.account()])
+
+    const withBlurb = created(
+      await fixture.service.createRoom(owner, {
+        name: 'Described room',
+        description: '  Weekly\n  horror double feature.  ',
+      }),
+    )
+    expect(withBlurb.room.description).toBe('Weekly horror double feature.')
+
+    // ADR 0060: the blurb is public, so pre-admission sees it too.
+    await expect(
+      fixture.service.inspectRouteProjection(withBlurb.room.id, visitor),
+    ).resolves.toMatchObject({
+      kind: 'preAdmission',
+      room: { description: 'Weekly horror double feature.' },
+    })
+    await expect(
+      fixture.service.inspectRouteProjection(withBlurb.room.id, owner),
+    ).resolves.toMatchObject({
+      kind: 'admitted',
+      room: { description: 'Weekly horror double feature.' },
+    })
+
+    const withoutBlurb = created(
+      await fixture.service.createRoom(await fixture.account(), { name: 'Plain room' }),
+    )
+    expect(withoutBlurb.room.description).toBeNull()
+    await expect(
+      fixture.service.inspectRouteProjection(withoutBlurb.room.id, null),
+    ).resolves.toMatchObject({ room: { description: null } })
+  })
+
   test('enforces private passwords and the ten-member capacity without mutating failed callers', async () => {
     const fixture = await createFixture()
     const owner = await fixture.account()

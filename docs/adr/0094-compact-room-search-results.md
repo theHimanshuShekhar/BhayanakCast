@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-11
+- **Amended:** 2026-07-28 — a result row carries the room description added by ADR 0060, clamped to one line.
 
 ## Context
 
@@ -9,7 +10,7 @@ Normal Home uses an editorial room grid driven by social rank, but search must e
 
 ## Decision
 
-The Active Rooms search group is a one-column list of compact horizontal result cards. Each result keeps a small one-to-four-tile Stream Preview mosaic, room name, visibility/Full/live state, category/tags, member and active Stream counts, and allowed presence treatment. The entire result remains one accessible link to pre-admission; descriptive metadata is not independently interactive.
+The Active Rooms search group is a one-column list of compact horizontal result cards. Each result keeps a small one-to-four-tile Stream Preview mosaic, room name, visibility/Full/live state, category/tags, the room description when present, member and active Stream counts, and allowed presence treatment. The description never costs the row its density: it occupies one clamped line and a room without one closes the gap rather than reserving it. Search does not match on the description (ADR 0060); it appears here as context for a result the query already found. The entire result remains one accessible link to pre-admission; descriptive metadata is not independently interactive.
 
 Direct matches precede fuzzy matches according to ADR 0090. Within equal relevance, rooms use normal social rank: member count descending, active Stream count descending, then meaningful activity descending. The separate Public Profiles group uses the same direct-before-fuzzy relevance tiers, then normalized Discord display name ascending and opaque Account ID as the deterministic final tie-breaker. Profiles are never ranked by popularity or usage.
 

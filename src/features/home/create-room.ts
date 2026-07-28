@@ -37,12 +37,16 @@ export function validateCreateRoomInput(value: unknown): NormalizedRoomInput {
   const source = value as Record<string, unknown>
   const name = source.name
   const category = source.category
+  const description = source.description
   const tags = source.tags
   const visibility = source.visibility
   const password = source.password
   if (typeof name !== 'string') throw new RoomInputError('ROOM_NAME_LENGTH')
   if (category !== undefined && category !== null && typeof category !== 'string') {
     throw new RoomInputError('ROOM_CATEGORY_LENGTH')
+  }
+  if (description !== undefined && description !== null && typeof description !== 'string') {
+    throw new RoomInputError('ROOM_DESCRIPTION_LENGTH')
   }
   if (tags !== undefined && tags !== null && (!Array.isArray(tags) || tags.some((tag) => typeof tag !== 'string'))) {
     throw new RoomInputError('ROOM_TAG_LENGTH')
@@ -56,6 +60,7 @@ export function validateCreateRoomInput(value: unknown): NormalizedRoomInput {
   return normalizeRoomInput({
     name,
     category: category as string | null | undefined,
+    description: description as string | null | undefined,
     tags: tags as string[] | null | undefined,
     visibility: visibility as RoomInput['visibility'],
     password: password as string | null | undefined,

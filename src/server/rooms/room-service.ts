@@ -53,6 +53,7 @@ const confirmationProposalDigest = (input: NormalizedRoomInput) =>
     .update(JSON.stringify({
       name: input.name,
       category: input.category ?? null,
+      description: input.description ?? null,
       tags: input.tags,
       visibility: input.visibility,
       password: input.password ?? null,
@@ -77,6 +78,7 @@ export interface RoomProjection {
   readonly id: string
   readonly name: string
   readonly category: string | null
+  readonly description: string | null
   readonly tags: readonly string[]
   readonly visibility: RoomVisibility
   readonly createdAt: Date
@@ -391,12 +393,13 @@ export class RoomService {
       const membershipId = randomUUID()
       await client.query(
         `INSERT INTO room
-           (id, name, category, tags, visibility, password_hash, created_by, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+           (id, name, category, description, tags, visibility, password_hash, created_by, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
         [
           roomId,
           normalized.name,
           normalized.category ?? null,
+          normalized.description ?? null,
           normalized.tags,
           normalized.visibility,
           passwordHash,
@@ -418,6 +421,7 @@ export class RoomService {
           id: roomId,
           name: normalized.name,
           category: normalized.category ?? null,
+          description: normalized.description ?? null,
           tags: normalized.tags,
           visibility: normalized.visibility,
           passwordHash,
@@ -830,6 +834,7 @@ export class RoomService {
       id: string
       name: string
       category: string | null
+      description: string | null
       tags: string[]
       visibility: RoomVisibility
       createdAt: Date
@@ -843,6 +848,7 @@ export class RoomService {
       `SELECT room.id,
               room.name,
               room.category,
+              room.description,
               room.tags,
               room.visibility,
               room.created_at AS "createdAt",
@@ -904,6 +910,7 @@ export class RoomService {
             id: row.id,
             name: row.name,
             category: row.category,
+            description: row.description,
             tags: row.tags,
             visibility: row.visibility,
             createdAt: row.createdAt,
@@ -1474,6 +1481,7 @@ function roomProjection(room: RoomRecord): RoomProjection {
     id: room.id,
     name: room.name,
     category: room.category,
+    description: room.description,
     tags: room.tags,
     visibility: room.visibility,
     createdAt: room.createdAt,

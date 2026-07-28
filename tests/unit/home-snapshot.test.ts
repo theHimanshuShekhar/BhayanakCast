@@ -11,6 +11,7 @@ function room(id: string, memberCount: number): ActiveRoomSummary {
     id,
     name: `Room ${id}`,
     category: null,
+    description: null,
     tags: [],
     visibility: 'public',
     memberCount,

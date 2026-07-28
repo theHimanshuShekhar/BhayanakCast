@@ -99,6 +99,7 @@ export class HomeRepository {
       `SELECT r.id,
               r.name,
               r.category,
+              r.description,
               r.tags,
               r.visibility,
               COUNT(DISTINCT m.id)::int AS "memberCount",
@@ -160,6 +161,7 @@ export class HomeRepository {
               r.ended_at AS "endedAt",
               r.visibility,
               r.category,
+              r.description,
               r.tags,
               COUNT(DISTINCT m.id)::int AS "memberCount",
               COUNT(DISTINCT s.id)::int AS "streamCount"
@@ -238,13 +240,14 @@ export class HomeRepository {
             WHERE m.account_id = c.id
          ) aggregates ON true
          LEFT JOIN LATERAL (
-           SELECT json_agg(json_build_object('roomId', item."roomId", 'name', item.name, 'endedAt', item."endedAt", 'visibility', item.visibility, 'category', item.category, 'tags', item.tags, 'memberCount', item."memberCount", 'streamCount', item."streamCount") ORDER BY item."endedAt" DESC, item."roomId" ASC) AS items
+           SELECT json_agg(json_build_object('roomId', item."roomId", 'name', item.name, 'endedAt', item."endedAt", 'visibility', item.visibility, 'category', item.category, 'description', item.description, 'tags', item.tags, 'memberCount', item."memberCount", 'streamCount', item."streamCount") ORDER BY item."endedAt" DESC, item."roomId" ASC) AS items
              FROM (
                SELECT r.id AS "roomId",
                       r.name,
                       r.ended_at AS "endedAt",
                       r.visibility,
                       r.category,
+                      r.description,
                       r.tags,
                       COUNT(DISTINCT all_members.id)::int AS "memberCount",
                       COUNT(DISTINCT all_streams.id)::int AS "streamCount"
@@ -358,6 +361,9 @@ type DatabaseHomeStatistics = Omit<
 
 interface ActiveRoomRow extends Omit<RoomSearchCandidate, 'activityAt'> {
   readonly activityAt: Date
+  /** Carried alongside the search candidate rather than inside it: ADR 0060
+      keeps the blurb out of search matching. */
+  readonly description: string | null
   readonly visibility: 'public' | 'private'
   readonly previews: StreamPreview[]
   readonly memberAvatars: string[]
@@ -391,6 +397,7 @@ function toActiveRoom(
     id: row.id,
     name: row.name,
     category: row.category,
+    description: row.description,
     tags: row.tags,
     visibility: row.visibility,
     memberCount: row.memberCount,
@@ -413,6 +420,7 @@ function toPastStream(row: PastStreamRow): PastStreamSummary {
     endedAt: new Date(row.endedAt).toISOString(),
     visibility: row.visibility,
     category: row.category,
+    description: row.description,
     tags: row.tags,
     memberCount: row.memberCount,
     streamCount: row.streamCount,

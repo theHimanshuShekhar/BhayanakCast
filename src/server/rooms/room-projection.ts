@@ -6,6 +6,7 @@ interface RoomProjectionRecord {
   readonly id: string
   readonly name: string
   readonly category: string | null
+  readonly description: string | null
   readonly tags: readonly string[]
   readonly visibility: RoomVisibility
   readonly createdAt: Date
@@ -33,6 +34,7 @@ interface RoomRouteDetails {
   readonly id: string
   readonly name: string
   readonly category: string | null
+  readonly description: string | null
   readonly tags: readonly string[]
   readonly visibility: RoomVisibility
   readonly memberCount: number
@@ -98,6 +100,7 @@ export function selectRoomRouteProjection(
     id: room.id,
     name: room.name,
     category: room.category,
+    description: room.description,
     tags: room.tags,
     visibility: room.visibility,
     memberCount: snapshot.memberCount,

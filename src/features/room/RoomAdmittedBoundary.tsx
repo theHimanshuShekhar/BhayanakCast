@@ -53,6 +53,7 @@ export function RoomAdmittedBoundary({
       <main className="room-boundary room-boundary--admitted" data-room-state="admitted">
         <RoomHeader
           category={room.category}
+          description={room.description}
           eyebrow={self.role === 'host' ? 'Host' : 'Member'}
           eyebrowTone={self.role === 'host' ? 'host' : 'neutral'}
           facts={
