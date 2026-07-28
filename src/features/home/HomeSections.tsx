@@ -27,6 +27,8 @@ interface HomeSectionsProps {
   readonly profiles: QuerySection<PublicProfileSummary> & { readonly updating: boolean }
   readonly pastStreams: QuerySection<PastStreamSummary>
   readonly realtimeRefreshVersion: number
+  readonly canJoin: boolean
+  readonly connectedAccountCount: number | undefined
 }
 export function HomeSections({
   search,
@@ -34,6 +36,8 @@ export function HomeSections({
   profiles,
   pastStreams,
   realtimeRefreshVersion,
+  canJoin,
+  connectedAccountCount,
 }: HomeSectionsProps) {
   const hasActiveDiscoveryContext = Boolean(
     search.q || search.category || search.tags?.length,
@@ -67,6 +71,8 @@ export function HomeSections({
           skeleton={<HomeRoomsSkeleton />}
         >
           <LiveRooms
+            canJoin={canJoin}
+            connectedAccountCount={connectedAccountCount}
             hasPastStreams={showPastStreams}
             isPlaceholderData={rooms.updating}
             rooms={rooms.data ?? []}

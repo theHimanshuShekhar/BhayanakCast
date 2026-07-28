@@ -15,8 +15,12 @@ const mocks = vi.hoisted(() => ({
   } | undefined,
   refIndex: 0,
   refs: [] as Array<{ current: unknown }>,
-  state: 'idle' as 'idle' | 'reconnecting' | 'error' | 'replaced' | 'revoked',
-  setState: vi.fn((next: 'idle' | 'reconnecting' | 'error' | 'replaced' | 'revoked') => {
+  state: { state: 'idle', lastEventAt: 0, attempt: 0 } as {
+    state: string
+    lastEventAt: number
+    attempt: number
+  },
+  setState: vi.fn((next: { state: string; lastEventAt: number; attempt: number }) => {
     mocks.state = next
   }),
 }))
@@ -82,7 +86,7 @@ describe('Home realtime canonical refresh callback', () => {
     mocks.ioSocket = undefined
     mocks.refIndex = 0
     mocks.refs = []
-    mocks.state = 'idle'
+    mocks.state = { state: 'idle', lastEventAt: 0, attempt: 0 }
     mocks.setState.mockClear()
   })
 
@@ -133,8 +137,35 @@ describe('Home realtime canonical refresh callback', () => {
     mocks.ioSocket.connected = false
     await flushMicrotasks()
 
-    expect(mocks.state).toBe('error')
+    expect(mocks.state.state).toBe('error')
     cleanup()
   })
 
+  test('counts reconnection attempts and retires the recovered strip on its own', async () => {
+    vi.useFakeTimers()
+    try {
+      mocks.invalidateQueries.mockResolvedValue(undefined)
+      const rendered = renderBridge(vi.fn())
+      expect(rendered).toBeTruthy()
+      const cleanup = mocks.effect?.()
+      const disconnect = mocks.handlers.get('disconnect')
+      const connect = mocks.handlers.get('connect')
+      if (!disconnect || !connect || !cleanup) throw new Error('bridge did not mount')
+
+      disconnect()
+      expect(mocks.state).toMatchObject({ state: 'reconnecting', attempt: 1 })
+      disconnect()
+      expect(mocks.state.attempt).toBe(2)
+
+      connect()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(mocks.state).toMatchObject({ state: 'recovered', attempt: 0 })
+
+      await vi.advanceTimersByTimeAsync(1200)
+      expect(mocks.state.state).toBe('idle')
+      cleanup()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

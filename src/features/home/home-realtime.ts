@@ -10,12 +10,21 @@ import {
 } from '../../server/realtime/home-events'
 import {
   HomeConnectionStatus,
+  RECOVERED_RETIRE_MS,
   type HomeConnectionState,
 } from './HomeConnectionStatus'
 
 interface HomeRealtimeBridgeProps {
   readonly enabled: boolean
   readonly onCanonicalRefresh: () => void
+}
+
+/** Everything the strip needs, published as one value: the state alone cannot
+    say how stale the page is or how many times the socket has tried. */
+interface HomeConnectionSnapshot {
+  readonly state: HomeConnectionState
+  readonly lastEventAt: number
+  readonly attempt: number
 }
 
 export function refreshHomeQueries(queryClient: QueryClient): Promise<void> {
@@ -30,7 +39,11 @@ export function HomeRealtimeBridge({
   onCanonicalRefresh,
 }: HomeRealtimeBridgeProps) {
   const queryClient = useQueryClient()
-  const [state, setState] = useState<HomeConnectionState>('idle')
+  const [snapshot, setSnapshot] = useState<HomeConnectionSnapshot>(() => ({
+    state: 'idle',
+    lastEventAt: Date.now(),
+    attempt: 0,
+  }))
   const onCanonicalRefreshRef = useRef(onCanonicalRefresh)
   const socketRef = useRef<ReturnType<typeof io> | null>(null)
   const retryRef = useRef<() => void>(() => {})
@@ -40,7 +53,7 @@ export function HomeRealtimeBridge({
     if (!enabled) {
       socketRef.current?.disconnect()
       socketRef.current = null
-      setState('idle')
+      setSnapshot({ state: 'idle', lastEventAt: Date.now(), attempt: 0 })
       return
     }
 
@@ -52,57 +65,79 @@ export function HomeRealtimeBridge({
     let recovering = false
     let replaced = false
     let generation = 0
+    // Tracked outside React: every delivered event refreshes the freshness
+    // clock, but only a state change is worth a render.
+    let lastEventAt = Date.now()
+    let attempt = 0
+    let retireTimer: ReturnType<typeof setTimeout> | undefined
+
+    const publish = (state: HomeConnectionState) => {
+      clearTimeout(retireTimer)
+      retireTimer = undefined
+      setSnapshot({ state, lastEventAt, attempt })
+    }
+    const publishRecovered = () => {
+      publish('recovered')
+      retireTimer = setTimeout(() => publish('idle'), RECOVERED_RETIRE_MS)
+    }
 
     const handleDisconnect = () => {
       if (replaced) return
       recovering = true
       generation += 1
+      attempt += 1
       void queryClient.invalidateQueries({
         queryKey: ['home'],
         refetchType: 'none',
       })
-      setState('reconnecting')
+      publish('reconnecting')
     }
     const refreshCanonical = async (refreshGeneration: number) => {
       try {
         await refreshHomeQueries(queryClient)
         if (refreshGeneration !== generation || !socket.connected || replaced) return
         recovering = false
+        lastEventAt = Date.now()
+        attempt = 0
         onCanonicalRefreshRef.current()
-        setState('idle')
+        publishRecovered()
       } catch {
         if (refreshGeneration === generation && !replaced) {
-          setState('error')
+          publish('error')
         }
       }
     }
     const handleConnect = () => {
       const connectGeneration = ++generation
       if (!recovering) {
-        setState('idle')
+        lastEventAt = Date.now()
+        attempt = 0
+        publish('idle')
         return
       }
-      setState('reconnecting')
+      publish('reconnecting')
       void refreshCanonical(connectGeneration)
     }
     const handleConnectError = () => {
       if (replaced) return
       recovering = true
       generation += 1
-      setState('error')
+      attempt += 1
+      publish('error')
     }
     const handleAccountReplaced = () => {
       replaced = true
       recovering = false
       generation += 1
       socket.io.opts.reconnection = false
-      setState('replaced')
+      publish('replaced')
       socket.disconnect()
     }
     const handleRetry = () => {
       if (replaced || !recovering) return
       const retryGeneration = ++generation
-      setState('reconnecting')
+      attempt += 1
+      publish('reconnecting')
       if (!socket.connected) {
         socket.connect()
         return
@@ -112,14 +147,16 @@ export function HomeRealtimeBridge({
     retryRef.current = handleRetry
     const handleHomeEvent = (value: unknown) => {
       const event = normalizeHomeRealtimeEvent(value)
-      if (event) applyHomeRealtimeEvent(queryClient, event)
+      if (!event) return
+      lastEventAt = Date.now()
+      applyHomeRealtimeEvent(queryClient, event)
     }
     const handleAccountRevoked = () => {
       replaced = true
       recovering = false
       generation += 1
       socket.io.opts.reconnection = false
-      setState('revoked')
+      publish('revoked')
       socket.disconnect()
     }
 
@@ -132,6 +169,7 @@ export function HomeRealtimeBridge({
     return () => {
       generation += 1
       replaced = true
+      clearTimeout(retireTimer)
       socket.off('disconnect', handleDisconnect)
       socket.off('connect', handleConnect)
       socket.off('connect_error', handleConnectError)
@@ -145,7 +183,7 @@ export function HomeRealtimeBridge({
   }, [enabled, queryClient])
 
   return createElement(HomeConnectionStatus, {
-    state,
-    onRetry: state === 'error' ? () => retryRef.current() : undefined,
+    ...snapshot,
+    onRetry: snapshot.state === 'error' ? () => retryRef.current() : undefined,
   })
 }

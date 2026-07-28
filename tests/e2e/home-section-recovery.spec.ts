@@ -169,8 +169,8 @@ for (const [index, section] of recoverableSections.entries()) {
     })
     await seedPastStream(authSessions)
     const page = await pageWithQueryHarness(signedIn.context)
-    await expect(page.getByRole('heading', { name: 'Live Rooms' })).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'Past Streams' })).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Live Rooms' })).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Past Streams' })).toBeVisible()
 
     let failRequests = true
     const failedUrls: string[] = []
@@ -199,8 +199,8 @@ for (const [index, section] of recoverableSections.entries()) {
     await expect(
       page.getByText(`${section.label} is unavailable.`),
     ).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'Live Rooms' })).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'Past Streams' })).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Live Rooms' })).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Past Streams' })).toBeVisible()
 
     const retry = page
       .getByRole('group', { name: `${section.label} section` })
@@ -241,10 +241,10 @@ test('Home hydrates critical SSR sections without duplicate browser fetches', as
   const serverResponse = await signedIn.context.request.get('/')
   expect(serverResponse.ok()).toBe(true)
   const serverHtml = await serverResponse.text()
-  expect(serverHtml).toMatch(/<h2[^>]*>Live Rooms<\/h2>/)
+  expect(serverHtml).toMatch(/aria-label="Live Rooms"/)
   expect(serverHtml).toMatch(/<h2[^>]*>Filters<\/h2>/)
   expect(serverHtml).toMatch(/<h2[^>]*>Statistics<\/h2>/)
-  expect(serverHtml).toMatch(/<h2[^>]*>Connected presence<\/h2>/)
+  expect(serverHtml).toMatch(/data-testid="home-counter"/)
 
   const requests: string[] = []
   signedIn.context.on('request', (request) => {
@@ -254,8 +254,8 @@ test('Home hydrates critical SSR sections without duplicate browser fetches', as
   })
   const page = await signedIn.context.newPage()
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'Live Rooms' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Past Streams' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Live Rooms' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Past Streams' })).toBeVisible()
   await page.waitForTimeout(250)
   expect(requests.filter((url) => !url.includes('/socket.io/'))).toHaveLength(1)
 })
@@ -272,7 +272,7 @@ test('independent SSR requests do not reuse another request cache', async ({
     verified: true,
   })
   const first = await signedIn.context.request.get('/')
-  expect(await first.text()).toContain('The clubhouse is quiet,')
+  expect(await first.text()).toContain('Nobody has a room open.')
 
   const users = await authSessions.sql(
     'SELECT id FROM "user" WHERE name = $1',

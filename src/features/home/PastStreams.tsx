@@ -10,14 +10,26 @@ const endedAtFormatter = new Intl.DateTimeFormat('en', {
   timeZone: 'UTC',
 })
 
+const relativeFormatter = new Intl.RelativeTimeFormat('en', { numeric: 'auto' })
+
+/** Whole days back, floored, so "2 days ago" never drifts to "1 day ago" for
+    two rows that ended minutes apart. */
+function endedLabel(endedAt: string, now: number) {
+  const days = Math.floor((now - new Date(endedAt).getTime()) / 86_400_000)
+  if (days >= 1) return relativeFormatter.format(-days, 'day')
+  const hours = Math.floor((now - new Date(endedAt).getTime()) / 3_600_000)
+  return hours >= 1 ? relativeFormatter.format(-hours, 'hour') : 'just now'
+}
+
 export function PastStreams({ streams }: PastStreamsProps) {
   if (streams.length === 0) return null
+  const now = Date.now()
 
   return (
-    <section aria-labelledby="past-streams-heading" className="past-streams">
+    <section aria-label="Past Streams" className="past-streams">
       <div className="home-section-heading">
-        <h2 id="past-streams-heading">Past Streams</h2>
-        <p>Recent clubhouse rooms</p>
+        <h2>Wrapped up</h2>
+        <p>last ten rooms</p>
       </div>
       <ol className="past-streams-list">
         {streams.map((stream) => (
@@ -26,34 +38,27 @@ export function PastStreams({ streams }: PastStreamsProps) {
               aria-label={`Open summary for ${stream.name}`}
               href={`/rooms/${encodeURIComponent(stream.roomId)}`}
             >
-              <div className="past-stream-item__heading">
-                <h3 data-past-stream-name>{stream.name}</h3>
-                <span
-                  className={`room-chip room-chip--${stream.visibility}`}
-                >
-                  {stream.visibility === 'private' ? 'Private' : 'Public'}
-                </span>
-              </div>
-              <time dateTime={stream.endedAt}>
-                Ended {endedAtFormatter.format(new Date(stream.endedAt))} UTC
-              </time>
-              {(stream.category || stream.tags.length > 0) && (
-                <div className="past-stream-item__topics">
-                  {stream.category && <span>{stream.category}</span>}
-                  {stream.tags.map((tag) => (
-                    <span key={tag}>#{tag}</span>
-                  ))}
-                </div>
-              )}
-              <p className="past-stream-item__summary tabular-nums">
+              {/* The badge sits inside the name block visually, but the name
+                  probe stays a leaf so it reads back as just the room name. */}
+              <span className="past-stream-item__name">
+                <span data-past-stream-name>{stream.name}</span>
+                {stream.visibility === 'private' && (
+                  <span className="past-stream-item__private">Private</span>
+                )}
+              </span>
+              <span className="past-stream-item__counts tabular-nums">
                 {stream.memberCount}{' '}
                 {stream.memberCount === 1 ? 'member' : 'members'} ·{' '}
                 {stream.streamCount}{' '}
-                {stream.streamCount === 1 ? 'stream' : 'streams'}
-              </p>
-              <span aria-hidden="true" className="past-stream-item__open">
-                Open summary <span>→</span>
+                {stream.streamCount === 1 ? 'screen' : 'screens'}
               </span>
+              <time
+                className="past-stream-item__when"
+                dateTime={stream.endedAt}
+                title={`Ended ${endedAtFormatter.format(new Date(stream.endedAt))} UTC`}
+              >
+                {endedLabel(stream.endedAt, now)}
+              </time>
             </a>
           </li>
         ))}

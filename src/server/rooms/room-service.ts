@@ -20,6 +20,7 @@ import {
 } from './end-room'
 import {
   normalizeRoomInput,
+  ROOM_CAPACITY,
   type NormalizedRoomInput,
   type RoomInput,
   type RoomVisibility,
@@ -45,7 +46,6 @@ import {
 } from './membership-service'
 import { RoomLifecycle, type RoomLifecycleWarning } from './room-lifecycle'
 
-const ROOM_CAPACITY = 10
 const SANCTION_DEFAULT_MS = 7 * 24 * 60 * 60 * 1_000
 const confirmationProposalDigest = (input: NormalizedRoomInput) =>
   createHash('sha256')

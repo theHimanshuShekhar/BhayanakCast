@@ -40,7 +40,7 @@ test('anonymous Create keeps its label and starts a create-only OAuth callback',
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ url: '/oauth/mock' }) })
   })
   await page.goto('/')
-  const createButton = page.getByTestId('home-bottom-navigation').getByRole('button', { name: 'Create room' })
+  const createButton = page.getByRole('button', { name: 'Sign in to open a room' })
   await expect(createButton).toBeVisible()
   await createButton.click()
   await expect.poll(() => callbackURL).toBe('/?intent=create')

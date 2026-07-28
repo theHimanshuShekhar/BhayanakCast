@@ -1,12 +1,8 @@
-import type { QueryKey } from '@tanstack/react-query'
 import { useState } from 'react'
 import { AccountMenu } from '../auth/AccountMenu'
 import { SignInButton } from '../auth/SignInButton'
 import type { SessionProjection } from '../auth/auth-client'
 import { ThemeToggle } from '../theme/ThemeToggle'
-import { HomeSectionBoundary } from './HomeSectionBoundary'
-import { HomeMetricsSkeleton } from './HomeSectionSkeletons'
-import type { ConnectedPresence } from './home-types'
 
 export const CREATE_ROOM_EVENT = 'bhayanakcast:create-room'
 
@@ -21,19 +17,11 @@ export interface CreateRoomEventDetail {
 
 interface HomeNavigationProps {
   readonly session: SessionProjection | null
-  readonly presence: ConnectedPresence | undefined
-  readonly presencePending: boolean
-  readonly presenceFailed: boolean
-  readonly presenceQueryKey: QueryKey
   readonly currentPage?: 'home' | 'profile'
 }
 
 export function HomeNavigation({
   session,
-  presence,
-  presencePending,
-  presenceFailed,
-  presenceQueryKey,
   currentPage = 'home',
 }: HomeNavigationProps) {
   return (
@@ -44,22 +32,6 @@ export function HomeNavigation({
     >
       <div className="home-top-bar" data-testid="home-top-bar">
         <span aria-label="BhayanakCast" className="home-brand-mark">BC</span>
-        <HomeSectionBoundary
-          failed={presenceFailed}
-          label="Connected presence"
-          pending={presencePending && !presence}
-          queryKey={presenceQueryKey}
-          skeleton={<HomeMetricsSkeleton label="Loading connected presence" />}
-        >
-          <section aria-label="Connected presence" className="home-presence">
-            <h2>Connected presence</h2>
-            <span aria-hidden="true" className="home-presence__dot" />
-            <span className="tabular-nums">
-              {presence?.connectedAccountCount ?? '—'}{' '}
-              <span className="home-presence__label">accounts connected</span>
-            </span>
-          </section>
-        </HomeSectionBoundary>
       </div>
 
       <nav
@@ -77,7 +49,7 @@ export function HomeNavigation({
           <HomeIcon />
           <span>Home</span>
         </a>
-        <CreateRoomButton className="home-nav-item home-nav-item--create" />
+        {session && <CreateRoomButton className="home-nav-item home-nav-item--create" />}
         {session ? (
           <a
             aria-current={currentPage === 'profile' ? 'page' : undefined}

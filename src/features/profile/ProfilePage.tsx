@@ -1,8 +1,6 @@
-import { useQuery } from '@tanstack/react-query'
 import type { SessionProjection } from '../auth/auth-client'
 import { SignInButton } from '../auth/SignInButton'
 import { HomeNavigation } from '../home/HomeNavigation'
-import { connectedPresenceQueryOptions } from '../home/home-queries'
 import type { PublicProfileSummary } from '../home/home-types'
 import { ProfileOverview } from './ProfileOverview'
 
@@ -12,20 +10,10 @@ interface ProfilePageProps {
 }
 
 export function ProfilePage({ profile, session }: ProfilePageProps) {
-  const presenceOptions = connectedPresenceQueryOptions()
-  const presence = useQuery(presenceOptions)
-
   return (
     <div className="profile-page">
       <div className="profile-navigation" data-testid="profile-navigation">
-        <HomeNavigation
-          currentPage="profile"
-          presence={presence.data}
-          presenceFailed={presence.isError}
-          presencePending={presence.isPending}
-          presenceQueryKey={presenceOptions.queryKey}
-          session={session}
-        />
+        <HomeNavigation currentPage="profile" session={session} />
       </div>
       {session ? (
         <ProfileOverview profile={profile} session={session} />

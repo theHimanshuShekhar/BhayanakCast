@@ -32,8 +32,10 @@ export function RoomSearchResult({ room }: Readonly<{ room: ActiveRoomSummary }>
           {room.previews.length > 0 && (
             <MemberPresence
               avatars={room.visibility === 'public' ? room.memberAvatars : []}
+              capacity={room.capacity}
               memberCount={room.memberCount}
               privateRoom={room.visibility === 'private'}
+              state={room.state}
             />
           )}
           <span aria-hidden="true" className="live-room-card__open-cue">

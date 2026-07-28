@@ -67,7 +67,7 @@ export function HomeSearch({
             event.preventDefault()
             debouncer.flush()
           }}
-          placeholder="Search rooms, categories, tags, or people"
+          placeholder="Search rooms, tags, people"
           type="search"
           value={draft}
         />

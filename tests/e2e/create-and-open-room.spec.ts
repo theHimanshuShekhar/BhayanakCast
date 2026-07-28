@@ -40,7 +40,7 @@ test('creates a room and enters the creator as Host', async ({ authSessions }) =
   await page.waitForURL(/\/rooms\/[0-9a-f-]+$/)
   const roomId = new URL(page.url()).pathname.split('/').at(-1)
   await expect(page.locator('[data-room-state="admitted"]')).toBeVisible()
-  await expect(page.getByText('Host', { exact: true })).toBeVisible()
+  await expect(page.locator('.room-header__eyebrow')).toHaveText('Host')
   await expect(page.getByRole('button', { name: 'Leave' })).toBeVisible()
   await page.getByRole('button', { name: 'Leave' }).click()
   const leaveDialog = page.getByRole('dialog', { name: 'Confirm room change' })

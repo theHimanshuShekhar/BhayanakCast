@@ -15,9 +15,9 @@ async function seedPastStream(authSessions: AuthSessionFixture) {
 }
 
 const stages = [
-  { name: 'small', width: 390, left: 0, right: 0 },
-  { name: 'medium', width: 1024, left: 56, right: 0 },
-  { name: 'wide', width: 1440, left: 56, right: 280 },
+  { name: 'small', width: 390, left: 0 },
+  { name: 'medium', width: 1024, left: 72 },
+  { name: 'wide', width: 1440, left: 72 },
 ] as const
 const themes = ['light', 'dark'] as const
 
@@ -48,7 +48,6 @@ async function openAnonymous(
 async function expectShell(page: Page, stage: (typeof stages)[number]) {
   const shell = page.getByTestId('home-shell')
   const left = page.getByTestId('home-navigation')
-  const right = page.getByTestId('home-rail')
   const top = page.getByTestId('home-top-bar')
   const bottom = page.getByTestId('home-bottom-navigation')
 
@@ -57,8 +56,8 @@ async function expectShell(page: Page, stage: (typeof stages)[number]) {
   await expect(page.getByRole('banner', { name: 'BhayanakCast' })).toHaveCount(1)
   await expect(page.getByRole('navigation', { name: 'Primary' })).toHaveCount(1)
   await expect(page.getByRole('main').getByRole('navigation')).toHaveCount(0)
-  await expect(page.getByRole('heading', { name: 'Live Rooms' })).toHaveCount(1)
-  await expect(page.getByRole('heading', { name: 'Past Streams' })).toHaveCount(1)
+  await expect(page.getByRole('heading', { name: 'Wrapped up' })).toHaveCount(1)
+  await expect(page.getByTestId('home-counter')).toBeVisible()
   await expect(page.getByRole('search', { name: 'Find rooms and people' })).toHaveCount(1)
   await expect(page.getByRole('link', { name: 'Home', exact: true })).toHaveAttribute(
     'aria-current',
@@ -75,7 +74,6 @@ async function expectShell(page: Page, stage: (typeof stages)[number]) {
     await expect(top).toBeVisible()
     await expect(bottom).toBeVisible()
     await expect(left).toHaveCSS('position', 'static')
-    await expect(right).toHaveCSS('display', 'contents')
     expect(await top.evaluate((node) => getComputedStyle(node).position)).toBe('fixed')
     expect(await bottom.evaluate((node) => getComputedStyle(node).position)).toBe('fixed')
     expect(Math.round((await top.boundingBox())?.height ?? 0)).toBe(56)
@@ -85,28 +83,11 @@ async function expectShell(page: Page, stage: (typeof stages)[number]) {
     await expect(bottom).toHaveCSS('display', 'contents')
     await expect(left).toBeVisible()
     expect(Math.round((await left.boundingBox())?.width ?? 0)).toBe(stage.left)
-    if (stage.name === 'wide') {
-      await expect(right).toBeVisible()
-      expect(Math.round((await right.boundingBox())?.width ?? 0)).toBe(stage.right)
-    } else {
-      await expect(right).toHaveCSS('display', 'contents')
-    }
   }
 
-  const statisticsToggle = page.getByRole('button', { name: 'Clubhouse statistics' })
-  const liveRoomsMetric = page.locator('.home-statistics dt', { hasText: 'Live Rooms' })
-  if (stage.name === 'wide') {
-    await expect(statisticsToggle).toHaveCount(0)
-    await expect(page.getByRole('heading', { name: 'Statistics' })).toBeVisible()
-    await expect(liveRoomsMetric).toBeVisible()
-  } else {
-    await expect(statisticsToggle).toHaveAttribute('aria-expanded', 'false')
-    await expect(liveRoomsMetric).toBeHidden()
-    await statisticsToggle.click()
-    await expect(statisticsToggle).toHaveAttribute('aria-expanded', 'true')
-    await expect(liveRoomsMetric).toBeVisible()
-    await statisticsToggle.click()
-  }
+  // The statistics strip never collapses — no disclosure to open at any stage.
+  await expect(page.getByRole('button', { name: 'Clubhouse statistics' })).toHaveCount(0)
+  await expect(page.locator('.home-statistics dt', { hasText: 'rooms live' })).toBeVisible()
 
   const scrollContract = await page.evaluate(() => {
     const nested = [...document.querySelectorAll<HTMLElement>('body *')]
@@ -239,18 +220,18 @@ async function expectIconRailTooltips(page: Page) {
 
 function anonymousKeyboardOrder(stage: (typeof stages)[number], theme: (typeof themes)[number]) {
   const discord = stage.name === 'small' ? ['Continue with Discord'] : []
-  const account = stage.name === 'medium' ? ['Sign in with Discord'] : []
-  const utilities = stage.name === 'wide' ? ['Sign in with Discord'] : ['Clubhouse statistics']
   const filters = stage.name === 'small' ? ['Filters'] : ['Category', 'Add tag']
+  // Small screens carry sign-in in the bottom navigation only, so the fixed
+  // top-right copy is hidden and drops out of the tab order.
+  const topAccount = stage.name === 'small' ? [] : ['Sign in with Discord']
   return [
     'Home',
-    'Create room',
     ...discord,
     theme === 'light' ? 'Dark theme' : 'Light theme',
-    ...account,
+    ...topAccount,
     'Find rooms and people',
     ...filters,
-    ...utilities,
+    'Sign in',
   ]
 }
 
@@ -264,7 +245,7 @@ function authenticatedKeyboardOrder(stage: (typeof stages)[number], theme: (type
     'Home Shell Member account',
     'Find rooms and people',
     ...(stage.name === 'small' ? ['Filters'] : ['Category', 'Add tag']),
-    stage.name === 'wide' ? 'Start a room' : 'Clubhouse statistics',
+    'Open a room',
   ]
 }
 
@@ -289,7 +270,7 @@ test('anonymous Home shell keeps one responsive tree in both themes', async ({
           exact: true,
         })).toBeVisible()
         await expect(page.getByRole('button', { name: 'Log out' })).toHaveCount(0)
-        await expect(page.getByText(/accounts? connected/i)).toBeVisible()
+        await expect(page.getByText(/(person|people) in the clubhouse/i)).toBeVisible()
         await expectKeyboardOrder(page, anonymousKeyboardOrder(stage, theme), stage.name !== 'small')
         if (stage.name === 'small') {
           const discord = page
@@ -476,7 +457,7 @@ test('Admin navigation is visible only to an authorized Account', async ({ authS
         'Home Admin account',
         'Find rooms and people',
         ...(stage.name === 'small' ? ['Filters'] : ['Category', 'Add tag']),
-        stage.name === 'wide' ? 'Start a room' : 'Clubhouse statistics',
+        'Open a room',
       ],
       stage.name !== 'small',
     )
@@ -490,17 +471,16 @@ test('query mode replaces Past Streams with Profiles without duplicating Home', 
   const { context, page } = await openAnonymous(browser, authSessions.origin, 1024, 'light')
   try {
     await page.goto('/?q=member')
-    await expect(page.getByRole('heading', { name: 'Active Rooms' })).toHaveCount(1)
-    await expect(page.getByRole('heading', { name: 'Public Profiles' })).toHaveCount(1)
-    await expect(page.getByRole('heading', { name: 'Past Streams' })).toHaveCount(0)
+    await expect(page.getByRole('heading', { name: 'Active rooms' })).toHaveCount(1)
+    await expect(page.getByRole('heading', { name: 'Public profiles' })).toHaveCount(1)
+    await expect(page.getByRole('heading', { name: 'Wrapped up' })).toHaveCount(0)
     const order = await page.locator('[data-home-center-region]').evaluateAll((regions) =>
       regions.map((region) => region.getAttribute('data-home-center-region')),
     )
     expect(order).toEqual(['search', 'live-rooms', 'profiles'])
-    const activeScrollPadding = await page.evaluate(() =>
-      Number.parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop),
-    )
-    expect(activeScrollPadding).toBeGreaterThanOrEqual(208)
+    // The counter counts results in search mode instead of connected accounts.
+    await expect(page.getByTestId('home-counter')).toContainText(/match(es)?/)
+    await expect(page.getByTestId('home-statistics')).toHaveCount(0)
   } finally {
     await context.close()
   }
@@ -519,7 +499,6 @@ test('desktop companions rejoin document flow in a short viewport', async ({
   )
   try {
     await expect(page.getByTestId('home-navigation')).toHaveCSS('position', 'static')
-    await expect(page.getByTestId('home-rail')).toHaveCSS('position', 'static')
     const nestedScrolls = await page.evaluate(() =>
       [...document.querySelectorAll<HTMLElement>('body *')].filter((element) => {
         const style = getComputedStyle(element)

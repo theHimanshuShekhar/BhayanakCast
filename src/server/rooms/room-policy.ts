@@ -1,3 +1,7 @@
+/** Seats in a room. The single source of truth — the room service gates
+    admission on it and the Home projection reports it as the seat count. */
+export const ROOM_CAPACITY = 10
+
 export type RoomVisibility = 'public' | 'private'
 
 export interface RoomInput {

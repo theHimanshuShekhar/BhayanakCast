@@ -16,8 +16,14 @@ export interface ActiveRoomSummary {
   readonly tags: readonly string[]
   readonly visibility: 'public' | 'private'
   readonly memberCount: number
+  /** Seats in the room. Carried on the projection so the client never has to
+      know the server's capacity constant. */
+  readonly capacity: number
   readonly streamCount: number
   readonly state: 'live' | 'full'
+  /** Display name of whoever opened the room; null when the account is gone
+      or the room is private (private rooms do not disclose their host). */
+  readonly hostName: string | null
   readonly previews: readonly StreamPreview[]
   readonly memberAvatars: readonly string[]
 }

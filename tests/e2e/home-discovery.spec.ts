@@ -208,16 +208,21 @@ test('renders ranked live rooms with private previews and one canonical link per
     'Open Indie Watch Party room',
   ])
 
+  // ADR 0084: five active Streams show the four freshest previews, and the
+  // overflow is carried by the total Stream count rather than a mosaic cell.
   const featuredPreviews = cards.nth(0).locator('.preview-mosaic img')
   await expect(featuredPreviews).toHaveCount(4)
   await expect(featuredPreviews.first()).toHaveCSS('filter', 'none')
+  await expect(cards.nth(0).locator('.preview-mosaic__summary')).toHaveText(
+    '5 screens shared',
+  )
   const privatePreview = cards.nth(1).locator('.preview-mosaic img')
   await expect(privatePreview).toHaveCount(1)
   expect(await privatePreview.evaluate((image) => getComputedStyle(image).filter)).toContain('blur')
   expect(await privatePreview.getAttribute('alt')).toBe('')
 
   await expect(cards.nth(2).locator('img')).toHaveCount(3)
-  await expect(cards.nth(2).getByText('No one is sharing yet')).toBeVisible()
+  await expect(cards.nth(2).getByText('Talking, no screens up')).toBeVisible()
   await expect(page.locator('[data-placeholder]')).toHaveCount(0)
   expect(await page.locator('body').innerHTML()).not.toContain(privateAccountId)
   await expect(page.getByText('Secret member 1')).toHaveCount(0)
@@ -248,15 +253,19 @@ test('places the frozen feature responsively while preserving DOM rank order', a
     ])
 
     if (width === 1440) {
-      expect(boxes[0]!.x).toBeLessThan(boxes[1]!.x)
-      expect(boxes[0]!.height).toBeGreaterThan(boxes[1]!.height * 1.5)
-      expect(Math.round(boxes[1]!.x)).toBe(Math.round(boxes[2]!.x))
-      expect(boxes[2]!.y).toBeGreaterThan(boxes[1]!.y)
-      expect(boxes[3]!.y).toBeGreaterThanOrEqual(boxes[0]!.y + boxes[0]!.height)
+      // Busiest room takes a full-width row; Also live is a three-up grid below it.
+      expect(boxes[0]!.y).toBeLessThan(boxes[1]!.y)
+      expect(boxes[0]!.width).toBeGreaterThan(boxes[1]!.width * 1.5)
+      expect(new Set(boxes.slice(1).map(({ y }) => Math.round(y))).size).toBe(1)
+      expect(boxes[1]!.x).toBeLessThan(boxes[2]!.x)
+      expect(boxes[2]!.x).toBeLessThan(boxes[3]!.x)
     } else if (width === 1024) {
-      expect(boxes[0]!.width).toBeGreaterThan(boxes[1]!.width * 1.8)
+      // Also live drops to two-up, so the fourth card wraps under the second.
+      expect(boxes[0]!.width).toBeGreaterThan(boxes[1]!.width * 1.5)
       expect(Math.round(boxes[1]!.y)).toBe(Math.round(boxes[2]!.y))
       expect(boxes[1]!.x).toBeLessThan(boxes[2]!.x)
+      expect(Math.round(boxes[3]!.x)).toBe(Math.round(boxes[1]!.x))
+      expect(boxes[3]!.y).toBeGreaterThan(boxes[1]!.y)
       const preview = await cards.first().locator('.preview-mosaic').boundingBox()
       expect(preview).not.toBeNull()
       expect(preview!.width / preview!.height).toBeGreaterThan(1.7)
@@ -286,10 +295,8 @@ test('renders Past Streams as newest metadata-only summaries in two columns then
   await expect(items.locator('img, video')).toHaveCount(0)
   await expect(page.getByText(/replay|carousel|pagination/i)).toHaveCount(0)
   await expect(items.first()).toContainText('2 members')
-  await expect(items.first()).toContainText('1 stream')
-  await expect(items.first()).toContainText('Public')
-  await expect(items.first()).toContainText('Drawing')
-  await expect(items.nth(1).locator('.past-stream-item__topics')).toHaveCount(0)
+  await expect(items.first()).toContainText('1 screen')
+  await expect(items.first().locator('.past-stream-item__private')).toHaveCount(0)
   await expect(items.first().getByRole('link')).toHaveAttribute(
     'href',
     '/rooms/20000000-0000-4000-8000-000000000001',
@@ -310,14 +317,13 @@ test('leads empty discovery with one Create Room invitation', async ({
   await page.goto(authSessions.origin)
 
   const liveSection = page.getByRole('region', { name: 'Live Rooms' })
-  await expect(liveSection.getByRole('heading', { name: 'The clubhouse is quiet,' })).toBeVisible()
+  await expect(liveSection).toContainText('Nobody has a room open.')
   await expect(liveSection).toContainText('Public rooms')
   await expect(liveSection).toContainText(/private rooms/i)
-  const create = liveSection.getByRole('button', { name: 'Create Room' })
-  await expect(create).toBeVisible()
+  await expect(liveSection.getByRole('button', { name: 'Sign in to open a room' })).toBeVisible()
   await expect(liveSection.locator('.empty-discovery__illustration')).toHaveCount(0)
-  await expect(liveSection.getByText('Be the first to open a room.')).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Past Streams' })).toHaveCount(0)
+  await expect(liveSection).toContainText('Be the first')
+  await expect(page.getByRole('heading', { name: 'Wrapped up' })).toHaveCount(0)
   await expect(page.getByText('No past streams yet.')).toHaveCount(0)
 
   const order = await page.locator('[data-home-center-region]').evaluateAll((regions) =>

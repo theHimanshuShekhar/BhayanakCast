@@ -38,14 +38,14 @@ export function HomeSearchResults({
       >
         <HomeSectionBoundary
           failed={rooms.failed}
-          label="Active Rooms"
+          label="Active rooms"
           pending={rooms.pending && !rooms.data}
           queryKey={rooms.queryKey}
           skeleton={<HomeRoomsSkeleton label="Loading active room results" />}
         >
           <section aria-labelledby="active-room-results-heading">
             <div className="home-section-heading">
-              <h2 id="active-room-results-heading">Active Rooms</h2>
+              <h2 id="active-room-results-heading">Active rooms</h2>
               <p className="tabular-nums">
                 {roomCount} {roomCount === 1 ? 'result' : 'results'}
               </p>
@@ -73,14 +73,14 @@ export function HomeSearchResults({
         >
           <HomeSectionBoundary
             failed={profiles.failed}
-            label="Public Profiles"
+            label="Public profiles"
             pending={profiles.pending && !profiles.data}
             queryKey={profiles.queryKey}
             skeleton={<HomeRoomsSkeleton label="Loading public profile results" />}
           >
             <section aria-labelledby="profile-results-heading">
               <div className="home-section-heading">
-                <h2 id="profile-results-heading">Public Profiles</h2>
+                <h2 id="profile-results-heading">Public profiles</h2>
                 <p className="tabular-nums">
                   {profileCount} {profileCount === 1 ? 'result' : 'results'}
                 </p>
@@ -106,18 +106,6 @@ export function HomeSearchResults({
           </HomeSectionBoundary>
         </section>
       )}
-
-      <p
-        aria-label="Search result count"
-        aria-live="polite"
-        className="visually-hidden"
-        role="status"
-      >
-        {roomCount} active {roomCount === 1 ? 'room' : 'rooms'}
-        {query
-          ? ` and ${profileCount} public ${profileCount === 1 ? 'profile' : 'profiles'}`
-          : ''}
-      </p>
     </>
   )
 }

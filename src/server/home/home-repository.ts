@@ -6,6 +6,7 @@ import {
   type RoomSearchCandidate,
 } from '../../features/home/home-search'
 import { OPERATOR_TIME_ZONE } from '../../features/home/operator-day'
+import { ROOM_CAPACITY } from '../rooms/room-policy'
 import type {
   ActiveRoomSummary,
   Facet,
@@ -107,8 +108,10 @@ export class HomeRepository {
               CASE
                 WHEN r.visibility = 'public' THEN COALESCE(member_avatars.items, '[]'::jsonb)
                 ELSE '[]'::jsonb
-              END AS "memberAvatars"
+              END AS "memberAvatars",
+              CASE WHEN r.visibility = 'public' THEN host.name END AS "hostName"
          FROM room r
+         LEFT JOIN "user" host ON host.id = r.created_by
          LEFT JOIN room_membership m ON m.room_id = r.id AND m.left_at IS NULL
          LEFT JOIN stream s ON s.room_id = r.id AND s.ended_at IS NULL
          LEFT JOIN LATERAL (
@@ -137,7 +140,7 @@ export class HomeRepository {
              ) recent
          ) member_avatars ON true
         WHERE r.ended_at IS NULL
-        GROUP BY r.id, previews.items, member_avatars.items
+        GROUP BY r.id, previews.items, member_avatars.items, host.name
         ORDER BY COUNT(DISTINCT m.id) DESC,
                  COUNT(DISTINCT s.id) DESC,
                  GREATEST(r.created_at, COALESCE(MAX(m.joined_at), r.created_at), COALESCE(MAX(s.preview_updated_at), r.created_at), COALESCE(MAX(s.started_at), r.created_at)) DESC,
@@ -358,6 +361,7 @@ interface ActiveRoomRow extends Omit<RoomSearchCandidate, 'activityAt'> {
   readonly visibility: 'public' | 'private'
   readonly previews: StreamPreview[]
   readonly memberAvatars: string[]
+  readonly hostName: string | null
 }
 
 type RankedRoomRow = Omit<ActiveRoomRow, 'activityAt'> & {
@@ -390,8 +394,10 @@ function toActiveRoom(
     tags: row.tags,
     visibility: row.visibility,
     memberCount: row.memberCount,
+    capacity: ROOM_CAPACITY,
     streamCount: row.streamCount,
-    state: row.memberCount >= 10 ? 'full' : 'live',
+    state: row.memberCount >= ROOM_CAPACITY ? 'full' : 'live',
+    hostName: row.hostName,
     previews: row.previews.map((preview) => ({
       previewKey: preview.previewKey,
       updatedAt: new Date(preview.updatedAt).toISOString(),

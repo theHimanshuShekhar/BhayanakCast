@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { admitRoom } from './room-queries'
+import { RoomFact, RoomHeader, RoomSeatStrip, RoomShell } from './RoomShell'
 import { authClient } from '../auth/auth-client'
 import { safeOAuthCallbackPath } from '../auth/SignInButton'
 import type { MembershipConfirmation } from '../../server/rooms/room-service'
@@ -70,34 +71,86 @@ export function RoomPreAdmission({
   }
 
   return (
-    <section className="room-boundary room-boundary--pre-admission" data-room-state="pre-admission">
-      <p className="room-boundary__eyebrow">{room.visibility === 'private' ? 'Private Room' : 'Public Room'}</p>
-      <h1 data-room-primary-heading="" tabIndex={-1}>{room.name}</h1>
-      {room.category && <p className="room-boundary__category">{room.category}</p>}
-      <p>Join explicitly to enter this room. Opening this link does not join you.</p>
-      <dl className="room-boundary__facts">
-        <div><dt>Members</dt><dd>{room.memberCount} / 10</dd></div>
-        <div><dt>Streams</dt><dd>{room.streamCount}</dd></div>
-      </dl>
-      {room.viewerAuthenticated && room.visibility === 'private' && !full && (
-        <label className="room-boundary__password">
-          Password
-          <input
-            autoComplete="current-password"
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-          />
-        </label>
-      )}
-      {error && <p className="form-error" role="alert">{error}</p>}
-      <div className="room-boundary__actions">
-        <a className="room-boundary__back" href="/">Back / Home</a>
-        <button aria-busy={pending} disabled={pending || full} type="button" onClick={join}>
-          {full ? 'Full' : pending ? (room.viewerAuthenticated ? 'Joining…' : 'Opening Discord…') : 'Join'}
-        </button>
-      </div>
-    </section>
+    <RoomShell state="pre-admission">
+      <section
+        className="room-boundary room-boundary--pre-admission"
+        data-room-state="pre-admission"
+      >
+        <RoomHeader
+          category={room.category}
+          eyebrow={room.visibility === 'private' ? 'Private Room' : 'Public Room'}
+          eyebrowTone={room.visibility === 'private' ? 'neutral' : 'live'}
+          facts={
+            <>
+              <RoomFact tone={room.streamCount > 0 ? 'live' : 'neutral'}>
+                {room.streamCount}{' '}
+                {room.streamCount === 1 ? 'screen shared' : 'screens shared'}
+              </RoomFact>
+              <RoomFact tone={full ? 'warning' : 'neutral'}>
+                {room.memberCount} of {room.capacity} here
+              </RoomFact>
+            </>
+          }
+          name={room.name}
+          tags={room.tags}
+        />
+
+        <div className="room-stage">
+          <div className="room-spotlight" data-spotlight="gated">
+            <p className="room-spotlight__state">
+              {full
+                ? 'This room is full.'
+                : 'You are not in this room yet.'}
+            </p>
+            <p className="room-spotlight__note">
+              Join explicitly to enter. Opening this link does not join you.
+            </p>
+          </div>
+
+          <section aria-label="Seats" className="room-stage__seats">
+            <h2 className="visually-hidden">Seats</h2>
+            <RoomSeatStrip capacity={room.capacity} memberCount={room.memberCount} />
+            <p className="room-stage__seats-label tabular-nums">
+              {room.memberCount} of {room.capacity} seats taken
+            </p>
+          </section>
+
+          {room.viewerAuthenticated && room.visibility === 'private' && !full && (
+            <label className="room-boundary__password">
+              Password
+              <input
+                autoComplete="current-password"
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+            </label>
+          )}
+          {error && <p className="form-error" role="alert">{error}</p>}
+
+          <div className="room-controls">
+            <a className="room-boundary__back" href="/">Back / Home</a>
+            <button
+              aria-busy={pending}
+              className="room-controls__join"
+              disabled={pending || full}
+              type="button"
+              onClick={join}
+            >
+              {full
+                ? 'Full'
+                : pending
+                  ? room.viewerAuthenticated
+                    ? 'Joining…'
+                    : 'Opening Discord…'
+                  : room.viewerAuthenticated
+                    ? 'Join'
+                    : 'Sign in to join'}
+            </button>
+          </div>
+        </div>
+      </section>
+    </RoomShell>
   )
 }
 
