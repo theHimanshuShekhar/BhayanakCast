@@ -1,7 +1,7 @@
 import { useThrottler } from '@tanstack/react-pacer'
 import { useEffect, useRef, useState } from 'react'
 import { orderRoomPeople, type RoomRosterMember } from '../../server/rooms/room-roster'
-import { CHAT_BODY_LIMIT } from '../../server/rooms/chat-service'
+import { CHAT_BODY_LIMIT } from '../../server/realtime/room-events'
 import { sendChatMessage } from './room-queries'
 import type { RoomRealtime } from './useRoomRealtime'
 

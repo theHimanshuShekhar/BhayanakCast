@@ -13,6 +13,6 @@ CREATE TABLE "report" (
 	CONSTRAINT "report_details_length_check" CHECK ("details" is null or char_length("details") <= 2000)
 );
 --> statement-breakpoint
-ALTER TABLE "report" ADD CONSTRAINT "report_reporter_fk" FOREIGN KEY ("reporter_account_id") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "report" ADD CONSTRAINT "report_room_fk" FOREIGN KEY ("room_id") REFERENCES "public"."room"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "report" ADD CONSTRAINT "report_reporter_fk" FOREIGN KEY ("reporter_account_id") REFERENCES "user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "report" ADD CONSTRAINT "report_room_fk" FOREIGN KEY ("room_id") REFERENCES "room"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "report_queue_idx" ON "report" USING btree ("created_at" DESC);

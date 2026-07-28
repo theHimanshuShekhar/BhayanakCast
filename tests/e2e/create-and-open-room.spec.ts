@@ -149,6 +149,13 @@ test('existing Host Stream switch Cancel preserves then Confirm cleans source ac
     [targetRoomId, targetAccountId],
   ) as { id: string }[])[0]?.id
   if (!sourceMembershipId || !targetMembershipId) throw new Error('Missing switch memberships')
+
+  // Navigate first, then seed the media. ADR 0103 has an unexpected disconnect
+  // close peer media at once, and leaving the source room's page is exactly
+  // that disconnect — media seeded before this point would already be stopped
+  // by the time the confirmation is computed.
+  await sourcePage.goto(`${authSessions.origin}/rooms/${targetRoomId}`)
+  await expect(sourcePage.getByRole('button', { name: 'Join' })).toBeVisible()
   const sourceStreamId = randomUUID()
   const targetStreamId = randomUUID()
   await authSessions.sql(
@@ -162,10 +169,12 @@ test('existing Host Stream switch Cancel preserves then Confirm cleans source ac
     [randomUUID(), sourceMembershipId, targetStreamId],
   )
 
-  await sourcePage.goto(`${authSessions.origin}/rooms/${targetRoomId}`)
   await sourcePage.getByRole('button', { name: 'Join' }).click()
   const confirmation = sourcePage.getByRole('dialog', { name: 'Confirm room change' })
   await expect(confirmation).toBeVisible()
+  // Proves the server still saw the Stream when it computed the consequences,
+  // so a late disconnect cannot make the assertions below pass vacuously.
+  await expect(confirmation).toContainText('current Stream will stop')
   const beforeCancel = await authSessions.sql(
     `SELECT
        (SELECT room_id FROM room_membership WHERE id = $1 AND left_at IS NULL) AS "roomId",
@@ -385,12 +394,14 @@ test('full and ended target rejection preserve active Host Stream source', async
     [sourceRoomId, sourceAccountId],
   ) as { id: string }[])[0]?.id
   if (!sourceMembershipId) throw new Error('Missing source membership')
+  // Seeded after the navigation for the ADR 0103 reason above.
+  await sourcePage.goto(`${authSessions.origin}/rooms/${endedRoomId}`)
+  await expect(sourcePage.getByRole('button', { name: 'Join' })).toBeVisible()
   await authSessions.sql(
     `INSERT INTO stream (id, room_id, membership_id, started_at)
      VALUES ($1, $2, $3, now())`,
     [randomUUID(), sourceRoomId, sourceMembershipId],
   )
-  await sourcePage.goto(`${authSessions.origin}/rooms/${endedRoomId}`)
   await sourcePage.getByRole('button', { name: 'Join' }).click()
   const confirmation = sourcePage.getByRole('dialog', { name: 'Confirm room change' })
   await expect(confirmation).toBeVisible()

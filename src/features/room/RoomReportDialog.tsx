@@ -1,5 +1,9 @@
 import { useState } from 'react'
-import { REPORT_REASONS, type ReportReason } from '../../server/moderation/report-service'
+import {
+  REPORT_DETAILS_LIMIT,
+  REPORT_REASONS,
+  type ReportReason,
+} from '../../server/moderation/report-policy'
 import { submitRoomReport } from './room-queries'
 
 const REASON_LABELS: Readonly<Record<ReportReason, string>> = {
@@ -79,7 +83,7 @@ export function RoomReportDialog({
             </label>
             <textarea
               id="report-details"
-              maxLength={2_000}
+              maxLength={REPORT_DETAILS_LIMIT}
               rows={4}
               value={details}
               onChange={(event) => setDetails(event.target.value)}

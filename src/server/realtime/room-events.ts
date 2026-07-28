@@ -15,7 +15,10 @@ export const ROOM_TYPING_COMMAND = 'room:typing' as const
 
 const MAX_ID_LENGTH = 128
 const MAX_NAME_LENGTH = 256
-const MAX_BODY_LENGTH = 500
+/** ADR 0102's composer limit. It lives here because the client needs it and a
+    component must not import the chat service to get at a number. */
+export const CHAT_BODY_LIMIT = 500
+const MAX_BODY_LENGTH = CHAT_BODY_LIMIT
 const MAX_TIMESTAMP_LENGTH = 64
 /** SDP blobs are large; candidates are small. One bound covers both without
     letting a client push unbounded text through the server. */
