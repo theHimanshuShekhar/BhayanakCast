@@ -2593,6 +2593,28 @@ a {
   letter-spacing: -0.02em;
 }
 
+/* ADR 0060: display-only blurb. Two lines on a card, one in a search row —
+   the row's density comes first. */
+.live-room-card__description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  margin: 0;
+  color: var(--ink-secondary);
+  font-size: var(--text-meta);
+}
+
+.room-search-result__description {
+  margin: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--ink-secondary);
+  font-size: var(--text-meta);
+}
+
 .live-room-card__host {
   display: inline-flex;
   align-items: center;
@@ -3292,6 +3314,15 @@ a {
   margin: 0.5rem 0 0;
   color: var(--ink-muted);
   font-size: var(--text-meta);
+  /* ADR 0100: the header stays two lines, so the blurb shares this one and
+     truncates rather than wrapping. */
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.room-header__description {
+  color: var(--ink-faint);
 }
 
 .room-header__tags {

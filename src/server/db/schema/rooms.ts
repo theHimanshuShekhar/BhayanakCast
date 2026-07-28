@@ -15,6 +15,7 @@ export const room = pgTable(
     id: uuid('id').defaultRandom().primaryKey(),
     name: text('name').notNull(),
     category: text('category'),
+    description: text('description'),
     tags: text('tags').array().default(sql`'{}'::text[]`).notNull(),
     visibility: text('visibility').notNull(),
     passwordHash: text('password_hash'),

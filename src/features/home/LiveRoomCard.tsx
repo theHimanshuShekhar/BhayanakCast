@@ -24,6 +24,10 @@ export function LiveRoomCard({ room, featured, canJoin }: LiveRoomCardProps) {
         <div className="live-room-card__body">
           <h3 data-room-name>{room.name}</h3>
 
+          {room.description && (
+            <p className="live-room-card__description">{room.description}</p>
+          )}
+
           <p className="live-room-card__host">
             <HostIcon known={Boolean(room.hostName)} />
             {room.hostName ?? 'Host hidden'}

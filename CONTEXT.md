@@ -97,7 +97,7 @@ BhayanakCast is a public discovery platform for small social screen-sharing room
 : A small, public or private social screen-sharing space with a hard capacity of 10 Room Members in V1. Create Room defaults to Public visibility; a creator may switch to Private and provide the required password.
 
 **Room metadata**
-: Create Room requires only a trimmed name of 3–80 user-visible characters. Names need not be unique; opaque room IDs remain authoritative. Category is optional freeform text up to 32 characters, as are up to five optional freeform tags of up to 24 characters each; V1 has no long-form description or predefined taxonomy. The current Host may update this metadata later.
+: Create Room requires only a trimmed name of 3–80 user-visible characters. Names need not be unique; opaque room IDs remain authoritative. Category is optional freeform text up to 32 characters, as are up to five optional freeform tags of up to 24 characters each; V1 has no predefined taxonomy. A room may also carry one optional description: single-line plain text up to 140 user-visible characters, shown on discovery cards, search results, pre-admission, and the room header, and never matched by search. The current Host may update this metadata later, including clearing the description.
 
 **Create Room flow**
 : All Home Create affordances use one form: centered modal on wide/medium and full-screen safe-area/keyboard-aware dialog on small. Anonymous activation carries only an opaque OAuth create intent and reopens a blank authenticated dialog; no fields/password cross OAuth. Submit is explicit. Success atomically enters the creator as Host; current membership closes only after target validation. Failure keeps the dialog/current membership and creates no room.
@@ -118,7 +118,7 @@ BhayanakCast is a public discovery platform for small social screen-sharing room
 : A room expires 12 hours after original creation; no Host transfer, revival, reconnect, or update resets or extends it. Members see persistent countdown state and Activity warnings at 30, 10, and 1 minute. Expiry stops media, closes memberships, and creates the normal Past Stream without grace.
 
 **Live room settings**
-: The current Host may change a live room's name, category, tags, and visibility. Public-to-Private changes save with a valid new password and retain current members; Private-to-Public requires confirmation, clears its password, and retains current members. Future admission always uses the current visibility and normal gates.
+: The current Host may change a live room's name, category, tags, description, and visibility. Public-to-Private changes save with a valid new password and retain current members; Private-to-Public requires confirmation, clears its password, and retains current members. Future admission always uses the current visibility and normal gates.
 
 **Full Room**
 : A Room at its 10-Member cap. It remains discoverable with an explicit Full state, but admission is disabled until capacity opens. V1 has no waitlist, reservation, notification, or Host approval queue.

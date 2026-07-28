@@ -25,6 +25,7 @@ export function CreateRoomDialog({ session }: CreateRoomDialogProps) {
   const returnFocusRef = useRef<HTMLElement | null>(null)
   const [name, setName] = useState('')
   const [category, setCategory] = useState('')
+  const [description, setDescription] = useState('')
   const [tags, setTags] = useState('')
   const [visibility, setVisibility] = useState<Visibility>('public')
   const [password, setPassword] = useState('')
@@ -49,6 +50,7 @@ export function CreateRoomDialog({ session }: CreateRoomDialogProps) {
     setConfirmation(null)
     setName('')
     setCategory('')
+    setDescription('')
     setTags('')
     setVisibility('public')
     setPassword('')
@@ -141,6 +143,7 @@ export function CreateRoomDialog({ session }: CreateRoomDialogProps) {
       const input = validateCreateRoomInput({
         name,
         category: category || undefined,
+        description: description || undefined,
         tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean),
         visibility,
         password: visibility === 'private' ? password : undefined,
@@ -168,6 +171,7 @@ export function CreateRoomDialog({ session }: CreateRoomDialogProps) {
       const input = validateCreateRoomInput({
         name,
         category: category || undefined,
+        description: description || undefined,
         tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean),
         visibility,
         password: visibility === 'private' ? password : undefined,
@@ -230,6 +234,14 @@ export function CreateRoomDialog({ session }: CreateRoomDialogProps) {
             <input maxLength={32} value={category} onChange={(event) => setCategory(event.target.value)} />
           </label>
           <label>
+            Description <span className="form-hint">Optional, up to 140 characters</span>
+            <input
+              maxLength={140}
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+            />
+          </label>
+          <label>
             Tags <span className="form-hint">Optional, comma separated</span>
             <input maxLength={128} value={tags} onChange={(event) => setTags(event.target.value)} />
           </label>
@@ -273,6 +285,7 @@ function createInputError(code: string) {
   const labels: Record<string, string> = {
     ROOM_NAME_LENGTH: 'Name must be between 3 and 80 characters.',
     ROOM_CATEGORY_LENGTH: 'Category must be at most 32 characters.',
+    ROOM_DESCRIPTION_LENGTH: 'Description must be at most 140 characters.',
     ROOM_TAG_COUNT: 'Use no more than 5 tags.',
     ROOM_TAG_LENGTH: 'Each tag must be at most 24 characters.',
     ROOM_PASSWORD_LENGTH: 'Private passwords must be at least 8 characters.',

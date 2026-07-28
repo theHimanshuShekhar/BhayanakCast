@@ -13,6 +13,9 @@ export interface ActiveRoomSummary {
   readonly id: string
   readonly name: string
   readonly category: string | null
+  /** ADR 0060: optional single-line blurb, display only — search never matches
+      on it. */
+  readonly description: string | null
   readonly tags: readonly string[]
   readonly visibility: 'public' | 'private'
   readonly memberCount: number
@@ -34,6 +37,7 @@ export interface PastStreamSummary {
   readonly endedAt: string
   readonly visibility: 'public' | 'private'
   readonly category: string | null
+  readonly description: string | null
   readonly tags: readonly string[]
   readonly memberCount: number
   readonly streamCount: number

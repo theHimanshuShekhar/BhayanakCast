@@ -16,6 +16,9 @@ export function RoomSearchResult({ room }: Readonly<{ room: ActiveRoomSummary }>
               {room.state === 'full' ? 'Full' : 'Live'}
             </span>
           </div>
+          {room.description && (
+            <p className="room-search-result__description">{room.description}</p>
+          )}
           <div className="live-room-card__chips">
             <span className={`room-chip room-chip--${room.visibility}`}>
               {room.visibility === 'private' ? 'Private' : 'Public'}

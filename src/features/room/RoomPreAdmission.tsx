@@ -78,6 +78,7 @@ export function RoomPreAdmission({
       >
         <RoomHeader
           category={room.category}
+          description={room.description}
           eyebrow={room.visibility === 'private' ? 'Private Room' : 'Public Room'}
           eyebrowTone={room.visibility === 'private' ? 'neutral' : 'live'}
           facts={

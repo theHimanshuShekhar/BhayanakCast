@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-11
+- **Amended:** 2026-07-28 — the room description added by ADR 0060 joins the fields that never survive OAuth.
 
 ## Context
 
@@ -11,7 +12,7 @@ Home exposes Create Room from wide/medium navigation, the wide right rail, empty
 
 Wide and medium layouts open the shared Create Room form in a centered accessible modal. Small layouts open the same form in a full-screen dialog that respects top/bottom safe areas and the on-screen keyboard. Both presentations keep identical field order, defaults, conditional private-password field, validation, explicit Cancel/Create actions, focus trap, Escape/dismiss rules, and focus return. Opening or cancelling does not change route.
 
-An anonymous Create Room activation initiates Discord sign-in before showing the form. OAuth carries only an opaque create intent. On successful return to Home, reopen a blank authenticated Create Room dialog. Never carry room name, category, tags, visibility, or private password through OAuth, and never create until the Account explicitly submits valid form data.
+An anonymous Create Room activation initiates Discord sign-in before showing the form. OAuth carries only an opaque create intent. On successful return to Home, reopen a blank authenticated Create Room dialog. Never carry room name, category, tags, description, visibility, or private password through OAuth, and never create until the Account explicitly submits valid form data.
 
 Successful creation follows the existing atomic admission contract and navigates directly into the new room as Host. Failed creation keeps the dialog open with field/form error state and does not change current Room Membership.
 
