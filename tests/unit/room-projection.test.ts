@@ -21,6 +21,7 @@ const snapshot = (
   streamCount: 1,
   self: null,
   viewerAuthenticated: false,
+  roster: [],
   ...overrides,
 })
 

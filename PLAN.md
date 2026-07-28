@@ -118,7 +118,28 @@ documented baseline below. Two further specs failed once and passed on retry:
 
 ---
 
-## Phase 2 — Room description blurb
+## Phase 2 — Room description blurb — **blocked: contradicts ADR `0060`**
+
+`0060` decides that Create Room takes a name, an optional category, and up to five
+optional tags, and states plainly: *"V1 provides no long-form room description or
+predefined taxonomy."* Its consequence gives the reason — *"Avoiding a description field
+keeps a larger persistent, searchable, and moderatable content surface out of V1."* That
+is exactly the question step 5 below asks, already answered.
+
+The cost is real and not hypothetical: `0033` indexes the Home page, so the blurb would
+be a persistent, anonymous-readable, search-indexed, user-authored text surface behind
+only best-effort moderation (`0025`) and report-driven enforcement (`0008`). `0045` would
+also have to extend Host settings to cover it.
+
+Note too that the design's line — `Two screens up — rewriting the auth flow. Coding
+· #typescript` — is half derived and half authored, and the derived half already ships:
+`N screens shared` in the mosaic summary plus the category/tag chips at
+`LiveRoomCard.tsx:44`. Only the authored clause is missing, and that clause is precisely
+what `0060` refused.
+
+**Recommendation: withdraw the phase.** Building it requires superseding `0060` with a
+new ADR that accepts the moderation surface; do not add the column under the existing
+one. The steps below are kept for whoever makes that call.
 
 The design's featured card and three-up cards carry a one-line blurb (`Two screens up —
 rewriting the auth flow.`). No column backs it.
@@ -150,7 +171,14 @@ pips instead of member tiles.
    `displayName`, `avatarUrl`, `role`, `joinedAt`, `streamId | null`.
 2. Order per ADR `0101`: viewer first (`You`), then current Host, then remaining members by
    continuous join time with a stable identity tie-breaker. Put the ordering in a pure
-   function with unit tests — it is the rule the whole mosaic and People list depend on.
+   function with unit tests.
+   - **Correction from the audit:** the mosaic and People do *not* share one rule. `0101`
+     orders the mosaic viewer → Host → join time; `0102` orders People Host → viewer →
+     active streamers → join time. Both are implemented as separate pure functions in
+     `src/server/rooms/room-roster.ts` (`orderRoomRoster`, `orderRoomPeople`).
+   - `0101` also freezes tile order: host transfer and stream-state changes must not
+     reorder existing tiles, so a mounted mosaic appends rather than re-sorting. That is
+     a client obligation once Phase 3 step 4 lands; it does not bind the server order.
 3. Private-room visibility: check ADR `0007` (private room history visibility) and `0003`
    (private room discovery) before exposing names. Roster is for **admitted** members only;
    the pre-admission projection must not gain it.
@@ -164,6 +192,20 @@ pips instead of member tiles.
 
 **Exit criteria:** admitted room renders one tile per member with real identity; no tile
 claims media. Integration test covering roster ordering and private-room exclusion.
+
+**Status, 2026-07-28:** steps 1, 2, 3, and 5 are done and the exit criteria are met.
+`RoomProjectionSnapshot` and `AdmittedRoom` carry a roster; the SQL returns it only when
+the viewer holds a current membership, and `projectDisplacedRoom` strips it explicitly.
+`RoomMemberMosaic` replaces `RoomSeatStrip` inside the room; the strip stays on
+pre-admission, where `0003` forbids a roster. Covered by `tests/unit/room-roster.test.ts`
+and `tests/integration/room-roster.test.ts` (ordering per viewer, identity and stream
+state, public and private pre-admission exclusion, displacement, departure).
+
+**Step 4 (room-scoped realtime channel) is not started.** `src/server/realtime/` has
+`connection-registry.ts` and `home-events.ts` only, so this is greenfield: server event
+union, socket room fan-out, client bridge, and normalizers. Until it lands the mosaic is
+correct on load and stale afterwards. It gates nothing in Phase 3 but should land before
+Phase 4 leans on live tile state.
 
 ---
 

@@ -1,12 +1,7 @@
 import { useState } from 'react'
 import { leaveRoom } from './room-queries'
-import {
-  RoomFact,
-  RoomHeader,
-  RoomSeatStrip,
-  RoomShell,
-  expiresInLabel,
-} from './RoomShell'
+import { RoomMemberMosaic } from './RoomMemberMosaic'
+import { RoomFact, RoomHeader, RoomShell, expiresInLabel } from './RoomShell'
 import type { MembershipConfirmation } from '../../server/rooms/room-service'
 import type { RoomAdmitted, RoomSelfMembership } from './room-types'
 
@@ -96,9 +91,9 @@ export function RoomAdmittedBoundary({
             </p>
           </div>
 
-          <section aria-label="Seats" className="room-stage__seats">
-            <h2 className="visually-hidden">Seats</h2>
-            <RoomSeatStrip capacity={room.capacity} memberCount={room.memberCount} />
+          <section aria-label="Members" className="room-stage__members">
+            <h2 className="visually-hidden">Members</h2>
+            <RoomMemberMosaic roster={room.roster} selfMembershipId={self.id} />
             <p className="room-stage__seats-label tabular-nums">
               {room.memberCount} of {room.capacity} seats taken
             </p>

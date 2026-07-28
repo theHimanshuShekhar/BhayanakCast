@@ -3377,6 +3377,100 @@ a {
   gap: 0.75rem;
 }
 
+.room-stage__members {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* ADR 0101: uniform cells that scroll before falling below 240px, and one
+   stable tile per member whatever their stream state. */
+.room-mosaic {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.room-mosaic__tile {
+  display: flex;
+  flex-direction: column;
+  border-radius: 0.625rem;
+  background: var(--rail);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  overflow: hidden;
+}
+
+.room-mosaic__presence {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  background: radial-gradient(130% 110% at 18% 0%, var(--action-soft), var(--rail) 68%);
+}
+
+.room-mosaic__avatar {
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: var(--radius-pill);
+  object-fit: cover;
+  box-shadow: 0 0 0 1px var(--border-strong);
+}
+
+.room-mosaic__avatar--empty {
+  display: grid;
+  place-items: center;
+  background: var(--surface-subtle);
+  color: var(--ink-secondary);
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.room-mosaic__sharing {
+  position: absolute;
+  left: 0.5rem;
+  top: 0.5rem;
+  border-radius: 0.3125rem;
+  padding: 0.125rem 0.4375rem;
+  background: color-mix(in srgb, var(--live) 12%, var(--surface));
+  color: var(--live);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* Below the media region, never over it, and never revealed by hover. */
+.room-mosaic__footer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: 0.5rem 0.625rem;
+  background: var(--surface-subtle);
+}
+
+.room-mosaic__name {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.875rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room-mosaic__state {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.8125rem;
+}
+
+.room-mosaic__tile[data-member-role="host"] .room-mosaic__state {
+  color: var(--host);
+}
+
 .room-seats {
   display: flex;
   gap: 0.3125rem;

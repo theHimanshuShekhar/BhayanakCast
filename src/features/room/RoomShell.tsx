@@ -67,9 +67,11 @@ export function RoomFact({
   return <span className={`room-fact room-fact--${tone}`}>{children}</span>
 }
 
-/** Seats, not people. The room projection knows how many seats are taken but
-    carries no roster, so the strip shows occupancy honestly rather than
-    inventing names for the tiles the design fills with members. */
+/** Seats, not people — for pre-admission only. ADR 0003 hides participant
+    identities until admission, so the projection outside a room carries a count
+    and no roster; the strip shows that occupancy honestly rather than inventing
+    names for the tiles the design fills with members. Inside the room, the
+    member mosaic replaces it. */
 export function RoomSeatStrip({
   memberCount,
   capacity,
