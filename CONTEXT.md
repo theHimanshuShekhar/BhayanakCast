@@ -370,3 +370,4 @@ BhayanakCast is a public discovery platform for small social screen-sharing room
 - [`docs/adr/0104-native-webrtc-over-socket-io.md`](docs/adr/0104-native-webrtc-over-socket-io.md) — uses native WebRTC with authenticated Socket.IO signaling.
 - [`docs/adr/0105-validated-v1-technology-baseline.md`](docs/adr/0105-validated-v1-technology-baseline.md) — pins the reviewed runtime, build, auth, data, and execution-control baseline.
 - [`docs/adr/0106-layered-testing-and-release-evidence.md`](docs/adr/0106-layered-testing-and-release-evidence.md) — separates deterministic domain/integration coverage, representative multi-user browser tests, and production qualification evidence.
+- [`docs/adr/0107-room-visual-language.md`](docs/adr/0107-room-visual-language.md) — adopts the 4a room design as visual language only, subordinate to the room structure ADRs.
