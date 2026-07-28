@@ -16,6 +16,8 @@ interface LiveRoomsProps {
   readonly showEmptyInvitation: boolean
   readonly hasPastStreams: boolean
   readonly isPlaceholderData: boolean
+  readonly canJoin: boolean
+  readonly connectedAccountCount: number | undefined
 }
 
 interface RoomPresentationState {
@@ -73,6 +75,8 @@ export function LiveRooms({
   showEmptyInvitation,
   hasPastStreams,
   isPlaceholderData,
+  canJoin,
+  connectedAccountCount,
 }: LiveRoomsProps) {
   const [state, setState] = useState<RoomPresentationState>(() => {
     const initialRooms = isPlaceholderData ? EMPTY_ROOMS : rooms
@@ -96,40 +100,64 @@ export function LiveRooms({
     )
     setState({ snapshotKey, sourceRooms: rooms, presentation })
   }
-  const hasFeature = presentation.rooms.some(
-    ({ id }) => id === presentation.featuredId,
-  )
+  const featured =
+    presentation.rooms.find(({ id }) => id === presentation.featuredId) ?? null
+  const rest = featured
+    ? presentation.rooms.filter((room) => room.id !== featured.id)
+    : presentation.rooms
+
+  if (presentation.rooms.length === 0) {
+    return (
+      <section aria-label="Live Rooms" className="live-rooms">
+        {showEmptyInvitation ? (
+          <EmptyDiscovery
+            canCreate={canJoin}
+            connectedAccountCount={connectedAccountCount}
+            hasPastStreams={hasPastStreams}
+          />
+        ) : (
+          <p className="live-rooms__no-results">0 rooms available.</p>
+        )}
+      </section>
+    )
+  }
 
   return (
-    <section aria-labelledby="live-rooms-heading" className="live-rooms">
-      <div className="home-section-heading">
-        <h2 id="live-rooms-heading">Live Rooms</h2>
-        {presentation.rooms.length > 0 && (
-          <p className="tabular-nums">
-            {presentation.rooms.length}{' '}
-            {presentation.rooms.length === 1 ? 'room' : 'rooms'} live now
-          </p>
-        )}
-      </div>
-      {presentation.rooms.length > 0 ? (
-        <ol
-          className="live-rooms-grid"
-          data-editorial={hasFeature && presentation.rooms.length >= 3}
-          data-has-feature={hasFeature}
-          data-room-count={presentation.rooms.length}
-        >
-          {presentation.rooms.map((room) => (
-            <LiveRoomCard
-              key={room.id}
-              featured={room.id === presentation.featuredId}
-              room={room}
-            />
-          ))}
-        </ol>
-      ) : showEmptyInvitation ? (
-        <EmptyDiscovery hasPastStreams={hasPastStreams} />
-      ) : (
-        <p className="live-rooms__no-results">0 rooms available.</p>
+    <section aria-label="Live Rooms" className="live-rooms">
+      {featured && (
+        <div className="live-rooms__feature">
+          <div className="home-section-heading">
+            <h2>Busiest room</h2>
+            <p>order holds until you refresh</p>
+          </div>
+          <ol
+            className="live-rooms-grid live-rooms-grid--feature"
+            data-has-feature="true"
+          >
+            <LiveRoomCard canJoin={canJoin} featured room={featured} />
+          </ol>
+        </div>
+      )}
+
+      {rest.length > 0 && (
+        <div className="live-rooms__rest">
+          <div className="home-section-heading">
+            <h2>Also live</h2>
+            <p className="tabular-nums">
+              {rest.length} {rest.length === 1 ? 'room' : 'rooms'}
+            </p>
+          </div>
+          <ol className="live-rooms-grid" data-room-count={rest.length}>
+            {rest.map((room) => (
+              <LiveRoomCard
+                key={room.id}
+                canJoin={canJoin}
+                featured={false}
+                room={room}
+              />
+            ))}
+          </ol>
+        </div>
       )}
     </section>
   )

@@ -41,19 +41,19 @@ export function HomePage({ search, session }: HomePageProps) {
 
   return (
     <div className="home-shell" data-testid="home-shell">
-      <HomeNavigation
-        presence={presence.data}
-        presenceFailed={presence.isError}
-        presencePending={presence.isPending}
-        presenceQueryKey={presenceOptions.queryKey}
-        session={session}
-      />
+      <HomeNavigation session={session} />
       <main className="home-main">
         <HomeUtilities
           facets={facets.data}
           facetsFailed={facets.isError}
           facetsPending={facets.isPending}
           facetsQueryKey={facetsOptions.queryKey}
+          presence={presence.data}
+          presenceFailed={presence.isError}
+          presencePending={presence.isPending}
+          presenceQueryKey={presenceOptions.queryKey}
+          profileCount={search.q ? profiles.data?.length : undefined}
+          roomCount={rooms.data?.length}
           search={search}
           session={session}
           statistics={statistics.data}
@@ -63,6 +63,8 @@ export function HomePage({ search, session }: HomePageProps) {
           onCanonicalRefresh={onCanonicalRefresh}
         />
         <HomeSections
+          canJoin={Boolean(session)}
+          connectedAccountCount={presence.data?.connectedAccountCount}
           pastStreams={{
             data: pastStreams.data,
             failed: pastStreams.isError,

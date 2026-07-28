@@ -1,16 +1,52 @@
+import { RoomFact, RoomHeader, RoomShell } from './RoomShell'
 import type { RoomEnded } from './room-types'
+
+const ENDED_FORMATTER = new Intl.DateTimeFormat('en-US', {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+  timeZone: 'UTC',
+})
 
 export function PastStreamSummary({ room }: Readonly<{ room: RoomEnded }>) {
   return (
-    <main className="room-boundary room-boundary--ended" data-room-state="ended">
-      <p className="room-boundary__eyebrow">Past Stream</p>
-      <h1 data-room-primary-heading="" tabIndex={-1}>{room.name}</h1>
-      <p>This room has ended and is no longer accepting members.</p>
-      <dl className="room-boundary__facts">
-        <div><dt>Members</dt><dd>{room.memberCount}</dd></div>
-        <div><dt>Streams</dt><dd>{room.streamCount}</dd></div>
-      </dl>
-      <a className="room-boundary__back" href="/">Back to Home</a>
-    </main>
+    <RoomShell state="ended">
+      <main className="room-boundary room-boundary--ended" data-room-state="ended">
+        <RoomHeader
+          category={room.category}
+          eyebrow="Past Stream"
+          facts={
+            <>
+              <RoomFact>
+                {room.memberCount}{' '}
+                {room.memberCount === 1 ? 'member' : 'members'}
+              </RoomFact>
+              <RoomFact>
+                {room.streamCount}{' '}
+                {room.streamCount === 1 ? 'screen shared' : 'screens shared'}
+              </RoomFact>
+            </>
+          }
+          name={room.name}
+          tags={room.tags}
+        />
+
+        <div className="room-stage">
+          <div className="room-spotlight" data-spotlight="ended">
+            <p className="room-spotlight__state">This room has ended.</p>
+            <p className="room-spotlight__note">
+              It is no longer accepting members.{' '}
+              <time dateTime={room.endedAt.toISOString()}>
+                Ended {ENDED_FORMATTER.format(room.endedAt)} UTC
+              </time>
+              .
+            </p>
+          </div>
+
+          <div className="room-controls">
+            <a className="room-boundary__back" href="/">Back to Home</a>
+          </div>
+        </div>
+      </main>
+    </RoomShell>
   )
 }

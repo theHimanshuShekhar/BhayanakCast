@@ -26,12 +26,16 @@ test('keeps Home usable while an authenticated realtime connection recovers', as
   await expect(search).toHaveValue('room')
 
   await signedIn.context.setOffline(true)
-  await expect(page.getByTestId('home-connection-status')).toHaveText('Reconnecting…')
+  const strip = page.getByTestId('home-connection-status')
+  await expect(strip).toContainText('Counts are paused — last seen')
+  await expect(strip).toContainText(/attempt \d+/)
   await expect(page.getByTestId('home-shell')).toBeVisible()
   await expect(search).toHaveValue('room')
 
   await signedIn.context.setOffline(false)
-  await expect(page.getByTestId('home-connection-status')).toHaveCount(0)
+  // Recovery is announced, then retires itself without a click.
+  await expect(strip).toContainText('Rooms are current again.')
+  await expect(strip).toHaveCount(0)
   await expect(search).toHaveValue('room')
 })
 
@@ -71,7 +75,7 @@ test('retries a failed canonical Home refresh while the socket stays connected',
   shouldFail = true
   await signedIn.context.setOffline(false)
   await expect(page.getByTestId('home-connection-status')).toContainText(
-    'Live updates unavailable.',
+    "You're seeing rooms as they were",
   )
   await expect(page.getByTestId('home-connection-retry')).toBeEnabled()
 

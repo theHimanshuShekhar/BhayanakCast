@@ -66,8 +66,8 @@ test('restores shared, back, and forward URLs before rendering results', async (
   await page.goto(`${authSessions.origin}/?q=Atlas`)
   const input = page.getByRole('searchbox', { name: 'Find rooms and people' })
   await expect(input).toHaveValue('Atlas')
-  await expect(page.getByRole('heading', { name: 'Active Rooms' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Public Profiles' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Active rooms' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Public profiles' })).toBeVisible()
 
   await page.goto(`${authSessions.origin}/?q=Nobody`)
   await expect(input).toHaveValue('Nobody')
@@ -84,7 +84,7 @@ test('applies desktop filters immediately and clears canonical search state', as
   await seedSearch(authSessions)
   await page.setViewportSize({ width: 1024, height: 800 })
   await page.goto(authSessions.origin)
-  const utilities = page.locator('.home-search-utilities')
+  const utilities = page.getByTestId('home-masthead')
   await expect(utilities).toHaveCSS('position', 'relative')
 
   const category = page.getByRole('combobox', { name: 'Category' })
@@ -109,7 +109,7 @@ test('applies desktop filters immediately and clears canonical search state', as
   await page.getByRole('button', { name: 'Clear all' }).click()
   await expect.poll(() => new URL(page.url()).search).toBe('')
   await expect(utilities).toHaveCSS('position', 'relative')
-  await expect(page.getByRole('heading', { name: 'Live Rooms' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Live Rooms' })).toBeVisible()
 })
 
 test('renders compact bounded result groups and a native mobile filter sheet', async ({
@@ -127,9 +127,11 @@ test('renders compact bounded result groups and a native mobile filter sheet', a
   await expect(rooms.locator('button')).toHaveCount(0)
   await expect(profiles.getByRole('link')).toHaveAttribute('href', `/users/${accountId}`)
   await expect(profiles.locator('button')).toHaveCount(0)
-  await expect(page.getByRole('status', { name: 'Search result count' })).toContainText(
-    '1 active room and 1 public profile',
+  // The visible counter carries the breakdown; there is no hidden duplicate.
+  await expect(page.getByTestId('home-counter')).toContainText(
+    '1 room and 1 person match “Atlas”',
   )
+  await expect(page.getByRole('status', { name: 'Search result count' })).toHaveCount(0)
 
   const input = page.getByRole('searchbox', { name: 'Find rooms and people' })
   await input.focus()

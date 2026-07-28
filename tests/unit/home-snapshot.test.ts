@@ -14,8 +14,10 @@ function room(id: string, memberCount: number): ActiveRoomSummary {
     tags: [],
     visibility: 'public',
     memberCount,
+    capacity: 10,
     streamCount: 0,
     state: 'live',
+    hostName: 'Host',
     previews: [],
     memberAvatars: [],
   }

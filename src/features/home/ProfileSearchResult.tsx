@@ -20,8 +20,8 @@ export function ProfileSearchResult({
           <div>
             <h3>{profile.displayName}</h3>
             <p className="tabular-nums">
-              {profile.roomCount} {profile.roomCount === 1 ? 'room' : 'rooms'} ·{' '}
-              {profile.streamCount} {profile.streamCount === 1 ? 'stream' : 'streams'}
+              {profile.roomCount} {profile.roomCount === 1 ? 'room' : 'rooms'} hosted ·{' '}
+              {profile.streamCount} {profile.streamCount === 1 ? 'screen' : 'screens'} shared
             </p>
           </div>
         </div>

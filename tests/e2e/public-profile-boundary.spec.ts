@@ -70,7 +70,7 @@ test('renders a public profile on direct navigation and reload', async ({
   await expect(page.getByRole('img', { name: 'Profile host' })).toBeVisible()
   await expect(page.getByText('4 rooms')).toBeVisible()
   await expect(page.getByText('4 streams')).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Past Streams' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Wrapped up' })).toBeVisible()
   await expect(page.getByText('Past stream 1')).toBeVisible()
   await expect(page.getByText('Past stream 3')).toBeVisible()
   await expect(page.getByText('Past stream 4')).toHaveCount(0)

@@ -1,5 +1,5 @@
 import { ROOM_LIFETIME_MS } from './end-room'
-import type { RoomVisibility } from './room-policy'
+import { ROOM_CAPACITY, type RoomVisibility } from './room-policy'
 
 interface RoomProjectionRecord {
   readonly id: string
@@ -32,6 +32,9 @@ interface RoomRouteDetails {
   readonly visibility: RoomVisibility
   readonly memberCount: number
   readonly streamCount: number
+  /** Carried on the projection so the client never has to know the server's
+      capacity constant. */
+  readonly capacity: number
 }
 
 export interface PreAdmissionRoom extends RoomRouteDetails {
@@ -86,6 +89,7 @@ export function selectRoomRouteProjection(
     visibility: room.visibility,
     memberCount: snapshot.memberCount,
     streamCount: snapshot.streamCount,
+    capacity: ROOM_CAPACITY,
   }
   if (room.endedAt) {
     return { kind: 'pastStream', room: { ...details, endedAt: room.endedAt } }
@@ -111,7 +115,7 @@ export function selectRoomRouteProjection(
 }
 
 function admissionFor(room: Pick<RoomRouteDetails, 'memberCount' | 'visibility'>) {
-  return room.memberCount >= 10
+  return room.memberCount >= ROOM_CAPACITY
     ? 'full' as const
     : room.visibility === 'private'
       ? 'password-required' as const

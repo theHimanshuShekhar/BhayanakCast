@@ -32,8 +32,10 @@ const room = (id: string, memberCount = 2): ActiveRoomSummary => ({
   tags: [],
   visibility: 'public',
   memberCount,
+  capacity: 10,
   streamCount: 1,
   state: 'live',
+  hostName: 'Host',
   previews: [],
   memberAvatars: [],
 })
