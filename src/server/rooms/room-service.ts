@@ -34,6 +34,7 @@ import {
   selectRoomRouteProjection,
   type RoomRouteProjection,
 } from './room-projection'
+import type { RoomRosterMember } from './room-roster'
 import type { HomeEventPublisher } from '../realtime/home-events'
 import { readAccountAccessPolicy } from '../auth/account-access-policy'
 import type { Clock } from '../time'
@@ -59,6 +60,10 @@ const confirmationProposalDigest = (input: NormalizedRoomInput) =>
     .digest('hex')
 const CONFIRMATION_TTL_MS = 5 * 60 * 1_000
 const deriveKey = promisify(scryptCallback)
+
+/** `json_build_object` hands timestamps back as ISO strings, so the roster is
+    revived into `Date` before it reaches the projection. */
+type RosterRow = Omit<RoomRosterMember, 'joinedAt'> & { readonly joinedAt: string }
 
 type Consequence = 'transfer-host' | 'stop-stream'
 
@@ -833,6 +838,7 @@ export class RoomService {
       streamCount: number
       membershipId: string | null
       membershipRole: 'host' | 'member' | null
+      roster: readonly RosterRow[]
     }>(
       `SELECT room.id,
               room.name,
@@ -854,12 +860,40 @@ export class RoomService {
                    AND (room.ended_at IS NOT NULL OR ended_at IS NULL)
               ) AS "streamCount",
               self.id AS "membershipId",
-              self.role AS "membershipRole"
+              self.role AS "membershipRole",
+              -- Roster is returned only to a viewer who holds a current
+              -- membership. ADR 0003 hides participant identities until
+              -- admission, so an anonymous or pre-admission request must not
+              -- be able to read names out of this projection at all.
+              CASE
+                WHEN self.id IS NULL THEN '[]'::json
+                ELSE COALESCE(roster.items, '[]'::json)
+              END AS roster
          FROM room
          LEFT JOIN room_membership self
            ON self.room_id = room.id
           AND self.account_id = $2
           AND self.left_at IS NULL
+         LEFT JOIN LATERAL (
+           SELECT json_agg(
+                    json_build_object(
+                      'membershipId', membership.id,
+                      'accountId', membership.account_id,
+                      'displayName', account.name,
+                      'avatarUrl', account.image,
+                      'role', membership.role,
+                      'joinedAt', membership.joined_at,
+                      'streamId', live_stream.id
+                    )
+                  ) AS items
+             FROM room_membership membership
+             JOIN "user" account ON account.id = membership.account_id
+             LEFT JOIN stream live_stream
+               ON live_stream.membership_id = membership.id
+              AND live_stream.ended_at IS NULL
+            WHERE membership.room_id = room.id
+              AND membership.left_at IS NULL
+         ) roster ON true
         WHERE room.id = $1`,
       [roomId, accountId],
     )
@@ -883,6 +917,10 @@ export class RoomService {
           ? { id: row.membershipId, role: row.membershipRole }
           : null,
       viewerAuthenticated: accountId !== null,
+      roster: (row?.roster ?? []).map((member) => ({
+        ...member,
+        joinedAt: new Date(member.joinedAt),
+      })),
     })
   }
   async setDeletionPending(accountId: string, pending: boolean) {

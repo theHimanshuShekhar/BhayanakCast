@@ -1,5 +1,6 @@
 import { ROOM_LIFETIME_MS } from './end-room'
 import { ROOM_CAPACITY, type RoomVisibility } from './room-policy'
+import { orderRoomRoster, type RoomRosterMember } from './room-roster'
 
 interface RoomProjectionRecord {
   readonly id: string
@@ -22,6 +23,10 @@ export interface RoomProjectionSnapshot {
   readonly streamCount: number
   readonly self: SelfMembership | null
   readonly viewerAuthenticated: boolean
+  /** Unordered; this projection sorts it. Loaded only for an admitted viewer —
+      ADR 0003 hides participant identities until admission, so a caller with no
+      current membership must pass an empty roster. */
+  readonly roster: readonly RoomRosterMember[]
 }
 
 interface RoomRouteDetails {
@@ -45,6 +50,9 @@ export interface PreAdmissionRoom extends RoomRouteDetails {
 
 export interface AdmittedRoom extends RoomRouteDetails {
   readonly expiresAt: Date
+  /** Ordered per ADR 0101. Present on the admitted projection only; the
+      pre-admission and Past Stream projections deliberately have no roster. */
+  readonly roster: readonly RoomRosterMember[]
 }
 
 export interface PastStreamRoom extends RoomRouteDetails {
@@ -66,10 +74,15 @@ type PreAdmissionRoomProjection = Extract<RoomRouteProjection, { readonly kind: 
 export function projectDisplacedRoom(
   projection: AdmittedRoomProjection,
 ): PreAdmissionRoomProjection {
+  // Drop the roster explicitly rather than spreading the admitted room: a
+  // displaced member is outside the room again, and ADR 0003 keeps identities
+  // on the admitted side of that line.
+  const { roster: _roster, expiresAt, ...details } = projection.room
   return {
     kind: 'preAdmission',
     room: {
-      ...projection.room,
+      ...details,
+      expiresAt,
       admission: admissionFor(projection.room),
       viewerAuthenticated: true,
     },
@@ -98,7 +111,11 @@ export function selectRoomRouteProjection(
   if (snapshot.self) {
     return {
       kind: 'admitted',
-      room: { ...details, expiresAt },
+      room: {
+        ...details,
+        expiresAt,
+        roster: orderRoomRoster(snapshot.roster, snapshot.self.id),
+      },
       self: snapshot.self,
     }
   }
