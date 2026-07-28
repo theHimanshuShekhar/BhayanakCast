@@ -3462,6 +3462,18 @@ a {
   font-weight: 600;
 }
 
+.room-mosaic__preview {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* ADR 0035: a private room's preview is blurred. The stored image is already
+   too small to read; the blur keeps it from looking like one that is not. */
+.room-mosaic__preview[data-preview-visibility='private'] {
+  filter: blur(9px);
+}
+
 .room-mosaic__sharing {
   position: absolute;
   left: 0.5rem;

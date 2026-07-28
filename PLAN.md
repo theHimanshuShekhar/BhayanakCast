@@ -302,11 +302,17 @@ explicit re-Watch / re-Start (ADR `0103`).
   `Connecting… attempt n of 4` and, on exhaustion, a manual `Retry` with ADR `0059`'s
   chat-only guidance. Covered by `tests/unit/watch-retry.test.ts`.
 
-**Still not built**, and the reason:
-- Preview freshness has no producer — ADR `0035`'s capture/upload/serve subsystem
-  (throttled frame capture, size-capped upload, Valkey rate limit, latest-only retention,
-  public-unblurred / private-blurred serving) does not exist yet. The tile's freshness
-  line waits on it.
+**Preview freshness landed 2026-07-29** with ADR `0035`'s capture/upload/serve subsystem:
+`useStreamPreview.ts` captures a frame every 30 seconds and paces uploads through a
+TanStack Pacer `useAsyncThrottler` at 120 seconds, cancelling and aborting on stop or
+unmount; `preview-service.ts` enforces ADR `0034`'s 110-second Valkey window and 100 KB
+cap independently of that pacing, keeps only the latest key, and holds the bytes in
+Valkey with a 5-minute TTL (ADR `0023`). The private-room treatment is the stored image
+itself, not CSS: private previews are capped at 64px wide against the width read out of
+the WebP header (`preview-image.ts`, no decoding), because a blur applied only in the
+browser still ships readable bytes to anyone holding the key. `/api/stream-previews`
+keeps ADR `0029`'s path. Covered by `tests/unit/preview-image.test.ts` and
+`tests/integration/stream-previews.test.ts`.
 
 ---
 
@@ -433,7 +439,6 @@ including withdrawal on stop, unsubscribe and departure; and report insertion wi
 
 Of the deferrals recorded under Phases 4 and 5, the watched-tile footer controls, ADR
 `0077`'s connection/retry state, People-row member/Host actions and Activity's
-`New activity` cue all landed on 2026-07-28. What remains is **per-tile preview
-freshness**, which waits on ADR `0035`'s preview capture/upload/serve subsystem — a
-phase-sized piece of work, not a finishing touch, and the only room surface still
-carrying a decision with no implementation behind it.
+`New activity` cue all landed on 2026-07-28, and per-tile preview freshness followed on
+2026-07-29 with ADR `0035`'s capture/upload/serve subsystem (see Phase 4). No room
+surface now carries a decision with no implementation behind it.

@@ -28,6 +28,11 @@ import {
 import { RoomService } from './server/rooms/room-service'
 import { StreamService } from './server/streams/stream-service'
 import { SubscriptionService } from './server/streams/subscription-service'
+import { PreviewService } from './server/streams/preview-service'
+import {
+  bindPreviewRuntime,
+  handleStreamPreviewRequest,
+} from './server/streams/preview-http'
 import { ChatService } from './server/rooms/chat-service'
 import { bindRoomRealtimeRuntime, roomRealtime } from './server/rooms/room-runtime'
 import {
@@ -81,6 +86,36 @@ export function bindServerRuntime(runtime: ServerRuntime, server: HttpServer) {
   })
   bindChatMuteRuntime({ pool })
   bindReportRuntime({ pool })
+  bindPreviewRuntime({
+    previews:
+      pool && valkey
+        ? new PreviewService({
+            pool,
+            valkey,
+            valkeyPrefix: `${runtime.bindings.valkeyPrefix}stream:`,
+            now: () => new Date(runtime.clock.now()),
+            onStored: (stored) => {
+              // Home cards patch the new preview in place; room tiles refetch
+              // the projection, which carries the freshness the footer shows.
+              publishHomeEvent(server, {
+                type: 'room-value',
+                roomId: stored.roomId,
+                preview: {
+                  previewKey: stored.previewKey,
+                  updatedAt: stored.updatedAt.toISOString(),
+                },
+              })
+              publishRoomEvent(server, {
+                type: 'stream-preview',
+                roomId: stored.roomId,
+                streamId: stored.streamId,
+                previewKey: stored.previewKey,
+                updatedAt: stored.updatedAt.toISOString(),
+              })
+            },
+          })
+        : undefined,
+  })
   if (pool) {
     const now = () => new Date(runtime.clock.now())
     bindRoomRealtimeRuntime({
@@ -356,6 +391,8 @@ export function attachSocketServer(server: HttpServer, databasePool?: Pool) {
 
 export default createServerEntry({
   async fetch(request) {
+    const previewResponse = await handleStreamPreviewRequest(request)
+    if (previewResponse) return previewResponse
     const authResponse = await handleAuthenticationRequest(request)
     return authResponse ?? handler.fetch(request)
   },

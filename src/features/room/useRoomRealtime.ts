@@ -116,6 +116,9 @@ export function useRoomRealtime({
           for (const listener of [...stoppedListeners.current]) listener(event.streamId)
           void invalidateRoomProjection(queryClient, roomId)
           break
+        // A fresher preview is a roster change: the tile reads both the key
+        // and its freshness off the projection (ADR 0035).
+        case 'stream-preview':
         case 'stream-started':
         case 'membership-changed':
           void invalidateRoomProjection(queryClient, roomId)

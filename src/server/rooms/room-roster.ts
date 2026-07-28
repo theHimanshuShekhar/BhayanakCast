@@ -9,6 +9,11 @@ export interface RoomRosterMember {
       sharing. A presence tile is a member without a Stream, never a member the
       roster left out. */
   readonly streamId: string | null
+  /** The member's latest Stream Preview and when it was captured, so a tile
+      can show the thumbnail and its freshness before anyone watches (ADR
+      0035). Null while a stream has not uploaded its first preview. */
+  readonly previewKey: string | null
+  readonly previewUpdatedAt: Date | null
   /** ADR 0101's informational watcher stack: up to three watchers plus the
       total. Empty for a member who is not streaming. */
   readonly watcherCount: number
