@@ -49,6 +49,9 @@ if (usesEphemeralTestOrigin) {
   process.env.BETTER_AUTH_URL = `http://${HOST}`
 }
 const runtime = startModule.createServerRuntime(process.env)
+// Nothing is served against an out-of-date schema: a failure here should stop
+// the process rather than surface as a broken page.
+await runtime.migrate()
 const trustedProxyIps = startModule.parseTrustedProxyIps(
   process.env.TRUSTED_PROXY_IPS,
 )

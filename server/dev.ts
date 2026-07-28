@@ -14,6 +14,7 @@ const dev = await rsbuild.createDevServer()
 const host = process.env.HOST ?? '127.0.0.1'
 const port = Number(process.env.PORT ?? dev.port)
 const runtime = createServerRuntime(process.env)
+await runtime.migrate()
 const trustedProxyIps = parseTrustedProxyIps(process.env.TRUSTED_PROXY_IPS)
 
 const server = createServer((request, response) => {

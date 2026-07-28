@@ -9,6 +9,16 @@ export default defineConfig({
       '~': './src',
     },
   },
+  environments: {
+    // The server migrates its schema at startup and reads the migration files
+    // from beside its own bundle, so they ship with the server build — and
+    // only with it, never into the client output.
+    ssr: {
+      output: {
+        copy: [{ from: './src/server/db/migrations', to: 'migrations' }],
+      },
+    },
+  },
   tools: {
     rspack: {
       // ponytail: optional native dependencies are intentionally not installed.
