@@ -15,7 +15,9 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'pnpm build && node server/index.mjs',
+    // `pnpm start` loads `.env`, so this server has the same database the
+    // developer's own does — and now migrates it at startup.
+    command: 'pnpm build && pnpm start',
     url: 'http://127.0.0.1:3000',
     reuseExistingServer: false,
     timeout: 120_000,

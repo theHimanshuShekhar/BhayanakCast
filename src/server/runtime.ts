@@ -1,5 +1,6 @@
 import Redis from 'ioredis'
 import { Pool, type QueryResultRow } from 'pg'
+import { migrateAuthDatabase } from './db/migrate'
 import {
   ControlledClock,
   SystemClock,
@@ -36,6 +37,20 @@ export class ServerRuntime {
   }
   getValkey(): Redis | undefined {
     return this.valkey
+  }
+
+  /** Brings the bound schema up to the shipped migrations before the process
+      serves anything. Every entry point calls this, so a fresh database, a
+      per-worker test schema and an upgraded deployment all reach the same
+      state by the same path. Drizzle's journal makes it a no-op once the
+      schema is current. */
+  async migrate() {
+    if (!this.database) return
+    // The identifier is validated in `createServerRuntime`.
+    await this.database.query(
+      `CREATE SCHEMA IF NOT EXISTS "${this.bindings.databaseSchema}"`,
+    )
+    await migrateAuthDatabase(this.database, this.bindings.databaseSchema)
   }
 
   async sql<T extends QueryResultRow = QueryResultRow>(
