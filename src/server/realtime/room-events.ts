@@ -76,6 +76,17 @@ export interface RoomStreamStoppedEvent {
   readonly membershipId: string
 }
 
+/** A fresher Stream Preview is available (ADR 0035). Carries the key rather
+    than the bytes: the tile fetches the image over the thumbnail path, and
+    preview bytes never travel on the realtime channel. */
+export interface RoomStreamPreviewEvent {
+  readonly type: 'stream-preview'
+  readonly roomId: string
+  readonly streamId: string
+  readonly previewKey: string
+  readonly updatedAt: string
+}
+
 export interface RoomChatEvent {
   readonly type: 'chat-message'
   readonly roomId: string
@@ -125,6 +136,7 @@ export type RoomRealtimeEvent =
   | RoomMembershipChangedEvent
   | RoomStreamStartedEvent
   | RoomStreamStoppedEvent
+  | RoomStreamPreviewEvent
   | RoomChatEvent
   | RoomTypingEvent
   | RoomActivityEvent
@@ -149,6 +161,14 @@ export function normalizeRoomRealtimeEvent(value: unknown): RoomRealtimeEvent | 
       const membershipId = boundedString(value.membershipId, MAX_ID_LENGTH)
       if (!streamId || !membershipId) return null
       return { type: value.type, roomId, streamId, membershipId }
+    }
+
+    case 'stream-preview': {
+      const streamId = boundedString(value.streamId, MAX_ID_LENGTH)
+      const previewKey = boundedString(value.previewKey, MAX_ID_LENGTH)
+      const updatedAt = boundedString(value.updatedAt, MAX_TIMESTAMP_LENGTH)
+      if (!streamId || !previewKey || !updatedAt) return null
+      return { type: 'stream-preview', roomId, streamId, previewKey, updatedAt }
     }
 
     case 'chat-message': {

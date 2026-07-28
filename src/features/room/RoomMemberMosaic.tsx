@@ -6,6 +6,9 @@ interface RoomMemberMosaicProps {
   readonly roster: readonly RoomRosterMember[]
   readonly selfMembershipId: string
   readonly media: RoomMedia
+  /** Decides the preview treatment: a private room's previews are blurred
+      (ADR 0035), on top of being captured small enough to carry no detail. */
+  readonly visibility: 'public' | 'private'
   readonly onReport: (member: RoomRosterMember) => void
   readonly hostActions: ((member: RoomRosterMember) => void) | null
 }
@@ -19,6 +22,7 @@ export function RoomMemberMosaic({
   roster,
   selfMembershipId,
   media,
+  visibility,
   onReport,
   hostActions,
 }: RoomMemberMosaicProps) {
@@ -53,6 +57,7 @@ export function RoomMemberMosaic({
             media={media}
             member={member}
             selfMembershipId={selfMembershipId}
+            visibility={visibility}
             onReport={onReport}
           />
         ))}
@@ -65,12 +70,14 @@ function MemberTile({
   member,
   selfMembershipId,
   media,
+  visibility,
   onReport,
   hostActions,
 }: Readonly<{
   member: RoomRosterMember
   selfMembershipId: string
   media: RoomMedia
+  visibility: 'public' | 'private'
   onReport: (member: RoomRosterMember) => void
   hostActions: ((member: RoomRosterMember) => void) | null
 }>) {
@@ -110,7 +117,20 @@ function MemberTile({
           />
         ) : (
           <>
-            <Avatar member={member} />
+            {/* Before a subscription, a streaming tile shows the Stream
+                Preview — non-interactive, with Watch in the footer where every
+                other control lives (ADR 0102). */}
+            {member.streamId !== null && member.previewKey ? (
+              <img
+                alt=""
+                className="room-mosaic__preview"
+                data-preview-visibility={visibility}
+                decoding="async"
+                src={`/api/stream-previews/${encodeURIComponent(member.previewKey)}`}
+              />
+            ) : (
+              <Avatar member={member} />
+            )}
             {member.streamId !== null && (
               <span className="room-mosaic__sharing">{sharingLabel(attempt)}</span>
             )}
@@ -128,6 +148,11 @@ function MemberTile({
               member.role === 'host' ? 'Host' : null,
               you ? 'You' : null,
               member.streamId !== null ? (watching ? 'Watching' : 'Live') : null,
+              // Preview freshness, so a still tile says how still it is
+              // (ADR 0102's footer, ADR 0035's two-minute cadence).
+              member.streamId !== null && !watching
+                ? previewFreshnessLabel(member.previewUpdatedAt)
+                : null,
             ]
               .filter(Boolean)
               .join(' · ') || 'Here'}
@@ -208,6 +233,21 @@ function subscriptionFor(watch: WatchState, streamId: string | null) {
   if (streamId === null || watch.kind === 'idle' || watch.streamId !== streamId) return null
   return watch
 }
+
+/** How old the tile's preview is, coarsely — previews refresh every two
+    minutes (ADR 0035), so a per-second countdown would say nothing true. */
+export function previewFreshnessLabel(
+  updatedAt: Date | null,
+  now: Date = new Date(),
+): string | null {
+  if (!updatedAt) return 'No preview yet'
+  const seconds = Math.max(0, Math.round((now.getTime() - updatedAt.getTime()) / 1_000))
+  if (seconds < 60) return 'Preview just now'
+  const minutes = Math.round(seconds / 60)
+  return `Preview ${RELATIVE_TIME.format(-minutes, 'minute')}`
+}
+
+const RELATIVE_TIME = new Intl.RelativeTimeFormat('en', { numeric: 'auto' })
 
 function sharingLabel(attempt: ReturnType<typeof subscriptionFor>) {
   if (attempt?.kind === 'connecting') {

@@ -8,6 +8,7 @@ import { RoomReportDialog, type ReportTarget } from './RoomReportDialog'
 import { RoomSettingsDialog } from './RoomSettingsDialog'
 import { RoomFact, RoomHeader, RoomShell, expiresInLabel } from './RoomShell'
 import { useRoomMedia } from './useRoomMedia'
+import { useStreamPreview } from './useStreamPreview'
 import { useRoomRealtime, type RoomSocket } from './useRoomRealtime'
 import type { RoomRosterMember } from '../../server/rooms/room-roster'
 import type { MembershipConfirmation } from '../../server/rooms/room-service'
@@ -50,6 +51,10 @@ export function RoomAdmittedBoundary({
     realtime,
     connection: realtime.connection,
   })
+
+  // ADR 0035: the viewer's own Stream keeps its preview fresh while it runs,
+  // and stops uploading the moment the stream does.
+  useStreamPreview({ stream: media.localStream, visibility: room.visibility })
 
   // ADR 0103: only the one-minute warning raises the countdown's prominence,
   // and it never says why the room is ending.
@@ -142,6 +147,7 @@ export function RoomAdmittedBoundary({
               onReport={reportMember}
               roster={room.roster}
               selfMembershipId={self.id}
+              visibility={room.visibility}
             />
           </section>
 

@@ -65,7 +65,10 @@ const deriveKey = promisify(scryptCallback)
 
 /** `json_build_object` hands timestamps back as ISO strings, so the roster is
     revived into `Date` before it reaches the projection. */
-type RosterRow = Omit<RoomRosterMember, 'joinedAt'> & { readonly joinedAt: string }
+type RosterRow = Omit<RoomRosterMember, 'joinedAt' | 'previewUpdatedAt'> & {
+  readonly joinedAt: string
+  readonly previewUpdatedAt: string | null
+}
 
 type Consequence = 'transfer-host' | 'stop-stream'
 
@@ -917,6 +920,8 @@ export class RoomService {
                       'role', membership.role,
                       'joinedAt', membership.joined_at,
                       'streamId', live_stream.id,
+                      'previewKey', live_stream.preview_key,
+                      'previewUpdatedAt', live_stream.preview_updated_at,
                       'watcherCount', COALESCE(watchers.total, 0),
                       'watchers', COALESCE(watchers.items, '[]'::json)
                     )
@@ -990,6 +995,9 @@ export class RoomService {
       roster: (row?.roster ?? []).map((member) => ({
         ...member,
         joinedAt: new Date(member.joinedAt),
+        previewUpdatedAt: member.previewUpdatedAt
+          ? new Date(member.previewUpdatedAt)
+          : null,
       })),
     })
   }
