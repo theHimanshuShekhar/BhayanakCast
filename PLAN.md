@@ -422,12 +422,14 @@ and running the suite on `HEAD` before diagnosing any new failure.
 
 All seven phases are shipped as of 2026-07-28.
 
-What is still owed on Phases 4–6 is **integration coverage**: chat persistence and the
-50-message backfill, stream start/stop and subscription authorization, and report
-insertion are all covered by unit tests over their pure parts only
+**Integration coverage for Phases 4–6 landed 2026-07-28** in
+`tests/integration/room-services.test.ts`: chat persistence, the 50-message backfill and
+per-viewer mute filtering; stream start/stop, Host-only stop of another member's stream,
+past-lifetime room ending and `stopForMembership`; ADR `0104`'s `parties` authorization
+including withdrawal on stop, unsubscribe and departure; and report insertion with the
+`other`-needs-details rejection. The unit suites over the pure parts
 (`tests/unit/room-chat.test.ts`, `tests/unit/room-events.test.ts`,
-`tests/unit/report-service.test.ts`). Their SQL paths have no
-`tests/integration/` counterpart yet, which ADR `0106` expects.
+`tests/unit/report-service.test.ts`) stay as they are.
 
 Of the deferrals recorded under Phases 4 and 5, the watched-tile footer controls, ADR
 `0077`'s connection/retry state, People-row member/Host actions and Activity's
