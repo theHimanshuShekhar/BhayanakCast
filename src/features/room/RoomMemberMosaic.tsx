@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { RoomRosterMember, RoomWatcher } from '../../server/rooms/room-roster'
-import type { RoomMedia } from './useRoomMedia'
+import { WATCH_MAX_ATTEMPTS, type RoomMedia, type WatchState } from './useRoomMedia'
 
 interface RoomMemberMosaicProps {
   readonly roster: readonly RoomRosterMember[]
@@ -46,111 +46,176 @@ export function RoomMemberMosaic({
       )}
 
       <ul className="room-mosaic" data-member-count={visible.length}>
-        {visible.map((member) => {
-          const you = member.membershipId === selfMembershipId
-          const watched =
-            member.streamId !== null &&
-            media.watch.kind !== 'idle' &&
-            media.watch.streamId === member.streamId
-          return (
-            <li
-              className="room-mosaic__tile"
-              data-member-role={member.role}
-              data-member-sharing={member.streamId !== null}
-              data-member-self={you}
-              data-member-watched={watched}
-              key={member.membershipId}
-            >
-              <div className="room-mosaic__presence">
-                {you && media.localStream ? (
-                  <StreamSurface label="Your screen" stream={media.localStream} />
-                ) : watched && media.remoteStream ? (
-                  <StreamSurface
-                    label={`${member.displayName}'s screen`}
-                    stream={media.remoteStream}
-                  />
-                ) : (
-                  <>
-                    <Avatar member={member} />
-                    {member.streamId !== null && (
-                      <span className="room-mosaic__sharing">
-                        {watched ? 'Connecting…' : 'Screen up'}
-                      </span>
-                    )}
-                  </>
-                )}
-              </div>
-
-              {/* Below the media region, not over it: ADR 0101 keeps the footer
-                  out of the shared content and out of hover. */}
-              <div className="room-mosaic__footer">
-                <div className="room-mosaic__identity">
-                  <p className="room-mosaic__name">{member.displayName}</p>
-                  <p className="room-mosaic__state">
-                    {[
-                      member.role === 'host' ? 'Host' : null,
-                      you ? 'You' : null,
-                      member.streamId !== null ? (watched ? 'Watching' : 'Live') : null,
-                    ]
-                      .filter(Boolean)
-                      .join(' · ') || 'Here'}
-                  </p>
-                </div>
-
-                {member.streamId !== null && (
-                  <WatcherStack total={member.watcherCount} watchers={member.watchers} />
-                )}
-
-                <div className="room-mosaic__actions">
-                  {/* Every control for a remote stream lives on that stream's
-                      tile; the shelf below the canvas is only ever about your
-                      own stream (ADR 0100). */}
-                  {member.streamId !== null &&
-                    !you &&
-                    (watched ? (
-                      <button
-                        className="room-mosaic__watch"
-                        type="button"
-                        onClick={() => void media.stopWatchingStream()}
-                      >
-                        Stop watching
-                      </button>
-                    ) : (
-                      <button
-                        className="room-mosaic__watch"
-                        disabled={!media.supported || media.watch.kind === 'connecting'}
-                        type="button"
-                        onClick={() => void media.startWatching(member.streamId as string)}
-                      >
-                        Watch
-                      </button>
-                    ))}
-                  {!you && (
-                    <button
-                      className="room-mosaic__menu"
-                      type="button"
-                      onClick={() => onReport(member)}
-                    >
-                      Report
-                    </button>
-                  )}
-                  {hostActions && !you && (
-                    <button
-                      className="room-mosaic__menu"
-                      type="button"
-                      onClick={() => hostActions(member)}
-                    >
-                      Host tools
-                    </button>
-                  )}
-                </div>
-              </div>
-            </li>
-          )
-        })}
+        {visible.map((member) => (
+          <MemberTile
+            hostActions={hostActions}
+            key={member.membershipId}
+            media={media}
+            member={member}
+            selfMembershipId={selfMembershipId}
+            onReport={onReport}
+          />
+        ))}
       </ul>
     </div>
   )
+}
+
+function MemberTile({
+  member,
+  selfMembershipId,
+  media,
+  onReport,
+  hostActions,
+}: Readonly<{
+  member: RoomRosterMember
+  selfMembershipId: string
+  media: RoomMedia
+  onReport: (member: RoomRosterMember) => void
+  hostActions: ((member: RoomRosterMember) => void) | null
+}>) {
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  // Every watch starts muted (ADR 0101); unmuting is the viewer's own act.
+  const [muted, setMuted] = useState(true)
+  const you = member.membershipId === selfMembershipId
+  const attempt = subscriptionFor(media.watch, member.streamId)
+  const watching = attempt?.kind === 'watching'
+
+  useEffect(() => {
+    if (!watching) setMuted(true)
+  }, [watching])
+
+  return (
+    <li
+      className="room-mosaic__tile"
+      data-member-role={member.role}
+      data-member-sharing={member.streamId !== null}
+      data-member-self={you}
+      data-member-watched={watching}
+    >
+      <div className="room-mosaic__presence">
+        {you && media.localStream ? (
+          <StreamSurface
+            label="Your screen"
+            muted
+            stream={media.localStream}
+            videoRef={videoRef}
+          />
+        ) : watching && media.remoteStream ? (
+          <StreamSurface
+            label={`${member.displayName}'s screen`}
+            muted={muted}
+            stream={media.remoteStream}
+            videoRef={videoRef}
+          />
+        ) : (
+          <>
+            <Avatar member={member} />
+            {member.streamId !== null && (
+              <span className="room-mosaic__sharing">{sharingLabel(attempt)}</span>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Below the media region, not over it: ADR 0101 keeps the footer
+          out of the shared content and out of hover. */}
+      <div className="room-mosaic__footer">
+        <div className="room-mosaic__identity">
+          <p className="room-mosaic__name">{member.displayName}</p>
+          <p className="room-mosaic__state">
+            {[
+              member.role === 'host' ? 'Host' : null,
+              you ? 'You' : null,
+              member.streamId !== null ? (watching ? 'Watching' : 'Live') : null,
+            ]
+              .filter(Boolean)
+              .join(' · ') || 'Here'}
+          </p>
+        </div>
+
+        {member.streamId !== null && (
+          <WatcherStack total={member.watcherCount} watchers={member.watchers} />
+        )}
+
+        {attempt?.kind === 'failed' && (
+          // Exhausted retries hand the tile back with guidance rather than a
+          // silent loop (ADR 0077); the room stays usable without media
+          // (ADR 0059).
+          <p className="room-mosaic__failure">
+            Could not connect to this stream. Chat and the rest of the room keep
+            working — try again, or use a recent Chrome, Edge, Firefox or Safari.
+          </p>
+        )}
+
+        <div className="room-mosaic__actions">
+          {/* Every control for a remote stream lives on that stream's tile;
+              the shelf below the canvas is only ever about your own stream
+              (ADR 0100). One row when it fits, wrapping to a second when it
+              does not — no overflow menu, no auto-hiding overlay (ADR 0101). */}
+          {watching && (
+            <>
+              <button type="button" onClick={() => setMuted((current) => !current)}>
+                {muted ? 'Unmute' : 'Mute'}
+              </button>
+              <button type="button" onClick={() => void videoRef.current?.requestFullscreen()}>
+                Fullscreen
+              </button>
+            </>
+          )}
+          {member.streamId !== null &&
+            !you &&
+            (watching || attempt?.kind === 'connecting' ? (
+              <button
+                className="room-mosaic__watch"
+                type="button"
+                onClick={() => void media.stopWatchingStream()}
+              >
+                Stop watching
+              </button>
+            ) : (
+              <button
+                className="room-mosaic__watch"
+                disabled={!media.supported || media.watch.kind === 'connecting'}
+                type="button"
+                onClick={() => void media.startWatching(member.streamId as string)}
+              >
+                {attempt?.kind === 'failed' ? 'Retry' : 'Watch'}
+              </button>
+            ))}
+          {!you && (
+            <button className="room-mosaic__menu" type="button" onClick={() => onReport(member)}>
+              Report
+            </button>
+          )}
+          {hostActions && !you && (
+            <button
+              className="room-mosaic__menu"
+              type="button"
+              onClick={() => hostActions(member)}
+            >
+              Host tools
+            </button>
+          )}
+        </div>
+      </div>
+    </li>
+  )
+}
+
+/** The viewer's single subscription, when it belongs to this member's stream. */
+function subscriptionFor(watch: WatchState, streamId: string | null) {
+  if (streamId === null || watch.kind === 'idle' || watch.streamId !== streamId) return null
+  return watch
+}
+
+function sharingLabel(attempt: ReturnType<typeof subscriptionFor>) {
+  if (attempt?.kind === 'connecting') {
+    // Bounded progress, so a viewer can see the retries end (ADR 0077).
+    return `Connecting… attempt ${attempt.attempt} of ${WATCH_MAX_ATTEMPTS}`
+  }
+  if (attempt?.kind === 'failed') return 'Could not connect'
+  return 'Screen up'
 }
 
 /** Up to three avatars plus the total, ordered by watch start. */
@@ -178,25 +243,30 @@ function WatcherStack({
   )
 }
 
-/** Every watch starts muted (ADR 0101); the element holds the media, so
-    unmuting is the viewer's own deliberate act. */
+/** The media only — its controls are explicit buttons in the tile footer, so
+    nothing floats over what is being shared and nothing auto-hides (ADR 0101). */
 function StreamSurface({
   stream,
   label,
-}: Readonly<{ stream: MediaStream; label: string }>) {
-  const ref = useRef<HTMLVideoElement | null>(null)
+  muted,
+  videoRef,
+}: Readonly<{
+  stream: MediaStream
+  label: string
+  muted: boolean
+  videoRef: React.RefObject<HTMLVideoElement | null>
+}>) {
   useEffect(() => {
-    if (ref.current) ref.current.srcObject = stream
-  }, [stream])
+    if (videoRef.current) videoRef.current.srcObject = stream
+  }, [stream, videoRef])
   return (
     <video
       aria-label={label}
       autoPlay
       className="room-mosaic__video"
-      controls
-      muted
+      muted={muted}
       playsInline
-      ref={ref}
+      ref={videoRef}
     />
   )
 }

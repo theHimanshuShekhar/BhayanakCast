@@ -3707,6 +3707,12 @@ a {
   object-fit: cover;
 }
 
+.room-mosaic__failure {
+  margin: 0.375rem 0 0;
+  color: var(--warning);
+  font-size: var(--text-meta);
+}
+
 .room-mosaic__actions {
   display: flex;
   flex-wrap: wrap;
@@ -3837,8 +3843,23 @@ a {
 
 .room-people__member {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 0.75rem;
+}
+
+/* The same actions the tiles carry, always visible rather than on hover
+   (ADR 0102). */
+.room-people__actions {
+  display: flex;
+  gap: 0.375rem;
+  margin-inline-start: auto;
+}
+
+/* Never scrolls the reader away from what they are reading (ADR 0102). */
+.room-activity__cue {
+  align-self: center;
+  margin-top: 0.5rem;
 }
 
 /* Only the one-minute warning is loud (ADR 0103). */

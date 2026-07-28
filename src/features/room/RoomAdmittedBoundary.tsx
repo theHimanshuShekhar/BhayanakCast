@@ -9,6 +9,7 @@ import { RoomSettingsDialog } from './RoomSettingsDialog'
 import { RoomFact, RoomHeader, RoomShell, expiresInLabel } from './RoomShell'
 import { useRoomMedia } from './useRoomMedia'
 import { useRoomRealtime, type RoomSocket } from './useRoomRealtime'
+import type { RoomRosterMember } from '../../server/rooms/room-roster'
 import type { MembershipConfirmation } from '../../server/rooms/room-service'
 import type { RoomAdmitted, RoomSelfMembership } from './room-types'
 
@@ -55,6 +56,21 @@ export function RoomAdmittedBoundary({
   const lastWarning = [...realtime.activity]
     .reverse()
     .find((entry) => entry.kind === 'room-warning')?.minutes
+
+  // Tiles and People rows offer the same actions, from one definition each
+  // (ADR 0102).
+  const reportMember = (member: RoomRosterMember) =>
+    setReport({
+      type: member.streamId ? 'stream' : 'account',
+      id: member.streamId ?? member.accountId,
+      label: member.displayName,
+    })
+  const hostActions =
+    self.role === 'host'
+      ? (member: RoomRosterMember) => {
+          void banRoomMember({ data: { roomId: room.id, accountId: member.accountId } })
+        }
+      : null
 
   const leave = async () => {
     if (pending) return
@@ -121,23 +137,9 @@ export function RoomAdmittedBoundary({
           >
             <h2 className="visually-hidden">Streams and members</h2>
             <RoomMemberMosaic
-              hostActions={
-                self.role === 'host'
-                  ? (member) => {
-                      void banRoomMember({
-                        data: { roomId: room.id, accountId: member.accountId },
-                      })
-                    }
-                  : null
-              }
+              hostActions={hostActions}
               media={media}
-              onReport={(member) =>
-                setReport({
-                  type: member.streamId ? 'stream' : 'account',
-                  id: member.streamId ?? member.accountId,
-                  label: member.displayName,
-                })
-              }
+              onReport={reportMember}
               roster={room.roster}
               selfMembershipId={self.id}
             />
@@ -158,8 +160,10 @@ export function RoomAdmittedBoundary({
         </div>
 
         <RoomCompanionDock
+          hostActions={hostActions}
           memberCount={room.memberCount}
           onDismissSheet={() => setSheet(null)}
+          onReport={reportMember}
           realtime={realtime}
           roomId={room.id}
           roster={room.roster}

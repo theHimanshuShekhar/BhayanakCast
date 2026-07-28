@@ -289,12 +289,24 @@ single stateful own-stream slot; every control for someone else's stream lives o
 stream's tile in `RoomMemberMosaic`. Reconnect closes peer media at once and requires an
 explicit re-Watch / re-Start (ADR `0103`).
 
-**Deliberately not built in this phase**, and the reason:
-- Mute/Unmute and Fullscreen are the `<video controls>` element's own; ADR `0101`'s
-  every-watch-starts-muted rule is satisfied by the `muted` attribute. A bespoke control
-  row buys nothing until the native one is measurably wrong.
-- Preview freshness and per-tile connection/retry state have no producer yet — there are
-  no periodic preview frames and no retry loop to report on. Add both together.
+**Amended 2026-07-28 — two of the three deferrals closed.**
+- The `<video controls>` shortcut was wrong against ADR `0101`, which forbids auto-hiding
+  overlays over shared content. `RoomMemberMosaic` now renders the media bare and puts
+  explicit `Unmute`/`Mute`, `Stop watching` and `Fullscreen` in the tile's persistent
+  footer, wrapping to a second row at narrow widths.
+- Per-tile connection/retry state now has a producer: `useRoomMedia` drives each explicit
+  selection or manual `Retry` through a single-use Pacer `AsyncRetryer` (ADR `0077` —
+  `maxAttempts: 4`, exponential from 1s capped at 4s, no jitter), wiring
+  `getAbortSignal()` into the peer attempt and discarding the retryer on stream end,
+  another selection, leave, reconnect or cancellation. The tile shows bounded
+  `Connecting… attempt n of 4` and, on exhaustion, a manual `Retry` with ADR `0059`'s
+  chat-only guidance. Covered by `tests/unit/watch-retry.test.ts`.
+
+**Still not built**, and the reason:
+- Preview freshness has no producer — ADR `0035`'s capture/upload/serve subsystem
+  (throttled frame capture, size-capped upload, Valkey rate limit, latest-only retention,
+  public-unblurred / private-blurred serving) does not exist yet. The tile's freshness
+  line waits on it.
 
 ---
 
@@ -325,9 +337,13 @@ mute filtering in SQL so a muted author's text never reaches the viewer's client
 room-session scroll, unread badges, optimistic pending/failed bubbles keyed by mutation
 identity, and `useThrottler`-gated typing presence.
 
-**Not built:** step 6's member/Host actions on People rows (they exist on tiles only —
-duplicating them is a second call site for the same commands with no new capability), and
-step 7's `New activity` cue when scrolled up. Both are additive to the shipped dock.
+**Amended 2026-07-28.** Steps 6 and 7 are now built. ADR `0102` requires the People rows
+to carry the actions precisely so safety never depends on hover or on which panel is
+open, so the duplicate-call-site objection was wrong; `RoomAdmittedBoundary` defines
+`reportMember` and `hostActions` once and hands the same pair to the mosaic and the dock.
+Activity raises a `New activity` cue instead of scrolling a reader away from what they
+are reading, dismissed by the cue or by scrolling back to the end
+(`tests/unit/room-dock.test.ts`).
 
 ---
 
@@ -413,6 +429,9 @@ insertion are all covered by unit tests over their pure parts only
 `tests/unit/report-service.test.ts`). Their SQL paths have no
 `tests/integration/` counterpart yet, which ADR `0106` expects.
 
-The deferrals recorded under Phases 4 and 5 — per-tile preview freshness and connection
-retry state, member/Host actions on People rows, and Activity's `New activity` cue — are
-all additive to what shipped and none of them gate each other.
+Of the deferrals recorded under Phases 4 and 5, the watched-tile footer controls, ADR
+`0077`'s connection/retry state, People-row member/Host actions and Activity's
+`New activity` cue all landed on 2026-07-28. What remains is **per-tile preview
+freshness**, which waits on ADR `0035`'s preview capture/upload/serve subsystem — a
+phase-sized piece of work, not a finishing touch, and the only room surface still
+carrying a decision with no implementation behind it.

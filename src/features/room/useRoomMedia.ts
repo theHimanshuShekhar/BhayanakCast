@@ -1,9 +1,31 @@
+import { AsyncRetryer } from '@tanstack/pacer'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { startStream, stopStream, stopWatching, watchStream } from './room-queries'
 import type { RoomRealtime } from './useRoomRealtime'
 
 /** ADR 0104: browser-native WebRTC, public STUN only, no TURN. */
 const ICE_SERVERS: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }]
+
+/** ADR 0077: the first attempt plus three retries at 1s, 2s and 4s. */
+export const WATCH_MAX_ATTEMPTS = 4
+
+/** ADR 0077 bounds the retries but not a single attempt, and a negotiation
+    that never settles would strand the tile on `Connecting` forever — so an
+    attempt that produces no track in this long is treated as a failure. */
+const WATCH_ATTEMPT_TIMEOUT = 15_000
+
+/** ADR 0077's retry policy, exactly: one direct-watch attempt then three more
+    at 1s, 2s and 4s, with no jitter so the wait a viewer sees is the wait the
+    decision names. */
+export const WATCH_RETRY_OPTIONS = {
+  maxAttempts: WATCH_MAX_ATTEMPTS,
+  backoff: 'exponential',
+  baseWait: 1_000,
+  maxWait: 4_000,
+  jitter: 0,
+  maxExecutionTime: WATCH_ATTEMPT_TIMEOUT,
+  throwOnError: false,
+} as const
 
 export type PublishState =
   | { readonly kind: 'idle' }
@@ -12,8 +34,9 @@ export type PublishState =
 
 export type WatchState =
   | { readonly kind: 'idle' }
-  | { readonly kind: 'connecting'; readonly streamId: string }
+  | { readonly kind: 'connecting'; readonly streamId: string; readonly attempt: number }
   | { readonly kind: 'watching'; readonly streamId: string }
+  | { readonly kind: 'failed'; readonly streamId: string }
 
 export interface RoomMedia {
   readonly supported: boolean
@@ -59,6 +82,8 @@ export function useRoomMedia({
   const outbound = useRef(new Map<string, RTCPeerConnection>())
   /** The single inbound connection. */
   const inbound = useRef<{ id: string; peer: RTCPeerConnection } | null>(null)
+  /** The retryer for the current selection, if one is in flight (ADR 0077). */
+  const watchAttempt = useRef<AsyncRetryer<(streamId: string) => Promise<void>> | null>(null)
 
   const closeInbound = useCallback(() => {
     const current = inbound.current
@@ -69,6 +94,16 @@ export function useRoomMedia({
     }
     setRemoteStream(null)
   }, [realtime])
+
+  /** ADR 0077: a retryer is single-use. Anything that ends the current watch —
+      the stream stopping, another selection, leaving, a reconnect, cancelling —
+      aborts the in-flight attempt and throws the retryer away rather than
+      resetting it, so nothing can resume without a fresh explicit action. */
+  const discardWatchAttempt = useCallback(() => {
+    watchAttempt.current?.abort()
+    watchAttempt.current = null
+    closeInbound()
+  }, [closeInbound])
 
   const releaseLocal = useCallback(() => {
     for (const [id, peer] of outbound.current) {
@@ -91,6 +126,8 @@ export function useRoomMedia({
         existing?.close()
         outbound.current.delete(subscriptionId)
         if (inbound.current?.id === subscriptionId) {
+          watchAttempt.current?.abort()
+          watchAttempt.current = null
           inbound.current.peer.close()
           inbound.current = null
           setRemoteStream(null)
@@ -149,28 +186,28 @@ export function useRoomMedia({
       realtime.onStreamStopped((streamId) => {
         setWatch((current) => {
           if (current.kind === 'idle' || current.streamId !== streamId) return current
-          closeInbound()
+          discardWatchAttempt()
           return { kind: 'idle' }
         })
       }),
-    [realtime, closeInbound],
+    [realtime, discardWatchAttempt],
   )
 
   // Reconnect closes peer media at once; the grace only governs presentation.
   useEffect(() => {
     if (connection === 'live') return
-    closeInbound()
+    discardWatchAttempt()
     setWatch({ kind: 'idle' })
     if (connection === 'lost') {
       releaseLocal()
       setPublish({ kind: 'idle' })
     }
-  }, [connection, closeInbound, releaseLocal])
+  }, [connection, discardWatchAttempt, releaseLocal])
 
   useEffect(() => () => {
-    closeInbound()
+    discardWatchAttempt()
     releaseLocal()
-  }, [closeInbound, releaseLocal])
+  }, [discardWatchAttempt, releaseLocal])
 
   return {
     supported,
@@ -231,16 +268,47 @@ export function useRoomMedia({
       setError(null)
       // Stop and clear the prior subscription first; a failed switch leaves the
       // viewer watching nothing rather than silently resuming (ADR 0101).
-      closeInbound()
-      setWatch({ kind: 'connecting', streamId })
-      const result = await watchStream({ data: { roomId, streamId } }).catch(() => null)
-      if (result?.status !== 'subscribed') {
-        setWatch({ kind: 'idle' })
-        setError('That stream could not be watched.')
-        return
-      }
-      const peer = new RTCPeerConnection({ iceServers: ICE_SERVERS })
-      inbound.current = { id: result.id, peer }
+      discardWatchAttempt()
+      setWatch({ kind: 'connecting', streamId, attempt: 1 })
+      // One retryer per explicit selection or manual Retry — never reused, so
+      // no attempt can outlive the action that asked for it (ADR 0077).
+      const retryer: AsyncRetryer<(id: string) => Promise<void>> = new AsyncRetryer(
+        (id: string) => negotiate(id, retryer.getAbortSignal()),
+        {
+          ...WATCH_RETRY_OPTIONS,
+          onRetry: (attempt) => {
+            closeInbound()
+            setWatch({ kind: 'connecting', streamId, attempt: attempt + 1 })
+          },
+          onLastError: () => {
+            // Exhausted: clear the attempt and hand the tile back to the viewer
+            // with a manual Retry rather than looping on its own (ADR 0077).
+            watchAttempt.current = null
+            closeInbound()
+            setWatch({ kind: 'failed', streamId })
+          },
+        },
+      )
+      watchAttempt.current = retryer
+      await retryer.execute(streamId)
+    },
+    async stopWatchingStream() {
+      discardWatchAttempt()
+      setWatch({ kind: 'idle' })
+      await stopWatching({ data: roomId }).catch(() => null)
+    },
+  }
+
+  /** One direct-watch attempt: a fresh subscription and peer connection that
+      settles only when the publisher's media arrives (ADR 0104). */
+  async function negotiate(streamId: string, signal: AbortSignal | null) {
+    const result = await watchStream({ data: { roomId, streamId } })
+    if (result.status !== 'subscribed') throw new Error(result.status)
+    if (signal?.aborted) throw new Error('aborted')
+    const peer = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+    inbound.current = { id: result.id, peer }
+    await new Promise<void>((resolve, reject) => {
+      signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
       peer.onicecandidate = (event) => {
         if (!event.candidate) return
         realtime.sendSignal(result.id, {
@@ -250,21 +318,24 @@ export function useRoomMedia({
           sdpMLineIndex: event.candidate.sdpMLineIndex,
         })
       }
+      peer.onconnectionstatechange = () => {
+        if (peer.connectionState === 'failed') reject(new Error('peer-failed'))
+      }
       peer.ontrack = (event) => {
         setRemoteStream(event.streams[0] ?? new MediaStream([event.track]))
         setWatch({ kind: 'watching', streamId })
+        resolve()
       }
       peer.addTransceiver('video', { direction: 'recvonly' })
       peer.addTransceiver('audio', { direction: 'recvonly' })
-      const offer = await peer.createOffer()
-      await peer.setLocalDescription(offer)
-      realtime.sendSignal(result.id, { kind: 'offer', sdp: offer.sdp ?? '' })
-    },
-    async stopWatchingStream() {
-      closeInbound()
-      setWatch({ kind: 'idle' })
-      await stopWatching({ data: roomId }).catch(() => null)
-    },
+      peer
+        .createOffer()
+        .then(async (offer) => {
+          await peer.setLocalDescription(offer)
+          realtime.sendSignal(result.id, { kind: 'offer', sdp: offer.sdp ?? '' })
+        })
+        .catch(reject)
+    })
   }
 }
 
