@@ -16,3 +16,4 @@ Unauthenticated visitors may browse live public and private room cards, Past Str
 - Every anonymous discovery/profile read must use a server-enforced public projection.
 - Private password admission never happens implicitly through a public card or route loader.
 - Auth-required calls must return actionable sign-in states rather than leaking room internals.
+- ADR `0108` extends browsing to holding a counted realtime socket: an anonymous visitor is part of the Home presence number and receives the public Home event stream. That socket carries no room listener, so joining still requires sign-in.
