@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { Page } from '@playwright/test'
-import { expect, test } from './fixtures'
+import { expect, expectCenteredModal, test } from './fixtures'
 import type { AuthSessionFixture } from './fixtures'
 
 async function seedSearch(authSessions: AuthSessionFixture) {
@@ -77,7 +77,7 @@ test('restores shared, back, and forward URLs before rendering results', async (
   await expect(input).toHaveValue('Nobody')
 })
 
-test('applies desktop filters immediately and clears canonical search state', async ({
+test('applies filters immediately and clears canonical search state', async ({
   authSessions,
   page,
 }) => {
@@ -87,21 +87,31 @@ test('applies desktop filters immediately and clears canonical search state', as
   const utilities = page.getByTestId('home-masthead')
   await expect(utilities).toHaveCSS('position', 'relative')
 
-  const category = page.getByRole('combobox', { name: 'Category' })
+  // One filter path at every width: the wide stage opens the same sheet the
+  // phone does rather than inlining a second copy of the fields.
+  await page.getByRole('button', { name: 'Filters' }).click()
+  const sheet = page.getByRole('dialog', { name: 'Filter rooms' })
+  await expect(sheet).toBeVisible()
+  await expectCenteredModal(sheet)
+
+  const category = sheet.getByRole('combobox', { name: 'Category' })
   await category.fill('Art')
   await expect.poll(() => searchParams(page).get('category')).toBe('Art')
   await expect(utilities).toHaveCSS('position', 'sticky')
-  await expect(page.getByRole('button', { name: 'Remove category Art' })).toBeVisible()
 
-  const tags = page.getByRole('combobox', { name: 'Add tag' })
+  const tags = sheet.getByRole('combobox', { name: 'Add tag' })
   await tags.fill('drawing')
   await expect.poll(() => searchParams(page).getAll('tags')).toEqual(['drawing'])
-  await expect(page.getByRole('button', { name: 'Remove tag drawing' })).toBeVisible()
   await tags.fill('2026')
   await expect.poll(() => searchParams(page).getAll('tags')).toEqual([
     '2026',
     'drawing',
   ])
+
+  await sheet.getByRole('button', { name: 'Close filters' }).click()
+  await expect(sheet).not.toBeVisible()
+  await expect(page.getByRole('button', { name: 'Remove category Art' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Remove tag drawing' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Remove tag 2026' })).toBeVisible()
   await page.reload()
   await expect(page.getByRole('button', { name: 'Remove tag 2026' })).toBeVisible()
@@ -142,8 +152,11 @@ test('renders compact bounded result groups and a native mobile filter sheet', a
 
   await page.setViewportSize({ width: 390, height: 800 })
   await page.getByRole('button', { name: 'Filters' }).click()
-  const sheet = page.getByRole('dialog', { name: 'Filters' })
+  // The sheet is named apart from the button that opens it: two headings both
+  // reading "Filters" gave the heading list no clue which one was the open sheet.
+  const sheet = page.getByRole('dialog', { name: 'Filter rooms' })
   await expect(sheet).toBeVisible()
+  await expectCenteredModal(sheet)
   await sheet.getByRole('combobox', { name: 'Category' }).fill('Art')
   await expect.poll(() => searchParams(page).get('category')).toBe('Art')
   await sheet.getByRole('button', { name: 'Close filters' }).click()

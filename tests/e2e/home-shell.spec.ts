@@ -57,7 +57,17 @@ async function expectShell(page: Page, stage: (typeof stages)[number]) {
   await expect(page.getByRole('navigation', { name: 'Primary' })).toHaveCount(1)
   await expect(page.getByRole('main').getByRole('navigation')).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'Wrapped up' })).toHaveCount(1)
-  await expect(page.getByTestId('home-counter')).toBeVisible()
+  // The live count has one home per stage and only one: the masthead counter
+  // below 1280px, the rail's card above it. Whichever is standing down is
+  // display:none, so the page keeps exactly one h1 either way.
+  await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1)
+  if (stage.name === 'wide') {
+    await expect(page.getByTestId('home-counter')).toBeHidden()
+    await expect(page.getByRole('region', { name: 'Right now' })).toBeVisible()
+  } else {
+    await expect(page.getByTestId('home-counter')).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Right now' })).toBeHidden()
+  }
   await expect(page.getByRole('search', { name: 'Find rooms and people' })).toHaveCount(1)
   await expect(page.getByRole('link', { name: 'Home', exact: true })).toHaveAttribute(
     'aria-current',
@@ -86,8 +96,19 @@ async function expectShell(page: Page, stage: (typeof stages)[number]) {
   }
 
   // The statistics strip never collapses — no disclosure to open at any stage.
+  // It changes form instead: five cells above 768px, one sentence below, with
+  // the unused form display:none so only one reaches the accessibility tree.
   await expect(page.getByRole('button', { name: 'Clubhouse statistics' })).toHaveCount(0)
-  await expect(page.locator('.home-statistics dt', { hasText: 'rooms live' })).toBeVisible()
+  const sentence = page.locator('.home-statistics__line')
+  const cells = page.locator('.home-statistics dt', { hasText: 'rooms live' })
+  if (stage.name === 'small') {
+    await expect(sentence).toBeVisible()
+    await expect(sentence).toContainText(/rooms? live/)
+    await expect(cells).toBeHidden()
+  } else {
+    await expect(cells).toBeVisible()
+    await expect(sentence).toBeHidden()
+  }
 
   const scrollContract = await page.evaluate(() => {
     const nested = [...document.querySelectorAll<HTMLElement>('body *')]
@@ -218,20 +239,22 @@ async function expectIconRailTooltips(page: Page) {
   }
 }
 
+// One dedicated sign-in door at every stage: the navigation slot, which is the
+// bottom bar on small and the icon rail above it. The masthead action stays
+// Create Room in both session states instead of swapping in a second door.
+// Filters is one control at every stage now — the wide stages no longer inline
+// their own copy of the fields the sheet already owns.
+// Above 1280px the masthead action stands down for the rail's card, so the last
+// stop is that card's control: Create Room for a member, and for an anonymous
+// visitor the rail's own Discord button, named apart from the navigation door.
 function anonymousKeyboardOrder(stage: (typeof stages)[number], theme: (typeof themes)[number]) {
-  const discord = stage.name === 'small' ? ['Continue with Discord'] : []
-  const filters = stage.name === 'small' ? ['Filters'] : ['Category', 'Add tag']
-  // Small screens carry sign-in in the bottom navigation only, so the fixed
-  // top-right copy is hidden and drops out of the tab order.
-  const topAccount = stage.name === 'small' ? [] : ['Sign in with Discord']
   return [
     'Home',
-    ...discord,
+    'Continue with Discord',
     theme === 'light' ? 'Dark theme' : 'Light theme',
-    ...topAccount,
     'Find rooms and people',
-    ...filters,
-    'Sign in',
+    'Filters',
+    stage.name === 'wide' ? 'Sign in with Discord' : 'Open a room',
   ]
 }
 
@@ -244,7 +267,7 @@ function authenticatedKeyboardOrder(stage: (typeof stages)[number], theme: (type
     theme === 'light' ? 'Dark theme' : 'Light theme',
     'Home Shell Member account',
     'Find rooms and people',
-    ...(stage.name === 'small' ? ['Filters'] : ['Category', 'Add tag']),
+    'Filters',
     'Open a room',
   ]
 }
@@ -266,11 +289,13 @@ test('anonymous Home shell keeps one responsive tree in both themes', async ({
         await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
         await expectShell(page, stage)
         await expect(page.getByRole('button', {
-          name: stage.name === 'small' ? 'Continue with Discord' : 'Sign in with Discord',
+          name: 'Continue with Discord',
           exact: true,
-        })).toBeVisible()
+        })).toHaveCount(1)
         await expect(page.getByRole('button', { name: 'Log out' })).toHaveCount(0)
-        await expect(page.getByText(/(person|people) in the clubhouse/i)).toBeVisible()
+        await expect(page.getByRole('heading', { level: 1 })).toHaveText(
+          /(person|people) in the clubhouse/i,
+        )
         await expectKeyboardOrder(page, anonymousKeyboardOrder(stage, theme), stage.name !== 'small')
         if (stage.name === 'small') {
           const discord = page
@@ -281,7 +306,6 @@ test('anonymous Home shell keeps one responsive tree in both themes', async ({
           const icon = discord.locator('svg')
           await expect(icon).toBeVisible()
           await expect(icon).toHaveAttribute('aria-hidden', 'true')
-          await expect(page.locator('.home-top-account--anonymous')).toBeHidden()
         }
         if (stage.name !== 'small') await expectIconRailTooltips(page)
       } finally {
@@ -456,7 +480,7 @@ test('Admin navigation is visible only to an authorized Account', async ({ authS
         'Dark theme',
         'Home Admin account',
         'Find rooms and people',
-        ...(stage.name === 'small' ? ['Filters'] : ['Category', 'Add tag']),
+        'Filters',
         'Open a room',
       ],
       stage.name !== 'small',

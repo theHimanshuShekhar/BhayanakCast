@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { expect, test } from './fixtures'
+import { expect, expectCenteredModal, test } from './fixtures'
 
 const PROFILE = {
   id: '102938475610293847',
@@ -35,6 +35,7 @@ test('creates a room and enters the creator as Host', async ({ authSessions }) =
   await page.getByTestId('home-bottom-navigation').getByRole('button', { name: 'Create room' }).click()
   const dialog = page.getByRole('dialog', { name: 'Create Room' })
   await expect(dialog).toBeVisible()
+  await expectCenteredModal(dialog)
   await dialog.getByLabel('Name').fill('Task 11 room')
   await dialog.getByRole('button', { name: 'Create Room' }).click()
   await page.waitForURL(/\/rooms\/[0-9a-f-]+$/)
@@ -44,6 +45,7 @@ test('creates a room and enters the creator as Host', async ({ authSessions }) =
   await expect(page.getByRole('button', { name: 'Leave' })).toBeVisible()
   await page.getByRole('button', { name: 'Leave' }).click()
   const leaveDialog = page.getByRole('dialog', { name: 'Confirm room change' })
+  await expectCenteredModal(leaveDialog)
   await leaveDialog.getByRole('button', { name: 'Confirm' }).click()
   await page.waitForURL(/\/$/)
   await authSessions.sql('DELETE FROM room_membership WHERE room_id = $1', [roomId])

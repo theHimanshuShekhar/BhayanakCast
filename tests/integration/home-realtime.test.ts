@@ -13,6 +13,7 @@ import {
   normalizeHomeRealtimeEvent,
   type HomeRealtimeEvent,
 } from '../../src/server/realtime/home-events'
+import { ROOM_JOIN_COMMAND } from '../../src/server/realtime/room-events'
 import { migrateAuthDatabase } from '../../src/server/db/migrate'
 import { RoomService } from '../../src/server/rooms/room-service'
 import { refreshHomeQueries } from '../../src/features/home/home-realtime'
@@ -53,6 +54,27 @@ async function openSocket(cookie: string, origin: string) {
     transports: ['websocket'],
     withCredentials: true,
     extraHeaders: { cookie },
+  })
+
+  sockets.push(socket)
+  await waitForSocketEvent(socket, 'connect')
+  return socket
+}
+
+/** A signed-out visitor (ADR 0108): no cookie, and a visitor id the server uses
+    only to collapse this visitor's own tabs. `userAgent` moves the socket into
+    its own connection-cap bucket, since the cap keys on IP and User-Agent and
+    every socket here shares one address. */
+async function openAnonymousSocket(
+  origin: string,
+  options: { visitorId?: string; userAgent?: string; reconnection?: boolean } = {},
+) {
+  const socket = io(origin, {
+    path: '/socket.io/',
+    transports: ['websocket'],
+    reconnection: options.reconnection ?? false,
+    ...(options.visitorId ? { auth: { visitorId: options.visitorId } } : {}),
+    ...(options.userAgent ? { extraHeaders: { 'user-agent': options.userAgent } } : {}),
   })
 
   sockets.push(socket)
@@ -278,6 +300,85 @@ describe('Home realtime event contract', () => {
     expect(client.getQueryData<readonly ActiveRoomSummary[]>(key)?.map(({ id }) => id)).toEqual(['second'])
   })
 
+  test('anonymous visitor is admitted and counted once across its tabs', async () => {
+    const context = await getIntegrationContext()
+    const userAgent = `anonymous-presence-${randomUUID()}`
+    const visitor = `visitor-${randomUUID()}`
+
+    const first = await openAnonymousSocket(context.server.origin, {
+      visitorId: visitor,
+      userAgent,
+    })
+    const admitted = await waitForHomeEvent(first, (event) => event.type === 'presence')
+    if (admitted.type !== 'presence') return
+    const baseline = admitted.connectedCount
+
+    // A second tab of the same visitor still publishes presence, so the
+    // assertion is on the number rather than on the event's absence.
+    const sameVisitor = waitForHomeEvent(first, (event) => event.type === 'presence')
+    await openAnonymousSocket(context.server.origin, { visitorId: visitor, userAgent })
+    const afterSecondTab = await sameVisitor
+    if (afterSecondTab.type !== 'presence') return
+    expect(afterSecondTab.connectedCount).toBe(baseline)
+
+    const otherVisitor = waitForHomeEvent(first, (event) => event.type === 'presence')
+    await openAnonymousSocket(context.server.origin, {
+      visitorId: `visitor-${randomUUID()}`,
+      userAgent,
+    })
+    const afterOtherVisitor = await otherVisitor
+    if (afterOtherVisitor.type !== 'presence') return
+    expect(afterOtherVisitor.connectedCount).toBe(baseline + 1)
+  })
+
+  test('anonymous visitor holds no room channel', async () => {
+    const context = await getIntegrationContext()
+    const anonymous = await openAnonymousSocket(context.server.origin, {
+      visitorId: `visitor-${randomUUID()}`,
+      userAgent: `anonymous-stream-${randomUUID()}`,
+    })
+
+    // No room listener is registered for an anonymous socket at all, so the
+    // command is not rejected — it is never heard, and the ack never fires.
+    const joined = await new Promise<unknown>((resolve) => {
+      anonymous.emit(ROOM_JOIN_COMMAND, 'any-room', resolve)
+      setTimeout(() => resolve('no-acknowledgement'), 500)
+    })
+    expect(joined).toBe('no-acknowledgement')
+  })
+
+  test('anonymous connections are capped per client', async () => {
+    const context = await getIntegrationContext()
+    const userAgent = `anonymous-cap-${randomUUID()}`
+    const opened: Socket[] = []
+    for (let index = 0; index < 8; index += 1) {
+      opened.push(
+        await openAnonymousSocket(context.server.origin, {
+          visitorId: `visitor-${randomUUID()}`,
+          userAgent,
+        }),
+      )
+    }
+    expect(opened.every((socket) => socket.connected)).toBe(true)
+
+    const ninth = await openAnonymousSocket(context.server.origin, {
+      visitorId: `visitor-${randomUUID()}`,
+      userAgent,
+    })
+    await waitForSocketEvent(ninth, 'disconnect')
+    expect(ninth.connected).toBe(false)
+
+    // The slot returns when a socket leaves, so the cap throttles rather than
+    // permanently locking a client out.
+    opened[0]!.disconnect()
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    const replacement = await openAnonymousSocket(context.server.origin, {
+      visitorId: `visitor-${randomUUID()}`,
+      userAgent,
+    })
+    expect(replacement.connected).toBe(true)
+  })
+
   test('new authenticated Account connection displaces its older socket', async () => {
     const { context, accounts: harness } = await authHarness()
     const signedIn = await harness.signInDiscord({
@@ -293,14 +394,14 @@ describe('Home realtime event contract', () => {
     const observedPresence: number[] = []
     const collectPresence = (value: unknown) => {
       const event = normalizeHomeRealtimeEvent(value)
-      if (event?.type === 'presence') observedPresence.push(event.connectedAccountCount)
+      if (event?.type === 'presence') observedPresence.push(event.connectedCount)
     }
     other.on(HOME_SOCKET_EVENT, collectPresence)
     const replaced = waitForSocketEvent(first, HOME_ACCOUNT_REPLACED_EVENT)
     const firstDisconnected = waitForSocketEvent(first, 'disconnect')
     const stablePresence = waitForHomeEvent(
       other,
-      (event) => event.type === 'presence' && event.connectedAccountCount === 2,
+      (event) => event.type === 'presence' && event.connectedCount === 2,
     )
     const second = await openSocket(signedIn.sessionCookie, context.server.origin)
     await Promise.all([replaced, firstDisconnected, stablePresence])

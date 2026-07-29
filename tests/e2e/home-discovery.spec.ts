@@ -322,7 +322,9 @@ test('leads empty discovery with one Create Room invitation', async ({
   await expect(liveSection).toContainText(/private rooms/i)
   await expect(liveSection.getByRole('button', { name: 'Sign in to open a room' })).toBeVisible()
   await expect(liveSection.locator('.empty-discovery__illustration')).toHaveCount(0)
-  await expect(liveSection).toContainText('Be the first')
+  // The first-timer cue says what the counter above it cannot: nothing has ever
+  // run here, rather than restating the count of rooms open right now.
+  await expect(liveSection).toContainText('Nothing has been streamed here yet.')
   await expect(page.getByRole('heading', { name: 'Wrapped up' })).toHaveCount(0)
   await expect(page.getByText('No past streams yet.')).toHaveCount(0)
 

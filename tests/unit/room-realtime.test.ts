@@ -71,7 +71,7 @@ describe('Room realtime projection invalidation', () => {
 
     applyRoomProjectionRealtimeEvent(client, ROOM_ID, null)
     applyRoomProjectionRealtimeEvent(client, ROOM_ID, { type: 'room-ended', roomId: OTHER_ROOM_ID })
-    applyRoomProjectionRealtimeEvent(client, ROOM_ID, { type: 'presence', connectedAccountCount: 1 })
+    applyRoomProjectionRealtimeEvent(client, ROOM_ID, { type: 'presence', connectedCount: 1 })
 
     expect(invalidateQueries).not.toHaveBeenCalled()
   })

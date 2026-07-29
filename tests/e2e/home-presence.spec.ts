@@ -1,12 +1,14 @@
 import { io } from 'socket.io-client'
 import { expect, test } from './fixtures'
 
-function connection(origin: string, cookie?: string) {
+function connection(origin: string, cookie?: string, visitorId?: string) {
   const socket = io(origin, {
     path: '/socket.io/',
     transports: ['websocket'],
     autoConnect: false,
+    reconnection: false,
     extraHeaders: cookie ? { cookie } : undefined,
+    ...(visitorId ? { auth: { visitorId } } : {}),
   })
   const connected = Promise.withResolvers<void>()
   const rejected = Promise.withResolvers<Error>()
@@ -16,9 +18,11 @@ function connection(origin: string, cookie?: string) {
   return { socket, connected: connected.promise, rejected: rejected.promise }
 }
 
-test('rejects anonymous sockets and accepts duplicate authenticated tabs', async ({ authSessions }) => {
-  const anonymous = connection(authSessions.origin)
-  await expect(anonymous.rejected).resolves.toMatchObject({ message: 'Authentication required' })
+// ADR 0108: an anonymous visitor is part of the Home count, so the socket that
+// carries the count is open to them too.
+test('admits anonymous sockets and accepts duplicate authenticated tabs', async ({ authSessions }) => {
+  const anonymous = connection(authSessions.origin, undefined, 'e2e-presence-visitor')
+  await expect(anonymous.connected).resolves.toBeUndefined()
   anonymous.socket.disconnect()
 
   const signedIn = await authSessions.createBrowserContext({

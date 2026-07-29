@@ -1,6 +1,43 @@
 import { describe, expect, test } from 'vitest'
 import { HomePresence } from '../../src/server/home/home-presence'
 
+describe('anonymous Home connection presence', () => {
+  test('counts one visitor once across tabs and blends them with Accounts', () => {
+    const presence = new HomePresence()
+    presence.add('account-a', 'socket-1')
+    presence.addVisitor('visitor-a', 'socket-2')
+    presence.addVisitor('visitor-a', 'socket-3')
+    presence.addVisitor('visitor-b', 'socket-4')
+    expect(presence.count()).toBe(3)
+
+    presence.removeVisitor('visitor-a', 'socket-2')
+    expect(presence.count()).toBe(3)
+    presence.removeVisitor('visitor-a', 'socket-3')
+    expect(presence.count()).toBe(2)
+  })
+
+  test('keeps Account and visitor identifiers in separate namespaces', () => {
+    const presence = new HomePresence()
+    presence.add('shared-id', 'socket-1')
+    presence.addVisitor('shared-id', 'socket-2')
+    expect(presence.count()).toBe(2)
+
+    presence.removeVisitor('shared-id', 'socket-2')
+    expect(presence.count()).toBe(1)
+  })
+
+  test('carries anonymous visitors into the operator-day peak', () => {
+    const presence = new HomePresence()
+    const instant = new Date('2026-07-14T10:00:00.000Z')
+    presence.add('account-a', 'socket-1', instant)
+    presence.addVisitor('visitor-a', 'socket-2', instant)
+    presence.removeVisitor('visitor-a', 'socket-2', instant)
+
+    expect(presence.count()).toBe(1)
+    expect(presence.peak('2026-07-14', instant)).toBe(2)
+  })
+})
+
 describe('authenticated Home connection presence', () => {
   test('counts duplicate sockets for one Account once and removes only final disconnect', () => {
     const presence = new HomePresence()
