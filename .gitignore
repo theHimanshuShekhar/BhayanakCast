@@ -21,6 +21,11 @@ dist-ssr/
 # Tool-generated files
 __unconfig*
 todos.json
+.playwright-mcp/
+.claude/.headroom_wrap_marker.json
+.tokensave/tokensave.db
+.tokensave/tokensave.db-shm
+.tokensave/tokensave.db-wal
 
 # Test and coverage outputs
 coverage/
