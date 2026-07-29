@@ -17,7 +17,6 @@ interface LiveRoomsProps {
   readonly hasPastStreams: boolean
   readonly isPlaceholderData: boolean
   readonly canJoin: boolean
-  readonly connectedAccountCount: number | undefined
 }
 
 interface RoomPresentationState {
@@ -76,7 +75,6 @@ export function LiveRooms({
   hasPastStreams,
   isPlaceholderData,
   canJoin,
-  connectedAccountCount,
 }: LiveRoomsProps) {
   const [state, setState] = useState<RoomPresentationState>(() => {
     const initialRooms = isPlaceholderData ? EMPTY_ROOMS : rooms
@@ -112,7 +110,6 @@ export function LiveRooms({
         {showEmptyInvitation ? (
           <EmptyDiscovery
             canCreate={canJoin}
-            connectedAccountCount={connectedAccountCount}
             hasPastStreams={hasPastStreams}
           />
         ) : (
@@ -128,7 +125,7 @@ export function LiveRooms({
         <div className="live-rooms__feature">
           <div className="home-section-heading">
             <h2>Busiest room</h2>
-            <p>order holds until you refresh</p>
+            <p>The room with the most people in it right now. Reload to re-rank.</p>
           </div>
           <ol
             className="live-rooms-grid live-rooms-grid--feature"

@@ -15,8 +15,29 @@ import {
 } from './HomeConnectionStatus'
 
 interface HomeRealtimeBridgeProps {
-  readonly enabled: boolean
+  /** Signed-out visitors get a minted visitor id so the server can collapse
+      their tabs into one person; a signed-in visitor is deduped by account and
+      is never given a stored identifier they did not ask for. */
+  readonly anonymous: boolean
   readonly onCanonicalRefresh: () => void
+}
+
+const VISITOR_ID_STORAGE_KEY = 'bhayanakcast.visitor-id'
+
+/** An opaque per-browser id, used for nothing but collapsing one person's tabs
+    into one entry in the Home count. Storage is unavailable in some privacy
+    modes; the server then falls back to counting the socket, which overcounts a
+    multi-tab visitor rather than dropping them. */
+function visitorId(): string | undefined {
+  try {
+    const stored = localStorage.getItem(VISITOR_ID_STORAGE_KEY)
+    if (stored) return stored
+    const minted = crypto.randomUUID()
+    localStorage.setItem(VISITOR_ID_STORAGE_KEY, minted)
+    return minted
+  } catch {
+    return undefined
+  }
 }
 
 /** Everything the strip needs, published as one value: the state alone cannot
@@ -35,7 +56,7 @@ export function refreshHomeQueries(queryClient: QueryClient): Promise<void> {
 }
 
 export function HomeRealtimeBridge({
-  enabled,
+  anonymous,
   onCanonicalRefresh,
 }: HomeRealtimeBridgeProps) {
   const queryClient = useQueryClient()
@@ -50,16 +71,11 @@ export function HomeRealtimeBridge({
   onCanonicalRefreshRef.current = onCanonicalRefresh
 
   useEffect(() => {
-    if (!enabled) {
-      socketRef.current?.disconnect()
-      socketRef.current = null
-      setSnapshot({ state: 'idle', lastEventAt: Date.now(), attempt: 0 })
-      return
-    }
-
+    const visitor = anonymous ? visitorId() : undefined
     const socket = io({
       path: '/socket.io/',
       withCredentials: true,
+      ...(visitor ? { auth: { visitorId: visitor } } : {}),
     })
     socketRef.current = socket
     let recovering = false
@@ -180,7 +196,7 @@ export function HomeRealtimeBridge({
       if (socketRef.current === socket) socketRef.current = null
       retryRef.current = () => {}
     }
-  }, [enabled, queryClient])
+  }, [anonymous, queryClient])
 
   return createElement(HomeConnectionStatus, {
     ...snapshot,

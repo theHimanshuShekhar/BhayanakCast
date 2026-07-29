@@ -37,17 +37,21 @@ export function SignInButton({
 
   return (
     <div className="sign-in-control">
+      {/* The tooltip repeats the accessible name. Where the rail collapses the
+          visible label to the Discord mark alone, the tooltip is the only place
+          the full `Continue with Discord` promise still shows. The label lives
+          in a span so that collapse is a CSS decision, not a prop. */}
       <button
         aria-busy={isPending}
-        aria-label={ariaLabel ?? (label === 'Log in' ? 'Sign in with Discord' : undefined)}
+        aria-label={ariaLabel}
         className={className ?? 'sign-in-button'}
-        data-tooltip={label === 'Log in' ? 'Sign in with Discord' : label}
+        data-tooltip={ariaLabel ?? label}
         disabled={isPending}
         type="button"
         onClick={signIn}
       >
         {icon}
-        {isPending ? 'Opening Discord…' : label}
+        <span>{isPending ? 'Opening Discord…' : label}</span>
       </button>
       {error && <p className="auth-error" role="alert">{error}</p>}
     </div>

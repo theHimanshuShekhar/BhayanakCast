@@ -1,17 +1,11 @@
 import type { QueryKey } from '@tanstack/react-query'
-import { SignInButton } from '../auth/SignInButton'
 import type { SessionProjection } from '../auth/auth-client'
 import { CreateRoomButton } from './HomeNavigation'
 import { HomeRealtimeBridge } from './home-realtime'
 import { HomeSearch as HomeSearchController } from './HomeSearch'
 import { HomeSectionBoundary } from './HomeSectionBoundary'
 import { HomeMetricsSkeleton } from './HomeSectionSkeletons'
-import type {
-  ConnectedPresence,
-  HomeFacets,
-  HomeSearch,
-  HomeStatistics,
-} from './home-types'
+import type { ConnectedPresence, HomeFacets, HomeSearch } from './home-types'
 
 interface HomeUtilitiesProps {
   readonly search: HomeSearch
@@ -20,10 +14,6 @@ interface HomeUtilitiesProps {
   readonly facetsPending: boolean
   readonly facetsFailed: boolean
   readonly facetsQueryKey: QueryKey
-  readonly statistics: HomeStatistics | undefined
-  readonly statisticsPending: boolean
-  readonly statisticsFailed: boolean
-  readonly statisticsQueryKey: QueryKey
   readonly presence: ConnectedPresence | undefined
   readonly presencePending: boolean
   readonly presenceFailed: boolean
@@ -44,10 +34,6 @@ export function HomeUtilities({
   facetsPending,
   facetsFailed,
   facetsQueryKey,
-  statistics,
-  statisticsPending,
-  statisticsFailed,
-  statisticsQueryKey,
   presence,
   presencePending,
   presenceFailed,
@@ -59,60 +45,54 @@ export function HomeUtilities({
   const hasActiveSearch = Boolean(search.q || search.category || search.tags?.length)
 
   return (
-    <>
-      <section
-        className={`home-masthead${hasActiveSearch ? ' home-masthead--searching' : ''}`}
-        data-home-center-region="search"
-        data-testid="home-masthead"
+    <section
+      className={`home-masthead${hasActiveSearch ? ' home-masthead--searching' : ''}`}
+      data-home-center-region="search"
+      data-testid="home-masthead"
+    >
+      {/* Anonymous visitors hold a socket too (ADR 0108): they are part of the
+          count above, and a count that never moves is worse than no count. */}
+      <HomeRealtimeBridge
+        anonymous={!session}
+        onCanonicalRefresh={onCanonicalRefresh}
+      />
+      {/* The presence query's one boundary, at every width. On the wide stage
+          the rail draws the count and the counter below goes display:none, but
+          this boundary keeps owning the pending and failed states so an outage
+          is still reported somewhere visible. */}
+      <HomeSectionBoundary
+        failed={presenceFailed}
+        label="Connected presence"
+        pending={presencePending && !presence}
+        queryKey={presenceQueryKey}
+        skeleton={<HomeMetricsSkeleton label="Loading connected presence" />}
       >
-        <HomeRealtimeBridge
-          enabled={Boolean(session)}
-          onCanonicalRefresh={onCanonicalRefresh}
+        <PresenceCounter
+          anonymous={!session}
+          hasActiveSearch={hasActiveSearch}
+          presence={presence}
+          profileCount={profileCount}
+          query={search.q}
+          roomCount={roomCount}
         />
-        <HomeSectionBoundary
-          failed={presenceFailed}
-          label="Connected presence"
-          pending={presencePending && !presence}
-          queryKey={presenceQueryKey}
-          skeleton={<HomeMetricsSkeleton label="Loading connected presence" />}
+      </HomeSectionBoundary>
+      <div className="home-masthead__actions">
+        <HomeSearchController
+          facets={facets}
+          facetsFailed={facetsFailed}
+          facetsPending={facetsPending}
+          facetsQueryKey={facetsQueryKey}
+          search={search}
         >
-          <PresenceCounter
-            anonymous={!session}
-            hasActiveSearch={hasActiveSearch}
-            presence={presence}
-            profileCount={profileCount}
-            query={search.q}
-            roomCount={roomCount}
-          />
-        </HomeSectionBoundary>
-        <div className="home-masthead__actions">
-          <HomeSearchController
-            facets={facets}
-            facetsFailed={facetsFailed}
-            facetsPending={facetsPending}
-            facetsQueryKey={facetsQueryKey}
-            search={search}
-          />
-          {session ? (
-            <CreateRoomButton className="home-masthead__create" label="Open a room" />
-          ) : (
-            <SignInButton label="Sign in" />
-          )}
-        </div>
-      </section>
-
-      {!hasActiveSearch && (
-        <HomeSectionBoundary
-          failed={statisticsFailed}
-          label="Statistics"
-          pending={statisticsPending && !statistics}
-          queryKey={statisticsQueryKey}
-          skeleton={<HomeMetricsSkeleton label="Loading statistics" />}
-        >
-          <StatisticsStrip statistics={statistics} />
-        </HomeSectionBoundary>
-      )}
-    </>
+          {/* Same control in both states: anonymous activation starts Discord
+              OAuth and returns here to reopen the dialog, so the action keeps
+              its own label instead of being swapped for a sign-in button.
+              Above 1280px the rail's card is this button, and this copy stands
+              down rather than putting two "Open a room" on one screen. */}
+          <CreateRoomButton className="home-masthead__create" label="Open a room" />
+        </HomeSearchController>
+      </div>
+    </section>
   )
 }
 
@@ -133,7 +113,7 @@ function PresenceCounter({
   query: string | undefined
   anonymous: boolean
 }>) {
-  const connected = presence?.connectedAccountCount
+  const connected = presence?.connectedCount
   return (
     <div className="home-counter" data-testid="home-counter">
       <p className="home-counter__eyebrow">
@@ -178,36 +158,6 @@ function PresenceCounter({
           join one or open your own.
         </p>
       )}
-    </div>
-  )
-}
-
-/** Five cells, always open. A disclosure here hid the only numbers that told a
-    visitor whether the clubhouse was worth staying in. */
-function StatisticsStrip({
-  statistics,
-}: Readonly<{ statistics: HomeStatistics | undefined }>) {
-  return (
-    <section aria-label="Statistics" className="home-statistics" data-testid="home-statistics">
-      <h2 className="visually-hidden">Statistics</h2>
-      <dl>
-        <Metric label="rooms live" value={statistics?.activeRoomCount} />
-        <Metric label="screens shared" value={statistics?.activeStreamCount} />
-        <Metric label="sitting in rooms" value={statistics?.currentMembershipCount} />
-        <Metric label="opened today" value={statistics?.roomsCreatedToday} />
-        <Metric label="peak today" value={statistics?.peakConnectedAccountCount} />
-      </dl>
-    </section>
-  )
-}
-
-function Metric({ label, value }: Readonly<{ label: string; value: number | undefined }>) {
-  return (
-    // Value renders above the label; the DOM keeps dt-then-dd because a dl
-    // group is only valid in that order.
-    <div className="home-statistics__cell">
-      <dt>{label}</dt>
-      <dd className="tabular-nums">{value ?? '—'}</dd>
     </div>
   )
 }

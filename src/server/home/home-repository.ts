@@ -354,10 +354,7 @@ export class HomeRepository {
 }
 
 
-type DatabaseHomeStatistics = Omit<
-  HomeStatistics,
-  'peakConnectedAccountCount'
->
+type DatabaseHomeStatistics = Omit<HomeStatistics, 'peakConnectedCount'>
 
 interface ActiveRoomRow extends Omit<RoomSearchCandidate, 'activityAt'> {
   readonly activityAt: Date

@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import type { SessionProjection } from '../auth/auth-client'
 import { CreateRoomDialog } from './CreateRoomDialog'
 import { HomeNavigation } from './HomeNavigation'
+import { HomeRail } from './HomeRail'
 import { HomeSections } from './HomeSections'
 import { HomeUtilities } from './HomeUtilities'
 import {
@@ -38,6 +39,7 @@ export function HomePage({ search, session }: HomePageProps) {
   const facets = useQuery(facetsOptions)
   const statistics = useQuery(statisticsOptions)
   const presence = useQuery(presenceOptions)
+  const hasActiveSearch = Boolean(search.q || search.category || search.tags?.length)
 
   return (
     <div className="home-shell" data-testid="home-shell">
@@ -56,39 +58,48 @@ export function HomePage({ search, session }: HomePageProps) {
           roomCount={rooms.data?.length}
           search={search}
           session={session}
+          onCanonicalRefresh={onCanonicalRefresh}
+        />
+        <HomeRail
+          hasActiveSearch={hasActiveSearch}
+          presence={presence.data}
+          session={session}
           statistics={statistics.data}
           statisticsFailed={statistics.isError}
           statisticsPending={statistics.isPending}
           statisticsQueryKey={statisticsOptions.queryKey}
-          onCanonicalRefresh={onCanonicalRefresh}
         />
-        <HomeSections
-          canJoin={Boolean(session)}
-          connectedAccountCount={presence.data?.connectedAccountCount}
-          pastStreams={{
-            data: pastStreams.data,
-            failed: pastStreams.isError,
-            pending: pastStreams.isPending,
-            queryKey: pastStreamsOptions.queryKey,
-          }}
-          profiles={{
-            data: profiles.data,
-            failed: profiles.isError,
-            pending: profiles.isPending,
-            queryKey: profilesOptions.queryKey,
-            updating: profiles.isPlaceholderData,
-          }}
-          rooms={{
-            data: rooms.data,
-            failed: rooms.isError,
-            pending: rooms.isPending,
-            queryKey: roomsOptions.queryKey,
-            updating: rooms.isPlaceholderData,
-          }}
-          search={search}
-          realtimeRefreshVersion={realtimeRefreshVersion}
-        />
-      <CreateRoomDialog session={session} />
+        {/* The centre column, wrapped so the rail beside it has something to be
+            beside. Below 1280px the wrapper is display:contents and both it and
+            the rail vanish from the box tree, leaving today's single column. */}
+        <div className="home-sections">
+          <HomeSections
+            canJoin={Boolean(session)}
+            pastStreams={{
+              data: pastStreams.data,
+              failed: pastStreams.isError,
+              pending: pastStreams.isPending,
+              queryKey: pastStreamsOptions.queryKey,
+            }}
+            profiles={{
+              data: profiles.data,
+              failed: profiles.isError,
+              pending: profiles.isPending,
+              queryKey: profilesOptions.queryKey,
+              updating: profiles.isPlaceholderData,
+            }}
+            rooms={{
+              data: rooms.data,
+              failed: rooms.isError,
+              pending: rooms.isPending,
+              queryKey: roomsOptions.queryKey,
+              updating: rooms.isPlaceholderData,
+            }}
+            search={search}
+            realtimeRefreshVersion={realtimeRefreshVersion}
+          />
+        </div>
+        <CreateRoomDialog session={session} />
       </main>
     </div>
   )
