@@ -3,6 +3,7 @@ import { once } from 'node:events'
 import { request } from 'node:http'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { io, type Socket } from 'socket.io-client'
+import { ROOM_JOIN_COMMAND } from '../../src/server/realtime/room-events'
 
 const LISTENING = /BhayanakCast listening on http:\/\/127\.0\.0\.1:(\d+)/
 
@@ -64,14 +65,23 @@ describe('production single listener', () => {
     expect(payload).toMatch(/^0\{.*"sid"/)
   })
 
-  test('rejects unauthenticated upgraded Socket.IO connections', async () => {
+  test('admits an anonymous upgraded Socket.IO connection without a room listener', async () => {
     socket = io(origin, { transports: ['websocket'] })
-    const error = await new Promise<Error>((resolve, reject) => {
-      socket!.once('connect_error', resolve)
-      socket!.once('connect', () => reject(new Error('unauthenticated socket connected')))
+    await new Promise<void>((resolve, reject) => {
+      socket!.once('connect', resolve)
+      socket!.once('connect_error', reject)
     })
-    expect(error.message).toContain('Authentication required')
-    expect(socket.connected).toBe(false)
+    expect(socket.connected).toBe(true)
+
+    // ADR 0108: the anonymous socket registers no room handler at all, so a
+    // room command is never heard rather than being rejected. No ack comes
+    // back — that silence is the guarantee.
+    const acked = await new Promise<boolean>((resolve) => {
+      socket!
+        .timeout(1_000)
+        .emit(ROOM_JOIN_COMMAND, 'smoke', (error: Error | null) => resolve(!error))
+    })
+    expect(acked).toBe(false)
   })
 
   test('lets Start own unknown routes', async () => {
