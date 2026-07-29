@@ -1,11 +1,12 @@
 import { useRef, useState } from 'react'
 import { normalizeHomeValue } from './home-search'
+import type { HomeSearchPatch } from './HomeSearch'
 import type { Facet, HomeFacets, HomeSearch } from './home-types'
 
 interface HomeFiltersProps {
   readonly facets: HomeFacets | undefined
   readonly search: HomeSearch
-  readonly onChange: (patch: Partial<HomeSearch>) => void
+  readonly onChange: (patch: HomeSearchPatch) => void
 }
 
 export function HomeFilters({ facets, search, onChange }: HomeFiltersProps) {
@@ -142,7 +143,9 @@ function FilterFields({
           setTagDraft(value)
           const selected = matchFacet(tags, value)
           if (!selected) return
-          onChange({ tags: [...(search.tags ?? []), selected.value] })
+          onChange((previous) => ({
+            tags: [...(previous.tags ?? []), selected.value],
+          }))
           setTagDraft('')
         }}
         placeholder="Search tags"

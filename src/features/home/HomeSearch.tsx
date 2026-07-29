@@ -8,6 +8,14 @@ import { HomeMetricsSkeleton } from './HomeSectionSkeletons'
 import { canonicalHomeSearch } from './home-search'
 import type { HomeFacets, HomeSearch as HomeSearchValue } from './home-types'
 
+/** A patch may be a function of the previous search, and any patch that builds
+    on the current value must be. A tag added from a render whose `search` prop
+    has not caught up with the URL yet would otherwise spread a stale array over
+    the newer one and silently drop the tag before it. */
+export type HomeSearchPatch =
+  | Partial<HomeSearchValue>
+  | ((previous: HomeSearchValue) => Partial<HomeSearchValue>)
+
 interface HomeSearchProps {
   /** The masthead's own action, rendered inside the control row. It has to sit
       between the controls and the chips in the DOM so that reading order,
@@ -40,10 +48,14 @@ export function HomeSearch({
     setQueryState({ routeQuery, draft: routeQuery })
   }
 
-  const updateSearch = (patch: Partial<HomeSearchValue>) =>
+  const updateSearch = (patch: HomeSearchPatch) =>
     void navigate({
       replace: true,
-      search: (previous) => canonicalHomeSearch({ ...previous, ...patch }),
+      search: (previous) =>
+        canonicalHomeSearch({
+          ...previous,
+          ...(typeof patch === 'function' ? patch(previous) : patch),
+        }),
     })
   const debouncer = useDebouncer(
     (query: string) => updateSearch({ q: query || undefined }),
@@ -132,9 +144,9 @@ export function HomeSearch({
               className="home-filter-chip"
               key={tag}
               onClick={() =>
-                updateSearch({
-                  tags: search.tags?.filter((selected) => selected !== tag),
-                })
+                updateSearch((previous) => ({
+                  tags: previous.tags?.filter((selected) => selected !== tag),
+                }))
               }
               type="button"
             >
