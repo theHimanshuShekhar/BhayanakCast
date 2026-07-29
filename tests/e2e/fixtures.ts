@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { test as base } from '@playwright/test'
-import type { BrowserContext } from '@playwright/test'
+import { expect, test as base } from '@playwright/test'
+import type { BrowserContext, Locator } from '@playwright/test'
 import {
   createTestAccountHarness,
   type StoredDiscordOAuthTokens,
@@ -101,3 +101,19 @@ export const test = base.extend<{ authSessions: AuthSessionFixture }>({
 })
 
 export { expect } from '@playwright/test'
+
+/** Preflight zeroes the auto margins the UA uses to centre an open modal, so a
+    dialog only sits in the middle of the viewport while the base `dialog` rule
+    puts them back. Full-bleed phone sheets pass too: they fill the viewport, so
+    the gaps on both sides are equal at zero. */
+export async function expectCenteredModal(dialog: Locator) {
+  const gaps = await dialog.evaluate((node) => {
+    const box = node.getBoundingClientRect()
+    return {
+      x: box.left - (window.innerWidth - box.right),
+      y: box.top - (window.innerHeight - box.bottom),
+    }
+  })
+  expect(Math.abs(gaps.x)).toBeLessThanOrEqual(1)
+  expect(Math.abs(gaps.y)).toBeLessThanOrEqual(1)
+}

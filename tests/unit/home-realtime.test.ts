@@ -67,7 +67,7 @@ import { HomeRealtimeBridge } from '../../src/features/home/home-realtime'
 
 function renderBridge(onCanonicalRefresh: () => void) {
   mocks.refIndex = 0
-  return HomeRealtimeBridge({ enabled: true, onCanonicalRefresh }) as unknown as {
+  return HomeRealtimeBridge({ anonymous: false, onCanonicalRefresh }) as unknown as {
     props: { onRetry?: () => void }
   }
 }
