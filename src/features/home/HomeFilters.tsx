@@ -6,38 +6,29 @@ interface HomeFiltersProps {
   readonly facets: HomeFacets | undefined
   readonly search: HomeSearch
   readonly onChange: (patch: Partial<HomeSearch>) => void
-  readonly onClear: () => void
 }
 
-export function HomeFilters({ facets, search, onChange, onClear }: HomeFiltersProps) {
+export function HomeFilters({ facets, search, onChange }: HomeFiltersProps) {
   const dialog = useRef<HTMLDialogElement>(null)
-  const activeFilters = Boolean(search.category || search.tags?.length)
 
   return (
     <section aria-label="Filters" className="home-filters">
-      <div className="home-filters__heading">
-        <h2>Filters</h2>
-        <p>
-          {facets
-            ? `${facets.categories.length} categories and ${facets.tags.length} tags available.`
-            : 'Filter options are unavailable.'}
-        </p>
-      </div>
+      {/* The section still needs a name for the heading list, but a visible
+          "Filters" title over the button that opens the filters said it
+          twice. */}
+      <h2 className="visually-hidden">Filters</h2>
 
-      <div className="home-filter-fields--desktop">
-        <FilterFields
-          facets={facets}
-          idPrefix="desktop"
-          onChange={onChange}
-          search={search}
-        />
-      </div>
+      {/* One filter path at every width. The wide stage used to inline its own
+          copy of the fields beside a sheet only phones could open, so the same
+          two facets had two different controls and two sets of state to keep
+          honest. */}
       <button
         className="home-filters__open"
         onClick={() => dialog.current?.showModal()}
         type="button"
       >
-        Filters
+        <FiltersIcon />
+        <span>Filters</span>
       </button>
       <dialog
         aria-labelledby="home-filter-sheet-title"
@@ -45,7 +36,10 @@ export function HomeFilters({ facets, search, onChange, onClear }: HomeFiltersPr
         ref={dialog}
       >
         <div className="home-filter-sheet__heading">
-          <h2 id="home-filter-sheet-title">Filters</h2>
+          {/* Distinct from the enclosing `Filters` section heading: with both
+              named `Filters`, a heading list read two identical entries and
+              gave no clue which one was the open sheet. */}
+          <h2 id="home-filter-sheet-title">Filter rooms</h2>
           <button
             aria-label="Close filters"
             onClick={() => dialog.current?.close()}
@@ -54,60 +48,34 @@ export function HomeFilters({ facets, search, onChange, onClear }: HomeFiltersPr
             Close
           </button>
         </div>
-        <FilterFields
-          facets={facets}
-          idPrefix="mobile"
-          onChange={onChange}
-          search={search}
-        />
+        <FilterFields facets={facets} onChange={onChange} search={search} />
+        {/* What is on offer belongs with the fields that offer it, not on the
+            page outside the closed sheet. */}
+        <p className="home-filters__facets">
+          {facets
+            ? `${facets.categories.length} ${facets.categories.length === 1 ? 'category' : 'categories'} and ${facets.tags.length} ${facets.tags.length === 1 ? 'tag' : 'tags'} available.`
+            : 'Filter options are unavailable.'}
+        </p>
       </dialog>
-
-      {(activeFilters || search.q) && (
-        <div className="home-active-filters" aria-label="Active search and filters">
-          {search.category && (
-            <button
-              aria-label={`Remove category ${search.category}`}
-              className="home-filter-chip"
-              onClick={() => onChange({ category: undefined })}
-              type="button"
-            >
-              Category: {search.category} <span aria-hidden="true">×</span>
-            </button>
-          )}
-          {search.tags?.map((tag) => (
-            <button
-              aria-label={`Remove tag ${tag}`}
-              className="home-filter-chip"
-              key={tag}
-              onClick={() =>
-                onChange({
-                  tags: search.tags?.filter((selected) => selected !== tag),
-                })
-              }
-              type="button"
-            >
-              #{tag} <span aria-hidden="true">×</span>
-            </button>
-          ))}
-          <button
-            className="home-filters__clear"
-            onClick={onClear}
-            type="button"
-          >
-            Clear all
-          </button>
-        </div>
-      )}
     </section>
+  )
+}
+
+function FiltersIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="M4 7h5m4 0h7M4 17h11m4 0h1" />
+      <circle cx="11" cy="7" r="2" />
+      <circle cx="17" cy="17" r="2" />
+    </svg>
   )
 }
 
 function FilterFields({
   facets,
-  idPrefix,
   search,
   onChange,
-}: Omit<HomeFiltersProps, 'onClear'> & Readonly<{ idPrefix: string }>) {
+}: HomeFiltersProps) {
   const routeCategory = search.category ?? ''
   const [categoryState, setCategoryState] = useState({
     routeCategory,
@@ -133,10 +101,10 @@ function FilterFields({
 
   return (
     <div className="home-filter-fields">
-      <label htmlFor={`${idPrefix}-category-filter`}>Category</label>
+      <label htmlFor="sheet-category-filter">Category</label>
       <input
-        id={`${idPrefix}-category-filter`}
-        list={`${idPrefix}-category-options`}
+        id="sheet-category-filter"
+        list="sheet-category-options"
         onBlur={() => {
           if (!matchFacet(categories, categoryDraft)) {
             setCategoryState({ routeCategory, draft: routeCategory })
@@ -156,7 +124,7 @@ function FilterFields({
         type="text"
         value={categoryDraft}
       />
-      <datalist id={`${idPrefix}-category-options`}>
+      <datalist id="sheet-category-options">
         {categories.map((option) => (
           <option key={option.value} value={option.value}>
             {option.count} {option.count === 1 ? 'room' : 'rooms'}
@@ -164,10 +132,10 @@ function FilterFields({
         ))}
       </datalist>
 
-      <label htmlFor={`${idPrefix}-tag-filter`}>Add tag</label>
+      <label htmlFor="sheet-tag-filter">Add tag</label>
       <input
-        id={`${idPrefix}-tag-filter`}
-        list={`${idPrefix}-tag-options`}
+        id="sheet-tag-filter"
+        list="sheet-tag-options"
         onBlur={() => setTagDraft('')}
         onChange={(event) => {
           const value = event.currentTarget.value
@@ -181,7 +149,7 @@ function FilterFields({
         type="text"
         value={tagDraft}
       />
-      <datalist id={`${idPrefix}-tag-options`}>
+      <datalist id="sheet-tag-options">
         {tags.map((option) => (
           <option key={option.value} value={option.value}>
             {option.count} {option.count === 1 ? 'room' : 'rooms'}

@@ -1,7 +1,9 @@
 import type { Pool } from 'pg'
 import type { Server as HttpServer } from 'node:http'
+import { createHash } from 'node:crypto'
 import handler, { createServerEntry } from '@tanstack/react-start/server-entry'
 import { Server as SocketServer, type Socket as SocketConnection } from 'socket.io'
+import { debounce } from '@tanstack/pacer'
 import {
   bindAuthRuntime,
   configuredAuthOrigin,
@@ -143,6 +145,40 @@ export function publishHomeEvent(server: HttpServer, event: HomeRealtimeEvent) {
 
 const attachedSockets = new WeakMap<HttpServer, SocketServer>()
 
+/** Generous for one device, and a shared network now gets a budget per device
+    rather than one between them. It bounds casual inflation of the Home count
+    and the memory a single client can hold; it is not a defence against a
+    distributed effort, and ADR 0108 accepts that. */
+const MAX_ANONYMOUS_SOCKETS_PER_CLIENT = 8
+const MAX_VISITOR_ID_LENGTH = 128
+/** Long enough to swallow a refresh's disconnect/connect pair, short enough
+    that a genuine arrival still reads as "right now". */
+const PRESENCE_SETTLE_MS = 1_500
+
+/** The visitor's own dedupe key, treated as opaque and never trusted: it only
+    ever collapses that client's own tabs, so a forged value costs its owner an
+    entry rather than earning them one. Without usable client storage there is
+    no id, and the socket itself stands in — one tab, one person. */
+function handshakeVisitorId(socket: SocketConnection): string {
+  const claimed = socket.handshake.auth?.visitorId
+  return typeof claimed === 'string' &&
+    claimed.length > 0 &&
+    claimed.length <= MAX_VISITOR_ID_LENGTH
+    ? `id:${claimed}`
+    : `socket:${socket.id}`
+}
+
+/** Passive fingerprint for the connection cap. Both parts fall out of the
+    connection, so unlike anything computed in the browser the client cannot
+    simply pick a new one per socket. */
+function handshakeClientKey(socket: SocketConnection): string {
+  const forwarded = socket.handshake.headers['x-forwarded-for']
+  const forwardedValue = Array.isArray(forwarded) ? forwarded[0] : forwarded
+  const address = forwardedValue?.split(',')[0]?.trim() || socket.handshake.address
+  const userAgent = socket.handshake.headers['user-agent'] ?? ''
+  return createHash('sha256').update(`${address}\n${userAgent}`).digest('hex')
+}
+
 export function attachSocketServer(server: HttpServer, databasePool?: Pool) {
   const existing = attachedSockets.get(server)
   if (existing) return existing
@@ -152,6 +188,14 @@ export function attachSocketServer(server: HttpServer, databasePool?: Pool) {
     serveClient: false,
   })
   const eventHub = createHomeEventHub()
+  // A page refresh is a disconnect immediately followed by a connect, so
+  // publishing per socket event makes Home's "right now" count dip and recover
+  // for every reader. Trailing-only debounce lets the pair settle, and the
+  // count is read at flush time so the number sent is the current one.
+  const publishPresence = debounce(
+    () => eventHub.publish({ type: 'presence', connectedCount: homePresence.count() }),
+    { wait: PRESENCE_SETTLE_MS, leading: false, trailing: true },
+  )
   const roomHub = createRoomEventHub()
   roomEventHubs.set(server, roomHub)
   const connectionRegistry = new ConnectionRegistry()
@@ -193,6 +237,11 @@ export function attachSocketServer(server: HttpServer, databasePool?: Pool) {
   })
   attachedSockets.set(server, sockets)
 
+  // Anonymous sockets, admitted per client key (ADR 0108). Keyed by
+  // hash(IP + User-Agent) rather than IP alone so one shared NAT does not put
+  // genuinely different devices on a single budget.
+  const anonymousSocketsByClient = new Map<string, Set<string>>()
+
   sockets.use(async (socket, next) => {
     try {
       const headers = new Headers()
@@ -202,7 +251,14 @@ export function attachSocketServer(server: HttpServer, databasePool?: Pool) {
         }
       }
       const session = await readSessionProjection(getProductionAuth(), headers)
-      if (!session) return next(new Error('Authentication required'))
+      if (!session) {
+        // No session is no longer a rejection: the visitor counts towards Home
+        // presence. The connection handler gives them no room listeners, so
+        // every command below still requires an account.
+        socket.data.visitorId = handshakeVisitorId(socket)
+        socket.data.clientKey = handshakeClientKey(socket)
+        return next()
+      }
       socket.data.accountId = session.id
       if (databasePool) {
         const policy = await readAccountAccessPolicy(databasePool, session.id)
@@ -216,10 +272,52 @@ export function attachSocketServer(server: HttpServer, databasePool?: Pool) {
     }
   })
 
+  /** An anonymous visitor's whole lifecycle: take a slot, count, forward the
+      public Home stream, give it all back on disconnect. No room listener is
+      registered here, which is what keeps every room command account-only. */
+  function admitAnonymousVisitor(socket: SocketConnection) {
+    const visitorId = socket.data.visitorId
+    const clientKey = socket.data.clientKey
+    if (typeof visitorId !== 'string' || typeof clientKey !== 'string') {
+      socket.disconnect(true)
+      return
+    }
+    // Claim first and check after: two handshakes racing to the last slot both
+    // see the pre-claim size, so only the post-claim size bounds them.
+    const admitted = anonymousSocketsByClient.get(clientKey) ?? new Set<string>()
+    admitted.add(socket.id)
+    anonymousSocketsByClient.set(clientKey, admitted)
+    if (admitted.size > MAX_ANONYMOUS_SOCKETS_PER_CLIENT) {
+      releaseAnonymousSlot(clientKey, socket.id)
+      socket.disconnect(true)
+      return
+    }
+
+    homePresence.addVisitor(visitorId, socket.id)
+    const unsubscribe = eventHub.subscribe((event) =>
+      socket.emit(HOME_SOCKET_EVENT, event),
+    )
+    publishPresence()
+
+    socket.on('disconnect', () => {
+      unsubscribe()
+      releaseAnonymousSlot(clientKey, socket.id)
+      homePresence.removeVisitor(visitorId, socket.id)
+      publishPresence()
+    })
+  }
+
+  function releaseAnonymousSlot(clientKey: string, socketId: string) {
+    const admitted = anonymousSocketsByClient.get(clientKey)
+    if (!admitted) return
+    admitted.delete(socketId)
+    if (admitted.size === 0) anonymousSocketsByClient.delete(clientKey)
+  }
+
   sockets.on('connection', (socket) => {
     const accountId = socket.data.accountId
     if (typeof accountId !== 'string') {
-      socket.disconnect(true)
+      admitAnonymousVisitor(socket)
       return
     }
     const connection = socket as unknown as RegisteredConnection
@@ -237,10 +335,7 @@ export function attachSocketServer(server: HttpServer, databasePool?: Pool) {
         if (!activated) return
         unsubscribe()
         homePresence.remove(accountId, socket.id)
-        eventHub.publish({
-          type: 'presence',
-          connectedAccountCount: homePresence.count(),
-        })
+        publishPresence()
         if (!terminalConnections.has(connection)) {
           await roomService?.handleUnexpectedDisconnect(accountId)
         }
@@ -380,10 +475,7 @@ export function attachSocketServer(server: HttpServer, databasePool?: Pool) {
         })
       }
       await roomService?.reclaimMembership(accountId)
-      eventHub.publish({
-        type: 'presence',
-        connectedAccountCount: homePresence.count(),
-      })
+      publishPresence()
     }).catch(() => socket.disconnect(true))
   })
   return sockets

@@ -73,9 +73,9 @@ export interface HomeStatistics {
   readonly activeStreamCount: number
   readonly currentMembershipCount: number
   readonly roomsCreatedToday: number
-  readonly peakConnectedAccountCount: number
+  readonly peakConnectedCount: number
 }
 
 export interface ConnectedPresence {
-  readonly connectedAccountCount: number
+  readonly connectedCount: number
 }

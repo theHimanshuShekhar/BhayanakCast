@@ -28,9 +28,15 @@ export function HomeSectionBoundary({
       ref={containerRef}
       role="group"
       aria-label={`${label} section`}
+      data-home-section={label}
       aria-busy={retrying || undefined}
       tabIndex={-1}
     >
+      {/* A failed section shows the failure and nothing else. Rendering the
+          children underneath put a live-looking `Filters` heading and its own
+          "unavailable" copy directly below the boundary's own message, so the
+          same outage was announced twice and the second one looked like
+          working UI. */}
       {pending && !retrying ? (
         skeleton
       ) : showFailure ? (
@@ -51,7 +57,6 @@ export function HomeSectionBoundary({
           >
             Retry
           </button>
-          {children}
         </>
       ) : (
         children

@@ -66,13 +66,13 @@ export const getHomeStatistics = createServerFn({ method: 'GET' })
     )
     return {
       ...statistics,
-      peakConnectedAccountCount: homePresence.peak(data.operatorDay),
+      peakConnectedCount: homePresence.peak(data.operatorDay),
     }
   })
 
 export const getConnectedPresence = createServerFn({ method: 'GET' })
   .middleware([requestSignal])
-  .handler(() => ({ connectedAccountCount: homePresence.count() }))
+  .handler(() => ({ connectedCount: homePresence.count() }))
 
 export function validateHomeSearch(value: unknown): HomeSearch {
   return canonicalHomeSearch(parseHomeSearch(value))

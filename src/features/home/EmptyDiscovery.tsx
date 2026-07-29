@@ -3,14 +3,9 @@ import { CreateRoomButton } from './HomeNavigation'
 interface EmptyDiscoveryProps {
   readonly hasPastStreams: boolean
   readonly canCreate: boolean
-  readonly connectedAccountCount: number | undefined
 }
 
-export function EmptyDiscovery({
-  hasPastStreams,
-  canCreate,
-  connectedAccountCount,
-}: EmptyDiscoveryProps) {
+export function EmptyDiscovery({ hasPastStreams, canCreate }: EmptyDiscoveryProps) {
   return (
     <div className="empty-discovery">
       <p className="empty-discovery__lead">
@@ -18,12 +13,13 @@ export function EmptyDiscovery({
         and join. <strong>Private rooms</strong> still show up here, but joining
         needs the password the host shares.
       </p>
+      {/* The count of who is here is already the largest thing on the page, so
+          this cue says the one thing that counter cannot: nothing has ever run
+          here yet. */}
       {!hasPastStreams && (
         <p className="empty-discovery__first-cue">
-          Be the first
-          {connectedAccountCount
-            ? ` — ${connectedAccountCount} ${connectedAccountCount === 1 ? 'account is' : 'accounts are'} connected and watching this page.`
-            : '.'}
+          Nothing has been streamed here yet. Whatever you open is the first
+          thing this page will have to remember.
         </p>
       )}
       {/* Anonymous visitors get the same control, not a plain sign-in: it

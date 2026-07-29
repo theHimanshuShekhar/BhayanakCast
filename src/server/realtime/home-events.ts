@@ -54,7 +54,7 @@ export interface HomeRoomDiscoveryEvent {
 
 export interface HomePresenceEvent {
   readonly type: 'presence'
-  readonly connectedAccountCount: number
+  readonly connectedCount: number
 }
 export type HomeEventPublisher = (event: HomeRealtimeEvent) => void
 
@@ -98,10 +98,8 @@ export function normalizeHomeRealtimeEvent(value: unknown): HomeRealtimeEvent | 
   if (!isRecord(value) || typeof value.type !== 'string') return null
   const roomId = boundedString(value.roomId, MAX_ID_LENGTH)
   if (value.type === 'presence') {
-    const connectedAccountCount = boundedPresenceCount(value.connectedAccountCount)
-    return connectedAccountCount === null
-      ? null
-      : { type: 'presence', connectedAccountCount }
+    const connectedCount = boundedPresenceCount(value.connectedCount)
+    return connectedCount === null ? null : { type: 'presence', connectedCount }
   }
   if (!roomId) return null
 
@@ -155,10 +153,7 @@ export function applyHomeRealtimeEvent(
   if (event.type === 'presence') {
     queryClient.setQueriesData<ConnectedPresence>(
       { queryKey: ['home', 'presence'] },
-      (presence) =>
-        presence
-          ? { connectedAccountCount: event.connectedAccountCount }
-          : undefined,
+      (presence) => (presence ? { connectedCount: event.connectedCount } : undefined),
     )
     return
   }

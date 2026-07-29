@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { SiDiscord } from '@icons-pack/react-simple-icons'
+import { House, Plus, ShieldCheck, UserRound } from 'lucide-react'
 import { AccountMenu } from '../auth/AccountMenu'
 import { SignInButton } from '../auth/SignInButton'
 import type { SessionProjection } from '../auth/auth-client'
@@ -87,9 +89,15 @@ export function HomeNavigation({
       </nav>
 
       <ThemeToggle />
-      <div className={`home-top-account${session ? '' : ' home-top-account--anonymous'}`}>
-        {session ? <AccountMenu session={session} /> : <SignInButton label="Log in" />}
-      </div>
+      {/* Anonymous visitors get exactly one dedicated sign-in door, the
+          `Discord` control in the navigation above. A second one here was a
+          duplicate top-bar authentication control the product forbids, and it
+          rendered with its label collapsed to zero width anyway. */}
+      {session && (
+        <div className="home-top-account">
+          <AccountMenu session={session} />
+        </div>
+      )}
     </header>
   )
 }
@@ -134,46 +142,31 @@ export function CreateRoomButton({
   )
 }
 
+/* Lucide for the interface glyphs — same 24-unit grid and round line ends the
+   hand-drawn set was imitating, minus the imitating. Sizing and stroke width
+   stay with the rail's CSS, so one rule still governs every icon in it. */
 function HomeIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24">
-      <path d="m4 10 8-6 8 6v9a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1Z" />
-    </svg>
-  )
+  return <House aria-hidden="true" />
 }
 
 function CreateIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24">
-      <path d="M12 5v14M5 12h14" />
-    </svg>
-  )
+  return <Plus aria-hidden="true" />
 }
 
+/* A logo is not a line icon: Discord's mark is a filled shape from Simple
+   Icons, drawn to the brand's own outline instead of an approximation of it.
+   The rail's `.sign-in-button svg` rule is what fills rather than strokes it. */
 function DiscordIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24">
-      <path d="M8 8.5a9 9 0 0 1 8 0l1.5 6.5a10 10 0 0 1-3 1.5l-.7-1a8 8 0 0 0 1.2-.6 7 7 0 0 1-6 0 8 8 0 0 0 1.2.6l-.7 1a10 10 0 0 1-3-1.5Z" />
-      <circle cx="10" cy="12.5" r="0.8" />
-      <circle cx="14" cy="12.5" r="0.8" />
-    </svg>
-  )
+  // Empty title: the pack ships a `<title>Discord</title>` inside the mark, and
+  // next to the control's own `Discord` label that is the word twice — once in
+  // the button's text, once again from an element that is aria-hidden anyway.
+  return <SiDiscord aria-hidden="true" title="" />
 }
 
 function ProfileIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24">
-      <circle cx="12" cy="8" r="4" />
-      <path d="M4.5 20c.8-4 3.3-6 7.5-6s6.7 2 7.5 6" />
-    </svg>
-  )
+  return <UserRound aria-hidden="true" />
 }
 
 function AdminIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24">
-      <path d="M12 3 20 6v5c0 5-3.2 8.4-8 10-4.8-1.6-8-5-8-10V6Z" />
-      <path d="m9 12 2 2 4-4" />
-    </svg>
-  )
+  return <ShieldCheck aria-hidden="true" />
 }

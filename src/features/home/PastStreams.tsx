@@ -4,10 +4,12 @@ interface PastStreamsProps {
   readonly streams: readonly PastStreamSummary[]
 }
 
+/** Visitor's own timezone, because the relative label above it is measured
+    against the visitor's own clock. A UTC tooltip made "3 hours ago" resolve to
+    a wall-clock time that was hours off from what their clock said. */
 const endedAtFormatter = new Intl.DateTimeFormat('en', {
   dateStyle: 'medium',
   timeStyle: 'short',
-  timeZone: 'UTC',
 })
 
 const relativeFormatter = new Intl.RelativeTimeFormat('en', { numeric: 'auto' })
@@ -43,22 +45,43 @@ export function PastStreams({ streams }: PastStreamsProps) {
               <span className="past-stream-item__name">
                 <span data-past-stream-name>{stream.name}</span>
                 {stream.visibility === 'private' && (
-                  <span className="past-stream-item__private">Private</span>
+                  <span className="past-stream-item__private room-chip room-chip--private">
+                    Private
+                  </span>
                 )}
               </span>
-              <span className="past-stream-item__counts tabular-nums">
-                {stream.memberCount}{' '}
-                {stream.memberCount === 1 ? 'member' : 'members'} ·{' '}
-                {stream.streamCount}{' '}
-                {stream.streamCount === 1 ? 'screen' : 'screens'}
+
+              {(stream.category || stream.tags.length > 0) && (
+                <span className="past-stream-item__chips">
+                  {stream.category && (
+                    <span className="room-chip">{stream.category}</span>
+                  )}
+                  {stream.tags.map((tag) => (
+                    <span className="room-chip" key={tag}>#{tag}</span>
+                  ))}
+                </span>
+              )}
+
+              <span className="past-stream-item__meta">
+                <span className="past-stream-item__counts tabular-nums">
+                  {stream.memberCount}{' '}
+                  {stream.memberCount === 1 ? 'member' : 'members'} ·{' '}
+                  {stream.streamCount}{' '}
+                  {stream.streamCount === 1 ? 'screen' : 'screens'} ·{' '}
+                  <time
+                    className="past-stream-item__when"
+                    dateTime={stream.endedAt}
+                    title={`Ended ${endedAtFormatter.format(new Date(stream.endedAt))}`}
+                  >
+                    {endedLabel(stream.endedAt, now)}
+                  </time>
+                </span>
+                {/* The whole block is the link; this only names where it
+                    goes, so it stays out of the accessible name. */}
+                <span aria-hidden="true" className="past-stream-item__open">
+                  Open <span>→</span>
+                </span>
               </span>
-              <time
-                className="past-stream-item__when"
-                dateTime={stream.endedAt}
-                title={`Ended ${endedAtFormatter.format(new Date(stream.endedAt))} UTC`}
-              >
-                {endedLabel(stream.endedAt, now)}
-              </time>
             </a>
           </li>
         ))}
