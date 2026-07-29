@@ -8,7 +8,7 @@
     "pnpm": "11.11.0"
   },
   "scripts": {
-    "dev": "tsx watch --env-file-if-exists=.env server/dev.ts",
+    "dev": "tsx watch --experimental-vm-modules --env-file-if-exists=.env server/dev.ts",
     "build": "rsbuild build",
     "start": "node --env-file-if-exists=.env server/index.mjs",
     "typecheck": "tsc --noEmit",
@@ -19,6 +19,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@icons-pack/react-simple-icons": "^13.13.0",
     "@opentelemetry/api": "1.9.0",
     "@tanstack/pacer": "0.21.1",
     "@tanstack/react-pacer": "0.22.1",
@@ -29,6 +30,7 @@
     "better-auth": "1.6.23",
     "drizzle-orm": "0.45.2",
     "ioredis": "5.11.1",
+    "lucide-react": "^1.27.0",
     "pg": "8.22.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
