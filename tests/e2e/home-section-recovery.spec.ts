@@ -219,10 +219,14 @@ for (const [index, section] of recoverableSections.entries()) {
     ).toBeFocused()
     expect(await page.evaluate(() => window.scrollY)).toBe(scrollBefore)
     expect(failedUrls.length).toBeGreaterThan(0)
-    expect(recoveredUrls).toHaveLength(1)
-    expect(new URL(recoveredUrls[0]!).pathname).toBe(
-      new URL(failedUrls[0]!).pathname,
-    )
+    // Retry refetches sections that failed and never reaches for anything new.
+    // Asserting one single fetch made this a race instead: presence and
+    // realtime traffic lands in the same window unbidden, so both the count and
+    // "the first failed URL is this section's" were coin flips.
+    const failedPaths = new Set(failedUrls.map((url) => new URL(url).pathname))
+    const recoveredPaths = recoveredUrls.map((url) => new URL(url).pathname)
+    expect(recoveredPaths.length).toBeGreaterThan(0)
+    expect(recoveredPaths.filter((path) => !failedPaths.has(path))).toEqual([])
   })
 }
 
@@ -380,7 +384,9 @@ test('superseded search navigation cancels its obsolete room query', async ({
   await expect(page).toHaveURL(/\?q=delta$/)
   await expect(page.getByText('No active rooms match this search.')).toBeVisible()
 
-  const obsoleteState = await page.evaluate(() => {
+  // Cancellation settles a tick or two after delta's results paint, so a single
+  // snapshot read caught the gamma query mid-abort as often as not.
+  const readObsoleteState = () => page.evaluate(() => {
     const roots = (window as TestWindow).__HOME_TEST_REACT_ROOTS__ ?? []
     const pending = roots.map((root) => root.current)
     const seen = new Set<unknown>()
@@ -427,6 +433,9 @@ test('superseded search navigation cancels its obsolete room query', async ({
     }
     throw new Error('QueryClient provider was not found')
   })
-  expect(obsoleteState).toEqual({ hasData: false, fetchStatus: 'idle' })
+  await expect.poll(readObsoleteState).toEqual({
+    hasData: false,
+    fetchStatus: 'idle',
+  })
   gammaGate.resolve()
 })
