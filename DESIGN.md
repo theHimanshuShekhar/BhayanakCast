@@ -65,7 +65,7 @@ Each Live Room card is one accessible link target: clicking or activating anywhe
 
 ## Past Streams layout
 
-The ten recent Past Streams use a compact two-column metadata list on desktop and one column on mobile. Items show name, ended time, visibility, optional category/tags, participation/Stream summary, and an Open summary action. They use no preview image, fake thumbnail, carousel, pagination, or table styling.
+The ten recent Past Streams use a compact grid of metadata blocks: one column on mobile, two on desktop, three on the widest layout so a block never stretches its metadata line apart. Each block shows name, visibility, optional category/tags, and a single baseline of participation/Stream summary, ended time, and an Open action linking to the summary. They use no preview image, fake thumbnail, carousel, pagination, or table styling.
 
 ## Empty discovery
 
