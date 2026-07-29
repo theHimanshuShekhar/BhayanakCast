@@ -12,11 +12,7 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
-    "types": ["node", "vitest/globals", "@rsbuild/core/types"],
-    "baseUrl": ".",
-    "paths": {
-      "~/*": ["./src/*"]
-    }
+    "types": ["node", "vitest/globals", "@rsbuild/core/types"]
   },
   "include": ["src", "server", "tests", "*.ts"],
   "exclude": ["dist", "node_modules"]
