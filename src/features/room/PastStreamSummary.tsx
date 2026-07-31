@@ -1,5 +1,6 @@
 import { RoomFact, RoomHeader, RoomShell } from './RoomShell'
 import type { RoomEnded } from './room-types'
+import type { SessionProjection } from '../auth/auth-client'
 
 const ENDED_FORMATTER = new Intl.DateTimeFormat('en-US', {
   dateStyle: 'medium',
@@ -7,9 +8,12 @@ const ENDED_FORMATTER = new Intl.DateTimeFormat('en-US', {
   timeZone: 'UTC',
 })
 
-export function PastStreamSummary({ room }: Readonly<{ room: RoomEnded }>) {
+export function PastStreamSummary({
+  room,
+  session,
+}: Readonly<{ room: RoomEnded; session: SessionProjection | null }>) {
   return (
-    <RoomShell state="ended">
+    <RoomShell session={session} state="ended">
       <main className="room-boundary room-boundary--ended" data-room-state="ended">
         <RoomHeader
           category={room.category}

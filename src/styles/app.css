@@ -114,9 +114,16 @@
   --scrim: rgb(23 32 51 / 0.72);
   /* Badges pinned over stream frames get no say in what is behind them, so
      they keep the midnight treatment in both themes — ADR 0096 allows a dark
-     media surface either way. These four are deliberately not re-declared in
+     media surface either way. These six are deliberately not re-declared in
      the dark block: against the porcelain theme's own semantic values a chip
-     on a bright frame measures 1.3:1. */
+     on a bright frame measures 1.3:1. ADR 0100 puts the media canvas itself on
+     the same footing, so the ground and its radial edge join them. The values
+     are the midnight theme's own --canvas and --action-soft, so the media
+     surface is the one the theme-color contract already promises rather than a
+     third dark. Named --media-canvas, not --canvas: that token is the page
+     background, in both themes, and every page reads it. */
+  --media-canvas: #0d1422;
+  --media-canvas-edge: #1b3264;
   --media-scrim: rgb(13 20 34 / 0.86);
   --on-media-ink: #f4f7fc;
   --on-media-live: #ff72a5;
@@ -3548,6 +3555,15 @@ p.home-filters__facets {
   background: var(--canvas);
 }
 
+/* The room owns the viewport (ADR 0100), and the root region is 3.5rem of
+   in-document height above it — enough on its own to make a 100dvh workspace
+   scroll the document. The rail already carries a theme toggle, so suppressing
+   the region here also stops the page rendering two. Same precedent as the
+   profile page's own suppression above. */
+body:has(.room-shell) > .root-controls {
+  display: none;
+}
+
 .room-boundary {
   display: flex;
   max-width: none;
@@ -3662,7 +3678,9 @@ p.home-filters__facets {
   gap: 1rem;
 }
 
-/* ADR 0100: the media canvas, with the control shelf integrated below it. */
+/* ADR 0100: the media canvas, with the control shelf integrated below it. It
+   stays midnight in both themes so peer media is never letterboxed against
+   porcelain; everything sitting on it reads from the --on-media-* family. */
 .room-stage__canvas {
   display: flex;
   min-height: 0;
@@ -3671,8 +3689,8 @@ p.home-filters__facets {
   border-radius: 0.625rem;
   background: radial-gradient(
     130% 110% at 18% 0%,
-    var(--action-soft),
-    var(--rail) 68%
+    var(--media-canvas-edge),
+    var(--media-canvas) 68%
   );
   box-shadow: var(--feature-shadow);
   padding: 1rem;
@@ -3694,17 +3712,19 @@ p.home-filters__facets {
   justify-content: flex-end;
 }
 
+/* On the canvas, not beside it: --ink-muted would be a porcelain grey on
+   midnight (3.4:1) in the light theme. */
 .room-mosaic-region__filter {
   display: flex;
   align-items: center;
   gap: 0.375rem;
-  color: var(--ink-muted);
+  color: var(--on-media-ink);
   font-size: var(--text-meta);
 }
 
 .room-mosaic-region__empty {
   margin: 0;
-  color: var(--ink-muted);
+  color: var(--on-media-ink);
   font-size: var(--text-meta);
 }
 
@@ -3735,12 +3755,17 @@ p.home-filters__facets {
   overflow: hidden;
 }
 
+/* The tile's media region: same midnight ground as the canvas, both themes. */
 .room-mosaic__presence {
   position: relative;
   display: grid;
   place-items: center;
   aspect-ratio: 16 / 9;
-  background: radial-gradient(130% 110% at 18% 0%, var(--action-soft), var(--rail) 68%);
+  background: radial-gradient(
+    130% 110% at 18% 0%,
+    var(--media-canvas-edge),
+    var(--media-canvas) 68%
+  );
 }
 
 .room-mosaic__avatar {
@@ -3748,14 +3773,14 @@ p.home-filters__facets {
   height: 3.5rem;
   border-radius: var(--radius-pill);
   object-fit: cover;
-  box-shadow: 0 0 0 1px var(--border-strong);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--on-media-ink) 32%, transparent);
 }
 
 .room-mosaic__avatar--empty {
   display: grid;
   place-items: center;
-  background: var(--surface-subtle);
-  color: var(--ink-secondary);
+  background: color-mix(in srgb, var(--on-media-ink) 14%, transparent);
+  color: var(--on-media-ink);
   font-size: var(--text-card);
   font-weight: 600;
 }
@@ -3772,14 +3797,18 @@ p.home-filters__facets {
   filter: blur(9px);
 }
 
+/* Pinned on the media, so it takes Home's preview-mosaic treatment rather than
+   floating a porcelain chip on a midnight frame. */
 .room-mosaic__sharing {
   position: absolute;
   left: 0.5rem;
   top: 0.5rem;
   border-radius: 0.3125rem;
   padding: 0.125rem 0.4375rem;
-  background: color-mix(in srgb, var(--live) 12%, var(--surface));
-  color: var(--live);
+  background: var(--media-scrim);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--on-media-live) 42%, transparent);
+  color: var(--on-media-live);
   font-size: var(--text-label);
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -3905,44 +3934,8 @@ p.home-filters__facets {
   opacity: 0.55;
 }
 
-.room-panel {
-  border-radius: var(--radius-control);
-  background: var(--surface);
-  box-shadow: var(--card-shadow);
-  padding: 1.25rem;
-}
-
-.room-panel h2 {
-  margin: 0 0 0.875rem;
-  color: var(--ink-muted);
-  font-size: var(--text-label);
-  font-weight: 650;
-  letter-spacing: 0.16em;
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-.room-panel__facts {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.875rem 1rem;
-  margin: 0;
-}
-
-.room-panel__facts dt {
-  color: var(--ink-faint);
-  font-size: var(--text-label);
-  line-height: 1;
-}
-
-.room-panel__facts dd {
-  margin: 0.375rem 0 0;
-  color: var(--ink);
-  font-size: var(--text-meta);
-  line-height: 1.3;
-}
-
 @media (min-width: 48rem) {
+  /* Every room state puts the rail beside its content. */
   .room-shell {
     display: grid;
     grid-template-columns: 4.5rem minmax(0, 1fr);
@@ -3950,16 +3943,47 @@ p.home-filters__facets {
     align-items: stretch;
   }
 
+  /* ADR 0100's fixed-viewport workspace: the shell is the viewport, and the
+     only two things that scroll inside it are the media canvas and the dock
+     panel. Everything between them is a clamped grid — hence min-height: 0 at
+     every level, since a flex or grid item's automatic minimum would otherwise
+     grow the chain back past the clip and take the header and shelf with it.
+     Admitted only: pre-admission, the Past Stream summary and the not-found
+     boundary carry no inner scroller, so clamping them would clip whatever
+     does not fit — larger text or a short window — with nothing left to
+     scroll. They keep ordinary document scroll. */
+  .room-shell[data-room-shell="admitted"] {
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  /* Home sizes the rail against `.home-shell`'s 1rem padding and a scrolling
+     document; inside the clamp the grid row is the height, so let it stretch
+     to that. The scrolling states keep Home's sticky rail. */
+  .room-shell[data-room-shell="admitted"] .home-navigation {
+    position: static;
+    height: auto;
+    min-height: 0;
+  }
+
   .room-boundary {
     grid-column: 2;
     gap: 1.75rem;
+    min-height: 0;
     padding: 2.125rem 2.5rem 3.5rem;
   }
 
+  /* The workspace stops being a centred card: `width` has to be reset along
+     with `max-width`, or the 44rem clamp above keeps it at 704px inside a
+     1208px column and squeezes the stage below the mosaic's 240px floor. The
+     other three states are ordinary prose and keep that readable measure. */
   .room-boundary--admitted {
     display: grid;
+    width: auto;
     grid-template-columns: minmax(0, 1fr) 20rem;
-    align-items: start;
+    grid-template-rows: auto minmax(0, 1fr);
+    align-items: stretch;
+    min-height: 0;
   }
 
   .room-boundary--admitted .room-header,
@@ -3967,20 +3991,44 @@ p.home-filters__facets {
     grid-column: 1 / -1;
   }
 
-  .room-panel {
-    position: sticky;
-    top: 2.125rem;
+  .room-stage {
+    min-height: 0;
   }
 
-  .room-panel__facts {
-    grid-template-columns: minmax(0, 1fr);
+  /* The canvas takes the whole leftover column and absorbs every overflow, so
+     the shelf below it keeps its intrinsic height instead of being squeezed. */
+  .room-stage__canvas {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .room-shelf {
+    flex: none;
+  }
+
+  /* Not a scroller: the region and the mosaic sit inside the canvas's scroll,
+     and a second scroller here would put two scrollbars on one list of tiles.
+     It keeps its intrinsic height instead — shrinking it to the canvas is what
+     the flex default would do, and that squashes the tiles flat rather than
+     giving the canvas anything to scroll. */
+  .room-mosaic-region {
+    flex: none;
+  }
+
+  /* `.room-dock__panel` is the dock's scroller; the dock itself only clips. */
+  .room-dock {
+    min-height: 0;
+    overflow: hidden;
   }
 }
 
 .room-mosaic__video {
   width: 100%;
   aspect-ratio: 16 / 9;
-  background: var(--surface-sunken, #000);
+  /* ADR 0100 letterboxes with `contain`, so the bars are visible surface: the
+     media canvas, not the pure black ADR 0096 rules out at either end. */
+  background: var(--media-canvas);
   object-fit: contain;
 }
 
@@ -4247,6 +4295,14 @@ p.home-filters__facets {
 }
 
 @media (max-width: 47.999rem) {
+  /* ADR 0103: the admitted room replaces the global bottom navigation with one
+     room control bar. Only the admitted state — pre-admission and the Past
+     Stream summary render no room bar and keep the global nav. The page keeps
+     document scroll here, so the shell takes no height clamp. */
+  .room-shell[data-room-shell="admitted"] .home-bottom-navigation {
+    display: none;
+  }
+
   .room-boundary--admitted {
     padding-bottom: 5rem;
   }
@@ -4276,12 +4332,6 @@ p.home-filters__facets {
 @media (min-width: 48rem) {
   .room-mobile-bar {
     display: none;
-  }
-
-  .room-boundary--admitted .room-dock {
-    position: sticky;
-    top: 2.125rem;
-    max-height: calc(100vh - 4.25rem);
   }
 }
 

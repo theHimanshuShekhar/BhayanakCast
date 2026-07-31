@@ -22,10 +22,14 @@ import {
 } from './room-queries'
 import type { RoomSocket } from './useRoomRealtime'
 import type { RoomView } from './room-types'
+import type { SessionProjection } from '../auth/auth-client'
 
 interface RoomRouteProps {
   readonly roomId: string
   readonly initialRoom: RoomView
+  /** The rail needs it in every boundary, so every boundary is handed it here
+      rather than defaulting to anonymous when a caller forgets. */
+  readonly session: SessionProjection | null
 }
 
 type ConfirmationAction = 'admit' | 'leave'
@@ -81,7 +85,7 @@ export function focusRoomPrimaryHeading(
 }
 
 
-export function RoomRoute({ roomId, initialRoom }: RoomRouteProps) {
+export function RoomRoute({ roomId, initialRoom, session }: RoomRouteProps) {
   const queryClient = useQueryClient()
   const roomQuery = useQuery({
     ...roomProjectionQueryOptions(roomId),
@@ -147,7 +151,7 @@ export function RoomRoute({ roomId, initialRoom }: RoomRouteProps) {
 
   if (!projection) return <RoomNotFound />
   if (projection.kind === 'pastStream') {
-    return <PastStreamSummary room={projection.room} />
+    return <PastStreamSummary room={projection.room} session={session} />
   }
   if (projection.kind === 'admitted') {
     return (
@@ -155,6 +159,7 @@ export function RoomRoute({ roomId, initialRoom }: RoomRouteProps) {
         <RoomAdmittedBoundary
           room={projection.room}
           self={projection.self}
+          session={session}
           socket={roomSocket}
           onConfirmation={(next) => {
             setError(null)
@@ -184,6 +189,7 @@ export function RoomRoute({ roomId, initialRoom }: RoomRouteProps) {
     <>
       <RoomPreAdmission
         room={projection.room}
+        session={session}
         onConfirmation={(next, nextPassword) => {
           setError(null)
           setPassword(nextPassword)

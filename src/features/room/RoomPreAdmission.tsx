@@ -5,15 +5,18 @@ import { authClient } from '../auth/auth-client'
 import { safeOAuthCallbackPath } from '../auth/SignInButton'
 import type { MembershipConfirmation } from '../../server/rooms/room-service'
 import type { RoomPreAdmission as RoomPreAdmissionView } from './room-types'
+import type { SessionProjection } from '../auth/auth-client'
 
 interface RoomPreAdmissionProps {
   readonly room: RoomPreAdmissionView
+  readonly session: SessionProjection | null
   readonly onJoined: () => void
   readonly onConfirmation: (confirmation: MembershipConfirmation, password?: string) => void
   readonly onRefresh: () => Promise<unknown>
 }
 export function RoomPreAdmission({
   room,
+  session,
   onJoined,
   onConfirmation,
   onRefresh,
@@ -71,7 +74,7 @@ export function RoomPreAdmission({
   }
 
   return (
-    <RoomShell state="pre-admission">
+    <RoomShell session={session} state="pre-admission">
       <section
         className="room-boundary room-boundary--pre-admission"
         data-room-state="pre-admission"

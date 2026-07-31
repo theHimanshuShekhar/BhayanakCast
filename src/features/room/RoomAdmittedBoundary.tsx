@@ -13,12 +13,14 @@ import { useRoomRealtime, type RoomSocket } from './useRoomRealtime'
 import type { RoomRosterMember } from '../../server/rooms/room-roster'
 import type { MembershipConfirmation } from '../../server/rooms/room-service'
 import type { RoomAdmitted, RoomSelfMembership } from './room-types'
+import type { SessionProjection } from '../auth/auth-client'
 
 type DockTab = 'chat' | 'people' | 'activity'
 
 interface RoomAdmittedBoundaryProps {
   readonly room: RoomAdmitted
   readonly self: RoomSelfMembership
+  readonly session: SessionProjection | null
   /** The room shares Home's single Socket.IO connection (ADR 0104). */
   readonly socket: RoomSocket | null
   readonly onLeft: (roomState: 'active' | 'empty-grace' | 'ended') => void
@@ -28,6 +30,7 @@ interface RoomAdmittedBoundaryProps {
 export function RoomAdmittedBoundary({
   room,
   self,
+  session,
   socket,
   onLeft,
   onConfirmation,
@@ -99,7 +102,7 @@ export function RoomAdmittedBoundary({
   }
 
   return (
-    <RoomShell state="admitted">
+    <RoomShell session={session} state="admitted">
       <main className="room-boundary room-boundary--admitted" data-room-state="admitted">
         <RoomHeader
           category={room.category}
