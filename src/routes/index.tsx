@@ -1,6 +1,4 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { createServerFn } from '@tanstack/react-start'
-import { getRequest } from '@tanstack/react-start/server'
 import { HomePage } from '../features/home/HomePage'
 import {
   connectedPresenceQueryOptions,
@@ -11,14 +9,7 @@ import {
   pastStreamsQueryOptions,
 } from '../features/home/home-queries'
 import { parseHomeSearch } from '../features/home/home-search'
-import {
-  getProductionAuth,
-  readSessionProjection,
-} from '../server/auth/auth'
-
-const getHomeSession = createServerFn({ method: 'GET' }).handler(() =>
-  readSessionProjection(getProductionAuth(), getRequest().headers),
-)
+import { getRouteSession } from '../server/auth/session-fn'
 
 export const Route = createFileRoute('/')({
   validateSearch: parseHomeSearch,
@@ -35,7 +26,7 @@ export const Route = createFileRoute('/')({
       })
     }
     abortController.signal.addEventListener('abort', cancel, { once: true })
-    const session = getHomeSession()
+    const session = getRouteSession()
     const critical = Promise.allSettled(
       deps.q
         ? [

@@ -1,20 +1,11 @@
-import { createServerFn } from '@tanstack/react-start'
-import { getRequest } from '@tanstack/react-start/server'
 import { createFileRoute } from '@tanstack/react-router'
 import { ProfilePage } from '../features/profile/ProfilePage'
 import { publicProfileQueryOptions } from '../features/public-profile/public-profile-queries'
-import {
-  getProductionAuth,
-  readSessionProjection,
-} from '../server/auth/auth'
-
-const getProfileSession = createServerFn({ method: 'GET' }).handler(() =>
-  readSessionProjection(getProductionAuth(), getRequest().headers),
-)
+import { getRouteSession } from '../server/auth/session-fn'
 
 export const Route = createFileRoute('/profile')({
   loader: async ({ context, abortController }) => {
-    const session = await getProfileSession()
+    const session = await getRouteSession()
     if (!session) return { profile: null, session: null }
 
     const profileQuery = publicProfileQueryOptions(session.id)
