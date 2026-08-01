@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { io } from 'socket.io-client'
-import { expect, test } from './fixtures'
+import { expect, test, gotoHydrated } from './fixtures'
 
 const PROFILE = {
   id: '564738291056473829',
@@ -51,7 +51,7 @@ test('account deletion uses explicit native confirmation and supports pending ca
   })
   const page = await signedIn.context.newPage()
 
-  await page.goto(`${authSessions.origin}/profile`)
+  await gotoHydrated(page, `${authSessions.origin}/profile`)
   await expect(page.getByRole('heading', { name: 'Account deletion' })).toBeVisible()
   await page.getByRole('button', { name: 'Request account deletion' }).click()
 
@@ -111,7 +111,7 @@ test('pending deletion forcibly disconnects an already connected socket', async 
   socket.once('disconnect', disconnected.resolve)
 
   try {
-    await page.goto(`${authSessions.origin}/profile`)
+    await gotoHydrated(page, `${authSessions.origin}/profile`)
     socket.connect()
     await expect(connected.promise).resolves.toBeUndefined()
     await page.getByRole('button', { name: 'Request account deletion' }).click()
@@ -138,15 +138,15 @@ test('pending deletion hides and cancellation restores public projections across
   const cleanupActivity = await seedPastActivity(authSessions.sql, session.id)
 
   try {
-    await pageB.goto(`${authSessions.origin}/users/${session.id}`)
+    await gotoHydrated(pageB, `${authSessions.origin}/users/${session.id}`)
     await expect(pageB.getByRole('heading', { name: 'Deletion member' })).toBeVisible()
     await expect(pageB.getByText('1 room', { exact: true })).toBeVisible()
-    await pageB.goto(`${authSessions.origin}/?q=Deletion%20member`)
+    await gotoHydrated(pageB, `${authSessions.origin}/?q=Deletion%20member`)
     await expect(
       pageB.getByRole('link', { name: 'Open Deletion member public profile' }),
     ).toBeVisible()
 
-    await pageA.goto(`${authSessions.origin}/profile`)
+    await gotoHydrated(pageA, `${authSessions.origin}/profile`)
     const deletionTrigger = pageA.getByRole('button', { name: 'Request account deletion' })
     const deletionDialog = pageA.getByRole('dialog')
     await expect(async () => {
@@ -156,10 +156,10 @@ test('pending deletion hides and cancellation restores public projections across
     await deletionDialog.getByRole('button', { name: 'Request deletion now' }).click()
     await expect(pageA.getByRole('region', { name: 'Account deletion' }).getByRole('status')).toContainText('Deletion request pending')
 
-    await pageB.goto(`${authSessions.origin}/users/${session.id}`)
-    await pageB.reload()
+    await gotoHydrated(pageB, `${authSessions.origin}/users/${session.id}`)
+    await gotoHydrated(pageB, pageB.url())
     await expect(pageB.getByRole('heading', { name: 'Profile not found' })).toBeVisible()
-    await pageB.goto(`${authSessions.origin}/?q=Deletion%20member`)
+    await gotoHydrated(pageB, `${authSessions.origin}/?q=Deletion%20member`)
     await expect(
       pageB.getByRole('link', { name: 'Open Deletion member public profile' }),
     ).toHaveCount(0)
@@ -167,11 +167,11 @@ test('pending deletion hides and cancellation restores public projections across
 
     await pageA.getByRole('button', { name: 'Cancel deletion request' }).click()
     await expect(pageA.getByText('Your account is active again.')).toBeVisible()
-    await pageB.goto(`${authSessions.origin}/users/${session.id}`)
-    await pageB.reload()
+    await gotoHydrated(pageB, `${authSessions.origin}/users/${session.id}`)
+    await gotoHydrated(pageB, pageB.url())
     await expect(pageB.getByRole('heading', { name: 'Deletion member' })).toBeVisible()
     await expect(pageB.getByText('1 room', { exact: true })).toBeVisible()
-    await pageB.goto(`${authSessions.origin}/?q=Deletion%20member`)
+    await gotoHydrated(pageB, `${authSessions.origin}/?q=Deletion%20member`)
     await expect(
       pageB.getByRole('link', { name: 'Open Deletion member public profile' }),
     ).toBeVisible()
@@ -205,7 +205,7 @@ test('denies a real authenticated theme mutation while deletion is pending', asy
   })
 
   try {
-    await page.goto(`${authSessions.origin}/profile`)
+    await gotoHydrated(page, `${authSessions.origin}/profile`)
     await page.getByRole('combobox', { name: 'Theme preference' }).selectOption('dark')
     const request = await captured
     await page.unroute('**/_serverFn/**')
@@ -246,7 +246,7 @@ test('service approval invalidates the real Better Auth browser session', async 
   const signedIn = await authSessions.createBrowserContext(PROFILE)
   const page = await signedIn.context.newPage()
   try {
-    await page.goto(`${authSessions.origin}/profile`)
+    await gotoHydrated(page, `${authSessions.origin}/profile`)
     const session = await (await page.request.get(`${authSessions.origin}/api/session`)).json() as {
       id: string
     }
@@ -255,7 +255,7 @@ test('service approval invalidates the real Better Auth browser session', async 
     await expect(page.getByRole('region', { name: 'Account deletion' }).getByRole('status')).toContainText('Deletion request pending')
 
     await authSessions.respondToDeletion(session.id, 'approved')
-    await page.reload()
+    await gotoHydrated(page, page.url())
     await expect(
       page.getByText('Sign in to see your public activity and account details.'),
     ).toBeVisible()
@@ -286,7 +286,7 @@ test('Escape cannot hide a busy deletion confirmation or its error', async ({
   })
 
   try {
-    await page.goto(`${authSessions.origin}/profile`)
+    await gotoHydrated(page, `${authSessions.origin}/profile`)
     await page.getByRole('button', { name: 'Request account deletion' }).click()
     const dialog = page.getByRole('dialog', { name: 'Request account deletion' })
     await dialog.getByRole('button', { name: 'Request deletion now' }).click()
@@ -312,7 +312,7 @@ test('external rejection restores pending profile controls in place', async ({
   const signedIn = await authSessions.createBrowserContext(PROFILE)
   const page = await signedIn.context.newPage()
   try {
-    await page.goto(`${authSessions.origin}/profile`)
+    await gotoHydrated(page, `${authSessions.origin}/profile`)
     const session = await (await page.request.get(`${authSessions.origin}/api/session`)).json() as {
       id: string
     }
@@ -347,7 +347,7 @@ test('Platform Admin rejects or irreversibly approves a pending deletion from th
   const memberPage = await member.context.newPage()
   const adminPage = await admin.context.newPage()
   try {
-    await memberPage.goto(`${authSessions.origin}/profile`)
+    await gotoHydrated(memberPage, `${authSessions.origin}/profile`)
     await memberPage.getByRole('button', { name: 'Request account deletion' }).click()
     await memberPage
       .getByRole('dialog')
@@ -355,13 +355,13 @@ test('Platform Admin rejects or irreversibly approves a pending deletion from th
       .click()
     await expect(memberPage.getByText(/Deletion request pending/)).toBeVisible()
 
-    await adminPage.goto(`${authSessions.origin}/admin`)
+    await gotoHydrated(adminPage, `${authSessions.origin}/admin`)
     const review = adminPage.getByRole('listitem').filter({ hasText: 'Deletion member' })
     await review.getByRole('button', { name: 'Reject' }).click()
     await review.getByRole('button', { name: 'Confirm rejection' }).click()
     await expect(review).toHaveCount(0)
 
-    await memberPage.reload()
+    await gotoHydrated(memberPage, memberPage.url())
     await expect(memberPage.getByRole('button', { name: 'Request account deletion' })).toBeVisible()
     await memberPage.getByRole('button', { name: 'Request account deletion' }).click()
     await memberPage
@@ -370,13 +370,13 @@ test('Platform Admin rejects or irreversibly approves a pending deletion from th
       .click()
     await expect(memberPage.getByText(/Deletion request pending/)).toBeVisible()
 
-    await adminPage.reload()
+    await gotoHydrated(adminPage, adminPage.url())
     const resubmitted = adminPage.getByRole('listitem').filter({ hasText: 'Deletion member' })
     await resubmitted.getByRole('button', { name: 'Approve' }).click()
     await resubmitted.getByRole('button', { name: 'Confirm permanent deletion' }).click()
     await expect(resubmitted).toHaveCount(0)
 
-    await memberPage.reload()
+    await gotoHydrated(memberPage, memberPage.url())
     await expect(
       memberPage.getByText('Sign in to see your public activity and account details.'),
     ).toBeVisible()

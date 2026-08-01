@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { Page } from '@playwright/test'
-import { expect, test } from './fixtures'
+import { expect, test, gotoHydrated } from './fixtures'
 import type { AuthSessionFixture } from './fixtures'
 import { installWebRtcProbe } from '../helpers/webrtc'
 
@@ -32,7 +32,7 @@ const VIEWER = {
 }
 
 async function createRoom(page: Page) {
-  await page.goto('/')
+  await gotoHydrated(page, '/')
   await page
     .getByTestId('home-bottom-navigation')
     .getByRole('button', { name: 'Create room' })

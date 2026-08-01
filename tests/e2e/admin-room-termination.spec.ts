@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { Page } from '@playwright/test'
-import { expect, test } from './fixtures'
+import { expect, test, gotoHydrated } from './fixtures'
 
 const ADMIN = { id: '102938475610293900', username: 'room-admin', global_name: 'Room Admin', avatar: 'admin-avatar', email: 'room-admin@example.test', verified: true }
 const HOST = { id: '302938475610293902', username: 'room-host', global_name: 'Room Host', avatar: 'host-avatar', email: 'room-host@example.test', verified: true }
@@ -49,16 +49,20 @@ test('Admin ends a populated Room and every connected Account reaches the generi
     [randomUUID(), randomUUID(), hostStreamId, memberStreamId, memberMembershipId, hostMembershipId],
   )
 
-  await Promise.all([hostPage.goto(`/rooms/${roomId}`), memberPage.goto(`/rooms/${roomId}`)])
+  await Promise.all([
+    gotoHydrated(hostPage, `/rooms/${roomId}`),
+    gotoHydrated(memberPage, `/rooms/${roomId}`),
+  ])
   await expect(hostPage.getByRole('button', { name: 'End Room' })).toHaveCount(0)
-  await hostPage.goto('/admin')
+  await gotoHydrated(hostPage, '/admin')
   await expect(hostPage.getByRole('heading', { name: 'Page not found' })).toBeVisible()
-  await hostPage.goto(`/rooms/${roomId}`)
+  await gotoHydrated(hostPage, `/rooms/${roomId}`)
 
-  await adminPage.goto('/admin')
+  await gotoHydrated(adminPage, '/admin')
   const roomItem = adminPage.locator('.admin-room-item').filter({ hasText: 'Admin intervention fixture' })
   await roomItem.getByRole('button', { name: 'End Room' }).click()
   const confirm = roomItem.getByRole('button', { name: 'Confirm end Room' })
+  await expect(confirm).toBeVisible()
   await confirm.focus()
   await expect(confirm).toBeFocused()
   await confirm.click()

@@ -67,379 +67,48 @@ Working and ADR-conformant, not to be redone:
 
 ---
 
-## Open gap register
+## Current status
 
-This register reflects the current worktree. R1 shell changes and focused admitted-shell
-E2E coverage are present; this documentation reconciliation did not rerun that suite.
+The Room implementation and its focused proof matrix are complete in PR #29. The former
+gap IDs A4–I1 are covered by the responsive shell, header, mosaic, Host moderation, Chat,
+media recovery, projection, and route-state suites under `tests/e2e/`, with transactional
+contracts under `tests/integration/`.
 
-| # | Gap | Governing | Today |
-|---|-----|-----------|-------|
-| A4 | Dock is a persistent 320px column at 768–1279px | `0100`, `0103`, `0107` | `.room-boundary--admitted` still uses `minmax(0, 1fr) 20rem` in the medium range; drawer with Close/Escape/focus-return does not exist |
-| B1 | Header is not the two-line composition; no Back/Home, no privacy/Full/live state, no current Host | `0100`, `DESIGN.md:80` | `RoomHeader` shows eyebrow `Host`/`Member`; Back lives in the shelf |
-| B2 | Only the 1-minute warning changes the countdown | `0103` | `data-countdown` is `urgent`/`normal` only |
-| B3 | No compact mobile header, no labeled Details sheet | `0103`, `DESIGN.md:96` | absent |
-| C1 | The 2×2 in-place span applies at every width | `0101`, `0103`, `0107` | the watched-tile span is unconditional; no two-column overview or stage-plus-strip below 768px |
-| C4 | Watcher stack has no accessible label naming visible watchers | `0101` | avatars are hidden from assistive technology and text exposes only the total |
-| C5 | Presence tiles carry no reconnecting/compatibility state | `0101`, `0102` | state line is Host/You/Live/freshness only |
-| D1 | Kick does not exist | `0009` | no server method, server function, or UI |
-| D2 | Host transfer does not exist | `0056` | no server method, server function, or UI |
-| D3 | Host ban acts immediately without confirmation | `0102`, `0057` | the admitted boundary invokes the ban action directly |
-| D4 | Host cannot stop another member's Stream from the UI | `0058`, `0102` | server support exists; only the UI is missing |
-| D5 | Report/Host actions are loose buttons, not a compact menu | `0101`, `0102` | two bare buttons per tile |
-| D6 | `stream-stopped` Activity credits the actor, not the Stream owner | `0102` | a Host stopping another member's Stream reads as the Host's own Stream ending |
-| D7 | `member-removed` and `host-transferred` have labels but no emitter | `0009`, `0056` | both are in the event union and labeled; nothing publishes either |
-| E1 | Chat has no bottom-anchoring and no `New messages` action | `0102`, `PRODUCT.md:89` | badge only while the tab is hidden |
-| E2 | No per-message menu for message Report or room-level chat Mute | `0102`, `0019` | absent; mute is profile-only |
-| E3 | Character counter is always visible | `0102` | unconditional in the composer |
-| E4 | Typing collapses 3+ typists to “Several people are typing…” | `0102` | it does not use two names plus `and N others` |
-| E5 | People rows have no avatar or reconnecting/compatibility/capability state | `0102` | name + Host/You/Streaming only |
-| E6 | Composer stays live while realtime is reconnecting or lost | `0103` | the dock does not read connection state |
-| E7 | Sheets lack Escape/focus return and tabs are not a semantic tablist | `0103`, `0102` | sheet state only toggles visibility |
-| F1 | Compatibility banner has no `Retry compatibility` | `0103` | support is computed once and cannot be re-tested |
-| F2 | Mobile `Desktop only` has no help affordance | `0103` | disabled reason is an attribute only |
-| F3 | Reconnecting never shows the remaining 45-second grace | `0103` | reconnect grace is a bare timer |
-| G1 | Pre-admission is a header plus a seat strip, not 4b's gate | design `:150`, `PRODUCT.md:54` | no chips/hero/stat-pair/presence-line composition |
-| H1 | Past Stream summary carries its facts in the header, not 4b's stat pair | design `:181` | cosmetic only; behavior is correct |
-| I1 | Admitted-room E2E coverage is incomplete | `0103`, `0106`, `0107` | focused shell coverage exists, but the media, moderation, companion, recovery, and responsive matrix does not |
+Completed implementation tickets:
 
-Standing implementation debt, carried over and outside this room plan: ADR `0096` fixes
-the type scale at 13/14/16/18/24/30/36px with a 13px floor, while
-`src/styles/app.css` still ships 12.5/12/11.5/11 and 10px text. The accepted scale
-remains authoritative; bring the CSS up to it in separate work rather than amending the
-design decision or widening this plan.
+- #11–#17: Room companions, header, mosaic, member actions, kick, Host transfer, and
+  Host-stopped Streams.
+- #18–#24: Chat safety, media recovery, stable route states, Account deletion and
+  scheduled retention, Platform Admin reports, sanctions, and room termination.
+- #25: single-node deployment, backup, restore, exposure, and recovery tooling. Its
+  infrastructure-dependent evidence remains an operator responsibility.
 
----
+## Remaining launch qualification
 
-## Phase R1 — Shell correctness (implemented; focused verification present)
+- #26 — retain the final automated V1 journey-matrix evidence from a clean no-retry run.
+- #27 — operator-run capacity evidence for 25 simultaneous full Rooms and representative
+  real-network direct-media success. Synthetic CI cannot establish the accepted 99%
+  criterion.
+- #28 — representative human usability cohort evidence for the accepted 90% unaided
+  completion criterion.
 
-The current worktree contains these shell changes and their focused E2E scenarios. The
-steps remain here as the implementation record; the broader admitted-room matrix remains
-open under I1.
+Issues #27 and #28 are routed to `ready-for-human`; they are not application implementation
+gaps.
 
-1. **Session reaches the room rail (A1).** Extract `getHomeSession`
-   (`routes/index.tsx:19`) into a shared server fn — `src/server/auth/session-fn.ts` is
-   the natural home, and `routes/index.tsx` and `routes/profile.tsx` both switch to it.
-   `routes/rooms/$roomId.tsx` loads it alongside the projection; `RoomRoute` threads it
-   into all three boundaries, which pass it to `RoomShell`.
-2. **One bottom bar below 768px (A2).** Give `HomeNavigation` a `variant` — or, cheaper
-   and with fewer callers to touch, let `RoomShell` set `data-room-shell` on the wrapper
-   (it already does) and add `.room-shell[data-room-shell="admitted"] .home-bottom-navigation { display: none }`
-   inside the `max-width: 47.999rem` block. Only the admitted state suppresses it:
-   pre-admission and Past Stream are ordinary pages and keep the global nav
-   (`DESIGN.md:92` says "an admitted room").
-3. **Fixed-viewport workspace (A3, C3).** At ≥48rem, `.room-shell` becomes
-   `height: 100dvh` with `overflow: hidden`; `.room-boundary--admitted` becomes a grid
-   with `grid-template-rows: auto minmax(0, 1fr)` so the header is fixed and the stage
-   row owns the remaining height. `.room-stage__canvas` and `.room-mosaic` become the
-   bounded scroll region (`overflow-y: auto`, `min-height: 0`); the dock gets its own.
-   Drop the `position: sticky` workarounds at `app.css:3970` and `:4282`. Below 48rem the
-   page keeps document scroll — `0103` describes a scrolling phone shell with a fixed
-   control bar, not a locked viewport.
-4. **Midnight canvas in both themes (A5).** Add explicit canvas tokens
-   (`--canvas`, `--canvas-edge`, `--canvas-ink`) pinned to the midnight values from the
-   nocturne bundle in *both* theme blocks, and build `.room-stage__canvas`,
-   `.room-mosaic__tile` media regions and `.room-mosaic__video` from them. Chrome — rail,
-   header, shelf, dock, dialogs — keeps the selected theme.
+## Verification
 
-**Tests.** `tests/e2e/room-shell.spec.ts` (new): signed-in member sees their account
-control in the room rail and no `Discord` sign-in door; at 390px exactly one bottom bar is
-visible in an admitted room and the global nav is visible on pre-admission; at 1280px the
-document does not scroll while the mosaic does. Extend `tests/e2e/root-theme.spec.ts` or
-add a case asserting the canvas background is unchanged between porcelain and midnight.
-
-**Exit:** admitted room at 1280px is a fixed viewport with two nested scroll regions; one
-bottom bar at 390px; rail identity correct in all three states.
-
----
-
-## Phase R2 — Room header
-
-1. **Two lines (B1).** `RoomHeader` gains an explicit two-row structure per
-   `0100`/`DESIGN.md:80`. Line 1: Back/Home link, room name (`data-room-primary-heading`
-   stays — `RoomRoute` focuses it), `Public`/`Private` chip plus `Full` or live state,
-   Host-only Settings. Line 2: description (already clamped), category and tags, current
-   Host avatar and name, member and Stream counts, lifetime countdown. Move the Back link
-   out of `RoomControlShelf.tsx:47`; Leave stays in the shelf (`0100`).
-   The current Host comes off the roster — `roster.find(m => m.role === 'host')` — so no
-   projection change is needed for the admitted header.
-   Keep the header at two rows: the description already clamps, and the countdown must not
-   be displaced into a third row.
-2. **Countdown emphasis (B2).** Replace the boolean with a three-step attribute driven by
-   the latest `room-warning` minutes: `data-countdown="normal" | "notice" | "urgent"`,
-   where 30 and 10 get restrained emphasis and only 1 is warning-level. Put the mapping in
-   a pure exported function beside `expiresInLabel` (`RoomShell.tsx:111`).
-3. **Mobile header and Details sheet (B3).** Below 768px the header collapses to Back, a
-   truncated name, privacy state and countdown. A labeled `Details` control opens a sheet
-   carrying category/tags, current Host, member/Stream counts and (for the Host) Settings.
-   Reuse the sheet mechanics from R3 step 2 rather than writing a second sheet — `Details`
-   becomes a fourth sheet key alongside `chat`/`people`/`activity`. Core metadata never
-   scrolls horizontally.
-
-**Tests.** Unit: countdown-emphasis mapping (`tests/unit/room-countdown.test.ts`).
-E2E in `room-shell.spec.ts`: the header is two rows at 1280px and shows the Host's name;
-at 390px the header is compact and `Details` opens a sheet containing the category and
-Host; Settings appears only for the Host.
-
----
-
-## Phase R3 — Companions: medium drawer, sheets, accessibility
-
-1. **Workspace drawer at 768–1279px (A4).** The dock stops being a grid column in that
-   band and becomes a non-modal right drawer: no scrim, no focus trap, no media pause, and
-   **no mosaic reflow** — the mosaic keeps its column count when the drawer opens. It
-   needs an explicit Close, Escape dismissal, focus return to the invoking tab, and its own
-   scroll. Uncovered tile controls stay usable; a keyboard-focused mosaic control must
-   scroll clear of the drawer (`scrollIntoView` on focus when the drawer is open, guarded
-   by `prefers-reduced-motion`). At ≥1280px the dock is the persistent **360px**
-   (`22.5rem`) column it already is at that breakpoint. Delete the 320px column at
-   `app.css:3961` — `0107` rejects it explicitly.
-   The tab strip that invokes the drawer lives where the 1280px dock's tabs live, so the
-   drawer needs a collapsed rail state carrying the unread/count badges.
-2. **Sheet behaviour below 768px (E7).** Escape dismisses; dismissal and sheet switching
-   return focus to the invoking room-bar or header control; `Expand`/`Collapse` move
-   between the existing 55vh and 90vh heights (`app.css:4267`/`:4271`) with labels, and
-   Chat expands for the on-screen keyboard. Track the invoking element in a ref in
-   `RoomAdmittedBoundary` where `sheet` state already lives.
-3. **Real tablist.** `.room-dock__tabs` gets `role="tablist"`, each tab
-   `aria-controls`/`id`, and the panel `aria-labelledby`. Badge counts get accessible text
-   (`3 unread messages`, not a bare `3`).
-
-**Tests.** `tests/e2e/room-responsive.spec.ts` (new): at 1024px opening People does not
-change the mosaic's column count, Escape closes the drawer and focus returns to the People
-tab; at 390px Chat opens at ~55%, `Expand` reaches ~90%, Escape returns focus to the Chat
-bar button. Unit coverage for the tab/panel wiring in `tests/unit/room-dock.test.ts`.
-
----
-
-## Phase R4 — Mosaic: two emphasis models
-
-`0107` is explicit that above and below 768px differ in emphasis model, not only in size,
-and that both must be tested as distinct behaviours.
-
-1. **≥768px — in place (already correct).** Keep the 2×2 span (`app.css:3989`); scope it
-   to the ≥48rem media query so it stops applying on phones. Confirm the "scroll before a
-   cell falls below 240px" rule still holds now that tiles carry footers — the grid's
-   `minmax(15rem, 1fr)` is the 240px floor, and R1's bounded region is what scrolls.
-2. **<768px — overview, then stage plus strip (C1).** With no active watch, a two-column
-   overview. Once a watch succeeds, the watched tile becomes the primary stage and every
-   remaining tile moves into a labeled horizontal strip beneath it. The strip is the one
-   place horizontal scrolling is allowed — footers inside it never scroll horizontally.
-   This is a DOM change, not only CSS: the strip is a different container, so
-   `RoomMemberMosaic` needs a layout mode prop (`'grid' | 'stage'`) chosen from a media
-   query hook, with the tile component shared between both. Tile *order* is unchanged in
-   both modes (`0101`).
-3. **`Hide non-streaming participants` applies to both (C6).** It already filters the
-   roster before rendering (`RoomMemberMosaic.tsx:33`), so it carries into the strip for
-   free — assert it rather than rebuild it.
-4. **Contain, not cover (C2).** `.room-mosaic__preview` → `object-fit: contain` on the
-   canvas surface, matching `.room-mosaic__video` (`app.css:3984`).
-5. **Watcher-stack label (C4).** Give the stack an accessible label naming the visible
-   watchers and the total — `Watched by Mira, Ken and 4 others`. Pure formatter, unit
-   tested; the avatars stay `aria-hidden`, and the stack stays informational with no
-   popover or focus target.
-6. **Presence state completeness (C5).** The tile state line gains reconnecting and
-   compatibility state. Reconnecting is per-member and the room projection does not carry
-   it today — derive it from the membership realtime the room already receives rather than
-   adding a column; if that proves to need a new event payload, that event is the one to
-   add (`0030` makes the protocol ours), not a schema change.
-
-**Tests.** `room-responsive.spec.ts`: at 1280px watching enlarges the tile to a 2×2 span
-with its DOM position unchanged; at 390px watching moves the other tiles into the strip and
-the watched tile becomes the stage; the hide-checkbox empties the strip of non-streamers.
-Unit: watcher-stack label formatting.
-
----
-
-## Phase R5 — Host moderation
-
-The largest functional gap: two ADR-decided capabilities have no implementation at all,
-and the one that exists is wired to fire without confirmation.
-
-1. **Kick (D1).** `MembershipService` gains `kick(hostAccountId, roomId, targetAccountId)`
-   — Host-authorized, closes the target's membership interval, stops any active stream, and
-   emits the same presence/stream-stop transitions as a forced leave. It creates **no** ban
-   (`0009`): the target may rejoin immediately if gates allow. Reuse
-   `departInTransaction` and `stopMembershipMedia` (`membership-service.ts:297`, `:340`)
-   rather than writing a second departure path — a kick is a forced leave with a different
-   authorizer. The target's client sees the generic forced-departure treatment `0103`
-   already specifies, and Activity says `X is no longer in this room.` (the existing
-   `member-removed` label, deliberately reasonless).
-2. **Host transfer (D2).** `RoomService.transferHost(hostAccountId, roomId, targetAccountId)`
-   — target must be a current member of the same live room; applies immediately, keeps both
-   accounts in the room, preserves all streams and subscriptions, broadcasts the new Host
-   state. The `host-transferred` Activity kind already exists in `activityLabel`, so the
-   publisher is the missing half. No request/acceptance workflow (`0056`).
-3. **Host stop stream (D4).** **Server side already works** — `StreamService.stop`
-   (`stream-service.ts:96`) authorizes the Host path and `stopStream`
-   (`room-queries.ts:186`) already takes an arbitrary `streamId`, so this is UI wiring
-   only: put `Stop this stream` in the streaming tile's Host menu and the matching People
-   row. Host stop is current-stream-only (`0058`); a later stream needs no new
-   authorization step and the watcher's client requires an explicit re-Watch (`0067`).
-4. **Correct the Activity attribution (D6, D7).** Three defects that only become visible
-   once Hosts can act on other members, so they land with this phase:
-   - `stopStream` publishes `publishActivity(roomId, 'stream-stopped', session.displayName)`
-     (`room-queries.ts:199`) — the **actor**. When a Host stops someone else's stream the
-     room reads that the Host stopped streaming. It must name the stream's owner;
-     `StreamService.stop` already returns the owning `membershipId`.
-   - Nothing publishes `member-removed`, so the kick in step 1 has a label waiting for it
-     and must emit it.
-   - Nothing publishes `host-transferred`, so the transfer in step 2 must emit it.
-5. **One compact menu per target (D3, D5).** Replace the loose `Report` and `Host tools`
-   buttons with a compact menu component used by both the tile footer and the People row —
-   a single `<RoomMemberMenu>` taking the member plus the viewer's capabilities, so the two
-   call sites cannot drift. It carries Report always, and for a Host: Stop stream (when
-   streaming), Kick, Ban, Transfer Host. **Every destructive item confirms** with a focused
-   dialog that names the target and states the consequence (`0102`); `MembershipConsequencesDialog`
-   is the closest precedent to follow, not to reuse verbatim. The menu is a real menu with
-   keyboard support — but it is never where a *safety* control hides: Report stays reachable
-   without opening anything, per `0102`'s "never behind hover".
-6. **No end-room control.** `0055` is explicit that V1 gives Hosts no room-end action.
-   Do not add one; do not let "Host tools" imply one.
-
-**Tests.** Integration (`tests/integration/room-moderation.test.ts`): kick closes the
-interval, stops the stream, writes no ban row, and permits immediate rejoin; transfer moves
-the role, preserves streams and subscriptions, and rejects a non-member target; non-Host
-callers are rejected on all three. E2E (`tests/e2e/room-moderation.spec.ts`): two contexts,
-Host kicks the member, the member's page becomes same-URL pre-admission with Join
-available; ban leaves Join unavailable; transfer moves the Host chip and the settings
-control to the other context; every action passes through a confirmation that can be
-cancelled without effect.
-
----
-
-## Phase R6 — Chat and companion completeness
-
-1. **Anchoring and `New messages` (E1).** Chat auto-scrolls only when the reader is
-   already at the bottom; otherwise it holds position and exposes a `New messages` action
-   that jumps to the latest. `RoomCompanionDock` already has the bottom test (`atBottom`)
-   and the Activity `New activity` cue — mirror that pattern for Chat instead of inventing
-   a second one.
-2. **Message menu: Report and Mute (E2).** Each message gains the compact menu with Report
-   for eligible targets and persistent chat Mute (`0019`). Mute immediately hides that
-   account's history and realtime messages for this viewer, emits nothing, and changes no
-   other room state — the SQL filter in `chat-service.ts` and the profile mute list already
-   exist, so this is a call site plus a local optimistic filter, not new persistence. A
-   muted account's typing indicator is also hidden (`0102`).
-3. **Counter near the limit (E3).** Show the 500-character counter only as the limit
-   approaches; keep validation and error text visible at all times.
-4. **Typing label (E4).** Up to two display names plus `and N others are typing`. Pure
-   function, unit tested, replacing the "Several people" collapse.
-5. **People rows (E5).** Add the avatar and the reconnecting/compatibility/sanction-relevant
-   capability state, without exposing private enforcement reasons.
-6. **Frozen mutations (E6).** While `realtime.connection !== 'live'`, disable the composer,
-   the send button, and every media mutation, with the reason stated once. The banner text
-   already exists in the shelf; the dock must honour the same state.
-
-**Tests.** Unit in `tests/unit/room-dock.test.ts`: chat anchoring and the `New messages`
-cue, typing label at 1/2/3/5 typists, counter threshold, composer disabled while
-reconnecting. E2E: mute in one context hides the muted author's history and new messages for
-that viewer only.
-
----
-
-## Phase R7 — Compatibility and recovery
-
-1. **Retryable compatibility (F1).** `supported` becomes a re-runnable probe rather than a
-   one-shot `useState` initializer (`useRoomMedia.ts:67`), and the persistent inline banner
-   gains `Retry compatibility` plus recovery guidance. The banner stays above the shelf and
-   the room bar, non-dismissible, not a toast and not a modal (`0103`, `0107`). Chat,
-   presence and previews stay usable throughout (`0059`).
-2. **`Desktop only` help (F2).** The disabled mobile Stream control gets a real help
-   affordance explaining the Chromium-family desktop requirement, not just a data
-   attribute.
-3. **Grace countdown (F3).** Surface the remaining seconds of the 45-second grace
-   (`0047`) while reconnecting, coarsely formatted so the shelf does not re-render every
-   second. On reclaim, refresh canonical state and restore presence/chat context with **no
-   backfill**; the former watched tile returns to its preview and requires an explicit
-   Watch, and the member's former stream stays stopped and requires an explicit Start —
-   which `useRoomMedia` already does, so this phase asserts it rather than rebuilding it.
-
-**Tests.** `tests/e2e/room-recovery.spec.ts` (new): with the socket forced offline, the
-room freezes, states the remaining grace, and disables the composer; on reconnect the
-canonical state returns with no duplicated backfill and the previously watched tile shows
-its preview with a `Watch` button. Unit: the grace formatter, and `supported` re-probing.
-
----
-
-## Phase R8 — Pre-admission and Past Stream surfaces
-
-Behaviour here is already correct; this is the design's visual language applied
-(`0107`), plus the composition 4b specifies.
-
-1. **Pre-admission (G1)**, from design `:150`–`:176`: a dark hero with a decorative
-   blurred backdrop — decorative only, built from tokens, **never** from real preview
-   bytes (pre-admission carries no preview keys and `0003` keeps it that way); the
-   `Public`/`Private` and category chips; the large room name; the explicit-join sentence
-   *"Join explicitly to enter this room — opening this link doesn't join you."*; the
-   member/Stream stat pair; one primary Join; and the live presence line
-   *"N people are here right now"*. The seat strip (`RoomShell.tsx:85`) stays — it is the
-   honest count-without-identities the design's member tiles cannot be. Keep the password
-   field for private rooms and the `Full` disabled state.
-2. **Past Stream (H1)**, from design `:181`–`:195`: the `Past stream` eyebrow, the muted
-   name, the ended sentence with its timestamp, and the member/Stream stat pair as a pair
-   rather than header facts. `Back to Home` stays; no Join control, ever (`0063`).
-3. Both keep the global bottom navigation below 768px (R1 step 2) — they are not admitted
-   rooms.
-
-**Tests.** Extend `tests/e2e/create-and-open-room.spec.ts`'s existing pre-admission case
-with assertions on the chips, the stat pair and the presence line; add a Past Stream case
-asserting no Join control and the `noindex` meta.
-
----
-
-## Phase R9 — The room's e2e suite
-
-The gap that lets every other gap regress: **no spec covers the admitted room** (I1).
-Phases R1–R8 each land their own specs above; this phase is the cross-cutting matrix
-`0103` and `0107` demand and closes the layered-testing obligation in `0106`.
-
-The fixture already supports this: `tests/e2e/fixtures.ts` gives multiple authenticated
-browser contexts plus raw `sql`, so a Host and two members in one room is a normal test.
-
-Matrix to cover, at 390px / 1024px / 1280px:
-
-- safe-area room bar and exactly one bottom bar;
-- both sheet heights, `Expand`/`Collapse` labels, focus return on dismissal and switching;
-- the medium drawer: no reflow, Escape, focus return, focused mosaic control scrolls clear;
-- both emphasis models: 2×2 in place above the breakpoint, stage-plus-strip below;
-- chat-only compatibility: banner persists, Start/Watch disabled with the reason, chat
-  works;
-- reconnect reclaim and reconnect expiry;
-- forced departure (kick, ban, displacement) → same-URL pre-admission;
-- in-place room end → Past Stream summary at the same URL;
-- short viewport and 200% zoom: header and shelf controls never become unreachable
-  (`0100`'s consequences name this explicitly).
-
----
-
-## Testing
-
-Layered per `0106`; every phase lands with its tests in the same change.
+Layered per ADR `0106`:
 
 - `pnpm typecheck`
-- `pnpm test:unit` — pure logic: countdown emphasis, typing label, watcher-stack label,
-  grace formatter, chat anchoring
-- `pnpm test:integration` — kick, transfer, Host stop-stream, authorization rejections
+- `pnpm test:unit`
+- `pnpm test:integration`
 - `pnpm test:smoke`
-- `pnpm test:e2e` — run with `set -a; . ./.env; set +a` so the server picks up
-  `DATABASE_URL`
+- `pnpm test:e2e`
 
-`tests/helpers/test-environment.ts` provisions a per-worker Postgres schema and Valkey
-prefix; tests call `migrateAuthDatabase(pool, schema)` themselves. There is no global
-migration step.
-
-### Known baseline failures (present on `main`, unrelated to this work)
-
-Re-establish the baseline by stashing the working tree and running the suite on `HEAD`
-before diagnosing any new failure.
-
-- `tests/e2e/create-and-open-room.spec.ts:111`
-- `tests/e2e/create-and-open-room.spec.ts:321`
-- `tests/e2e/profile-responsive.spec.ts:183`
-- `tests/e2e/profile-responsive.spec.ts:202`
-- `tests/e2e/profile-responsive.spec.ts:226`
-- `tests/e2e/root-theme.spec.ts:35` — order-dependent: uses the bare Playwright fixture,
-  so it fails whenever the default schema is unmigrated
+`tests/helpers/test-environment.ts` provisions a per-worker PostgreSQL schema and Valkey
+prefix. Hydration-sensitive Home interactions use `gotoHydrated` from
+`tests/e2e/fixtures.ts`, so server-rendered controls cannot lose interactions before their
+React handlers are ready.
 
 ---
 

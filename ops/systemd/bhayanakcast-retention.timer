@@ -1,0 +1,11 @@
+[Unit]
+Description=Run BhayanakCast data retention daily
+
+[Timer]
+OnCalendar=*-*-* 04:00:00
+Persistent=true
+RandomizedDelaySec=15m
+Unit=bhayanakcast-retention.service
+
+[Install]
+WantedBy=timers.target
