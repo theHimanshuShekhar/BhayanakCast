@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import type { Page } from '@playwright/test'
 import { expect, expectCenteredModal, test, gotoHydrated } from './fixtures'
 
 const PROFILE = {
@@ -28,12 +29,24 @@ const TARGET_PROFILE = {
   verified: true,
 }
 
+async function openCreateRoomDialog(page: Page) {
+  const trigger = page
+    .getByTestId('home-bottom-navigation')
+    .getByRole('button', { name: 'Create room' })
+  const dialog = page.getByRole('dialog', { name: 'Create Room' })
+  // The shell can hydrate before its lazy route. Retry only until the click is handled.
+  await expect(async () => {
+    await trigger.click()
+    await expect(dialog).toBeVisible({ timeout: 1_000 })
+  }).toPass({ timeout: 15_000 })
+  return dialog
+}
+
 test('creates a room and enters the creator as Host', async ({ authSessions }) => {
   const signedIn = await authSessions.createBrowserContext(PROFILE)
   const page = await signedIn.context.newPage()
   await gotoHydrated(page, '/')
-  await page.getByTestId('home-bottom-navigation').getByRole('button', { name: 'Create room' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Create Room' })
+  const dialog = await openCreateRoomDialog(page)
   await expect(dialog).toBeVisible()
   await expectCenteredModal(dialog)
   await dialog.getByLabel('Name').fill('Task 11 room')
@@ -56,8 +69,7 @@ test('existing Host Create Cancel preserves then Confirm replaces the source roo
   const signedIn = await authSessions.createBrowserContext(PROFILE)
   const page = await signedIn.context.newPage()
   await gotoHydrated(page, '/')
-  await page.getByTestId('home-bottom-navigation').getByRole('button', { name: 'Create room' }).click()
-  const initialDialog = page.getByRole('dialog', { name: 'Create Room' })
+  const initialDialog = await openCreateRoomDialog(page)
   await initialDialog.getByLabel('Name').fill('Existing Host source')
   await initialDialog.getByRole('button', { name: 'Create Room' }).click()
   await page.waitForURL(/\/rooms\/[0-9a-f-]+$/)
@@ -69,8 +81,7 @@ test('existing Host Create Cancel preserves then Confirm replaces the source roo
   if (!sourceRoomId || !accountId) throw new Error('Missing seeded source account')
 
   await gotoHydrated(page, '/')
-  await page.getByTestId('home-bottom-navigation').getByRole('button', { name: 'Create room' }).click()
-  const createDialog = page.getByRole('dialog', { name: 'Create Room' })
+  const createDialog = await openCreateRoomDialog(page)
   await createDialog.getByLabel('Name').fill('Existing Host replacement')
   await createDialog.getByRole('button', { name: 'Create Room' }).click()
   const confirmation = page.getByRole('dialog', { name: 'Confirm room change' })
@@ -114,8 +125,7 @@ test('existing Host Stream switch Cancel preserves then Confirm cleans source ac
   const sourceOwner = await authSessions.createBrowserContext(PROFILE)
   const sourcePage = await sourceOwner.context.newPage()
   await gotoHydrated(sourcePage, '/')
-  await sourcePage.getByTestId('home-bottom-navigation').getByRole('button', { name: 'Create room' }).click()
-  const sourceDialog = sourcePage.getByRole('dialog', { name: 'Create Room' })
+  const sourceDialog = await openCreateRoomDialog(sourcePage)
   await sourceDialog.getByLabel('Name').fill('Active source room')
   await sourceDialog.getByRole('button', { name: 'Create Room' }).click()
   await sourcePage.waitForURL(/\/rooms\/[0-9a-f-]+$/)
@@ -124,8 +134,7 @@ test('existing Host Stream switch Cancel preserves then Confirm cleans source ac
   const targetOwner = await authSessions.createBrowserContext(TARGET_PROFILE)
   const targetPage = await targetOwner.context.newPage()
   await gotoHydrated(targetPage, '/')
-  await targetPage.getByTestId('home-bottom-navigation').getByRole('button', { name: 'Create room' }).click()
-  const targetDialog = targetPage.getByRole('dialog', { name: 'Create Room' })
+  const targetDialog = await openCreateRoomDialog(targetPage)
   await targetDialog.getByLabel('Name').fill('Switch target room')
   await targetDialog.getByRole('button', { name: 'Create Room' }).click()
   await targetPage.waitForURL(/\/rooms\/[0-9a-f-]+$/)
@@ -253,8 +262,7 @@ test('opening a room does not join until the explicit public Join action', async
   const owner = await authSessions.createBrowserContext(PROFILE)
   const ownerPage = await owner.context.newPage()
   await gotoHydrated(ownerPage, '/')
-  await ownerPage.getByTestId('home-bottom-navigation').getByRole('button', { name: 'Create room' }).click()
-  const dialog = ownerPage.getByRole('dialog', { name: 'Create Room' })
+  const dialog = await openCreateRoomDialog(ownerPage)
   await dialog.getByLabel('Name').fill('Explicit admission room')
   await dialog.getByRole('button', { name: 'Create Room' }).click()
   await ownerPage.waitForURL(/\/rooms\/[0-9a-f-]+$/)
@@ -283,8 +291,7 @@ test('Canceling Leave preserves membership before Confirm applies it', async ({ 
   const owner = await authSessions.createBrowserContext(PROFILE)
   const page = await owner.context.newPage()
   await gotoHydrated(page, '/')
-  await page.getByTestId('home-bottom-navigation').getByRole('button', { name: 'Create room' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Create Room' })
+  const dialog = await openCreateRoomDialog(page)
   await dialog.getByLabel('Name').fill('Confirmation room')
   await dialog.getByRole('button', { name: 'Create Room' }).click()
   await page.waitForURL(/\/rooms\/[0-9a-f-]+$/)
@@ -305,8 +312,7 @@ test('signed-in private Join requires the password and admits explicitly', async
   const owner = await authSessions.createBrowserContext(PROFILE)
   const ownerPage = await owner.context.newPage()
   await gotoHydrated(ownerPage, '/')
-  await ownerPage.getByTestId('home-bottom-navigation').getByRole('button', { name: 'Create room' }).click()
-  const dialog = ownerPage.getByRole('dialog', { name: 'Create Room' })
+  const dialog = await openCreateRoomDialog(ownerPage)
   await dialog.getByLabel('Name').fill('Private admission room')
   await dialog.getByLabel('Private').check()
   await dialog.getByLabel('Password').fill('private-pass')
@@ -333,8 +339,7 @@ test('full and ended target rejection preserve active Host Stream source', async
   const sourceOwner = await authSessions.createBrowserContext(PROFILE)
   const sourcePage = await sourceOwner.context.newPage()
   await gotoHydrated(sourcePage, '/')
-  await sourcePage.getByTestId('home-bottom-navigation').getByRole('button', { name: 'Create room' }).click()
-  const sourceDialog = sourcePage.getByRole('dialog', { name: 'Create Room' })
+  const sourceDialog = await openCreateRoomDialog(sourcePage)
   await sourceDialog.getByLabel('Name').fill('Source stream room')
   await sourceDialog.getByRole('button', { name: 'Create Room' }).click()
   await sourcePage.waitForURL(/\/rooms\/[0-9a-f-]+$/)
@@ -342,8 +347,7 @@ test('full and ended target rejection preserve active Host Stream source', async
   const targetOwner = await authSessions.createBrowserContext(TARGET_PROFILE)
   const targetPage = await targetOwner.context.newPage()
   await gotoHydrated(targetPage, '/')
-  await targetPage.getByTestId('home-bottom-navigation').getByRole('button', { name: 'Create room' }).click()
-  const targetDialog = targetPage.getByRole('dialog', { name: 'Create Room' })
+  const targetDialog = await openCreateRoomDialog(targetPage)
   await targetDialog.getByLabel('Name').fill('Full target room')
   await targetDialog.getByRole('button', { name: 'Create Room' }).click()
   await targetPage.waitForURL(/\/rooms\/[0-9a-f-]+$/)
