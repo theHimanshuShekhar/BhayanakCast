@@ -17,7 +17,7 @@
     "test:integration": "vitest run tests/integration",
     "test:smoke": "vitest run tests/smoke",
     "test:e2e": "playwright test",
-    "retention:run": "node --env-file-if-exists=.env scripts/run-retention.mjs"
+    "retention:run": "pnpm build && node --env-file-if-exists=.env scripts/run-retention.mjs"
   },
   "dependencies": {
     "@icons-pack/react-simple-icons": "^13.13.0",

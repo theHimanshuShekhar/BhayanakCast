@@ -104,6 +104,7 @@ export const test = base.extend<{ authSessions: AuthSessionFixture }>({
 })
 
 export { expect } from '@playwright/test'
+// This waits after a real navigation; it is not a replacement for page.reload().
 export async function gotoHydrated(page: Page, url: string) {
   await page.goto(url)
   await expect(page.locator('body')).toHaveAttribute('data-hydrated', 'true')
