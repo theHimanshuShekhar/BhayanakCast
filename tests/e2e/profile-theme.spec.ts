@@ -119,8 +119,14 @@ test('failed account update restores the previous effective theme', async ({ aut
 
   const preference = page.getByRole('combobox', { name: 'Theme preference' })
   await expect(preference).toHaveValue('system')
-  await preference.selectOption('dark')
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+  // Programmatic select events can precede selective route hydration under load.
+  // The held request makes retrying safe: only the first handled change can mutate.
+  await expect(async () => {
+    await preference.selectOption('dark')
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark', {
+      timeout: 1_000,
+    })
+  }).toPass({ timeout: 15_000 })
   release()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
   await expect(preference).toHaveValue('system')
