@@ -1,3 +1,4 @@
+import { observeHome } from './home-observability'
 import { MemberPresence, PreviewMosaic } from './PreviewMosaic'
 import type { ActiveRoomSummary } from './home-types'
 
@@ -19,6 +20,10 @@ export function LiveRoomCard({ room, featured, canJoin }: LiveRoomCardProps) {
       <a
         aria-label={`Open ${room.name} room`}
         href={`/rooms/${encodeURIComponent(room.id)}`}
+        onClick={() => observeHome({
+          name: 'home_room_opened',
+          properties: { collection: 'live_rooms' },
+        })}
       >
         <PreviewMosaic room={room} />
         <div className="live-room-card__body">

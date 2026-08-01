@@ -11,6 +11,10 @@
 
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
+body[data-hydrated="false"] :is(button, input, select, textarea) {
+  pointer-events: none;
+}
+
 @theme inline {
   --*: initial;
   --font-sans: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
@@ -2077,7 +2081,7 @@ p.home-filters__facets {
 
 .room-boundary h1 {
   margin: 0;
-  font-size: clamp(2rem, 5vw, 3rem);
+  font-size: var(--text-page);
 }
 
 .room-boundary__eyebrow {
@@ -2263,7 +2267,7 @@ p.home-filters__facets {
 
 .home-counter__value {
   margin: 0;
-  font-size: clamp(2.125rem, 6vw, 4.5rem);
+  font-size: var(--text-page);
   font-weight: 500;
   letter-spacing: -0.035em;
   line-height: 0.92;
@@ -2272,7 +2276,7 @@ p.home-filters__facets {
 
 .home-counter__unit {
   color: var(--ink-faint);
-  font-size: clamp(1rem, 2.2vw, 1.875rem);
+  font-size: var(--text-feature);
   letter-spacing: -0.01em;
 }
 
@@ -2535,7 +2539,7 @@ p.home-filters__facets {
 }
 
 .live-room-card--featured h3 {
-  font-size: clamp(1.375rem, 3vw, 1.875rem);
+  font-size: var(--text-feature);
   line-height: 1.1;
   letter-spacing: -0.02em;
 }
@@ -3371,7 +3375,7 @@ p.home-filters__facets {
 
   .home-rail-presence__value {
     margin: 0;
-    font-size: 2.75rem;
+    font-size: var(--text-page);
     font-weight: 500;
     letter-spacing: -0.035em;
     line-height: 0.95;
@@ -3617,7 +3621,7 @@ body:has(.room-shell) > .root-controls {
 
 .room-boundary h1 {
   margin: 0;
-  font-size: clamp(1.5rem, 4vw, 2.25rem);
+  font-size: var(--text-page);
   font-weight: 500;
   letter-spacing: -0.02em;
   line-height: 1.1;
@@ -3676,6 +3680,67 @@ body:has(.room-shell) > .root-controls {
   min-width: 0;
   flex-direction: column;
   gap: 1rem;
+}
+.room-boundary--pre-admission,
+.room-boundary--ended {
+  width: min(100%, 44rem);
+  align-self: center;
+  margin-inline: auto;
+}
+
+.room-spotlight {
+  position: relative;
+  display: grid;
+  min-height: 14rem;
+  align-content: end;
+  gap: 0.5rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 0.75rem;
+  background:
+    radial-gradient(
+      circle at 18% 12%,
+      color-mix(in srgb, var(--action) 16%, transparent),
+      transparent 48%
+    ),
+    var(--surface-subtle);
+  box-shadow: var(--feature-shadow);
+  overflow: hidden;
+  padding: clamp(1.25rem, 4vw, 2.25rem);
+}
+
+.room-spotlight[data-spotlight="ended"] {
+  background:
+    radial-gradient(
+      circle at 18% 12%,
+      color-mix(in srgb, var(--ink-muted) 14%, transparent),
+      transparent 48%
+    ),
+    var(--surface-subtle);
+}
+
+.room-spotlight__state {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--text-section);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+.room-spotlight__note {
+  max-width: 40rem;
+  margin: 0;
+  color: var(--ink-secondary);
+  font-size: var(--text-body);
+  text-wrap: pretty;
+}
+
+.room-boundary__password {
+  max-width: 28rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-subtle);
+  padding: 0.875rem;
 }
 
 /* ADR 0100: the media canvas, with the control shelf integrated below it. It
@@ -3740,6 +3805,7 @@ body:has(.room-shell) > .root-controls {
 .room-mosaic {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  min-width: calc(30rem + 0.75rem);
   gap: 0.75rem;
   margin: 0;
   padding: 0;
@@ -3788,7 +3854,8 @@ body:has(.room-shell) > .root-controls {
 .room-mosaic__preview {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  background: var(--media-canvas);
+  object-fit: contain;
 }
 
 /* ADR 0035: a private room's preview is blurred. The stored image is already
@@ -3911,6 +3978,7 @@ body:has(.room-shell) > .root-controls {
 
 .room-controls__join {
   border: 1px solid var(--action);
+  margin-left: auto;
   color: var(--action);
 }
 
@@ -3932,6 +4000,26 @@ body:has(.room-shell) > .root-controls {
 .room-controls__leave:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+@media (max-width: 47.999rem) {
+  .room-boundary--pre-admission,
+  .room-boundary--ended {
+    padding-bottom: calc(5.5rem + var(--safe-area-bottom));
+  }
+
+  .room-spotlight {
+    min-height: 11rem;
+  }
+
+  .room-controls {
+    align-items: stretch;
+  }
+
+  .room-boundary__back,
+  .room-controls__join {
+    justify-content: center;
+  }
 }
 
 @media (min-width: 48rem) {
@@ -3978,9 +4066,10 @@ body:has(.room-shell) > .root-controls {
      1208px column and squeezes the stage below the mosaic's 240px floor. The
      other three states are ordinary prose and keep that readable measure. */
   .room-boundary--admitted {
+    position: relative;
     display: grid;
     width: auto;
-    grid-template-columns: minmax(0, 1fr) 20rem;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
     align-items: stretch;
     min-height: 0;
@@ -3988,7 +4077,13 @@ body:has(.room-shell) > .root-controls {
 
   .room-boundary--admitted .room-header,
   .room-boundary--admitted .room-boundary__error {
-    grid-column: 1 / -1;
+    grid-column: 1;
+  }
+
+  .room-boundary--admitted .room-stage,
+  .room-boundary--admitted .room-dock {
+    grid-column: 1;
+    grid-row: 2;
   }
 
   .room-stage {
@@ -4016,10 +4111,100 @@ body:has(.room-shell) > .root-controls {
     flex: none;
   }
 
-  /* `.room-dock__panel` is the dock's scroller; the dock itself only clips. */
+  /* The medium companion is an overlay, so opening it cannot reflow the
+     mosaic or interrupt media. At wide widths the same element rejoins the
+     workspace grid as the persistent 360px dock. */
   .room-dock {
+    z-index: 5;
+    width: 22.5rem;
+    height: 100%;
     min-height: 0;
+    justify-self: end;
     overflow: hidden;
+  }
+
+  .room-dock[data-open="false"] {
+    width: 3.5rem;
+  }
+
+  .room-dock[data-open="false"] .room-dock__tabs {
+    flex-direction: column;
+  }
+
+  .room-dock[data-open="false"] .room-dock__tab-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    overflow: hidden;
+    white-space: nowrap;
+  }
+
+  .room-stage__canvas {
+    scroll-padding-inline-end: 3.5rem;
+  }
+  .room-boundary--pre-admission,
+  .room-boundary--ended {
+    width: min(100%, 52rem);
+  }
+}
+
+
+@media (min-width: 80rem) {
+  .room-boundary--admitted {
+    grid-template-columns: minmax(0, 1fr) 22.5rem;
+  }
+
+  .room-boundary--admitted:has(.room-dock[data-open="false"]) {
+    grid-template-columns: minmax(0, 1fr) 3.5rem;
+  }
+
+  .room-boundary--pre-admission {
+    width: min(100%, 70rem);
+  }
+
+  .room-boundary--pre-admission .room-stage {
+    display: grid;
+    grid-template-columns: minmax(0, 1.3fr) minmax(18rem, 0.7fr);
+    align-items: start;
+  }
+
+  .room-boundary--pre-admission .room-spotlight {
+    min-height: 22rem;
+    grid-column: 1;
+    grid-row: 1 / span 3;
+  }
+
+  .room-boundary--pre-admission .room-stage__seats,
+  .room-boundary--pre-admission .room-boundary__password,
+  .room-boundary--pre-admission .room-controls {
+    grid-column: 2;
+  }
+
+  .room-boundary--admitted .room-header,
+  .room-boundary--admitted .room-boundary__error {
+    grid-column: 1 / -1;
+  }
+
+  .room-boundary--admitted .room-stage {
+    grid-column: 1;
+  }
+
+  .room-boundary--admitted .room-dock {
+    grid-column: 2;
+  }
+
+  .room-stage__canvas {
+    scroll-padding-inline-end: 0;
+  }
+
+  .room-dock__wide-label {
+    display: inline;
+  }
+
+  .room-dock__medium-label {
+    display: none;
   }
 }
 
@@ -4032,12 +4217,6 @@ body:has(.room-shell) > .root-controls {
   object-fit: contain;
 }
 
-/* ADR 0101: the watched stream enlarges in place — a 2x2 span keeps its
-   position in the order while the emphasis changes only its size. */
-.room-mosaic__tile[data-member-watched="true"] {
-  grid-column: span 2;
-  grid-row: span 2;
-}
 
 .room-mosaic__watchers {
   display: flex;
@@ -4091,12 +4270,28 @@ body:has(.room-shell) > .root-controls {
 }
 
 .room-shelf__compatibility {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: var(--text-meta);
+}
+
+.room-shelf__compatibility p {
+  margin: 0;
+}
+
+.room-shelf__guidance {
   flex-basis: 100%;
   margin: 0;
   color: var(--ink-muted);
   font-size: var(--text-meta);
 }
 
+.room-shelf[data-connection="reconnecting"] .room-shelf__compatibility,
 .room-shelf[data-connection="lost"] .room-shelf__compatibility {
   color: var(--warning);
 }
@@ -4132,6 +4327,20 @@ body:has(.room-shell) > .root-controls {
   background: var(--rail);
   box-shadow: inset 0 0 0 1px var(--border-strong);
   padding: 0.75rem;
+  transition: width 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.room-dock__desktop-controls {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.room-dock__wide-label {
+  display: none;
+}
+
+.room-dock__collapse {
+  min-height: 2.25rem;
 }
 
 .room-dock__tabs {
@@ -4214,6 +4423,42 @@ body:has(.room-shell) > .root-controls {
   margin-inline-start: auto;
 }
 
+.room-member-actions {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.room-member-actions__trigger {
+  min-height: 2.5rem;
+}
+
+.room-member-actions__menu {
+  position: absolute;
+  z-index: 19;
+  display: grid;
+  min-width: 11rem;
+  inset: calc(100% + 0.375rem) 0 auto auto;
+  gap: 0.25rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 0.625rem;
+  background: var(--surface);
+  box-shadow: var(--feature-shadow);
+  padding: 0.375rem;
+}
+
+.room-member-actions__menu button {
+  width: 100%;
+  justify-content: flex-start;
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink);
+  text-align: start;
+}
+
+.room-member-actions__menu button:last-child:not(:first-child) {
+  color: var(--danger);
+}
+
 /* Never scrolls the reader away from what they are reading (ADR 0102). */
 .room-activity__cue {
   align-self: center;
@@ -4226,9 +4471,6 @@ body:has(.room-shell) > .root-controls {
   font-weight: 600;
 }
 
-.room-header time[data-countdown="urgent"] {
-  font-weight: 700;
-}
 
 .room-chat__composer {
   display: grid;
@@ -4255,6 +4497,66 @@ body:has(.room-shell) > .root-controls {
   box-shadow: var(--feature-shadow);
   padding: 1.25rem;
   overflow-y: auto;
+}
+
+.room-dialog__ban-guidance {
+  margin-top: 0;
+  color: var(--ink-muted);
+}
+
+.room-dialog__bans li > span {
+  display: grid;
+  gap: 0.125rem;
+}
+
+.room-dialog__bans small {
+  color: var(--ink-muted);
+}
+
+.room-ban-dialog {
+  width: min(34rem, calc(100vw - 2rem));
+  max-width: 100%;
+  border: 0;
+  border-radius: 0.75rem;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--feature-shadow);
+  padding: 0;
+}
+
+.room-ban-dialog::backdrop {
+  background: rgb(9 14 26 / 0.66);
+}
+
+.room-ban-dialog__panel {
+  display: grid;
+  gap: 0.875rem;
+  padding: 1.25rem;
+}
+
+.room-ban-dialog__panel h2,
+.room-ban-dialog__panel p {
+  margin: 0;
+}
+
+.room-ban-dialog__eyebrow {
+  color: var(--danger);
+  font-size: var(--text-label);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.room-ban-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.room-ban-dialog__confirm {
+  border-color: var(--danger) !important;
+  background: var(--danger) !important;
+  color: var(--canvas) !important;
 }
 
 .room-dialog__reasons {
@@ -4284,7 +4586,7 @@ body:has(.room-shell) > .root-controls {
    the dock becomes the bottom sheet it opens. */
 .room-mobile-bar {
   position: fixed;
-  z-index: 15;
+  z-index: 17;
   display: flex;
   inset: auto 0 0;
   justify-content: space-around;
@@ -4294,6 +4596,19 @@ body:has(.room-shell) > .root-controls {
   padding: 0.5rem 0.75rem calc(0.5rem + env(safe-area-inset-bottom));
 }
 
+.room-mobile-bar button {
+  min-width: 0;
+  min-height: 2.75rem;
+  flex: 1 1 0;
+  padding-inline: 0.375rem;
+}
+
+.room-mobile-bar button[data-disabled-reason="Desktop only"] {
+  opacity: 1;
+  color: var(--ink-muted);
+  font-size: var(--text-meta);
+}
+
 @media (max-width: 47.999rem) {
   /* ADR 0103: the admitted room replaces the global bottom navigation with one
      room control bar. Only the admitted state — pre-admission and the Past
@@ -4301,6 +4616,10 @@ body:has(.room-shell) > .root-controls {
      document scroll here, so the shell takes no height clamp. */
   .room-shell[data-room-shell="admitted"] .home-bottom-navigation {
     display: none;
+  }
+
+  .room-boundary {
+    padding-top: calc(4.5rem + var(--safe-area-top));
   }
 
   .room-boundary--admitted {
@@ -4315,17 +4634,61 @@ body:has(.room-shell) > .root-controls {
   .room-dock[data-sheet="expanded"] {
     position: fixed;
     z-index: 16;
+    width: 100%;
+    max-height: calc(100dvh - env(safe-area-inset-top));
     inset: auto 0 0;
     border-radius: 0.625rem 0.625rem 0 0;
-    padding-bottom: calc(3.5rem + env(safe-area-inset-bottom));
+    box-sizing: border-box;
+    padding-bottom: calc(4rem + env(safe-area-inset-bottom));
   }
 
   .room-dock[data-sheet="open"] {
-    height: 55vh;
+    height: 55dvh;
   }
 
   .room-dock[data-sheet="expanded"] {
-    height: 90vh;
+    height: 90dvh;
+  }
+
+@media (prefers-reduced-motion: reduce) {
+  .room-dock {
+    transition: none;
+  }
+}
+
+  /* Mobile without a watch is the accepted two-column overview. Once a watch
+     is live, the watched tile is a viewport-width stage and every remaining
+     member occupies one bounded cell in the horizontal strip below it. */
+  .room-mosaic {
+    min-width: 0;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .room-mosaic[data-has-watch='true'] {
+    display: grid;
+    grid-template-columns: none;
+    grid-template-rows: auto auto;
+    grid-auto-columns: minmax(12rem, 42vw);
+    grid-auto-flow: column;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scroll-snap-type: inline proximity;
+  }
+
+  .room-mosaic[data-has-watch='true']
+    .room-mosaic__tile:not([data-member-watched='true']) {
+    grid-row: 2;
+    scroll-snap-align: start;
+  }
+
+  .room-mosaic[data-has-watch='true']
+    .room-mosaic__tile[data-member-watched='true'] {
+    position: sticky;
+    z-index: 1;
+    left: 0;
+    width: calc(100vw - 2rem);
+    grid-column: 1;
+    grid-row: 1;
   }
 }
 
@@ -4335,9 +4698,745 @@ body:has(.room-shell) > .root-controls {
   }
 }
 
+/* ADR 0101: desktop and medium enlarge the watched stream in place to a
+   stable two-column-by-two-row span. Mobile uses its separate stage rule. */
+@media (min-width: 48rem) {
+  .room-mosaic__tile[data-member-watched='true'] {
+    grid-column: span 2;
+    grid-row: span 2;
+  }
+}
+
 /* The dock is persistent at ≥1280px and a touch wider there (ADR 0102). */
 @media (min-width: 80rem) {
   .room-boundary--admitted {
     grid-template-columns: minmax(0, 1fr) 22.5rem;
+  }
+}
+
+/* Private Platform Admin clubhouse workspace. */
+.admin-shell {
+  width: min(72rem, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: max(2rem, calc(var(--safe-area-top) + 1rem)) 0 5rem;
+  color: var(--ink);
+}
+
+.admin-shell--detail { width: min(76rem, calc(100% - 2rem)); }
+.admin-header, .admin-detail-header, .admin-detail-grid, .admin-detail-main {
+  display: grid;
+  gap: 1rem;
+}
+.admin-header, .admin-detail-header { margin-bottom: 1.5rem; }
+.admin-header h1, .admin-detail-header h1 {
+  margin: 0.125rem 0 0.375rem;
+  font-size: clamp(1.875rem, 5vw, var(--text-page));
+  line-height: 1.08;
+  overflow-wrap: anywhere;
+}
+.admin-header p, .admin-detail-header p, .admin-panel p { color: var(--ink-secondary); }
+.admin-eyebrow {
+  margin: 0;
+  color: var(--action) !important;
+  font-size: var(--text-label);
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.admin-back-link { width: fit-content; color: var(--action); font-weight: 700; text-decoration: none; }
+.admin-back-link:hover { text-decoration: underline; }
+.admin-tabs { display: flex; margin-bottom: 1rem; border-bottom: 1px solid var(--border); }
+.admin-tabs a {
+  padding: 0.75rem 0.875rem;
+  border-bottom: 0.1875rem solid var(--action);
+  color: var(--ink);
+  font-weight: 750;
+  text-decoration: none;
+}
+.admin-panel {
+  min-width: 0;
+  padding: clamp(1rem, 3vw, 1.5rem);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--raised-shadow);
+}
+.admin-panel h2 { margin: 0.125rem 0 0.75rem; font-size: var(--text-section); line-height: 1.2; }
+.admin-panel__heading, .admin-detail-header__title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.admin-count, .admin-status {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  min-height: 1.75rem;
+  padding: 0.25rem 0.625rem;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-label);
+  font-weight: 750;
+}
+.admin-count, .admin-status--pending {
+  background: color-mix(in srgb, var(--warning) 14%, var(--surface));
+  color: var(--warning);
+}
+.admin-status--resolved {
+  background: color-mix(in srgb, var(--host) 14%, var(--surface));
+  color: var(--host);
+}
+.admin-status--dismissed { background: var(--surface-subtle); color: var(--ink-secondary); }
+.admin-privacy-note, .admin-report-card__meta { font-size: var(--text-meta); }
+.admin-report-list { display: grid; gap: 0.625rem; margin: 1.25rem 0 0; padding: 0; list-style: none; }
+.admin-report-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.875rem;
+  min-height: 4.5rem;
+  padding: 0.875rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--ink);
+  text-decoration: none;
+  transition: border-color 120ms var(--ease-clubhouse), background 120ms var(--ease-clubhouse);
+}
+.admin-report-card:hover { border-color: var(--action-line); background: var(--action-soft); }
+.admin-report-card__main, .admin-report-card__meta { display: grid; min-width: 0; }
+.admin-report-card__main span, .admin-report-card__meta { color: var(--ink-secondary); }
+.admin-report-card__main strong, .admin-report-card__main span { overflow-wrap: anywhere; }
+.admin-report-card__meta { text-align: right; }
+.admin-report-card__arrow { color: var(--action); font-size: 1.25rem; }
+.admin-empty {
+  margin-top: 1rem;
+  padding: 2.5rem 1rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-control);
+  text-align: center;
+}
+.admin-empty h3 { margin: 0; }
+.admin-review-panel { align-self: start; }
+.admin-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 1rem 0 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+.admin-facts > div { min-width: 0; padding: 0.75rem; border-bottom: 1px solid var(--border); }
+.admin-facts > div:nth-child(odd) { border-right: 1px solid var(--border); }
+.admin-facts dt { color: var(--ink-muted); font-size: var(--text-label); font-weight: 700; }
+.admin-facts dd { margin: 0.125rem 0 0; overflow-wrap: anywhere; }
+.admin-facts--stacked { grid-template-columns: 1fr; }
+.admin-facts--stacked > div:nth-child(odd) { border-right: 0; }
+.admin-report-details, .admin-confirmation, .admin-message-evidence, .admin-unavailable {
+  margin: 1rem 0 0;
+  padding: 1rem;
+  border-radius: var(--radius-control);
+  background: var(--surface-subtle);
+  overflow-wrap: anywhere;
+}
+.admin-report-details h3, .admin-confirmation h3 { margin: 0 0 0.375rem; font-size: var(--text-card); }
+.admin-report-details p, .admin-confirmation p { margin: 0; white-space: pre-wrap; }
+.admin-message-evidence { border-left: 0.25rem solid var(--action); color: var(--ink); white-space: pre-wrap; }
+.admin-evidence-frame {
+  aspect-ratio: 16 / 9;
+  margin-top: 1rem;
+  border-radius: var(--radius-control);
+  background: var(--media-canvas);
+  overflow: hidden;
+}
+.admin-evidence-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(14px);
+  transform: scale(1.08);
+}
+.admin-actions { display: flex; flex-wrap: wrap; gap: 0.625rem; margin-top: 1rem; }
+.admin-actions--stacked { display: grid; }
+.admin-actions button { min-height: 2.75rem; }
+.admin-error { color: var(--danger) !important; font-weight: 700; }
+
+@media (max-width: 47.999rem) {
+  .admin-report-card { grid-template-columns: minmax(0, 1fr) auto; }
+  .admin-report-card .admin-status, .admin-report-card__main, .admin-report-card__meta { grid-column: 1; }
+  .admin-report-card .admin-status { width: fit-content; }
+  .admin-report-card__meta { text-align: left; }
+  .admin-report-card__arrow { grid-column: 2; grid-row: 1 / span 3; }
+  .admin-facts { grid-template-columns: 1fr; }
+  .admin-facts > div:nth-child(odd) { border-right: 0; }
+}
+
+@media (min-width: 64rem) {
+  .admin-detail-grid { grid-template-columns: minmax(0, 1fr) 20rem; align-items: start; }
+  .admin-review-panel { position: sticky; top: 1rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-report-card { transition: none; }
+}
+
+/* Issue #12: admitted Room identity and lifetime chrome. The desktop header is
+   exactly two bounded rows; compact/mobile Details is a separate surface. */
+.room-live-header {
+  display: grid;
+  min-width: 0;
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.room-live-header__primary {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(6rem, 1fr) auto auto auto;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.room-live-header__primary h1 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room-live-header__back {
+  display: inline-flex;
+  min-height: 2.75rem;
+  box-sizing: border-box;
+  align-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  color: var(--ink);
+  padding: 0.625rem 0.75rem;
+  text-decoration: none;
+}
+
+.room-live-header__back-compact,
+.room-live-header__details-trigger,
+.room-live-header__mobile-countdown {
+  display: none;
+}
+
+.room-live-header__privacy,
+.room-live-header__live-state {
+  display: inline-flex;
+  min-height: 1.75rem;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--ink-muted);
+  font-size: var(--text-label);
+  padding-inline: 0.625rem;
+  white-space: nowrap;
+}
+
+.room-live-header__live-state {
+  border-color: color-mix(in srgb, var(--live) 38%, var(--border));
+  color: var(--live);
+}
+
+.room-live-header__secondary {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto auto auto auto;
+  align-items: center;
+  gap: 0.875rem;
+}
+
+.room-live-header__metadata {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.5rem;
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: var(--text-meta);
+  white-space: nowrap;
+}
+
+.room-live-header__description {
+  min-width: 2rem;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--ink-faint);
+  text-overflow: ellipsis;
+}
+
+.room-live-header__category,
+.room-live-header__tags,
+.room-live-header__fact,
+.room-live-header__countdown {
+  flex: none;
+  white-space: nowrap;
+}
+.room-live-header__category {
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+
+.room-live-header__tags {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 0.25rem;
+  overflow: hidden;
+}
+
+.room-live-header__tags .room-chip {
+  min-width: 0;
+  max-width: 7rem;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.room-live-header__fact,
+.room-live-header__countdown {
+  color: var(--ink-muted);
+  font-size: var(--text-label);
+  font-variant-numeric: tabular-nums;
+}
+
+.room-live-header__host {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.room-live-header__host-identity {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 10rem;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.room-live-header__host-identity img {
+  width: 1.5rem;
+  height: 1.5rem;
+  flex: none;
+  border-radius: 999px;
+  object-fit: cover;
+}
+
+.room-live-header__host-identity > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room-live-header__countdown[data-countdown-state="thirty-minute"] {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.room-live-header__countdown[data-countdown-state="ten-minute"] {
+  color: var(--host);
+  font-weight: 650;
+}
+
+.room-live-header__countdown[data-countdown-state="one-minute"] {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+  color: var(--warning);
+  font-weight: 750;
+  padding: 0.375rem 0.5rem;
+}
+
+.room-details {
+  display: none;
+}
+
+@media (max-width: 47.999rem) {
+  .room-live-header {
+    display: block;
+  }
+
+  .room-live-header__primary {
+    grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+    gap: 0.375rem;
+  }
+
+  .room-live-header__back {
+    min-height: 2.5rem;
+    padding-inline: 0.625rem;
+  }
+
+  .room-live-header__back-wide,
+  .room-live-header__live-state,
+  .room-live-header__settings,
+  .room-live-header__secondary {
+    display: none;
+  }
+
+  .room-live-header__back-compact,
+  .room-live-header__details-trigger,
+  .room-live-header__mobile-countdown {
+    display: inline-flex;
+  }
+
+  .room-live-header__privacy {
+    min-height: 1.5rem;
+    padding-inline: 0.5rem;
+  }
+
+  .room-live-header__mobile-countdown {
+    align-items: center;
+  }
+
+  .room-live-header__details-trigger {
+    min-height: 2.5rem;
+    align-items: center;
+    padding-inline: 0.625rem;
+  }
+
+  .room-live-header__primary h1 {
+    font-size: 1.125rem;
+  }
+
+  .room-details {
+    position: fixed;
+    z-index: 18;
+    display: flex;
+    width: 100%;
+    max-height: calc(100dvh - env(safe-area-inset-top));
+    flex-direction: column;
+    inset: auto 0 0;
+    border: 1px solid var(--border-strong);
+    border-radius: 0.75rem 0.75rem 0 0;
+    background: var(--surface);
+    box-shadow: var(--feature-shadow);
+    box-sizing: border-box;
+    color: var(--ink);
+    padding-bottom: calc(4rem + env(safe-area-inset-bottom));
+  }
+
+  .room-details[data-height="55"] {
+    height: 55dvh;
+  }
+
+  .room-details[data-height="90"] {
+    height: 90dvh;
+  }
+
+  .room-details__controls {
+    display: flex;
+    flex: none;
+    justify-content: space-between;
+    gap: 0.5rem;
+    border-bottom: 1px solid var(--border);
+    padding: 0.75rem;
+  }
+
+  .room-details__content {
+    display: grid;
+    gap: 1rem;
+    padding: 1rem;
+    overflow-y: auto;
+    overflow-wrap: anywhere;
+  }
+
+  .room-details__content h2,
+  .room-details__content p,
+  .room-details__facts {
+    margin: 0;
+  }
+
+  .room-details__eyebrow {
+    color: var(--ink-muted);
+    font-size: var(--text-label);
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .room-details__metadata,
+  .room-details__metadata .room-live-header__tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    overflow: visible;
+    white-space: normal;
+  }
+  .room-details__metadata .room-live-header__tags,
+  .room-details__metadata .room-chip {
+    flex: none;
+  }
+
+
+  .room-details__facts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+  }
+
+  .room-details__facts > div {
+    min-width: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    padding: 0.75rem;
+  }
+
+  .room-details__facts dt {
+    color: var(--ink-muted);
+    font-size: var(--text-label);
+  }
+
+  .room-details__facts dd {
+    min-width: 0;
+    margin: 0.375rem 0 0;
+  }
+}
+
+/* Issue #24: private Platform Admin Room termination. */
+.admin-room-termination { margin-top: 1rem; }
+.admin-room-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1.25rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+.admin-room-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-subtle);
+}
+.admin-room-item__summary {
+  display: grid;
+  min-width: 0;
+  gap: 0.125rem;
+}
+.admin-room-item__summary strong { overflow-wrap: anywhere; }
+.admin-room-item__summary span { color: var(--ink-secondary); font-size: var(--text-meta); }
+.admin-room-confirmation { grid-column: 1 / -1; }
+.admin-room-confirmation p { margin: 0 0 0.75rem; }
+.admin-room-actions { display: flex; flex-wrap: wrap; gap: 0.625rem; }
+.admin-room-actions button, .admin-room-item > button { min-height: 2.75rem; }
+.admin-danger-action {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  color: var(--danger);
+}
+.admin-danger-action:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+}
+.admin-room-feedback { margin: 1rem 0 0; font-weight: 700; }
+.admin-room-feedback--error { color: var(--danger) !important; }
+
+@media (max-width: 47.999rem) {
+  .admin-room-item { grid-template-columns: 1fr; align-items: stretch; }
+  .admin-room-item > button { width: 100%; }
+}
+
+/* Issue #23: capability-specific Platform Sanctions. */
+.admin-sanctions { margin-top: 1rem; }
+.admin-panel__eyebrow {
+  margin: 0;
+  color: var(--action) !important;
+  font-size: var(--text-label);
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.admin-sanctions__form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1.25rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-subtle);
+}
+.admin-sanctions__form > label,
+.admin-sanctions__form fieldset {
+  display: grid;
+  min-width: 0;
+  gap: 0.375rem;
+  margin: 0;
+  font-weight: 700;
+}
+.admin-sanctions__form select,
+.admin-sanctions__form input[type="datetime-local"] {
+  width: 100%;
+  min-height: 2.75rem;
+}
+.admin-sanctions__form fieldset {
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 0;
+  border: 0;
+}
+.admin-sanctions__form legend {
+  margin-bottom: 0.5rem;
+  font-size: var(--text-label);
+}
+.admin-sanctions__form fieldset label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+.admin-sanctions__effect {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: var(--text-meta);
+}
+.admin-sanctions__form > button { width: fit-content; min-height: 2.75rem; }
+.admin-sanctions__notice { font-weight: 700; }
+.admin-sanctions__columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+.admin-sanctions__list {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+}
+.admin-sanctions__list h3 { margin: 0 0 0.75rem; font-size: var(--text-card); }
+.admin-sanctions__list ol {
+  display: grid;
+  gap: 0.625rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.admin-sanctions__list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem;
+  border-radius: var(--radius-control);
+  background: var(--surface-subtle);
+}
+.admin-sanctions__list li > div:first-child { display: grid; min-width: 0; gap: 0.125rem; }
+.admin-sanctions__list strong,
+.admin-sanctions__list span { overflow-wrap: anywhere; }
+.admin-sanctions__list span,
+.admin-sanctions__list small { color: var(--ink-secondary); }
+.admin-sanctions__confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem; }
+.admin-sanctions__confirm span { flex-basis: 100%; font-size: var(--text-label); font-weight: 700; }
+
+@media (max-width: 47.999rem) {
+  .admin-sanctions__form,
+  .admin-sanctions__columns,
+  .admin-sanctions__form fieldset {
+    grid-template-columns: 1fr;
+  }
+  .admin-sanctions__list li { align-items: stretch; flex-direction: column; }
+  .admin-sanctions__list li > button { width: 100%; }
+}
+
+/* Issue #18: canonical Chat feedback and persistent personal safety controls. */
+.room-chat__message {
+  position: relative;
+  display: grid;
+  gap: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  padding: 0.625rem 0.75rem;
+}
+
+.room-chat__message-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.room-message-actions {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.room-message-actions__trigger {
+  min-height: 2.5rem;
+}
+
+.room-message-actions__menu {
+  position: absolute;
+  z-index: 19;
+  display: grid;
+  min-width: 13rem;
+  inset: calc(100% + 0.375rem) 0 auto auto;
+  gap: 0.25rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  box-shadow: var(--feature-shadow);
+  padding: 0.375rem;
+}
+
+.room-message-actions__menu button {
+  width: 100%;
+  justify-content: flex-start;
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink);
+  text-align: start;
+}
+
+.room-chat__cue {
+  align-self: center;
+}
+
+.room-chat__composer {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+}
+
+.room-chat__composer textarea,
+.room-chat__typing,
+.room-chat__status,
+.room-chat__availability {
+  grid-column: 1 / -1;
+}
+
+.room-chat__status,
+.room-chat__availability {
+  margin: 0;
+  color: var(--ink-secondary);
+  font-size: var(--text-meta);
+}
+
+.room-chat__count[data-over-limit="true"],
+.room-chat__availability {
+  color: var(--danger);
+}
+
+.room-chat__composer textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+@media (max-width: 47.999rem) {
+  .room-message-actions__menu {
+    max-width: calc(100vw - 2rem);
+  }
+
+  .room-chat__composer textarea {
+    min-height: 4.5rem;
   }
 }

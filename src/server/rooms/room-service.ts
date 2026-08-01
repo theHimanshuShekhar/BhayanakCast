@@ -35,9 +35,12 @@ import {
   type RoomRouteProjection,
 } from './room-projection'
 import type { RoomRosterMember } from './room-roster'
-import type { RoomEventPublisher } from '../realtime/room-events'
+import type { RoomActivityKind, RoomEventPublisher } from '../realtime/room-events'
 import type { HomeEventPublisher } from '../realtime/home-events'
-import { readAccountAccessPolicy } from '../auth/account-access-policy'
+import {
+  readAccountAccessPolicy,
+  type SanctionType,
+} from '../auth/account-access-policy'
 import type { Clock } from '../time'
 import {
   MembershipService,
@@ -175,9 +178,56 @@ export type RoomInspection =
       readonly admission: 'open' | 'password-required' | 'full' | 'member' | 'ended'
     }
 
-export type SanctionType = 'room_creation' | 'all_access'
 export interface AffectedRoomTransition {
   readonly roomId: string
+}
+
+export interface PlatformAdminRoomActor {
+  readonly accountId: string
+  readonly isPlatformAdmin: boolean
+}
+
+export interface AdminLiveRoom {
+  readonly id: string
+  readonly name: string
+  readonly visibility: RoomVisibility
+  readonly memberCount: number
+  readonly streamCount: number
+  readonly createdAt: Date
+}
+
+export type AdminEndRoomResult =
+  | { readonly status: 'ended'; readonly endedAt: Date }
+  | { readonly status: 'already-ended' | 'forbidden' | 'not-found' }
+
+export type ListAdminLiveRoomsResult =
+  | { readonly status: 'forbidden' }
+  | { readonly status: 'ok'; readonly rooms: readonly AdminLiveRoom[] }
+
+export interface RoomModerationAuditEntry {
+  readonly level: 'info'
+  readonly event:
+    | 'room.member_kicked'
+    | 'room.ban_applied'
+    | 'room.ban_cleared'
+    | 'room.host_transferred'
+    | 'room.admin_ended'
+  readonly roomId: string
+  readonly actorAccountId: string
+  readonly targetAccountId: string | null
+  readonly outcome:
+    | 'banned'
+    | 'kicked'
+    | 'cleared'
+    | 'transferred'
+    | 'not-banned'
+    | 'not-member'
+    | 'invalid-target'
+    | 'forbidden'
+    | 'ended'
+    | 'not-found'
+    | 'already-ended'
+  readonly occurredAt: string
 }
 
 export interface RoomServiceConfiguration {
@@ -191,6 +241,13 @@ export interface RoomServiceConfiguration {
       inside the room as well as Home badges (ADR 0103). */
   readonly publishRoomEvent?: RoomEventPublisher
   readonly revokeConnections: (accountId: string) => Promise<void> | void
+  readonly revokeRoomConnections?: (
+    accountId: string,
+    roomId: string,
+  ) => Promise<void> | void
+  /** Moderation detail stays in structured operational logs, never Room
+      Activity or analytics. */
+  readonly moderationAudit?: (entry: RoomModerationAuditEntry) => void
 }
 
 export class RoomService {
@@ -198,6 +255,11 @@ export class RoomService {
   private readonly now: () => Date
   private readonly publishHomeEvent: HomeEventPublisher
   private readonly revokeConnections: (accountId: string) => Promise<void> | void
+  private readonly revokeRoomConnections: (
+    accountId: string,
+    roomId: string,
+  ) => Promise<void> | void
+  private readonly moderationAudit: (entry: RoomModerationAuditEntry) => void
   private readonly membershipService: MembershipService
   private readonly lifecycle?: RoomLifecycle
   private readonly initialization: Promise<void>
@@ -206,7 +268,9 @@ export class RoomService {
     this.repository = new RoomRepository(configuration.pool)
     this.now = configuration.now ?? (() => new Date())
     this.revokeConnections = configuration.revokeConnections
+    this.revokeRoomConnections = configuration.revokeRoomConnections ?? (() => {})
     this.publishHomeEvent = configuration.publishHomeEvent ?? (() => {})
+    this.moderationAudit = configuration.moderationAudit ?? writeRoomModerationAudit
     let membershipService!: MembershipService
     const lifecycle = configuration.clock
       ? new RoomLifecycle({
@@ -287,6 +351,50 @@ export class RoomService {
       this.publishHomeEvent(event)
     } catch {
       // Notifications are best effort after the owning mutation commits.
+    }
+  }
+
+  private emitRoomActivity(
+    roomId: string,
+    kind: RoomActivityKind,
+    displayName: string | null,
+    at: Date,
+  ) {
+    try {
+      this.configuration.publishRoomEvent?.({
+        type: 'activity',
+        roomId,
+        entry: {
+          id: randomUUID(),
+          kind,
+          displayName,
+          at: at.toISOString(),
+        },
+      })
+    } catch {
+      // Realtime delivery is best effort after the committed moderation action.
+    }
+  }
+
+  private emitModerationAudit(
+    event: RoomModerationAuditEntry['event'],
+    actorAccountId: string,
+    roomId: string,
+    targetAccountId: string | null,
+    outcome: RoomModerationAuditEntry['outcome'],
+  ) {
+    try {
+      this.moderationAudit({
+        level: 'info',
+        event,
+        roomId,
+        actorAccountId,
+        targetAccountId,
+        outcome,
+        occurredAt: this.now().toISOString(),
+      })
+    } catch {
+      // Logging cannot turn an already decided moderation command into failure.
     }
   }
 
@@ -919,6 +1027,7 @@ export class RoomService {
                       'avatarUrl', account.image,
                       'role', membership.role,
                       'joinedAt', membership.joined_at,
+                      'reconnecting', membership.reconnect_until IS NOT NULL,
                       'streamId', live_stream.id,
                       'previewKey', live_stream.preview_key,
                       'previewUpdatedAt', live_stream.preview_updated_at,
@@ -971,6 +1080,10 @@ export class RoomService {
       [roomId, accountId],
     )
     const row = result.rows[0]
+    const viewerAccess =
+      accountId && row?.membershipId
+        ? await readAccountAccessPolicy(this.configuration.pool, accountId, this.now())
+        : null
     return selectRoomRouteProjection({
       room: row
         ? {
@@ -992,6 +1105,9 @@ export class RoomService {
           : null,
       viewerAuthenticated: accountId !== null,
       watchingStreamId: row?.watchingStreamId ?? null,
+      viewerSanctionTypes: viewerAccess?.sanctionTypes.filter(
+        (type): type is 'streaming' | 'chat' => type === 'streaming' || type === 'chat',
+      ),
       roster: (row?.roster ?? []).map((member) => ({
         ...member,
         joinedAt: new Date(member.joinedAt),
@@ -1038,26 +1154,54 @@ export class RoomService {
     readonly expiresAt?: Date | null
   }) {
     const affectedRooms: AffectedRoomTransition[] = []
-    const removedFromRoom = await this.transaction(async (client) => {
+    const result = await this.transaction(async (client) => {
       if (!(await this.lockAccount(client, input.accountId))) {
         throw new Error(`Unknown Account: ${input.accountId}`)
       }
-      const current =
-        input.type === 'all_access'
-          ? await this.lockCurrentMembership(client, input.accountId)
-          : null
+      const current = await this.lockCurrentMembership(client, input.accountId)
       const instant = this.now()
       const expiresAt =
         input.expiresAt === undefined
           ? new Date(instant.getTime() + SANCTION_DEFAULT_MS)
           : input.expiresAt
+      if (expiresAt && expiresAt.getTime() <= instant.getTime()) {
+        throw new TypeError('Sanction expiry must be in the future')
+      }
+      const sanctionId = randomUUID()
       await client.query(
         `INSERT INTO platform_sanction
            (id, account_id, type, starts_at, expires_at)
          VALUES ($1, $2, $3, $4, $5)`,
-        [randomUUID(), input.accountId, input.type, instant, expiresAt],
+        [sanctionId, input.accountId, input.type, instant, expiresAt],
       )
-      if (input.type !== 'all_access') return false
+      let stoppedStreams = 0
+      if (input.type === 'streaming' && current) {
+        await client.query(
+          `UPDATE stream_subscription subscription
+              SET ended_at = $2
+             FROM stream
+            WHERE subscription.stream_id = stream.id
+              AND stream.membership_id = $1
+              AND subscription.ended_at IS NULL`,
+          [current.id, instant],
+        )
+        const stopped = await client.query(
+          `UPDATE stream
+              SET ended_at = $2,
+                  preview_key = NULL,
+                  preview_updated_at = NULL
+            WHERE membership_id = $1 AND ended_at IS NULL
+          RETURNING id`,
+          [current.id, instant],
+        )
+        stoppedStreams = stopped.rowCount ?? stopped.rows.length
+      }
+      if (input.type !== 'all_access' && current) {
+        affectedRooms.push({ roomId: current.roomId })
+      }
+      if (input.type !== 'all_access') {
+        return { sanctionId, removedFromRoom: false, stoppedStreams }
+      }
       await client.query(
         `UPDATE "user" account
             SET all_access_blocked_indefinite = EXISTS (
@@ -1084,17 +1228,91 @@ export class RoomService {
       if (current) await this.depart(client, current, instant)
       if (current) affectedRooms.push({ roomId: current.roomId })
       await client.query('DELETE FROM session WHERE user_id = $1', [input.accountId])
-      return current !== null
+      return {
+        sanctionId,
+        removedFromRoom: current !== null,
+        stoppedStreams: current ? 1 : 0,
+      }
     })
     await this.publishRoomTransitions(affectedRooms)
     if (input.type === 'all_access') {
       await this.revokeConnections(input.accountId)
     }
-    return { status: 'applied' as const, removedFromRoom }
+    return { status: 'applied' as const, ...result }
+  }
+
+  async kickAccount(hostAccountId: string, roomId: string, accountId: string) {
+    if (hostAccountId === accountId) {
+      const result = { status: 'invalid-target' as const }
+      this.emitModerationAudit(
+        'room.member_kicked',
+        hostAccountId,
+        roomId,
+        accountId,
+        result.status,
+      )
+      return result
+    }
+    const affectedRooms: AffectedRoomTransition[] = []
+    const result = await this.transaction(async (client) => {
+      const accounts = await this.lockAccounts(client, [hostAccountId, accountId])
+      if (!accounts.has(hostAccountId)) return { status: 'forbidden' as const }
+      const access = await readAccountAccessPolicy(client, hostAccountId, this.now())
+      if (!access?.canMutate('moderate')) return { status: 'forbidden' as const }
+      await this.lockRooms(client, [roomId])
+      const instant = this.now()
+      if (await this.closeRoomIfDue(client, roomId, instant)) {
+        affectedRooms.push({ roomId })
+        return { status: 'ended' as const }
+      }
+      const host = await this.repository.currentMembership(hostAccountId, client, true)
+      if (!host || host.roomId !== roomId || host.role !== 'host') {
+        return { status: 'forbidden' as const }
+      }
+      const target = await this.repository.currentMembership(accountId, client, true)
+      if (!target || target.roomId !== roomId) return { status: 'not-member' as const }
+      const targetAccount = await client.query<{ displayName: string }>(
+        'SELECT name AS "displayName" FROM "user" WHERE id = $1',
+        [accountId],
+      )
+      await this.depart(client, target, instant)
+      affectedRooms.push({ roomId: target.roomId })
+      return {
+        status: 'kicked' as const,
+        activity: {
+          displayName: targetAccount.rows[0]?.displayName ?? 'A member',
+          at: instant,
+        },
+      }
+    })
+    this.emitModerationAudit(
+      'room.member_kicked',
+      hostAccountId,
+      roomId,
+      accountId,
+      result.status,
+    )
+    if (result.status === 'kicked') {
+      await this.revokeRoomConnections(accountId, roomId)
+    }
+    if (result.status === 'kicked') {
+      this.emitRoomActivity(
+        roomId,
+        'member-removed',
+        result.activity.displayName,
+        result.activity.at,
+      )
+    }
+    await this.publishRoomTransitions(affectedRooms)
+    return result.status === 'kicked' ? { status: 'kicked' as const } : result
   }
 
   async banAccount(hostAccountId: string, roomId: string, accountId: string) {
-    if (hostAccountId === accountId) return { status: 'invalid-target' as const }
+    if (hostAccountId === accountId) {
+      const result = { status: 'invalid-target' as const }
+      this.emitModerationAudit('room.ban_applied', hostAccountId, roomId, accountId, result.status)
+      return result
+    }
     const affectedRooms: AffectedRoomTransition[] = []
     const result = await this.transaction(async (client) => {
       const accounts = await this.lockAccounts(client, [
@@ -1116,6 +1334,10 @@ export class RoomService {
       }
       const target = await this.repository.currentMembership(accountId, client, true)
       if (!target || target.roomId !== roomId) return { status: 'not-member' as const }
+      const targetAccount = await client.query<{ displayName: string }>(
+        'SELECT name AS "displayName" FROM "user" WHERE id = $1',
+        [accountId],
+      )
       const existing = await client.query(
         `SELECT 1 FROM room_ban
           WHERE room_id = $1 AND account_id = $2 AND cleared_at IS NULL`,
@@ -1131,10 +1353,100 @@ export class RoomService {
       }
       await this.depart(client, target, instant)
       affectedRooms.push({ roomId: target.roomId })
-      return { status: 'banned' as const }
+      return {
+        status: 'banned' as const,
+        activity: {
+          displayName: targetAccount.rows[0]?.displayName ?? 'A member',
+          at: instant,
+        },
+      }
     })
+    this.emitModerationAudit('room.ban_applied', hostAccountId, roomId, accountId, result.status)
+    if (result.status === 'banned') {
+      await this.revokeRoomConnections(accountId, roomId)
+    }
+    if (result.status === 'banned') {
+      this.emitRoomActivity(
+        roomId,
+        'member-removed',
+        result.activity.displayName,
+        result.activity.at,
+      )
+    }
     await this.publishRoomTransitions(affectedRooms)
-    return result
+    return result.status === 'banned' ? { status: 'banned' as const } : result
+  }
+
+  async transferHost(hostAccountId: string, roomId: string, accountId: string) {
+    if (hostAccountId === accountId) {
+      const result = { status: 'invalid-target' as const }
+      this.emitModerationAudit(
+        'room.host_transferred',
+        hostAccountId,
+        roomId,
+        accountId,
+        result.status,
+      )
+      return result
+    }
+    const affectedRooms: AffectedRoomTransition[] = []
+    const result = await this.transaction(async (client) => {
+      const accounts = await this.lockAccounts(client, [hostAccountId, accountId])
+      if (!accounts.has(hostAccountId)) return { status: 'forbidden' as const }
+      const access = await readAccountAccessPolicy(client, hostAccountId, this.now())
+      if (!access?.canMutate('moderate')) return { status: 'forbidden' as const }
+      await this.lockRooms(client, [roomId])
+      const instant = this.now()
+      if (await this.closeRoomIfDue(client, roomId, instant)) {
+        affectedRooms.push({ roomId })
+        return { status: 'ended' as const }
+      }
+      const host = await this.repository.currentMembership(hostAccountId, client, true)
+      if (!host || host.roomId !== roomId || host.role !== 'host') {
+        return { status: 'forbidden' as const }
+      }
+      const target = await this.repository.currentMembership(accountId, client, true)
+      if (!target || target.roomId !== roomId) return { status: 'not-member' as const }
+      const targetAccount = await client.query<{ displayName: string }>(
+        'SELECT name AS "displayName" FROM "user" WHERE id = $1',
+        [accountId],
+      )
+      // The partial unique Host index is immediate, so demote then promote
+      // inside one locked transaction rather than briefly creating two Hosts.
+      await client.query(
+        "UPDATE room_membership SET role = 'member' WHERE id = $1 AND left_at IS NULL",
+        [host.id],
+      )
+      await client.query(
+        "UPDATE room_membership SET role = 'host' WHERE id = $1 AND left_at IS NULL",
+        [target.id],
+      )
+      affectedRooms.push({ roomId })
+      return {
+        status: 'transferred' as const,
+        activity: {
+          displayName: targetAccount.rows[0]?.displayName ?? 'A member',
+          at: instant,
+        },
+      }
+    })
+    this.emitModerationAudit(
+      'room.host_transferred',
+      hostAccountId,
+      roomId,
+      accountId,
+      result.status,
+    )
+    if (result.status === 'transferred') {
+      this.emitRoomActivity(
+        roomId,
+        'host-transferred',
+        result.activity.displayName,
+        result.activity.at,
+      )
+    }
+    await this.publishRoomTransitions(affectedRooms)
+    return result.status === 'transferred' ? { status: 'transferred' as const } : result
   }
 
   async clearBan(hostAccountId: string, roomId: string, accountId: string) {
@@ -1164,6 +1476,7 @@ export class RoomService {
       )
       return { status: result.rows[0] ? ('cleared' as const) : ('not-banned' as const) }
     })
+    this.emitModerationAudit('room.ban_cleared', hostAccountId, roomId, accountId, result.status)
     await this.publishRoomTransitions(affectedRooms)
     return result
   }
@@ -1621,6 +1934,77 @@ export class RoomService {
   }
 
 
+  async listAdminLiveRooms(
+    actor: PlatformAdminRoomActor,
+  ): Promise<ListAdminLiveRoomsResult> {
+    if (!actor.isPlatformAdmin) return { status: 'forbidden' }
+    const result = await this.configuration.pool.query<AdminLiveRoom>(
+      `SELECT room.id,
+              room.name,
+              room.visibility,
+              room.created_at AS "createdAt",
+              count(DISTINCT membership.id)::int AS "memberCount",
+              count(DISTINCT stream.id)::int AS "streamCount"
+         FROM room
+         LEFT JOIN room_membership membership
+           ON membership.room_id = room.id AND membership.left_at IS NULL
+         LEFT JOIN stream
+           ON stream.room_id = room.id AND stream.ended_at IS NULL
+        WHERE room.ended_at IS NULL
+        GROUP BY room.id
+        ORDER BY count(DISTINCT membership.id) DESC, room.created_at ASC, room.id ASC`,
+    )
+    return { status: 'ok', rooms: result.rows }
+  }
+
+  async adminEndRoom(
+    actor: PlatformAdminRoomActor,
+    roomId: string,
+  ): Promise<AdminEndRoomResult> {
+    if (!actor.isPlatformAdmin) {
+      this.emitModerationAudit(
+        'room.admin_ended',
+        actor.accountId,
+        roomId,
+        null,
+        'forbidden',
+      )
+      return { status: 'forbidden' }
+    }
+
+    const endedAt = this.now()
+    const result = await this.transaction(async (client): Promise<AdminEndRoomResult> => {
+      const room = await client.query<{ endedAt: Date | null }>(
+        `SELECT ended_at AS "endedAt"
+           FROM room
+          WHERE id = $1
+          FOR UPDATE`,
+        [roomId],
+      )
+      if (!room.rows[0]) return { status: 'not-found' }
+      if (room.rows[0].endedAt) return { status: 'already-ended' }
+      await endRoom(client, roomId, endedAt)
+      return { status: 'ended', endedAt }
+    })
+
+    this.emitModerationAudit(
+      'room.admin_ended',
+      actor.accountId,
+      roomId,
+      null,
+      result.status,
+    )
+    if (result.status === 'ended') {
+      this.emitHomeEvent({ type: 'room-ended', roomId })
+      try {
+        this.configuration.publishRoomEvent?.({ type: 'room-ended', roomId })
+      } catch {
+        // The committed end remains authoritative; clients also refresh on reconnect.
+      }
+    }
+    return result
+  }
+
   private async transaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
     const client = await this.configuration.pool.connect()
     try {
@@ -1687,4 +2071,8 @@ async function passwordMatches(password: string, stored: string) {
     expected.length,
   )) as Buffer
   return actual.length === expected.length && timingSafeEqual(actual, expected)
+}
+
+function writeRoomModerationAudit(entry: RoomModerationAuditEntry) {
+  console.info(JSON.stringify(entry))
 }

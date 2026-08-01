@@ -1,6 +1,6 @@
 import { createElement, useEffect, useRef, useState } from 'react'
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
-import { io } from 'socket.io-client'
+import { acquireRealtimeSocket } from '../realtime-socket'
 import {
   applyHomeRealtimeEvent,
   HOME_ACCOUNT_REPLACED_EVENT,
@@ -66,18 +66,16 @@ export function HomeRealtimeBridge({
     attempt: 0,
   }))
   const onCanonicalRefreshRef = useRef(onCanonicalRefresh)
-  const socketRef = useRef<ReturnType<typeof io> | null>(null)
   const retryRef = useRef<() => void>(() => {})
   onCanonicalRefreshRef.current = onCanonicalRefresh
 
   useEffect(() => {
     const visitor = anonymous ? visitorId() : undefined
-    const socket = io({
-      path: '/socket.io/',
-      withCredentials: true,
-      ...(visitor ? { auth: { visitorId: visitor } } : {}),
-    })
-    socketRef.current = socket
+    const lease = acquireRealtimeSocket(
+      anonymous ? `anonymous:${visitor ?? 'unstored'}` : 'authenticated',
+      visitor,
+    )
+    const socket = lease.socket
     let recovering = false
     let replaced = false
     let generation = 0
@@ -192,8 +190,7 @@ export function HomeRealtimeBridge({
       socket.off(HOME_SOCKET_EVENT, handleHomeEvent)
       socket.off(HOME_ACCOUNT_REPLACED_EVENT, handleAccountReplaced)
       socket.off(HOME_ACCOUNT_REVOKED_EVENT, handleAccountRevoked)
-      socket.disconnect()
-      if (socketRef.current === socket) socketRef.current = null
+      lease.release()
       retryRef.current = () => {}
     }
   }, [anonymous, queryClient])

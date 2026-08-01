@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import type { QueryClient } from '@tanstack/react-query'
 import {
   HeadContent,
@@ -83,15 +83,23 @@ function Document({
         />
         <HeadContent />
       </head>
-      <body>
+      <body data-hydrated="false">
         {showDisplayControls && (
           <div aria-label="Display controls" className="root-controls" role="region">
             <ThemeToggle initialPreference={themePreference} />
           </div>
         )}
         {children}
+        <HydrationReady />
         <Scripts />
       </body>
     </html>
   )
 }
+function HydrationReady() {
+  useEffect(() => {
+    document.body.dataset.hydrated = 'true'
+  }, [])
+  return null
+}
+

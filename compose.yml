@@ -1,34 +1,113 @@
+name: bhayanakcast
+
+x-service-health: &service-health
+  interval: 10s
+  timeout: 5s
+  retries: 6
+  start_period: 20s
+
 services:
+  app:
+    build:
+      context: .
+    restart: unless-stopped
+    init: true
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+      NODE_ENV: production
+      DATABASE_SCHEMA: ${DATABASE_SCHEMA:-public}
+      VALKEY_PREFIX: ${VALKEY_PREFIX:-}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:?Set BETTER_AUTH_URL}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Set BETTER_AUTH_SECRET}
+      ENFORCEMENT_KEY_SECRET: ${ENFORCEMENT_KEY_SECRET:?Set ENFORCEMENT_KEY_SECRET}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:?Set DISCORD_CLIENT_ID}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:?Set DISCORD_CLIENT_SECRET}
+      ADMIN_DISCORD_IDS: ${ADMIN_DISCORD_IDS:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      PUBLIC_OPERATOR_TIME_ZONE: ${PUBLIC_OPERATOR_TIME_ZONE:-UTC}
+      CLOUDFLARED_PUBLIC_URL: ${CLOUDFLARED_PUBLIC_URL:?Set CLOUDFLARED_PUBLIC_URL}
+      TRUSTED_PROXY_IPS: ${TRUSTED_PROXY_IPS:-172.30.0.3}
+      POSTHOG_PROJECT_API_KEY: ${POSTHOG_PROJECT_API_KEY:?Set POSTHOG_PROJECT_API_KEY}
+      POSTHOG_PROJECT_ID: ${POSTHOG_PROJECT_ID:?Set POSTHOG_PROJECT_ID}
+      POSTHOG_PERSONAL_API_KEY: ${POSTHOG_PERSONAL_API_KEY:?Set POSTHOG_PERSONAL_API_KEY}
+      DATABASE_URL: postgres://${POSTGRES_USER:-bhayanakcast}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-bhayanakcast}
+      VALKEY_URL: redis://valkey:6379
+      POSTHOG_HOST: http://posthog:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    expose:
+      - "3000"
+    networks:
+      - edge
+      - data
+      - analytics
+    healthcheck:
+      <<: *service-health
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3000/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-bhayanakcast}
       POSTGRES_USER: ${POSTGRES_USER:-bhayanakcast}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bhayanakcast}
-    ports:
-      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    networks:
+      - data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 5s
+      <<: *service-health
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
 
   valkey:
     image: valkey/valkey:8-alpine
     restart: unless-stopped
     command: ["valkey-server", "--save", "", "--appendonly", "no"]
-    ports:
-      - "127.0.0.1:${VALKEY_PORT:-6379}:6379"
+    networks:
+      - data
     healthcheck:
+      <<: *service-health
       test: ["CMD", "valkey-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 5s
+
+  cloudflared:
+    image: ${CLOUDFLARED_IMAGE:-cloudflare/cloudflared:2025.11.1}
+    restart: unless-stopped
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --loglevel
+      - info
+      - --metrics
+      - 0.0.0.0:2000
+      - run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARED_TUNNEL_TOKEN:?Set CLOUDFLARED_TUNNEL_TOKEN}
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      edge:
+        ipv4_address: 172.30.0.3
+
+networks:
+  edge:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+  data:
+    internal: true
+  analytics:
+    name: ${POSTHOG_NETWORK:-bhayanakcast-analytics}
+    external: true
 
 volumes:
   postgres-data:

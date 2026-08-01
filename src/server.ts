@@ -14,10 +14,14 @@ import { handleAuthenticationRequest } from './server/auth/handler'
 import { parseAdminDiscordIds } from './server/auth/session'
 import { readAccountAccessPolicy } from './server/auth/account-access-policy'
 import { bindHomeRuntime } from './server/home/home-functions'
+import { bindHomeAnalytics } from './server/home/home-observability'
+import { bindRoomAnalytics } from './server/rooms/room-observability'
 import { bindRoomService } from './features/home/create-room'
 import { bindPreferenceRuntime } from './server/profile/preference-service'
 import { bindChatMuteRuntime } from './server/profile/chat-mute-service'
 import { bindReportRuntime } from './server/moderation/report-service'
+import { bindModerationAnalytics } from './server/moderation/moderation-observability'
+import { bindSanctionRuntime } from './server/moderation/sanction-service'
 import { homePresence } from './server/home/home-presence'
 import {
   createHomeEventHub,
@@ -39,17 +43,21 @@ import { ChatService } from './server/rooms/chat-service'
 import { bindRoomRealtimeRuntime, roomRealtime } from './server/rooms/room-runtime'
 import {
   createRoomEventHub,
+  ROOM_CHAT_COMMAND,
   ROOM_JOIN_COMMAND,
   ROOM_LEAVE_COMMAND,
   ROOM_SIGNAL_COMMAND,
   ROOM_SOCKET_EVENT,
   ROOM_TYPING_COMMAND,
+  ROOM_TYPING_TTL_MS,
+  normalizeRoomChatCommand,
   normalizeSignalPayload,
   type RoomEventHub,
   type RoomRealtimeEvent,
 } from './server/realtime/room-events'
 import { ConnectionRegistry, type RegisteredConnection } from './server/realtime/connection-registry'
 import { bindDeletionRuntime } from './server/profile/deletion-service'
+import { createAccountLifecycleAnalytics } from './server/observability/account-lifecycle-analytics'
 import type { ServerRuntime } from './server/runtime'
 export { createServerRuntime } from './server/runtime'
 export {
@@ -59,12 +67,22 @@ export {
 const roomServicesByServer = new WeakMap<HttpServer, RoomService>()
 const homeEventHubs = new WeakMap<HttpServer, HomeEventHub>()
 const roomEventHubs = new WeakMap<HttpServer, RoomEventHub>()
+const connectionRevokers = new WeakMap<
+  HttpServer,
+  {
+    readonly account: (accountId: string) => void
+    readonly room: (accountId: string, roomId: string) => void
+  }
+>()
 
 export function bindServerRuntime(runtime: ServerRuntime, server: HttpServer) {
   const pool = runtime.getDatabasePool()
   if (pool) configuredAuthOrigin(process.env)
   bindAuthRuntime({ pool })
   bindHomeRuntime({ pool })
+  bindHomeAnalytics(process.env)
+  bindRoomAnalytics(process.env)
+  bindModerationAnalytics(process.env)
   bindPreferenceRuntime({ pool })
   const valkey = runtime.getValkey()
   const roomService =
@@ -76,18 +94,35 @@ export function bindServerRuntime(runtime: ServerRuntime, server: HttpServer) {
           publishHomeEvent: (event) => publishHomeEvent(server, event),
           publishRoomEvent: (event) => publishRoomEvent(server, event),
           now: () => new Date(runtime.clock.now()),
-          revokeConnections: () => undefined,
+          revokeConnections: (accountId) =>
+            connectionRevokers.get(server)?.account(accountId),
+          revokeRoomConnections: (accountId, roomId) =>
+            connectionRevokers.get(server)?.room(accountId, roomId),
           clock: runtime.clock,
         })
       : undefined
   if (roomService) bindRoomService(roomService)
   if (roomService) roomServicesByServer.set(server, roomService)
+  bindSanctionRuntime({
+    pool,
+    roomService,
+    now: () => new Date(runtime.clock.now()),
+  })
   bindDeletionRuntime({
     pool,
     roomService,
+    analytics: createAccountLifecycleAnalytics(process.env),
+    enforcementSecret:
+      process.env.ENFORCEMENT_KEY_SECRET ?? process.env.BETTER_AUTH_SECRET,
   })
   bindChatMuteRuntime({ pool })
-  bindReportRuntime({ pool })
+  bindReportRuntime({
+    pool,
+    readPreview: valkey
+      ? (previewKey) =>
+          valkey.getBuffer(`${runtime.bindings.valkeyPrefix}stream:preview:${previewKey}`)
+      : undefined,
+  })
   bindPreviewRuntime({
     previews:
       pool && valkey
@@ -124,7 +159,11 @@ export function bindServerRuntime(runtime: ServerRuntime, server: HttpServer) {
       streams: new StreamService({
         pool,
         now,
-        onRoomChanged: (roomId) => roomService?.publishRoomMembership(roomId),
+        onRoomChanged: async (roomId) => {
+          await roomService?.publishRoomMembership(roomId)
+          publishRoomEvent(server, { type: 'membership-changed', roomId })
+        },
+        publishRoomEvent: (event) => publishRoomEvent(server, event),
       }),
       subscriptions: new SubscriptionService(pool, now, (event) =>
         publishHomeEvent(server, event),
@@ -200,6 +239,7 @@ export function attachSocketServer(server: HttpServer, databasePool?: Pool) {
   roomEventHubs.set(server, roomHub)
   const connectionRegistry = new ConnectionRegistry()
   const terminalConnections = new WeakSet<RegisteredConnection>()
+  const roomDetachers = new Map<string, () => void>()
   const claimsByAccount = new Map<string, { readonly socket: SocketConnection; readonly generation: number }>()
   const generationsByAccount = new Map<string, number>()
   const roomService = roomServicesByServer.get(server)
@@ -223,18 +263,29 @@ export function attachSocketServer(server: HttpServer, databasePool?: Pool) {
     return next
   }
   homeEventHubs.set(server, eventHub)
-  bindDeletionRuntime({
-    revokeConnections: (accountId) => {
-      for (const socket of sockets.sockets.sockets.values()) {
-        if (socket.data.accountId === accountId) {
-          const connection = socket as unknown as RegisteredConnection
-          terminalConnections.add(connection)
-          socket.emit(HOME_ACCOUNT_REVOKED_EVENT)
-          socket.disconnect(true)
-        }
+  const revokeConnections = (accountId: string) => {
+    for (const socket of sockets.sockets.sockets.values()) {
+      if (socket.data.accountId === accountId) {
+        const connection = socket as unknown as RegisteredConnection
+        terminalConnections.add(connection)
+        socket.emit(HOME_ACCOUNT_REVOKED_EVENT)
+        socket.disconnect(true)
       }
-    },
+    }
+  }
+  const revokeRoomConnections = (accountId: string, roomId: string) => {
+    for (const socket of sockets.sockets.sockets.values()) {
+      if (socket.data.accountId !== accountId || socket.data.roomId !== roomId) continue
+      socket.emit(ROOM_SOCKET_EVENT, { type: 'membership-changed', roomId })
+      roomDetachers.get(socket.id)?.()
+    }
+  }
+  connectionRevokers.set(server, {
+    account: revokeConnections,
+    room: revokeRoomConnections,
   })
+  bindDeletionRuntime({ revokeConnections })
+  bindSanctionRuntime({ revokeConnections })
   attachedSockets.set(server, sockets)
 
   // Anonymous sockets, admitted per client key (ADR 0108). Keyed by
@@ -325,6 +376,7 @@ export function attachSocketServer(server: HttpServer, databasePool?: Pool) {
     let handledDisconnect = false
     let unsubscribe: () => void = () => {}
     const removePresence = () => {
+      const disconnectedFromRoom = typeof socket.data.roomId === 'string'
       if (handledDisconnect) return
       handledDisconnect = true
       void runAccountOperation(accountId, async () => {
@@ -336,7 +388,7 @@ export function attachSocketServer(server: HttpServer, databasePool?: Pool) {
         unsubscribe()
         homePresence.remove(accountId, socket.id)
         publishPresence()
-        if (!terminalConnections.has(connection)) {
+        if (!terminalConnections.has(connection) && disconnectedFromRoom) {
           await roomService?.handleUnexpectedDisconnect(accountId)
         }
         terminalConnections.delete(connection)
@@ -353,12 +405,30 @@ export function attachSocketServer(server: HttpServer, databasePool?: Pool) {
       readonly membershipId: string
       readonly displayName: string
     } | null = null
+    let typingExpiry: NodeJS.Timeout | undefined
+    let typingActive = false
     const detachRoom = () => {
+      delete socket.data.roomId
+      clearTimeout(typingExpiry)
+      typingExpiry = undefined
+      if (roomMembership && typingActive) {
+        roomHub.publish({
+          type: 'typing',
+          roomId: roomMembership.roomId,
+          membershipId: roomMembership.membershipId,
+          accountId,
+          displayName: roomMembership.displayName,
+          typing: false,
+        })
+      }
+      typingActive = false
       leaveRoomChannel()
       leaveRoomChannel = () => {}
       roomMembership = null
     }
     socket.on('disconnect', detachRoom)
+    roomDetachers.set(socket.id, detachRoom)
+    socket.on('disconnect', () => roomDetachers.delete(socket.id))
 
     socket.on(ROOM_JOIN_COMMAND, async (value: unknown, ack?: (result: unknown) => void) => {
       const roomId = typeof value === 'string' ? value : null
@@ -374,10 +444,12 @@ export function attachSocketServer(server: HttpServer, databasePool?: Pool) {
         membershipId: projection.self.id,
         displayName: self?.displayName ?? '',
       }
-      // Mutes are read once per join: a mute takes effect for messages that
-      // arrive after it, and rejoining is what re-reads the list (ADR 0102).
+      socket.data.roomId = roomMembership.roomId
+      // The server filter is refreshed on join; the client applies a newly
+      // persisted mute immediately so content disappears without reconnecting.
       const muted = new Set((await roomRealtime().chat?.mutedAccountIds(accountId).catch(() => [])) ?? [])
       leaveRoomChannel = roomHub.subscribe(projection.room.id, (event) => {
+        if (event.type === 'typing' && event.accountId === accountId) return
         if ('accountId' in event && muted.has(event.accountId)) return
         if (event.type === 'chat-message' && muted.has(event.message.accountId)) return
         socket.emit(ROOM_SOCKET_EVENT, event)
@@ -390,17 +462,55 @@ export function attachSocketServer(server: HttpServer, databasePool?: Pool) {
       ack?.({ status: 'left' })
     })
 
+    socket.on(ROOM_CHAT_COMMAND, async (value: unknown, ack?: (result: unknown) => void) => {
+      const current = roomMembership
+      const command = normalizeRoomChatCommand(value)
+      const chat = roomRealtime().chat
+      if (!current || !command || !chat) return ack?.({ status: 'rejected' })
+      try {
+        const result = await chat.send(accountId, { roomId: current.roomId, ...command })
+        if (result.status === 'sent') {
+          roomHub.publish({
+            type: 'chat-message',
+            roomId: current.roomId,
+            message: result.message,
+          })
+        }
+        ack?.(result)
+      } catch {
+        ack?.({ status: 'failed' })
+      }
+    })
+
     socket.on(ROOM_TYPING_COMMAND, (value: unknown, ack?: (result: unknown) => void) => {
       const current = roomMembership
-      if (!current) return ack?.({ status: 'rejected' })
+      if (!current || typeof value !== 'boolean') return ack?.({ status: 'rejected' })
+      clearTimeout(typingExpiry)
+      typingExpiry = undefined
+      typingActive = value
       roomHub.publish({
         type: 'typing',
         roomId: current.roomId,
         membershipId: current.membershipId,
         accountId,
         displayName: current.displayName,
-        typing: value === true,
+        typing: value,
       })
+      if (value) {
+        typingExpiry = setTimeout(() => {
+          typingExpiry = undefined
+          if (!typingActive || roomMembership !== current) return
+          typingActive = false
+          roomHub.publish({
+            type: 'typing',
+            roomId: current.roomId,
+            membershipId: current.membershipId,
+            accountId,
+            displayName: current.displayName,
+            typing: false,
+          })
+        }, ROOM_TYPING_TTL_MS)
+      }
       ack?.({ status: 'accepted' })
     })
 
@@ -444,8 +554,10 @@ export function attachSocketServer(server: HttpServer, databasePool?: Pool) {
         terminalConnections.add(previous)
         try {
           const previousSocket = previous as unknown as SocketConnection
-          const departure =
-            previousSocket.connected === false
+          const previousWasInRoom = typeof previousSocket.data.roomId === 'string'
+          const departure = !previousWasInRoom
+            ? undefined
+            : previousSocket.connected === false
               ? await roomService?.handleUnexpectedDisconnect(accountId)
               : await roomService?.terminalDeparture(accountId, 'displacement')
           if (departure && 'roomId' in departure) displacedRoomId = departure.roomId

@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { normalizeHomeValue } from './home-search'
+import { observeHome } from './home-observability'
 import type { HomeSearchPatch } from './HomeSearch'
 import type { Facet, HomeFacets, HomeSearch } from './home-types'
 
@@ -25,7 +26,10 @@ export function HomeFilters({ facets, search, onChange }: HomeFiltersProps) {
           honest. */}
       <button
         className="home-filters__open"
-        onClick={() => dialog.current?.showModal()}
+        onClick={() => {
+          observeHome({ name: 'home_filters_opened', properties: {} })
+          dialog.current?.showModal()
+        }}
         type="button"
       >
         <FiltersIcon />

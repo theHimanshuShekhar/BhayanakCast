@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-11
+- **Amended:** 2026-07-29 — ADR 0108 expands Home presence from signed-in Accounts to a blended connected-people count.
 
 ## Context
 
@@ -11,7 +12,7 @@ Desktop Home's identity and statistics rails cannot be compressed beside the dis
 
 Mobile Home replaces the desktop rails with:
 
-- a compact top brand bar containing the large `B`, live connected-Account count, and an avatar only when signed in;
+- a compact top brand bar containing the large `B`, live connected-people count, and an avatar only when signed in;
 - persistent bottom navigation for Home, Create, and Profile/account access when signed in or visible `Discord` authentication when anonymous; the anonymous control has the full accessible name `Continue with Discord`, with Admin visible only when authorized;
 - a collapsed global-statistics disclosure inside the search utility area, before Live Rooms.
 

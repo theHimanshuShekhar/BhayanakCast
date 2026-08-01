@@ -10,13 +10,20 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as ProfileRouteImport } from './routes/profile'
+import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as UsersUserIdRouteImport } from './routes/users/$userId'
 import { Route as RoomsRoomIdRouteImport } from './routes/rooms/$roomId'
+import { Route as AdminReportsReportIdRouteImport } from './routes/admin/reports/$reportId'
 
 const ProfileRoute = ProfileRouteImport.update({
   id: '/profile',
   path: '/profile',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -34,36 +41,67 @@ const RoomsRoomIdRoute = RoomsRoomIdRouteImport.update({
   path: '/rooms/$roomId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminReportsReportIdRoute = AdminReportsReportIdRouteImport.update({
+  id: '/reports/$reportId',
+  path: '/reports/$reportId',
+  getParentRoute: () => AdminRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteWithChildren
   '/profile': typeof ProfileRoute
   '/rooms/$roomId': typeof RoomsRoomIdRoute
   '/users/$userId': typeof UsersUserIdRoute
+  '/admin/reports/$reportId': typeof AdminReportsReportIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteWithChildren
   '/profile': typeof ProfileRoute
   '/rooms/$roomId': typeof RoomsRoomIdRoute
   '/users/$userId': typeof UsersUserIdRoute
+  '/admin/reports/$reportId': typeof AdminReportsReportIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteWithChildren
   '/profile': typeof ProfileRoute
   '/rooms/$roomId': typeof RoomsRoomIdRoute
   '/users/$userId': typeof UsersUserIdRoute
+  '/admin/reports/$reportId': typeof AdminReportsReportIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/profile' | '/rooms/$roomId' | '/users/$userId'
+  fullPaths:
+    | '/'
+    | '/admin'
+    | '/profile'
+    | '/rooms/$roomId'
+    | '/users/$userId'
+    | '/admin/reports/$reportId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/profile' | '/rooms/$roomId' | '/users/$userId'
-  id: '__root__' | '/' | '/profile' | '/rooms/$roomId' | '/users/$userId'
+  to:
+    | '/'
+    | '/admin'
+    | '/profile'
+    | '/rooms/$roomId'
+    | '/users/$userId'
+    | '/admin/reports/$reportId'
+  id:
+    | '__root__'
+    | '/'
+    | '/admin'
+    | '/profile'
+    | '/rooms/$roomId'
+    | '/users/$userId'
+    | '/admin/reports/$reportId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRouteWithChildren
   ProfileRoute: typeof ProfileRoute
   RoomsRoomIdRoute: typeof RoomsRoomIdRoute
   UsersUserIdRoute: typeof UsersUserIdRoute
@@ -76,6 +114,13 @@ declare module '@tanstack/react-router' {
       path: '/profile'
       fullPath: '/profile'
       preLoaderRoute: typeof ProfileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -99,11 +144,29 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RoomsRoomIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/reports/$reportId': {
+      id: '/admin/reports/$reportId'
+      path: '/reports/$reportId'
+      fullPath: '/admin/reports/$reportId'
+      preLoaderRoute: typeof AdminReportsReportIdRouteImport
+      parentRoute: typeof AdminRoute
+    }
   }
 }
 
+interface AdminRouteChildren {
+  AdminReportsReportIdRoute: typeof AdminReportsReportIdRoute
+}
+
+const AdminRouteChildren: AdminRouteChildren = {
+  AdminReportsReportIdRoute: AdminReportsReportIdRoute,
+}
+
+const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminRoute: AdminRouteWithChildren,
   ProfileRoute: ProfileRoute,
   RoomsRoomIdRoute: RoomsRoomIdRoute,
   UsersUserIdRoute: UsersUserIdRoute,

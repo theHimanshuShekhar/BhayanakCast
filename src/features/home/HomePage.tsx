@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { SessionProjection } from '../auth/auth-client'
 import { CreateRoomDialog } from './CreateRoomDialog'
@@ -14,6 +14,7 @@ import {
   homeStatisticsQueryOptions,
   pastStreamsQueryOptions,
 } from './home-queries'
+import { observeHome } from './home-observability'
 import type { HomeSearch } from './home-types'
 
 interface HomePageProps {
@@ -22,6 +23,15 @@ interface HomePageProps {
 }
 
 export function HomePage({ search, session }: HomePageProps) {
+  const observedView = useRef(false)
+  useEffect(() => {
+    if (observedView.current) return
+    observedView.current = true
+    observeHome({
+      name: 'home_viewed',
+      properties: { mode: search.q ? 'search' : 'discovery' },
+    })
+  }, [search.q])
   const [realtimeRefreshVersion, setRealtimeRefreshVersion] = useState(0)
   const onCanonicalRefresh = useCallback(
     () => setRealtimeRefreshVersion((version) => version + 1),

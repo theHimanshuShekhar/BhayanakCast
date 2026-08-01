@@ -52,6 +52,40 @@ describe('Room route projection selector', () => {
     expect(JSON.stringify(projection)).not.toMatch(/"(?:password|passwordHash|password_hash|members|accountId)":/i)
   })
 
+  test('carries the complete public gate contract while keeping presence anonymous', () => {
+    const projection = selectRoomRouteProjection(snapshot({
+      room: {
+        ...snapshot().room!,
+        visibility: 'private',
+        description: null,
+        tags: ['friends', 'horror'],
+      },
+      memberCount: 9,
+      streamCount: 3,
+      viewerAuthenticated: false,
+    }))
+
+    expect(projection).toEqual({
+      kind: 'preAdmission',
+      room: {
+        id: snapshot().room!.id,
+        name: 'Projection room',
+        category: 'Games',
+        description: null,
+        tags: ['friends', 'horror'],
+        visibility: 'private',
+        memberCount: 9,
+        streamCount: 3,
+        capacity: 10,
+        admission: 'password-required',
+        viewerAuthenticated: false,
+        expiresAt: new Date('2026-01-01T12:00:00.000Z'),
+      },
+    })
+    expect(projection?.room).not.toHaveProperty('roster')
+    expect(projection?.room).not.toHaveProperty('password')
+  })
+
   test('selects the admitted projection only for membership in this room', () => {
     const projection = selectRoomRouteProjection(
       snapshot({ self: { id: '00000000-0000-4000-8000-000000000002', role: 'host' } }),
@@ -99,6 +133,40 @@ describe('Room route projection selector', () => {
         viewerAuthenticated: true,
       },
     })
+  })
+
+  test('Past Stream retains bounded public metadata and end facts only', () => {
+    const endedAt = new Date('2026-01-01T02:00:00.000Z')
+    const projection = selectRoomRouteProjection(snapshot({
+      room: {
+        ...snapshot().room!,
+        visibility: 'private',
+        endedAt,
+      },
+      memberCount: 7,
+      streamCount: 4,
+      viewerAuthenticated: true,
+    }))
+
+    expect(projection).toEqual({
+      kind: 'pastStream',
+      room: {
+        id: snapshot().room!.id,
+        name: 'Projection room',
+        category: 'Games',
+        description: 'A blurb for the room.',
+        tags: ['friends'],
+        visibility: 'private',
+        memberCount: 7,
+        streamCount: 4,
+        capacity: 10,
+        endedAt,
+        viewerAuthenticated: true,
+      },
+    })
+    expect(projection?.room).not.toHaveProperty('admission')
+    expect(projection?.room).not.toHaveProperty('roster')
+    expect(projection?.room).not.toHaveProperty('transcript')
   })
 
   test.each(['normal end', 'admin end'])('%s selects Past Stream from canonical ended state', () => {

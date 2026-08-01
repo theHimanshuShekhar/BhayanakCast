@@ -7,11 +7,11 @@ import type { SessionProjection } from '../auth/auth-client'
     room itself. */
 export function RoomShell({
   children,
-  session = null,
+  session,
   state,
 }: Readonly<{
   children: ReactNode
-  session?: SessionProjection | null
+  session: SessionProjection | null
   state: 'admitted' | 'pre-admission' | 'ended' | 'not-found'
 }>) {
   return (

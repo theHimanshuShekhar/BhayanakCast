@@ -44,7 +44,7 @@ export async function endRoom(
     [roomId, instant],
   )
   await client.query(
-    'UPDATE room_membership SET left_at = $2 WHERE room_id = $1 AND left_at IS NULL',
+    'UPDATE room_membership SET left_at = $2, reconnect_until = NULL WHERE room_id = $1 AND left_at IS NULL',
     [roomId, instant],
   )
   await client.query(

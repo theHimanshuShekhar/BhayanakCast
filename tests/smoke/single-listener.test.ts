@@ -11,15 +11,16 @@ let server: ChildProcessWithoutNullStreams
 let origin: string
 let socket: Socket | undefined
 let rawSocket: WebSocket | undefined
+let serverErrors = ''
 
-beforeAll(async () => {
-  server = spawn(process.execPath, ['server/index.mjs'], {
+async function startServer(environment: NodeJS.ProcessEnv) {
+  const child = spawn(process.execPath, ['server/index.mjs'], {
     cwd: process.cwd(),
-    env: { ...process.env, HOST: '127.0.0.1', PORT: '0' },
+    env: { ...environment, HOST: '127.0.0.1', PORT: '0' },
     stdio: ['pipe', 'pipe', 'pipe'],
   })
 
-  origin = await new Promise<string>((resolve, reject) => {
+  const childOrigin = await new Promise<string>((resolve, reject) => {
     let output = ''
     const inspect = (chunk: Buffer) => {
       output += chunk.toString()
@@ -28,11 +29,22 @@ beforeAll(async () => {
         resolve(`http://127.0.0.1:${match[1]}`)
       }
     }
-    server.stdout.on('data', inspect)
-    server.stderr.on('data', inspect)
-    server.once('exit', (code) => {
+    child.stdout.on('data', inspect)
+    child.stderr.on('data', inspect)
+    child.once('exit', (code) => {
       reject(new Error(`server exited with ${code}:\n${output}`))
     })
+  })
+
+  return { origin: childOrigin, server: child }
+}
+
+beforeAll(async () => {
+  const started = await startServer(process.env)
+  server = started.server
+  origin = started.origin
+  server.stderr.on('data', (chunk: Buffer) => {
+    serverErrors += chunk.toString()
   })
 })
 
@@ -44,6 +56,33 @@ afterAll(async () => {
 })
 
 describe('production single listener', () => {
+  test('reports process liveness without disclosing dependency details', async () => {
+    const response = await fetch(`${origin}/health/live`)
+    expect(response.status).toBe(200)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(await response.json()).toEqual({ status: 'live' })
+  })
+
+  test('reports dependency readiness without disclosing dependency details', async () => {
+    const response = await fetch(`${origin}/health/ready`)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ status: 'ready' })
+
+    const unavailable = await startServer({
+      ...process.env,
+      DATABASE_URL: '',
+      VALKEY_URL: '',
+    })
+    try {
+      const unavailableResponse = await fetch(`${unavailable.origin}/health/ready`)
+      expect(unavailableResponse.status).toBe(503)
+      expect(await unavailableResponse.json()).toEqual({ status: 'unavailable' })
+    } finally {
+      unavailable.server.kill('SIGTERM')
+      await once(unavailable.server, 'exit')
+    }
+  })
+
   test('serves Start HTML and a built client asset', async () => {
     const response = await fetch(origin)
     const html = await response.text()
@@ -100,6 +139,35 @@ describe('production single listener', () => {
       req.end()
     })
     expect(status).toBe(404)
+  })
+
+  test('treats a disconnected HTTP client as cancellation, not a server error', async () => {
+    for (let index = 0; index < 5; index += 1) {
+      const { promise, resolve } = Promise.withResolvers<void>()
+      const client = request(origin)
+      client.once('finish', () => client.destroy())
+      client.once('error', () => undefined)
+      client.once('close', resolve)
+      client.end()
+      await promise
+    }
+    const html = await (await fetch(origin)).text()
+    const assetPath = html.match(/(?:src|href)="(\/static\/[^\"]+|\/assets\/[^\"]+)"/)?.[1]
+    expect(assetPath).toBeDefined()
+    for (let index = 0; index < 5; index += 1) {
+      const { promise, resolve, reject } = Promise.withResolvers<void>()
+      const client = request(new URL(assetPath!, origin), (response) => {
+        response.once('data', () => response.destroy())
+        response.once('close', resolve)
+      })
+      client.once('error', reject)
+      client.end()
+      await promise
+    }
+    expect((await fetch(`${origin}/health/live`)).status).toBe(200)
+    expect(server.exitCode).toBeNull()
+    expect(serverErrors).not.toContain('ERR_STREAM_UNABLE_TO_PIPE')
+    expect(serverErrors).not.toContain('ERR_STREAM_PREMATURE_CLOSE')
   })
 
   test('closes an upgraded Socket.IO transport during shutdown', async () => {

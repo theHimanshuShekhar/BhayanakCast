@@ -8,6 +8,7 @@ import {
   HOME_ACCOUNT_REPLACED_EVENT,
   HOME_SOCKET_EVENT,
 } from '../../src/server/realtime/home-events'
+import { ROOM_JOIN_COMMAND } from '../../src/server/realtime/room-events'
 import { ConnectionRegistry, type RegisteredConnection } from '../../src/server/realtime/connection-registry'
 import { RoomService } from '../../src/server/rooms/room-service'
 import { createTestAccountHarness, type TestAccountHarness } from '../helpers/test-account'
@@ -33,6 +34,14 @@ async function openProductionSocket(
     socket.once('connect_error', reject)
   })
   return socket
+}
+async function joinProductionRoom(socket: Socket, roomId: string) {
+  await new Promise<void>((resolve, reject) => {
+    socket.emit(ROOM_JOIN_COMMAND, roomId, (result: unknown) => {
+      if ((result as { status?: unknown } | null)?.status === 'joined') resolve()
+      else reject(new Error('Production socket did not join its room'))
+    })
+  })
 }
 
 async function waitForProduction<T>(
@@ -176,6 +185,7 @@ describe('production account connection lifecycle', () => {
     const fixture = await productionRoom()
     try {
       const first = await openProductionSocket(fixture.cookie, fixture.context.server.origin)
+      await joinProductionRoom(first, fixture.roomId)
       let secondPromise!: Promise<Socket>
       const reclaimed = new Promise<void>((resolve) => {
         secondPromise = openProductionSocket(
@@ -219,6 +229,7 @@ describe('production account connection lifecycle', () => {
     const fixture = await productionRoom()
     try {
       const first = await openProductionSocket(fixture.cookie, fixture.context.server.origin)
+      await joinProductionRoom(first, fixture.roomId)
       const replacements: unknown[] = []
       const replaced = new Promise<void>((resolve) => {
         first.once(HOME_ACCOUNT_REPLACED_EVENT, (event) => {

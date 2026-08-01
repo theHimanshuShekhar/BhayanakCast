@@ -5,36 +5,59 @@ import type { RoomMedia } from './useRoomMedia'
     controls someone else's stream — those controls live on their tile. */
 export function RoomControlShelf({
   media,
+  canStream,
   connection,
+  reconnectSecondsRemaining,
   leavePending,
   onLeave,
 }: Readonly<{
   media: RoomMedia
+  canStream: boolean
   connection: 'live' | 'reconnecting' | 'lost'
+  reconnectSecondsRemaining: number | null
   leavePending: boolean
   onLeave: () => void
 }>) {
   const frozen = connection !== 'live'
   return (
     <div className="room-shelf" data-connection={connection}>
-      {!media.supported && (
-        // Persistent and inline above the shelf — never a dismissible toast, so
-        // a member who cannot stream always knows why (ADR 0103).
-        <p className="room-shelf__compatibility" role="status">
-          This browser cannot share a screen. Streaming and watching need a
-          desktop browser with screen sharing support.
+      {media.compatibility !== 'compatible' && (
+        // Compatibility never blocks admission. A failed probe is explicitly
+        // rerunnable in place, without leaving chat or the room.
+        <div className="room-shelf__compatibility" role="status">
+          <p>
+            {media.compatibility === 'probing'
+              ? 'Checking direct media compatibility… Chat and presence remain available.'
+              : 'Direct media is unavailable. Chat and presence remain available.'}
+          </p>
+          {media.compatibility === 'incompatible' && (
+            <button type="button" onClick={() => void media.retryCompatibility()}>
+              Retry compatibility
+            </button>
+          )}
+        </div>
+      )}
+      {!media.captureSupported && (
+        <p className="room-shelf__guidance" id="desktop-stream-guidance">
+          Sharing a screen requires a Chromium-family browser on a desktop computer.
+          You can still watch streams on this device after the media check passes.
+        </p>
+      )}
+      {!canStream && (
+        <p className="room-shelf__guidance" id="stream-sanction-guidance" role="status">
+          Streaming is unavailable on your account. You can remain in the room.
         </p>
       )}
       {frozen && (
         <p className="room-shelf__compatibility" role="status">
           {connection === 'reconnecting'
-            ? 'Reconnecting… the room is paused until the connection returns.'
+            ? `Reconnecting… ${reconnectSecondsRemaining ?? 45}s remaining. Your media was stopped; Start or Watch again after recovery.`
             : 'Connection lost. Start your stream and pick a stream to watch again.'}
         </p>
       )}
 
       <div className="room-shelf__slot">
-        <StreamSlot frozen={frozen} media={media} />
+        <StreamSlot canStream={canStream} frozen={frozen} media={media} />
       </div>
 
       {media.error && (
@@ -44,9 +67,6 @@ export function RoomControlShelf({
       )}
 
       <div className="room-shelf__trailing">
-        <a className="room-boundary__back" href="/">
-          Back to Home
-        </a>
         <button
           aria-busy={leavePending}
           className="room-controls__leave"
@@ -65,12 +85,37 @@ export function RoomControlShelf({
     of buttons appearing and disappearing (ADR 0100). */
 function StreamSlot({
   media,
+  canStream,
   frozen,
-}: Readonly<{ media: RoomMedia; frozen: boolean }>) {
-  if (!media.supported) {
+}: Readonly<{ media: RoomMedia; frozen: boolean; canStream: boolean }>) {
+  if (!canStream) {
+    return (
+      <button
+        aria-describedby="stream-sanction-guidance"
+        className="room-shelf__stream"
+        disabled
+        type="button"
+      >
+        Streaming unavailable
+      </button>
+    )
+  }
+  if (!media.captureSupported) {
+    return (
+      <button
+        aria-describedby="desktop-stream-guidance"
+        className="room-shelf__stream"
+        disabled
+        type="button"
+      >
+        Desktop only
+      </button>
+    )
+  }
+  if (media.compatibility !== 'compatible') {
     return (
       <button className="room-shelf__stream" disabled type="button">
-        Desktop only
+        {media.compatibility === 'probing' ? 'Checking media…' : 'Media unavailable'}
       </button>
     )
   }

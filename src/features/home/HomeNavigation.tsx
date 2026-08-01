@@ -5,6 +5,7 @@ import { AccountMenu } from '../auth/AccountMenu'
 import { SignInButton } from '../auth/SignInButton'
 import type { SessionProjection } from '../auth/auth-client'
 import { ThemeToggle } from '../theme/ThemeToggle'
+import { observeHome } from './home-observability'
 
 export const CREATE_ROOM_EVENT = 'bhayanakcast:create-room'
 
@@ -72,6 +73,10 @@ export function HomeNavigation({
               ariaLabel="Continue with Discord"
               icon={<DiscordIcon />}
               label="Discord"
+              onActivate={() => observeHome({
+                name: 'home_discord_sign_in_started',
+                properties: { intent: 'home' },
+              })}
             />
           </div>
         )}
@@ -125,6 +130,7 @@ export function CreateRoomButton({
         disabled={state.pending}
         type="button"
         onClick={() => {
+          observeHome({ name: 'home_create_started', properties: {} })
           window.dispatchEvent(new CustomEvent<CreateRoomEventDetail>(CREATE_ROOM_EVENT, {
             detail: { setState },
           }))

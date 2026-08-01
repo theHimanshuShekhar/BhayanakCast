@@ -37,11 +37,14 @@ export const test = base.extend<{ authSessions: AuthSessionFixture }>({
     let accounts: TestAccountHarness | undefined
     const contexts: BrowserContext[] = []
     try {
-      accounts = await createTestAccountHarness({
-        workerId: environment.workerId,
-        environment,
-        server,
-      })
+      accounts = await createTestAccountHarness(
+        {
+          workerId: environment.workerId,
+          environment,
+          server,
+        },
+        { deleteUsersOnCleanup: false },
+      )
       await use({
         origin: server.origin,
         sql: server.sql,

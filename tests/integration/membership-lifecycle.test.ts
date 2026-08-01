@@ -8,6 +8,7 @@ import { RoomLifecycle } from '../../src/server/rooms/room-lifecycle'
 import { RoomService } from '../../src/server/rooms/room-service'
 import { TestClock } from '../helpers/test-clock'
 import { getIntegrationContext } from '../setup/integration'
+import { SubscriptionService } from '../../src/server/streams/subscription-service'
 
 const MINUTE_MS = 60_000
 const HOUR_MS = 60 * MINUTE_MS
@@ -88,15 +89,26 @@ describe('membership lifecycle', () => {
     const fixture = await createFixture()
     const owner = await fixture.account()
     const member = await fixture.account()
+    const viewer = await fixture.account()
     const room = created(await fixture.rooms.createRoom(owner, { name: 'Reconnect room' }))
     const joined = await fixture.rooms.admit(member, room.room.id)
     expect(joined.status).toBe('joined')
     if (joined.status !== 'joined') throw new Error('Expected member admission')
+    const viewerJoin = await fixture.rooms.admit(viewer, room.room.id)
+    expect(viewerJoin.status).toBe('joined')
+    if (viewerJoin.status !== 'joined') throw new Error('Expected viewer admission')
     const streamId = randomUUID()
     await fixture.pool.query(
       'INSERT INTO stream (id, room_id, membership_id, started_at) VALUES ($1, $2, $3, $4)',
       [streamId, room.room.id, joined.membership.id, new Date(fixture.clock.now())],
     )
+    const subscriptions = new SubscriptionService(
+      fixture.pool,
+      () => new Date(fixture.clock.now()),
+    )
+    await expect(
+      subscriptions.subscribe(viewerJoin.membership.id, streamId),
+    ).resolves.toMatchObject({ status: 'subscribed' })
 
     await expect(fixture.membership.unexpectedDisconnect(member)).resolves.toMatchObject({
       status: 'reserved',
@@ -111,6 +123,7 @@ describe('membership lifecycle', () => {
     await expect(
       fixture.pool.query('SELECT ended_at AS "endedAt" FROM stream WHERE id = $1', [streamId]),
     ).resolves.toMatchObject({ rows: [{ endedAt: new Date(fixture.clock.now()) }] })
+    await expect(subscriptions.current(viewerJoin.membership.id)).resolves.toBeNull()
 
     await expect(fixture.membership.reclaim(member)).resolves.toMatchObject({
       status: 'reclaimed',

@@ -1,12 +1,17 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
-import { banRoomMember, chatHistoryQueryOptions, leaveRoom } from './room-queries'
+import { useRef, useState } from 'react'
+import { chatHistoryQueryOptions, leaveRoom } from './room-queries'
 import { RoomCompanionDock } from './RoomCompanionDock'
+import { RoomBanDialog } from './RoomBanDialog'
+import { RoomKickDialog } from './RoomKickDialog'
+import { RoomHostTransferDialog } from './RoomHostTransferDialog'
+import { RoomHostStreamStopDialog } from './RoomHostStreamStopDialog'
 import { RoomControlShelf } from './RoomControlShelf'
 import { RoomMemberMosaic } from './RoomMemberMosaic'
 import { RoomReportDialog, type ReportTarget } from './RoomReportDialog'
 import { RoomSettingsDialog } from './RoomSettingsDialog'
-import { RoomFact, RoomHeader, RoomShell, expiresInLabel } from './RoomShell'
+import { RoomShell } from './RoomShell'
+import { RoomLiveHeader } from './RoomLiveHeader'
 import { useRoomMedia } from './useRoomMedia'
 import { useStreamPreview } from './useStreamPreview'
 import { useRoomRealtime, type RoomSocket } from './useRoomRealtime'
@@ -14,8 +19,10 @@ import type { RoomRosterMember } from '../../server/rooms/room-roster'
 import type { MembershipConfirmation } from '../../server/rooms/room-service'
 import type { RoomAdmitted, RoomSelfMembership } from './room-types'
 import type { SessionProjection } from '../auth/auth-client'
+import { observeRoom } from './room-observability'
 
 type DockTab = 'chat' | 'people' | 'activity'
+const EMPTY_CHAT_HISTORY: [] = []
 
 interface RoomAdmittedBoundaryProps {
   readonly room: RoomAdmitted
@@ -39,31 +46,35 @@ export function RoomAdmittedBoundary({
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [sheet, setSheet] = useState<DockTab | null>(null)
+  const sheetInvoker = useRef<HTMLButtonElement | null>(null)
   const [report, setReport] = useState<ReportTarget | null>(null)
+  const [banTarget, setBanTarget] = useState<RoomRosterMember | null>(null)
+  const [kickTarget, setKickTarget] = useState<RoomRosterMember | null>(null)
+  const [transferTarget, setTransferTarget] = useState<RoomRosterMember | null>(null)
+  const [streamStopTarget, setStreamStopTarget] = useState<RoomRosterMember | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const history = useQuery(chatHistoryQueryOptions(room.id))
   const realtime = useRoomRealtime({
     socket,
     roomId: room.id,
     admitted: true,
-    history: history.data ?? [],
+    history: history.data ?? EMPTY_CHAT_HISTORY,
     queryClient,
   })
   const media = useRoomMedia({
+    activeStreamIds: room.roster.flatMap((member) =>
+      member.streamId === null ? [] : [member.streamId],
+    ),
     roomId: room.id,
     realtime,
     connection: realtime.connection,
+    roomEnded: realtime.ended,
   })
 
   // ADR 0035: the viewer's own Stream keeps its preview fresh while it runs,
   // and stops uploading the moment the stream does.
   useStreamPreview({ stream: media.localStream, visibility: room.visibility })
 
-  // ADR 0103: only the one-minute warning raises the countdown's prominence,
-  // and it never says why the room is ending.
-  const lastWarning = [...realtime.activity]
-    .reverse()
-    .find((entry) => entry.kind === 'room-warning')?.minutes
 
   // Tiles and People rows offer the same actions, from one definition each
   // (ADR 0102).
@@ -73,12 +84,10 @@ export function RoomAdmittedBoundary({
       id: member.streamId ?? member.accountId,
       label: member.displayName,
     })
-  const hostActions =
-    self.role === 'host'
-      ? (member: RoomRosterMember) => {
-          void banRoomMember({ data: { roomId: room.id, accountId: member.accountId } })
-        }
-      : null
+  const hostActions = self.role === 'host' ? setBanTarget : null
+  const onKickMember = self.role === 'host' ? setKickTarget : null
+  const onTransferHost = self.role === 'host' ? setTransferTarget : null
+  const onStopStream = self.role === 'host' ? setStreamStopTarget : null
 
   const leave = async () => {
     if (pending) return
@@ -101,40 +110,35 @@ export function RoomAdmittedBoundary({
     }
   }
 
+  const toggleCompanionSheet = (tab: DockTab, invoker: HTMLButtonElement) => {
+    sheetInvoker.current = invoker
+    if (sheet === tab) {
+      observeRoom({
+        name: 'room_companion_closed',
+        properties: { surface: 'sheet', reason: 'control' },
+      })
+      setSheet(null)
+      return
+    }
+    observeRoom({
+      name: sheet === null ? 'room_companion_opened' : 'room_companion_tab_selected',
+      properties: { surface: 'sheet', tab },
+    })
+    setSheet(tab)
+  }
+
+  const dismissCompanionSheet = () => {
+    setSheet(null)
+    requestAnimationFrame(() => sheetInvoker.current?.focus())
+  }
+
   return (
     <RoomShell session={session} state="admitted">
       <main className="room-boundary room-boundary--admitted" data-room-state="admitted">
-        <RoomHeader
-          category={room.category}
-          description={room.description}
-          eyebrow={self.role === 'host' ? 'Host' : 'Member'}
-          eyebrowTone={self.role === 'host' ? 'host' : 'neutral'}
-          facts={
-            <>
-              <RoomFact tone={room.streamCount > 0 ? 'live' : 'neutral'}>
-                {room.streamCount}{' '}
-                {room.streamCount === 1 ? 'screen shared' : 'screens shared'}
-              </RoomFact>
-              <RoomFact>
-                {room.memberCount} of {room.capacity} here
-              </RoomFact>
-              <RoomFact tone="warning">
-                <time
-                  data-countdown={lastWarning === 1 ? 'urgent' : 'normal'}
-                  dateTime={room.expiresAt.toISOString()}
-                >
-                  {expiresInLabel(room.expiresAt)}
-                </time>
-              </RoomFact>
-              {self.role === 'host' && (
-                <button type="button" onClick={() => setSettingsOpen(true)}>
-                  Room settings
-                </button>
-              )}
-            </>
-          }
-          name={room.name}
-          tags={room.tags}
+        <RoomLiveHeader
+          canManageSettings={self.role === 'host'}
+          room={room}
+          onOpenSettings={() => setSettingsOpen(true)}
         />
 
         <div className="room-stage">
@@ -147,7 +151,10 @@ export function RoomAdmittedBoundary({
             <RoomMemberMosaic
               hostActions={hostActions}
               media={media}
+              onKickMember={onKickMember}
               onReport={reportMember}
+              onStopStream={onStopStream}
+              onTransferHost={onTransferHost}
               roster={room.roster}
               selfMembershipId={self.id}
               visibility={room.visibility}
@@ -161,7 +168,9 @@ export function RoomAdmittedBoundary({
           )}
 
           <RoomControlShelf
+            canStream={room.canStream}
             connection={realtime.connection}
+            reconnectSecondsRemaining={realtime.reconnectSecondsRemaining}
             leavePending={pending}
             media={media}
             onLeave={leave}
@@ -169,12 +178,22 @@ export function RoomAdmittedBoundary({
         </div>
 
         <RoomCompanionDock
+          canChat={room.canChat}
           hostActions={hostActions}
           memberCount={room.memberCount}
-          onDismissSheet={() => setSheet(null)}
+          onDismissSheet={dismissCompanionSheet}
           onReport={reportMember}
+          onReportMessage={(message) =>
+            setReport({
+              type: 'message',
+              id: message.id,
+              label: `Message from ${message.displayName}`,
+            })
+          }
+          onKickMember={onKickMember}
+          onStopStream={onStopStream}
+          onTransferHost={onTransferHost}
           realtime={realtime}
-          roomId={room.id}
           roster={room.roster}
           selfMembershipId={self.id}
           sheet={sheet}
@@ -183,18 +202,24 @@ export function RoomAdmittedBoundary({
         {/* Below 768px this is the only room control surface (ADR 0103). */}
         <nav aria-label="Room controls" className="room-mobile-bar">
           <button
-            data-disabled-reason={media.supported ? undefined : 'Desktop only'}
-            disabled={!media.supported || realtime.connection !== 'live'}
+            aria-describedby="mobile-stream-guidance"
+            data-disabled-reason="Desktop only"
+            disabled
             type="button"
-            onClick={() => void media.startPublishing()}
           >
-            {media.supported ? 'Stream' : 'Desktop only'}
+            Desktop only
           </button>
+          <span className="visually-hidden" id="mobile-stream-guidance">
+            Sharing a screen requires a Chromium-family browser on a desktop
+            computer. Watching remains available after the media check passes.
+          </span>
           {(['chat', 'people', 'activity'] as const).map((tab) => (
             <button
+              aria-controls="room-companions"
+              aria-expanded={sheet === tab}
               key={tab}
               type="button"
-              onClick={() => setSheet((current) => (current === tab ? null : tab))}
+              onClick={(event) => toggleCompanionSheet(tab, event.currentTarget)}
             >
               {tab === 'chat' ? 'Chat' : tab === 'people' ? 'People' : 'Activity'}
             </button>
@@ -211,6 +236,26 @@ export function RoomAdmittedBoundary({
           onSubmitted={() => {
             if (report?.type === 'stream') void media.stopWatchingStream()
           }}
+        />
+        <RoomBanDialog
+          roomId={room.id}
+          target={banTarget}
+          onClose={() => setBanTarget(null)}
+        />
+        <RoomKickDialog
+          roomId={room.id}
+          target={kickTarget}
+          onClose={() => setKickTarget(null)}
+        />
+        <RoomHostTransferDialog
+          roomId={room.id}
+          target={transferTarget}
+          onClose={() => setTransferTarget(null)}
+        />
+        <RoomHostStreamStopDialog
+          roomId={room.id}
+          target={streamStopTarget}
+          onClose={() => setStreamStopTarget(null)}
         />
         {self.role === 'host' && (
           <RoomSettingsDialog

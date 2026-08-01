@@ -6,6 +6,7 @@ import {
   updateRoomSettings,
 } from './room-queries'
 import type { RoomAdmitted } from './room-types'
+import { observeRoom } from './room-observability'
 
 type SettingsTab = 'metadata' | 'privacy' | 'bans'
 
@@ -26,14 +27,16 @@ export function RoomSettingsDialog({
   const [password, setPassword] = useState('')
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [clearingAccountId, setClearingAccountId] = useState<string | null>(null)
+  const [banError, setBanError] = useState<string | null>(null)
   const bans = useQuery({ ...roomBansQueryOptions(room.id), enabled: open && tab === 'bans' })
 
   if (!open) return null
 
   return (
-    <div aria-modal="true" className="room-dialog" role="dialog">
+    <div aria-labelledby="room-settings-title" aria-modal="true" className="room-dialog" role="dialog">
       <div className="room-dialog__panel">
-        <h2>Room settings</h2>
+        <h2 id="room-settings-title">Room settings</h2>
         <div className="room-dialog__tabs" role="tablist">
           {(['metadata', 'privacy', 'bans'] as const).map((value) => (
             <button
@@ -49,25 +52,39 @@ export function RoomSettingsDialog({
         </div>
 
         {tab === 'bans' ? (
-          <ul className="room-dialog__bans">
-            {(bans.data ?? []).length === 0 && <li>No one is banned from this room.</li>}
-            {(bans.data ?? []).map((ban) => (
-              <li key={ban.accountId}>
-                <span>{ban.displayName}</span>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await clearRoomBan({ data: { roomId: room.id, accountId: ban.accountId } })
-                    await queryClient.invalidateQueries({
-                      queryKey: roomBansQueryOptions(room.id).queryKey,
-                    })
-                  }}
-                >
-                  Remove ban
-                </button>
-              </li>
-            ))}
-          </ul>
+          <div aria-live="polite">
+            <p className="room-dialog__ban-guidance">
+              Clearing a Room Ban lets that person use the normal Join flow again.
+            </p>
+            {bans.isPending && <p>Loading Room Bans…</p>}
+            {(bans.isError || bans.data === null || banError) && (
+              <p className="form-error" role="alert">
+                {banError ?? 'Room Bans could not be loaded. Try again.'}
+              </p>
+            )}
+            {bans.isSuccess && Array.isArray(bans.data) && (
+              <ul className="room-dialog__bans">
+                {bans.data.length === 0 && <li>No one is banned from this room.</li>}
+                {bans.data.map((ban) => (
+                  <li key={ban.accountId}>
+                    <span>
+                      <strong>{ban.displayName}</strong>
+                      <small>Banned from this room</small>
+                    </span>
+                    <button
+                      aria-label={`Clear Room Ban for ${ban.displayName}`}
+                      aria-busy={clearingAccountId === ban.accountId}
+                      disabled={clearingAccountId !== null}
+                      type="button"
+                      onClick={() => void clear(ban.accountId)}
+                    >
+                      {clearingAccountId === ban.accountId ? 'Clearing…' : 'Clear ban'}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         ) : (
           <form
             onSubmit={(event) => {
@@ -198,5 +215,27 @@ export function RoomSettingsDialog({
           ? 'This room has ended.'
           : 'Those settings could not be saved.',
     )
+  }
+
+  async function clear(accountId: string) {
+    if (clearingAccountId) return
+    setClearingAccountId(accountId)
+    setBanError(null)
+    observeRoom({ name: 'room_ban_clear_requested', properties: {} })
+    const result = await clearRoomBan({
+      data: { roomId: room.id, accountId },
+    }).catch(() => null)
+    if (result?.status === 'cleared') {
+      await queryClient.invalidateQueries({
+        queryKey: roomBansQueryOptions(room.id).queryKey,
+      })
+    } else {
+      setBanError(
+        result?.status === 'ended'
+          ? 'This room has ended.'
+          : 'That Room Ban could not be cleared. Try again.',
+      )
+    }
+    setClearingAccountId(null)
   }
 }

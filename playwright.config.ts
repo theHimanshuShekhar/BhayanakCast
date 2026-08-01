@@ -2,10 +2,12 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   testDir: './tests/e2e',
+  timeout: 120_000,
   retries: 1,
   outputDir: 'test-results',
   use: {
     baseURL: 'http://127.0.0.1:3000',
+    actionTimeout: 15_000,
     trace: 'on-first-retry',
   },
   projects: [

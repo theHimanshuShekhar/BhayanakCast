@@ -160,6 +160,40 @@ describe('stream previews', () => {
     )
   })
 
+  test('serializes concurrent replacements and removes the displaced bytes', async () => {
+    const fixture = await createFixture()
+    const { host, streamId } = await streaming(fixture)
+    const originalSet = fixture.valkey.set.bind(fixture.valkey)
+    const firstWrite = Promise.withResolvers<void>()
+    const releaseFirst = Promise.withResolvers<void>()
+    let delay = true
+    fixture.valkey.set = (async (...args: Parameters<typeof originalSet>) => {
+      if (delay && String(args[0]).includes('preview:')) {
+        delay = false
+        firstWrite.resolve()
+        await releaseFirst.promise
+      }
+      return originalSet(...args)
+    }) as typeof fixture.valkey.set
+
+    const first = fixture.previews.store(host, webp(640, 360))
+    await firstWrite.promise
+    await fixture.clearRateLimit(streamId)
+    const second = await fixture.previews.store(host, webp(320, 180))
+    releaseFirst.resolve()
+    const completed = await first
+    expect(second.status).toBe('stored')
+    expect(completed.status).toBe('stored')
+
+    const keys = await fixture.valkey.keys(`${fixture.valkeyPrefix}preview:*`)
+    expect(keys).toHaveLength(1)
+    const row = await fixture.pool.query<{ key: string }>(
+      'SELECT preview_key AS key FROM stream WHERE id = $1',
+      [streamId],
+    )
+    expect(keys[0]).toBe(`${fixture.valkeyPrefix}preview:${row.rows[0]?.key}`)
+  })
+
   test('holds a publisher to one upload per window', async () => {
     const fixture = await createFixture()
     const { host } = await streaming(fixture)

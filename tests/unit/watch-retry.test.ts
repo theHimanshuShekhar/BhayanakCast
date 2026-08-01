@@ -1,6 +1,41 @@
+import fc from 'fast-check'
 import { AsyncRetryer } from '@tanstack/pacer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { WATCH_MAX_ATTEMPTS, WATCH_RETRY_OPTIONS } from '../../src/features/room/useRoomMedia'
+import {
+  beginWatchSelection,
+  WATCH_MAX_ATTEMPTS,
+  WATCH_RETRY_OPTIONS,
+  isDesktopCaptureClient,
+  probeDirectMediaCompatibility,
+  type WatchState,
+} from '../../src/features/room/useRoomMedia'
+
+describe('one-watch selection invariant', () => {
+  it('replaces every prior state with exactly the newly selected Stream', () => {
+    fc.assert(
+      fc.property(
+        fc.array(fc.uuid(), { minLength: 1, maxLength: 30 }),
+        (selections) => {
+          let current: WatchState = { kind: 'idle' }
+          for (const streamId of selections) {
+            const transition = beginWatchSelection(current, streamId)
+            expect(transition.previousStreamId).toBe(
+              current.kind === 'idle' ? null : current.streamId,
+            )
+            expect(transition.next).toEqual({
+              kind: 'connecting',
+              streamId,
+              attempt: 1,
+            })
+            current = transition.next
+          }
+          if (current.kind === 'idle') throw new Error('Expected at least one selection')
+          expect(current.streamId).toBe(selections.at(-1))
+        },
+      ),
+    )
+  })
+})
 
 /** ADR 0077: after the first direct-watch attempt fails, the same Stream is
     retried three times at 1, 2 and 4 seconds — and never again without a fresh
@@ -86,5 +121,51 @@ describe('direct-watch retry policy', () => {
       maxWait: 4_000,
       jitter: 0,
     })
+  })
+})
+
+describe('direct-media compatibility', () => {
+  it('closes a successful probe peer and can be run again after a failure', async () => {
+    const failedClose = vi.fn()
+    const passedClose = vi.fn()
+    const failed = {
+      addTransceiver: vi.fn(),
+      createOffer: vi.fn().mockRejectedValue(new Error('unsupported')),
+      setLocalDescription: vi.fn(),
+      close: failedClose,
+    } as unknown as RTCPeerConnection
+    const passed = {
+      addTransceiver: vi.fn(),
+      createOffer: vi.fn().mockResolvedValue({ type: 'offer', sdp: 'probe' }),
+      setLocalDescription: vi.fn().mockResolvedValue(undefined),
+      close: passedClose,
+    } as unknown as RTCPeerConnection
+
+    await expect(probeDirectMediaCompatibility(() => failed)).resolves.toBe(false)
+    await expect(probeDirectMediaCompatibility(() => passed)).resolves.toBe(true)
+    expect(failedClose).toHaveBeenCalledOnce()
+    expect(passedClose).toHaveBeenCalledOnce()
+  })
+
+  it('keeps capture desktop-only without disabling compatible mobile watching', () => {
+    const mediaDevices = { getDisplayMedia: vi.fn() }
+    expect(
+      isDesktopCaptureClient({
+        mediaDevices,
+        userAgent: 'Mozilla/5.0 (X11; Linux x86_64) Chrome/136.0.0.0 Safari/537.36',
+      }),
+    ).toBe(true)
+    expect(
+      isDesktopCaptureClient({
+        mediaDevices,
+        userAgent: 'Mozilla/5.0 (Linux; Android 15) Chrome/136.0.0.0 Mobile',
+      }),
+    ).toBe(false)
+    expect(
+      isDesktopCaptureClient({
+        mediaDevices,
+        userAgent: 'Mozilla/5.0 (Macintosh) Version/18.0 Safari/605.1.15',
+      }),
+    ).toBe(false)
   })
 })

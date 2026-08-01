@@ -108,6 +108,30 @@ describe('chat persistence', () => {
     expect(history[0]?.avatarUrl).toMatch(/^https:\/\/cdn\.test\//)
   })
 
+  test('acknowledges a retried mutation with one canonical persisted message', async () => {
+    const fixture = await createFixture()
+    const host = await fixture.account('Hana')
+    const room = created(await fixture.rooms.createRoom(host, { name: 'Retry room' }))
+    const mutationId = randomUUID()
+
+    const first = await fixture.chat.send(host, {
+      roomId: room.room.id,
+      body: 'only once',
+      mutationId,
+    })
+    const retry = await fixture.chat.send(host, {
+      roomId: room.room.id,
+      body: 'only once',
+      mutationId,
+    })
+
+    expect(first).toMatchObject({ status: 'sent', message: { mutationId } })
+    expect(retry).toEqual(first)
+    await expect(fixture.chat.history(room.room.id, host)).resolves.toMatchObject([
+      { body: 'only once' },
+    ])
+  })
+
   test('backfills the newest fifty messages in reading order', async () => {
     const fixture = await createFixture()
     const host = await fixture.account('Hana')
@@ -216,7 +240,7 @@ describe('stream lifecycle', () => {
     expect(await fixture.subscriptions.current(watcherMembership.id)).toBeNull()
   })
 
-  test('only the Host may stop another member’s stream', async () => {
+  test('the owner stop path cannot stop another member’s stream', async () => {
     const fixture = await createFixture()
     const host = await fixture.account('Hana')
     const streamer = await fixture.account('Sam')
@@ -229,9 +253,8 @@ describe('stream lifecycle', () => {
     await expect(fixture.streams.stop(bystander, { streamId })).resolves.toEqual({
       status: 'not-authorized',
     })
-    await expect(fixture.streams.stop(host, { streamId })).resolves.toMatchObject({
-      status: 'stopped',
-      streamId,
+    await expect(fixture.streams.stop(host, { streamId })).resolves.toEqual({
+      status: 'not-authorized',
     })
   })
 
@@ -339,6 +362,37 @@ describe('subscription authorization', () => {
       fixture.subscriptions.subscribe(room.membership.id, ownStream),
     ).resolves.toEqual({ status: 'own-stream' })
   })
+
+  test('closes the prior Subscription before a switch and never restores it after failure', async () => {
+    const fixture = await createFixture()
+    const firstPublisher = await fixture.account('Hana')
+    const secondPublisher = await fixture.account('Suri')
+    const watcher = await fixture.account('Wren')
+    const room = created(
+      await fixture.rooms.createRoom(firstPublisher, { name: 'One watch room' }),
+    )
+    await joined(fixture.rooms, secondPublisher, room.room.id)
+    const watcherMembership = await joined(fixture.rooms, watcher, room.room.id)
+    const firstStream = await startStream(fixture.streams, firstPublisher, room.room.id)
+    const secondStream = await startStream(fixture.streams, secondPublisher, room.room.id)
+    const first = await fixture.subscriptions.subscribe(watcherMembership.id, firstStream)
+    if (first.status !== 'subscribed') throw new Error('Expected the first Subscription')
+
+    const switched = await fixture.subscriptions.subscribe(watcherMembership.id, secondStream)
+    if (switched.status !== 'subscribed') throw new Error('Expected the switched Subscription')
+    expect(switched.id).not.toBe(first.id)
+    expect(await fixture.subscriptions.parties(first.id)).toBeNull()
+    await expect(fixture.subscriptions.current(watcherMembership.id)).resolves.toMatchObject({
+      id: switched.id,
+      streamId: secondStream,
+    })
+
+    await expect(
+      fixture.subscriptions.subscribe(watcherMembership.id, randomUUID()),
+    ).resolves.toEqual({ status: 'stream-unavailable' })
+    expect(await fixture.subscriptions.parties(switched.id)).toBeNull()
+    expect(await fixture.subscriptions.current(watcherMembership.id)).toBeNull()
+  })
 })
 
 describe('report intake', () => {
@@ -347,6 +401,7 @@ describe('report intake', () => {
     const reporter = await fixture.account('Rae')
     const host = await fixture.account('Hana')
     const room = created(await fixture.rooms.createRoom(host, { name: 'Reported room' }))
+    await joined(fixture.rooms, reporter, room.room.id)
     const streamId = await startStream(fixture.streams, host, room.room.id)
 
     await expect(
@@ -359,7 +414,6 @@ describe('report intake', () => {
           reason: 'harassment',
           details: '  targeted abuse  ',
         },
-        new Date(fixture.clock.now()),
       ),
     ).resolves.toEqual({ status: 'received' })
 
@@ -383,6 +437,35 @@ describe('report intake', () => {
         details: 'targeted abuse',
       },
     ])
+  })
+
+  test('accepts an admitted message report and rejects a non-member', async () => {
+    const fixture = await createFixture()
+    const host = await fixture.account('Hana')
+    const reporter = await fixture.account('Rae')
+    const outsider = await fixture.account('Otto')
+    const room = created(await fixture.rooms.createRoom(host, { name: 'Message report room' }))
+    await joined(fixture.rooms, reporter, room.room.id)
+    const sent = await fixture.chat.send(host, {
+      roomId: room.room.id,
+      body: 'reportable message',
+      mutationId: randomUUID(),
+    })
+    if (sent.status !== 'sent') throw new Error('Expected canonical message')
+    const input = {
+      targetType: 'message' as const,
+      targetId: sent.message.id,
+      roomId: room.room.id,
+      reason: 'harassment' as const,
+      details: '',
+    }
+
+    await expect(submitReport(reporter, input)).resolves.toEqual({
+      status: 'received',
+    })
+    await expect(submitReport(outsider, input)).resolves.toEqual({
+      status: 'invalid-target',
+    })
   })
 
   test('rejects `other` without details before touching the table', async () => {

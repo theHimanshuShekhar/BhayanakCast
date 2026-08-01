@@ -86,8 +86,13 @@ const discordOAuthStubs = new Map<string, DiscordOAuthStub>()
 let originalFetch: typeof fetch | undefined
 let activeFetchStubs = 0
 
+export interface TestAccountHarnessOptions {
+  readonly deleteUsersOnCleanup?: boolean
+}
+
 export async function createTestAccountHarness(
   context: IntegrationContext,
+  options: TestAccountHarnessOptions = {},
 ): Promise<TestAccountHarness> {
   const pool = new Pool({
     connectionString: context.environment.databaseUrl,
@@ -139,11 +144,13 @@ export async function createTestAccountHarness(
     const cleanup = () => {
       cleanupPromise ??= (async () => {
         const failures: unknown[] = []
-        for (const userId of users) {
-          try {
-            await testContext.test.deleteUser(userId)
-          } catch (error) {
-            failures.push(error)
+        if (options.deleteUsersOnCleanup !== false) {
+          for (const userId of users) {
+            try {
+              await testContext.test.deleteUser(userId)
+            } catch (error) {
+              failures.push(error)
+            }
           }
         }
         try {
@@ -161,6 +168,7 @@ export async function createTestAccountHarness(
     }
     return {
       async signInDiscord(profile) {
+        const signInClientIp = createTestClientIp()
         const accessToken = `test-discord-access-token-${profile.id}`
         discordOAuthStubs.set(accessToken, { profile, accessToken })
         try {
@@ -169,7 +177,7 @@ export async function createTestAccountHarness(
               method: 'POST',
               headers: {
                 'content-type': 'application/json',
-                'x-bhayanakcast-client-ip': clientIp,
+                'x-bhayanakcast-client-ip': signInClientIp,
               },
               body: JSON.stringify({
                 provider: 'discord',
@@ -191,7 +199,7 @@ export async function createTestAccountHarness(
               {
                 headers: {
                   cookie: cookieHeader(signInResponse.headers.getSetCookie()),
-                  'x-bhayanakcast-client-ip': clientIp,
+                  'x-bhayanakcast-client-ip': signInClientIp,
                 },
               },
             ),

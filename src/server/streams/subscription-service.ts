@@ -91,22 +91,6 @@ export class SubscriptionService {
               : ('account-read-only' as const),
         }
       }
-      const observedTarget = await client.query<{
-        roomId: string
-        membershipId: string
-      }>(
-        `SELECT room_id AS "roomId", membership_id AS "membershipId"
-           FROM stream
-          WHERE id = $1`,
-        [streamId],
-      )
-      if (
-        !observedTarget.rows[0] ||
-        observedTarget.rows[0].roomId !== observedViewer.rows[0].roomId
-      ) {
-        await client.query('ROLLBACK')
-        return { status: 'stream-unavailable' }
-      }
 
       const room = await client.query<{
         createdAt: Date
@@ -149,6 +133,16 @@ export class SubscriptionService {
         await client.query('ROLLBACK')
         return { status: 'viewer-not-admitted' }
       }
+
+      // A selection is destructive: close the prior Subscription before
+      // resolving the next target. If that target disappeared or is rejected,
+      // committing this close leaves the viewer watching nothing (ADR 0101).
+      await client.query(
+        `UPDATE stream_subscription
+            SET ended_at = $2
+          WHERE viewer_membership_id = $1 AND ended_at IS NULL`,
+        [viewerMembershipId, instant],
+      )
       const target = await client.query<{
         roomId: string
         membershipId: string
@@ -167,40 +161,14 @@ export class SubscriptionService {
       )
       const lockedStream = target.rows[0]
       if (!lockedStream || lockedStream.roomId !== viewer.rows[0].roomId) {
-        await client.query('ROLLBACK')
+        await client.query('COMMIT')
         return { status: 'stream-unavailable' }
       }
       if (lockedStream.membershipId === viewerMembershipId) {
-        await client.query('ROLLBACK')
+        await client.query('COMMIT')
         return { status: 'own-stream' }
       }
 
-      const existing = await client.query<{ id: string }>(
-        `SELECT id
-           FROM stream_subscription
-          WHERE viewer_membership_id = $1 AND ended_at IS NULL
-          FOR UPDATE`,
-        [viewerMembershipId],
-      )
-      if (existing.rows[0]) {
-        const same = await client.query<{ streamId: string }>(
-          `SELECT stream_id AS "streamId"
-             FROM stream_subscription
-            WHERE id = $1`,
-          [existing.rows[0].id],
-        )
-        if (same.rows[0]?.streamId === streamId) {
-          await client.query('COMMIT')
-          return { status: 'subscribed', id: existing.rows[0].id, streamId }
-        }
-      }
-
-      await client.query(
-        `UPDATE stream_subscription
-            SET ended_at = $2
-          WHERE viewer_membership_id = $1 AND ended_at IS NULL`,
-        [viewerMembershipId, instant],
-      )
       const id = randomUUID()
       await client.query(
         `INSERT INTO stream_subscription

@@ -1,12 +1,35 @@
 import { describe, expect, test } from 'vitest'
 import {
+  chatCharacterCount,
   createRoomEventHub,
   normalizeRoomRealtimeEvent,
+  normalizeRoomChatCommand,
   normalizeSignalPayload,
 } from '../../src/server/realtime/room-events'
 
 const ROOM_ID = '00000000-0000-4000-8000-000000000001'
 const OTHER_ROOM_ID = '00000000-0000-4000-8000-000000000002'
+
+describe('Room Chat command contract', () => {
+  test('accepts content with an opaque mutation identity and counts Unicode characters', () => {
+    const mutationId = '00000000-0000-4000-8000-000000000003'
+    expect(normalizeRoomChatCommand({ body: 'Hello 👋', mutationId })).toEqual({
+      body: 'Hello 👋',
+      mutationId,
+    })
+    expect(chatCharacterCount('👋'.repeat(500))).toBe(500)
+  })
+
+  test('rejects malformed and oversized commands before persistence', () => {
+    expect(normalizeRoomChatCommand({ body: 'hello', mutationId: 'predictable' })).toBeNull()
+    expect(
+      normalizeRoomChatCommand({
+        body: 'x'.repeat(4_001),
+        mutationId: '00000000-0000-4000-8000-000000000003',
+      }),
+    ).toBeNull()
+  })
+})
 
 describe('normalizeSignalPayload', () => {
   test('accepts the three negotiation frames and a close', () => {

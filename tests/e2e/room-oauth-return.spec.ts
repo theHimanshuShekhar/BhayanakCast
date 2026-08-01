@@ -184,6 +184,8 @@ test('OAuth return re-evaluates private, full, ended, and missing targets withou
   await returnPage.goto(`${authSessions.origin}/rooms/${privateRoomId}`)
   await expect(returnPage.locator('[data-room-state="pre-admission"]')).toBeVisible()
   await expect(returnPage.getByLabel('Password')).toBeVisible()
+  await expect(returnPage.getByRole('button', { name: 'Join' })).toBeDisabled()
+  await returnPage.getByLabel('Password').fill('private-room-password')
   await expect(returnPage.getByRole('button', { name: 'Join' })).toBeEnabled()
 
   await returnPage.goto(`${authSessions.origin}/rooms/${fullRoomId}`)

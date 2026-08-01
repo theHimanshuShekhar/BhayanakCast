@@ -2,9 +2,11 @@ import { randomUUID } from 'node:crypto'
 import type { Pool, PoolClient } from 'pg'
 import {
   AccountAccessDeniedError,
+  readAccountAccessPolicy,
   requireAccountMutation,
 } from '../auth/account-access-policy'
 import { endRoom, roomEndDeadline } from '../rooms/end-room'
+import type { RoomEventPublisher } from '../realtime/room-events'
 
 /** Publishing one's own screen. Separate from `stream-subscribe` so the
     `streaming` sanction can stop a member publishing while still letting them
@@ -37,7 +39,28 @@ export type StopStreamResult =
   | { readonly status: 'not-admitted' }
   | { readonly status: 'not-authorized' }
 
-export type StopReason = 'owner' | 'host'
+export type HostStopStreamResult =
+  | {
+      readonly status: 'stopped'
+      readonly streamId: string
+      readonly roomId: string
+      readonly membershipId: string
+      readonly targetAccountId: string
+      readonly targetDisplayName: string
+      readonly endedSubscriptionIds: readonly string[]
+    }
+  | { readonly status: 'not-streaming' | 'not-member' | 'not-authorized' }
+
+export interface StreamModerationAuditEntry {
+  readonly level: 'info'
+  readonly event: 'room.stream_stopped_by_host'
+  readonly roomId: string
+  readonly streamId: string
+  readonly actorAccountId: string
+  readonly targetAccountId: string
+  readonly outcome: HostStopStreamResult['status']
+  readonly occurredAt: string
+}
 
 export interface StreamServiceConfiguration {
   readonly pool: Pool
@@ -45,17 +68,25 @@ export interface StreamServiceConfiguration {
   /** Invoked after a committed change so the room and Home projections can
       recompute their Stream counts. Failures here never fail the mutation. */
   readonly onRoomChanged?: (roomId: string) => void | Promise<void>
+  readonly publishRoomEvent?: RoomEventPublisher
+  /** Host/subject detail is private operational evidence and is isolated from
+      the already committed Stream mutation if the sink fails. */
+  readonly moderationAudit?: (entry: StreamModerationAuditEntry) => void
 }
 
 export class StreamService {
   private readonly pool: Pool
   private readonly now: () => Date
   private readonly onRoomChanged: (roomId: string) => void | Promise<void>
+  private readonly publishRoomEvent: RoomEventPublisher
+  private readonly moderationAudit: (entry: StreamModerationAuditEntry) => void
 
   constructor(configuration: StreamServiceConfiguration) {
     this.pool = configuration.pool
     this.now = configuration.now ?? (() => new Date())
     this.onRoomChanged = configuration.onRoomChanged ?? (() => {})
+    this.publishRoomEvent = configuration.publishRoomEvent ?? (() => {})
+    this.moderationAudit = configuration.moderationAudit ?? writeStreamModerationAudit
   }
 
   async start(accountId: string, roomId: string): Promise<StartStreamResult> {
@@ -87,12 +118,20 @@ export class StreamService {
       )
       return { status: 'started', streamId, roomId, membershipId: membership.id }
     })
-    if (result.status === 'started') await this.notify(result.roomId)
+    if (result.status === 'started') {
+      this.emitRoomEvent({
+        type: 'stream-started',
+        roomId: result.roomId,
+        streamId: result.streamId,
+        membershipId: result.membershipId,
+      })
+      await this.notify(result.roomId)
+    }
     return result
   }
 
-  /** `streamId` omitted stops the caller's own Stream. Naming another member's
-      Stream requires the caller to be that room's current Host (ADR 0102). */
+  /** Owner stop is intentionally owner-only. Host moderation uses
+      `stopByHost` so subject attribution and private audit cannot be bypassed. */
   async stop(
     accountId: string,
     options: { readonly streamId?: string } = {},
@@ -120,9 +159,7 @@ export class StreamService {
       const stream = target.rows[0]
       if (!stream) return { status: 'not-streaming' }
       if (stream.roomId !== membership.roomId) return { status: 'not-authorized' }
-      if (stream.membershipId !== membership.id && membership.role !== 'host') {
-        return { status: 'not-authorized' }
-      }
+      if (stream.membershipId !== membership.id) return { status: 'not-authorized' }
 
       const instant = this.now()
       const closed = await client.query<{ id: string }>(
@@ -144,9 +181,125 @@ export class StreamService {
         endedSubscriptionIds: closed.rows.map((row) => row.id),
       }
     })
-    if (result.status === 'stopped') await this.notify(result.roomId)
+    if (result.status === 'stopped') {
+      this.emitRoomEvent({
+        type: 'stream-stopped',
+        roomId: result.roomId,
+        streamId: result.streamId,
+        membershipId: result.membershipId,
+      })
+      await this.notify(result.roomId)
+    }
     return result
   }
+  /** Stops exactly the selected member's current Stream while preserving their
+      Room Membership. Actor and subject stay distinct for Activity/audit
+      attribution, and a stale selection cannot stop a replacement Stream. */
+  async stopByHost(
+    actorAccountId: string,
+    input: {
+      readonly roomId: string
+      readonly targetAccountId: string
+      readonly streamId: string
+    },
+  ): Promise<HostStopStreamResult> {
+    const result = await this.transact<HostStopStreamResult>(async (client) => {
+      const accounts = await client.query<{ id: string }>(
+        `SELECT id FROM "user"
+          WHERE id IN ($1, $2)
+          ORDER BY id
+          FOR UPDATE`,
+        [actorAccountId, input.targetAccountId],
+      )
+      if (
+        actorAccountId === input.targetAccountId ||
+        !accounts.rows.some((account) => account.id === actorAccountId)
+      ) {
+        return { status: 'not-authorized' }
+      }
+      const access = await readAccountAccessPolicy(client, actorAccountId, this.now())
+      if (!access?.canMutate('moderate')) return { status: 'not-authorized' }
+
+      const room = await client.query<{ id: string }>(
+        `SELECT id FROM room
+          WHERE id = $1 AND ended_at IS NULL
+          FOR UPDATE`,
+        [input.roomId],
+      )
+      if (!room.rows[0]) return { status: 'not-authorized' }
+
+      const actor = await currentMembership(client, actorAccountId)
+      if (!actor || actor.roomId !== input.roomId || actor.role !== 'host') {
+        return { status: 'not-authorized' }
+      }
+      const target = await client.query<{
+        id: string
+        displayName: string
+      }>(
+        `SELECT membership.id, account.name AS "displayName"
+           FROM room_membership membership
+           JOIN "user" account ON account.id = membership.account_id
+          WHERE membership.account_id = $1
+            AND membership.room_id = $2
+            AND membership.left_at IS NULL
+          FOR UPDATE OF membership`,
+        [input.targetAccountId, input.roomId],
+      )
+      const targetMembership = target.rows[0]
+      if (!targetMembership) return { status: 'not-member' }
+
+      const selected = await client.query<{
+        id: string
+        roomId: string
+        membershipId: string
+      }>(
+        `SELECT id, room_id AS "roomId", membership_id AS "membershipId"
+           FROM stream
+          WHERE id = $1
+            AND room_id = $2
+            AND membership_id = $3
+            AND ended_at IS NULL
+          FOR UPDATE`,
+        [input.streamId, input.roomId, targetMembership.id],
+      )
+      const stream = selected.rows[0]
+      if (!stream) return { status: 'not-streaming' }
+
+      const instant = this.now()
+      const closed = await client.query<{ id: string }>(
+        `UPDATE stream_subscription
+            SET ended_at = $2
+          WHERE stream_id = $1 AND ended_at IS NULL
+      RETURNING id`,
+        [stream.id, instant],
+      )
+      await client.query(`UPDATE stream SET ended_at = $2 WHERE id = $1`, [
+        stream.id,
+        instant,
+      ])
+      return {
+        status: 'stopped',
+        streamId: stream.id,
+        roomId: stream.roomId,
+        membershipId: stream.membershipId,
+        targetAccountId: input.targetAccountId,
+        targetDisplayName: targetMembership.displayName,
+        endedSubscriptionIds: closed.rows.map((subscription) => subscription.id),
+      }
+    })
+    this.emitHostStopAudit(actorAccountId, input, result.status)
+    if (result.status === 'stopped') {
+      this.emitRoomEvent({
+        type: 'stream-stopped',
+        roomId: result.roomId,
+        streamId: result.streamId,
+        membershipId: result.membershipId,
+      })
+      await this.notify(result.roomId)
+    }
+    return result
+  }
+
 
   /** Ends every Stream a membership owns. Used when a member leaves, is
       displaced, or loses admission — ADR 0103 requires their Stream to stay
@@ -233,6 +386,39 @@ export class StreamService {
     return null
   }
 
+  private emitHostStopAudit(
+    actorAccountId: string,
+    input: {
+      readonly roomId: string
+      readonly targetAccountId: string
+      readonly streamId: string
+    },
+    outcome: HostStopStreamResult['status'],
+  ) {
+    try {
+      this.moderationAudit({
+        level: 'info',
+        event: 'room.stream_stopped_by_host',
+        roomId: input.roomId,
+        streamId: input.streamId,
+        actorAccountId,
+        targetAccountId: input.targetAccountId,
+        outcome,
+        occurredAt: this.now().toISOString(),
+      })
+    } catch {
+      // Audit delivery cannot change the already decided moderation result.
+    }
+  }
+
+  private emitRoomEvent(event: Parameters<RoomEventPublisher>[0]) {
+    try {
+      this.publishRoomEvent(event)
+    } catch {
+      // Realtime delivery cannot change the already committed Stream result.
+    }
+  }
+
   private async notify(roomId: string) {
     try {
       await this.onRoomChanged(roomId)
@@ -270,4 +456,8 @@ async function currentMembership(client: PoolClient, accountId: string) {
     [accountId],
   )
   return result.rows[0] ?? null
+}
+
+function writeStreamModerationAudit(entry: StreamModerationAuditEntry) {
+  console.info(JSON.stringify(entry))
 }

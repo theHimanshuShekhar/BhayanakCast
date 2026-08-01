@@ -1,3 +1,4 @@
+import { observeHome } from './home-observability'
 import type { PublicProfileSummary } from './home-types'
 
 export function ProfileSearchResult({
@@ -8,6 +9,10 @@ export function ProfileSearchResult({
       <a
         aria-label={`Open ${profile.displayName} public profile`}
         href={`/users/${encodeURIComponent(profile.accountId)}`}
+        onClick={() => observeHome({
+          name: 'home_profile_opened',
+          properties: {},
+        })}
       >
         <div className="profile-search-result__identity">
           {profile.avatarUrl ? (

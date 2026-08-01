@@ -6,6 +6,7 @@ import { HomeFilters } from './HomeFilters'
 import { HomeSectionBoundary } from './HomeSectionBoundary'
 import { HomeMetricsSkeleton } from './HomeSectionSkeletons'
 import { canonicalHomeSearch } from './home-search'
+import { observeHome } from './home-observability'
 import type { HomeFacets, HomeSearch as HomeSearchValue } from './home-types'
 
 /** A patch may be a function of the previous search, and any patch that builds
@@ -51,11 +52,21 @@ export function HomeSearch({
   const updateSearch = (patch: HomeSearchPatch) =>
     void navigate({
       replace: true,
-      search: (previous) =>
-        canonicalHomeSearch({
+      search: (previous) => {
+        const next = canonicalHomeSearch({
           ...previous,
           ...(typeof patch === 'function' ? patch(previous) : patch),
-        }),
+        })
+        observeHome({
+          name: 'home_search_applied',
+          properties: {
+            has_text_query: Boolean(next.q),
+            category_selected: Boolean(next.category),
+            tag_count: next.tags?.length ?? 0,
+          },
+        })
+        return next
+      },
     })
   const debouncer = useDebouncer(
     (query: string) => updateSearch({ q: query || undefined }),
@@ -112,6 +123,7 @@ export function HomeSearch({
       </div>
 
       <HomeSectionBoundary
+        analyticsSection="filters"
         failed={facetsFailed}
         label="Filters"
         pending={facetsPending && !facets}

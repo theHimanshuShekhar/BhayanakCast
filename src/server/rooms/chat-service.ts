@@ -88,23 +88,40 @@ export class ChatService {
 
       const id = randomUUID()
       const createdAt = this.now()
-      await client.query(
-        `INSERT INTO message (id, room_id, membership_id, body, created_at)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [id, input.roomId, current.id, body, createdAt],
+      const inserted = await client.query<{
+        id: string
+        body: string
+        createdAt: Date
+      }>(
+        `INSERT INTO message (id, room_id, membership_id, mutation_id, body, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (membership_id, mutation_id) DO NOTHING
+         RETURNING id, body, created_at AS "createdAt"`,
+        [id, input.roomId, current.id, input.mutationId ?? null, body, createdAt],
       )
+      const canonical =
+        inserted.rows[0] ??
+        (
+          await client.query<{ id: string; body: string; createdAt: Date }>(
+            `SELECT id, body, created_at AS "createdAt"
+               FROM message
+              WHERE membership_id = $1 AND mutation_id = $2`,
+            [current.id, input.mutationId],
+          )
+        ).rows[0]
+      if (!canonical) throw new Error('Chat mutation acknowledgement was not persisted')
       await client.query('COMMIT')
       return {
         status: 'sent',
         message: {
-          id,
+          id: canonical.id,
           roomId: input.roomId,
           membershipId: current.id,
           accountId,
           displayName: current.displayName,
           avatarUrl: current.avatarUrl,
-          body,
-          createdAt: createdAt.toISOString(),
+          body: canonical.body,
+          createdAt: canonical.createdAt.toISOString(),
           mutationId: input.mutationId ?? null,
         },
       }
