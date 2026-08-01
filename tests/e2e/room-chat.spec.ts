@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { Page } from '@playwright/test'
-import { expect, test, type AuthSessionFixture } from './fixtures'
+import { expect, test, type AuthSessionFixture, gotoHydrated } from './fixtures'
 
 const HOST = {
   id: '718281828459045235',
@@ -39,7 +39,7 @@ const MEMBERS = [
 ] as const
 
 async function createAdmittedRoom(page: Page, name: string) {
-  await page.goto('/')
+  await gotoHydrated(page, '/')
   await page
     .getByTestId('home-bottom-navigation')
     .getByRole('button', { name: 'Create room' })
@@ -115,7 +115,7 @@ test('multi-Account Chat preserves reading position and exposes canonical local 
         ],
       )
     }
-    await hostPage.reload()
+    await gotoHydrated(hostPage, hostPage.url())
     await expect(hostPage.getByLabel('Message', { exact: true })).toBeEnabled({
       timeout: 15_000,
     })
@@ -131,6 +131,26 @@ test('multi-Account Chat preserves reading position and exposes canonical local 
         panel.evaluate((node) => node.scrollHeight - node.scrollTop - node.clientHeight),
       )
       .toBeLessThanOrEqual(24)
+    await panel.evaluate((node) => {
+      node.scrollTop = 0
+      node.dispatchEvent(new Event('scroll'))
+    })
+    const retainedPosition = await panel.evaluate((node) => node.scrollTop)
+    await hostPage.getByLabel('Message', { exact: true }).fill('Retained draft')
+    await hostPage.getByRole('tab', { name: 'People' }).click()
+    await hostPage.getByRole('tab', { name: 'Chat' }).click()
+    await expect(hostPage.getByLabel('Message', { exact: true })).toHaveValue('Retained draft')
+    expect(await panel.evaluate((node) => node.scrollTop)).toBe(retainedPosition)
+
+    await hostPage.getByRole('tab', { name: 'People' }).click()
+    await send(memberPage, 'Hidden tab unread')
+    await expect(hostPage.getByRole('tab', { name: 'Chat' }).locator('.room-dock__badge')).toHaveText('1')
+    await hostPage.getByRole('tab', { name: 'Chat' }).click()
+    await expect(hostPage.getByRole('tab', { name: 'Chat' }).locator('.room-dock__badge')).toHaveCount(0)
+    await expect(hostPage.getByText('Hidden tab unread', { exact: true })).toBeVisible()
+    await expect(hostPage.getByLabel('Message', { exact: true })).toHaveValue('Retained draft')
+    await hostPage.getByLabel('Message', { exact: true }).fill('')
+
 
     await send(memberPage, 'Follow the latest')
     await expect(hostPage.getByText('Follow the latest', { exact: true })).toBeVisible()

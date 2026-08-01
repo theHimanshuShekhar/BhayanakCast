@@ -8,6 +8,10 @@ import { RoomService } from '../../src/server/rooms/room-service'
 import { StreamService } from '../../src/server/streams/stream-service'
 import { SubscriptionService } from '../../src/server/streams/subscription-service'
 import { bindReportRuntime, submitReport } from '../../src/server/moderation/report-service'
+import {
+  PlatformAdminSanctionAuthorizationError,
+  SanctionService,
+} from '../../src/server/moderation/sanction-service'
 import { TestClock } from '../helpers/test-clock'
 import { getIntegrationContext } from '../setup/integration'
 
@@ -32,6 +36,7 @@ async function createFixture() {
   await valkey.connect()
   const clock = new TestClock(1_000_000)
   const now = () => new Date(clock.now())
+  const sanctionAudit: Array<Readonly<Record<string, unknown>>> = []
   const rooms = new RoomService({
     pool,
     valkey,
@@ -58,6 +63,14 @@ async function createFixture() {
     rooms,
     account,
     changedRoomIds,
+    sanctions: new SanctionService({
+      pool,
+      roomService: rooms,
+      now,
+      revokeConnections: () => undefined,
+      audit: (entry) => sanctionAudit.push(entry),
+    }),
+    sanctionAudit,
     chat: new ChatService({ pool, now }),
     streams: new StreamService({
       pool,
@@ -392,6 +405,87 @@ describe('subscription authorization', () => {
     ).resolves.toEqual({ status: 'stream-unavailable' })
     expect(await fixture.subscriptions.parties(switched.id)).toBeNull()
     expect(await fixture.subscriptions.current(watcherMembership.id)).toBeNull()
+  })
+})
+
+describe('Platform Sanctions', () => {
+  test('authorizes Admins, stops streaming immediately, and restores it after an early lift', async () => {
+    const fixture = await createFixture()
+    const adminId = await fixture.account('Admin')
+    const targetId = await fixture.account('Target')
+    const room = created(await fixture.rooms.createRoom(targetId, { name: 'Sanction room' }))
+    const streamId = await startStream(fixture.streams, targetId, room.room.id)
+    const admin = { accountId: adminId, isPlatformAdmin: true }
+    const ordinary = { accountId: targetId, isPlatformAdmin: false }
+
+    await expect(
+      fixture.sanctions.apply(ordinary, { accountId: targetId, type: 'streaming' }),
+    ).rejects.toBeInstanceOf(PlatformAdminSanctionAuthorizationError)
+
+    const applied = await fixture.sanctions.apply(admin, {
+      accountId: targetId,
+      type: 'streaming',
+      expiresAt: null,
+    })
+    await expect(fixture.rooms.currentMembership(targetId)).resolves.toMatchObject({
+      roomId: room.room.id,
+    })
+    await expect(
+      fixture.pool.query('SELECT ended_at FROM stream WHERE id = $1', [streamId]),
+    ).resolves.toMatchObject({ rows: [{ ended_at: expect.any(Date) }] })
+    await expect(fixture.streams.start(targetId, room.room.id)).resolves.toEqual({
+      status: 'account-read-only',
+    })
+    await expect(fixture.sanctions.lift(ordinary, applied.sanctionId)).rejects.toBeInstanceOf(
+      PlatformAdminSanctionAuthorizationError,
+    )
+    await expect(fixture.sanctions.lift(admin, applied.sanctionId)).resolves.toMatchObject({
+      status: 'lifted',
+    })
+    await expect(fixture.streams.start(targetId, room.room.id)).resolves.toMatchObject({
+      status: 'started',
+    })
+    expect(fixture.sanctionAudit.map((entry) => entry.event)).toEqual([
+      'platform_sanction.applied',
+      'platform_sanction.lifted',
+    ])
+  })
+
+  test('preserves membership and Chat history while a sanction expires canonically', async () => {
+    const fixture = await createFixture()
+    const adminId = await fixture.account('Admin')
+    const targetId = await fixture.account('Target')
+    const room = created(await fixture.rooms.createRoom(targetId, { name: 'Chat sanction room' }))
+    await expect(
+      fixture.chat.send(targetId, { roomId: room.room.id, body: 'Before sanction' }),
+    ).resolves.toMatchObject({ status: 'sent' })
+
+    const expiresAt = new Date(fixture.clock.now() + 10 * 60_000)
+    await fixture.sanctions.apply(
+      { accountId: adminId, isPlatformAdmin: true },
+      { accountId: targetId, type: 'chat', expiresAt },
+    )
+    await expect(
+      fixture.chat.send(targetId, { roomId: room.room.id, body: 'Blocked' }),
+    ).resolves.toEqual({ status: 'account-read-only' })
+    await expect(fixture.chat.history(room.room.id, targetId)).resolves.toMatchObject([
+      { body: 'Before sanction' },
+    ])
+    await expect(fixture.rooms.currentMembership(targetId)).resolves.toMatchObject({
+      roomId: room.room.id,
+    })
+
+    fixture.clock.advanceTo(expiresAt.getTime() + 1)
+    await expect(
+      fixture.chat.send(targetId, { roomId: room.room.id, body: 'After expiry' }),
+    ).resolves.toMatchObject({ status: 'sent' })
+    const dashboard = await fixture.sanctions.dashboard({
+      accountId: adminId,
+      isPlatformAdmin: true,
+    })
+    expect(dashboard.sanctions).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: 'chat', status: 'expired' })]),
+    )
   })
 })
 

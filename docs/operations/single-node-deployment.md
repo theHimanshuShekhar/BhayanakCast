@@ -131,6 +131,22 @@ sudo systemctl status bhayanakcast-backup.service
 
 The script creates a custom-format dump, encrypts it with AES-256-CBC/PBKDF2 before its atomic final name appears, writes an encrypted-file checksum, and deletes backup/checksum files older than 30 days only after a new non-empty backup succeeds. The timer's `Persistent=true` runs a missed daily job after the host returns. Alert on a failed unit and on the absence of a backup newer than 26 hours.
 
+## Daily data retention
+
+Install and enable the retention timer after the application is healthy:
+
+```sh
+sudo install -m 0644 ops/systemd/bhayanakcast-retention.service /etc/systemd/system/
+sudo install -m 0644 ops/systemd/bhayanakcast-retention.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now bhayanakcast-retention.timer
+sudo systemctl start bhayanakcast-retention.service
+sudo systemctl status bhayanakcast-retention.service
+```
+
+The oneshot executes the bundled retention command inside the running application container, so it uses the same private PostgreSQL connection and schema as the application. `Persistent=true` runs a missed daily job after host recovery. Alert on a failed unit or the absence of a `retention_run_completed` journal entry for more than 26 hours.
+
+
 ## Monthly clean restore drill
 
 Run this at least monthly while PostgreSQL and the NAS are healthy:

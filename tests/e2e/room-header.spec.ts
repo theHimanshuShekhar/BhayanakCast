@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test'
-import { expect, test } from './fixtures'
+import { expect, test, gotoHydrated } from './fixtures'
 import type { AuthSessionFixture } from './fixtures'
 
 const HOST_PROFILE = {
@@ -25,7 +25,7 @@ const LONG_DESCRIPTION = `A bounded description ${'stays secondary while control
 const TAGS = Array.from({ length: 5 }, (_, index) => `long-room-tag-${index + 1}-${'x'.repeat(7)}`)
 
 async function createAdmittedRoom(page: Page) {
-  await page.goto('/')
+  await gotoHydrated(page, '/')
   await page
     .getByTestId('home-bottom-navigation')
     .getByRole('button', { name: 'Create room' })
@@ -135,7 +135,7 @@ test('mobile Details exposes canonical metadata to the Host, returns focus, and 
       [roomId, LONG_NAME, LONG_DESCRIPTION, 'Community', TAGS],
     )
     await hostPage.setViewportSize({ width: 390, height: 844 })
-    await hostPage.reload()
+    await gotoHydrated(hostPage, hostPage.url())
 
     const header = hostPage.locator('.room-live-header')
     await expect(header.getByRole('link', { name: 'Back' })).toBeVisible()
