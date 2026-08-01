@@ -16,6 +16,7 @@ import {
   projectSession,
   type SessionProjection,
 } from './session'
+import { applyEnforcementSanctions } from '../moderation/sanction-enforcement'
 
 export type AppAuth = Auth
 export type DiscordUserInfoLoader = NonNullable<DiscordOptions['getUserInfo']>
@@ -26,6 +27,7 @@ export interface AuthConfiguration {
   secret: string
   discordClientId: string
   discordClientSecret: string
+  enforcementSecret?: string
   adminDiscordIds?: string
   plugins?: BetterAuthPlugin[]
   discordGetUserInfo?: DiscordUserInfoLoader
@@ -75,9 +77,37 @@ export function createAuthServer(configuration: AuthConfiguration): AuthServer {
       transaction: true,
     }),
     databaseHooks: {
+      account: {
+        create: {
+          after: async (account) => {
+            if (account.providerId === 'discord') {
+              await applyEnforcementSanctions(
+                configuration.pool,
+                account.userId,
+                account.accountId,
+                configuration.enforcementSecret ?? configuration.secret,
+              )
+            }
+          },
+        },
+      },
       session: {
         create: {
           before: async (session) => {
+            const discordIdentity = await configuration.pool.query<{ discordId: string }>(
+              `SELECT account_id AS "discordId"
+                 FROM account
+                WHERE user_id = $1 AND provider_id = 'discord'`,
+              [session.userId],
+            )
+            if (discordIdentity.rows[0]) {
+              await applyEnforcementSanctions(
+                configuration.pool,
+                session.userId,
+                discordIdentity.rows[0].discordId,
+                configuration.enforcementSecret ?? configuration.secret,
+              )
+            }
             const sanction = await configuration.pool.query(
               `SELECT 1
                  FROM platform_sanction
@@ -155,6 +185,7 @@ export function getProductionAuth(): AuthServer {
       'DISCORD_CLIENT_SECRET',
     ),
     adminDiscordIds: environment.ADMIN_DISCORD_IDS,
+    enforcementSecret: environment.ENFORCEMENT_KEY_SECRET,
   })
   return authState.productionAuth
 }
@@ -177,6 +208,17 @@ export async function readSessionProjection(
       discordAccount && server.isPlatformAdmin(discordAccount.accountId),
     ),
   })
+}
+
+export async function readAnalyticsDiscordId(
+  server: AuthServer,
+  headers: Headers,
+): Promise<string | null> {
+  const value = await server.auth.api.getSession({ headers })
+  if (!value) return null
+  const context = await server.auth.$context
+  const accounts = await context.internalAdapter.findAccounts(value.user.id)
+  return accounts.find((account) => account.providerId === 'discord')?.accountId ?? null
 }
 
 export function configuredAuthOrigin(environment: NodeJS.ProcessEnv) {

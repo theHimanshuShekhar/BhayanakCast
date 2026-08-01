@@ -194,6 +194,17 @@ describe('room persistence and admission', () => {
 
     const wrongPasswordAccount = await fixture.account()
     await expect(
+      fixture.service.inspectRouteProjection(room.id, wrongPasswordAccount),
+    ).resolves.toMatchObject({
+      kind: 'preAdmission',
+      room: {
+        visibility: 'private',
+        admission: 'password-required',
+        memberCount: 1,
+        capacity: 10,
+      },
+    })
+    await expect(
       fixture.service.admit(wrongPasswordAccount, room.id, {
         password: 'wrong password',
       }),
@@ -225,6 +236,17 @@ describe('room persistence and admission', () => {
     await expect(
       fixture.service.inspectPreAdmission(room.id, rejectedAccount),
     ).resolves.toMatchObject({ memberCount: 10, admission: 'full' })
+    await expect(
+      fixture.service.inspectRouteProjection(room.id, rejectedAccount),
+    ).resolves.toMatchObject({
+      kind: 'preAdmission',
+      room: {
+        visibility: 'private',
+        admission: 'full',
+        memberCount: 10,
+        capacity: 10,
+      },
+    })
   })
 
 

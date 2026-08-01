@@ -25,9 +25,12 @@ import {
   getSubscriptionService,
   publishRoomEvent,
 } from '../../server/rooms/room-runtime'
-import type { StartStreamResult, StopStreamResult } from '../../server/streams/stream-service'
+import type {
+  HostStopStreamResult,
+  StartStreamResult,
+  StopStreamResult,
+} from '../../server/streams/stream-service'
 import type { SubscriptionResult } from '../../server/streams/subscription-service'
-import type { SendChatResult } from '../../server/rooms/chat-service'
 import type {
   RoomActivityKind,
   RoomChatMessage,
@@ -172,12 +175,6 @@ export const startStream = createServerFn({ method: 'POST' })
     if (!session) return { status: 'not-admitted' }
     const result = await getStreamService().start(session.id, data)
     if (result.status === 'started') {
-      publishRoomEvent({
-        type: 'stream-started',
-        roomId: result.roomId,
-        streamId: result.streamId,
-        membershipId: result.membershipId,
-      })
       publishActivity(result.roomId, 'stream-started', session.displayName)
     }
     return result
@@ -190,13 +187,19 @@ export const stopStream = createServerFn({ method: 'POST' })
     if (!session) return { status: 'not-admitted' }
     const result = await getStreamService().stop(session.id, { streamId: data.streamId })
     if (result.status === 'stopped') {
-      publishRoomEvent({
-        type: 'stream-stopped',
-        roomId: result.roomId,
-        streamId: result.streamId,
-        membershipId: result.membershipId,
-      })
       publishActivity(result.roomId, 'stream-stopped', session.displayName)
+    }
+    return result
+  })
+
+export const hostStopStream = createServerFn({ method: 'POST' })
+  .validator(validateHostStopStreamCommand)
+  .handler(async ({ data }): Promise<HostStopStreamResult> => {
+    const session = await currentSession()
+    if (!session) return { status: 'not-authorized' }
+    const result = await getStreamService().stopByHost(session.id, data)
+    if (result.status === 'stopped') {
+      publishActivity(result.roomId, 'stream-stopped', result.targetDisplayName)
     }
     return result
   })
@@ -226,21 +229,6 @@ export const stopWatching = createServerFn({ method: 'POST' })
     return { status: 'stopped' }
   })
 
-export const sendChatMessage = createServerFn({ method: 'POST' })
-  .validator(validateChatCommand)
-  .handler(async ({ data }): Promise<SendChatResult> => {
-    const session = await currentSession()
-    if (!session) return { status: 'not-admitted' }
-    const result = await getChatService().send(session.id, data)
-    if (result.status === 'sent') {
-      publishRoomEvent({
-        type: 'chat-message',
-        roomId: data.roomId,
-        message: result.message,
-      })
-    }
-    return result
-  })
 
 export const getChatHistory = createServerFn({ method: 'GET' })
   .validator(validateRoomId)
@@ -303,6 +291,31 @@ function validateStopStreamCommand(value: unknown): { streamId?: string } {
   return { streamId }
 }
 
+function validateHostStopStreamCommand(value: unknown): {
+  roomId: string
+  targetAccountId: string
+  streamId: string
+} {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('Invalid Host stop Stream command')
+  }
+  const source = value as Record<string, unknown>
+  if (
+    typeof source.targetAccountId !== 'string' ||
+    source.targetAccountId.length > 128
+  ) {
+    throw new TypeError('Invalid target account id')
+  }
+  if (typeof source.streamId !== 'string' || !ROOM_ID.test(source.streamId)) {
+    throw new TypeError('Invalid stream id')
+  }
+  return {
+    roomId: validateRoomId(source.roomId),
+    targetAccountId: source.targetAccountId,
+    streamId: source.streamId,
+  }
+}
+
 function validateWatchCommand(value: unknown): { roomId: string; streamId: string } {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new TypeError('Invalid watch command')
@@ -314,27 +327,6 @@ function validateWatchCommand(value: unknown): { roomId: string; streamId: strin
   return { roomId: validateRoomId(source.roomId), streamId: source.streamId }
 }
 
-function validateChatCommand(value: unknown): {
-  roomId: string
-  body: string
-  mutationId: string
-} {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new TypeError('Invalid chat command')
-  }
-  const source = value as Record<string, unknown>
-  if (typeof source.body !== 'string' || source.body.length > 4_000) {
-    throw new TypeError('Invalid message body')
-  }
-  if (typeof source.mutationId !== 'string' || !ROOM_ID.test(source.mutationId)) {
-    throw new TypeError('Invalid mutation id')
-  }
-  return {
-    roomId: validateRoomId(source.roomId),
-    body: source.body,
-    mutationId: source.mutationId,
-  }
-}
 
 /** Moderation and Host Settings. */
 
@@ -376,6 +368,26 @@ export const banRoomMember = createServerFn({ method: 'POST' })
     const session = await currentSession()
     if (!session) return { status: 'forbidden' as const }
     return getProductionRoomService().banAccount(session.id, data.roomId, data.accountId)
+  })
+
+export const kickRoomMember = createServerFn({ method: 'POST' })
+  .validator(validateKickCommand)
+  .handler(async ({ data }) => {
+    const session = await currentSession()
+    if (!session) return { status: 'forbidden' as const }
+    return getProductionRoomService().kickAccount(session.id, data.roomId, data.accountId)
+  })
+
+export const transferRoomHost = createServerFn({ method: 'POST' })
+  .validator(validateHostTransferCommand)
+  .handler(async ({ data }) => {
+    const session = await currentSession()
+    if (!session) return { status: 'forbidden' as const }
+    return getProductionRoomService().transferHost(
+      session.id,
+      data.roomId,
+      data.accountId,
+    )
   })
 
 export function roomBansQueryOptions(roomId: string) {
@@ -443,6 +455,30 @@ function validateSettingsCommand(value: unknown): {
 function validateBanCommand(value: unknown): { roomId: string; accountId: string } {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new TypeError('Invalid ban command')
+  }
+  const source = value as Record<string, unknown>
+  if (typeof source.accountId !== 'string' || source.accountId.length > 128) {
+    throw new TypeError('Invalid account id')
+  }
+  return { roomId: validateRoomId(source.roomId), accountId: source.accountId }
+}
+
+function validateKickCommand(value: unknown): { roomId: string; accountId: string } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('Invalid kick command')
+  }
+  const source = value as Record<string, unknown>
+  if (typeof source.accountId !== 'string' || source.accountId.length > 128) {
+    throw new TypeError('Invalid account id')
+  }
+  return { roomId: validateRoomId(source.roomId), accountId: source.accountId }
+}
+
+function validateHostTransferCommand(
+  value: unknown,
+): { roomId: string; accountId: string } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('Invalid Host transfer command')
   }
   const source = value as Record<string, unknown>
   if (typeof source.accountId !== 'string' || source.accountId.length > 128) {

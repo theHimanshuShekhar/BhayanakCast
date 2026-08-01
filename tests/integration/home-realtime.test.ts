@@ -13,7 +13,10 @@ import {
   normalizeHomeRealtimeEvent,
   type HomeRealtimeEvent,
 } from '../../src/server/realtime/home-events'
-import { ROOM_JOIN_COMMAND } from '../../src/server/realtime/room-events'
+import {
+  ROOM_CHAT_COMMAND,
+  ROOM_JOIN_COMMAND,
+} from '../../src/server/realtime/room-events'
 import { migrateAuthDatabase } from '../../src/server/db/migrate'
 import { RoomService } from '../../src/server/rooms/room-service'
 import { refreshHomeQueries } from '../../src/features/home/home-realtime'
@@ -410,6 +413,28 @@ describe('Home realtime event contract', () => {
     expect(first.disconnected).toBe(true)
     expect(second.connected).toBe(true)
     expect(other.connected).toBe(true)
+  })
+
+  test('rejects chat until the realtime room channel is acknowledged', async () => {
+    const { context, accounts: harness } = await authHarness()
+    const signedIn = await harness.signInDiscord({
+      id: '102938475610293862',
+      username: 'room-chat-reconnecting',
+    })
+    const socket = await openSocket(signedIn.sessionCookie, context.server.origin)
+
+    const acknowledgement = await new Promise<unknown>((resolve) => {
+      socket.emit(
+        ROOM_CHAT_COMMAND,
+        {
+          body: 'must not persist',
+          mutationId: randomUUID(),
+        },
+        resolve,
+      )
+    })
+
+    expect(acknowledgement).toEqual({ status: 'rejected' })
   })
 
   test('event hub instances do not cross-talk and unsubscribe on disconnect', () => {

@@ -177,7 +177,7 @@ for (const [index, section] of recoverableSections.entries()) {
     const recoveredUrls: string[] = []
     await page.route('**/*', async (route) => {
       const request = route.request()
-      if (!['fetch', 'xhr'].includes(request.resourceType())) {
+      if (!['fetch', 'xhr'].includes(request.resourceType()) || request.method() !== 'GET') {
         await route.continue()
         return
       }
@@ -252,7 +252,10 @@ test('Home hydrates critical SSR sections without duplicate browser fetches', as
 
   const requests: string[] = []
   signedIn.context.on('request', (request) => {
-    if (['fetch', 'xhr'].includes(request.resourceType())) {
+    if (
+      ['fetch', 'xhr'].includes(request.resourceType()) &&
+      request.method() === 'GET'
+    ) {
       requests.push(request.url())
     }
   })

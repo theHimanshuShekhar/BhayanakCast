@@ -7,6 +7,7 @@ export interface SignInButtonProps {
   className?: string
   icon?: ReactNode
   label?: string
+  onActivate?: () => void
 }
 
 export function SignInButton({
@@ -14,12 +15,14 @@ export function SignInButton({
   callbackURL,
   className,
   icon,
+  onActivate,
   label = 'Sign in with Discord',
 }: SignInButtonProps) {
   const [isPending, setIsPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const signIn = async () => {
+    onActivate?.()
     setIsPending(true)
     setError(null)
     try {

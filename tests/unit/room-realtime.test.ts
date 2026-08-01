@@ -9,6 +9,7 @@ import {
   bindRoomProjectionSocket,
   focusRoomPrimaryHeading,
 } from '../../src/features/room/RoomRoute'
+import { reconnectGraceSeconds } from '../../src/features/room/useRoomRealtime'
 
 const ROOM_ID = '00000000-0000-4000-8000-000000000001'
 const OTHER_ROOM_ID = '00000000-0000-4000-8000-000000000002'
@@ -121,5 +122,14 @@ describe('Room realtime projection invalidation', () => {
 
     expect(root.querySelector).toHaveBeenCalledWith('[data-room-primary-heading]')
     expect(focus).toHaveBeenCalledOnce()
+  })
+
+  test('shows the fixed reconnect deadline from 45 through expiry', () => {
+    const deadline = 50_000
+    expect(reconnectGraceSeconds(deadline, 5_000)).toBe(45)
+    expect(reconnectGraceSeconds(deadline, 5_001)).toBe(45)
+    expect(reconnectGraceSeconds(deadline, 49_999)).toBe(1)
+    expect(reconnectGraceSeconds(deadline, 50_000)).toBe(0)
+    expect(reconnectGraceSeconds(deadline, 75_000)).toBe(0)
   })
 })

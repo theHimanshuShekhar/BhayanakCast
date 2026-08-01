@@ -99,6 +99,48 @@
       "when": 1785369600000,
       "tag": "0013_reports",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1785542400000,
+      "tag": "0014_report_review",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1785628800000,
+      "tag": "0015_account_deletion_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1785715200000,
+      "tag": "0016_chat_mutation_ack",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1785801600000,
+      "tag": "0017_sanction_lineage",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1785888000000,
+      "tag": "0018_unambiguous_sanction_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1785974400000,
+      "tag": "0019_sanction_foreign_keys",
+      "breakpoints": true
     }
   ]
 }

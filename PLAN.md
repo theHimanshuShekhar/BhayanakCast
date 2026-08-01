@@ -13,7 +13,7 @@ ADRs themselves.
    transport), plus the room-behaviour ADRs `0009`, `0019`, `0032`, `0035`, `0039`,
    `0047`, `0051`, `0055`–`0059`, `0063`, `0066`–`0072`, `0075`, `0077`.
 2. **`PRODUCT.md` / `DESIGN.md` / `CONTEXT.md`** — the same decisions in prose.
-   `DESIGN.md:74`–`96` is the room's normative description; `PRODUCT.md:80`, `:89`,
+   `DESIGN.md:76`–`98` is the room's normative description; `PRODUCT.md:80`, `:89`,
    `:108` are its behavioural clauses.
 3. **`docs/design/Home Uplift.dc.html`** — option **4a** (`:54`, admitted wide; `:200`,
    admitted 390px) and option **4b** (`:150`, pre-admission and Past Stream). Options
@@ -32,7 +32,7 @@ concept anywhere in `PRODUCT.md`. 4a's floating control pill is likewise rejecte
 `0100` ("structural surface, not floating conferencing pill") — take its button styling,
 not its placement.
 
-An assumption worth stating: `DESIGN.md:90`'s "the desktop room uses the 72px icon app
+An assumption worth stating: `DESIGN.md:92`'s "the desktop room uses the 72px icon app
 rail at all widths" means all *desktop* widths. Below 768px `0103` puts Back/Home in the
 room header and one room control bar at the bottom, and 4a's 390px mock (`:203`) draws no
 rail. Build no rail below 768px.
@@ -67,55 +67,54 @@ Working and ADR-conformant, not to be redone:
 
 ---
 
-## Gap register
+## Open gap register
+
+This register reflects the current worktree. R1 shell changes and focused admitted-shell
+E2E coverage are present; this documentation reconciliation did not rerun that suite.
 
 | # | Gap | Governing | Today |
 |---|-----|-----------|-------|
-| A1 | Room rail shows the anonymous sign-in door to signed-in members | — (bug) | `RoomShell` takes `session` but no caller passes it: `RoomAdmittedBoundary.tsx:102`, `RoomPreAdmission.tsx:74`, `PastStreamSummary.tsx:12` |
-| A2 | Global bottom nav and room bar both render below 768px | `0103`, `DESIGN.md:90` | `HomeNavigation` always renders `.home-bottom-navigation`; `.room-mobile-bar` is `position: fixed` (`app.css:4237`) |
-| A3 | Room is a document-scrolling page, not a fixed-viewport workspace | `0100`, `DESIGN.md:76` | `.room-boundary` is a padded column; dock/panel use `position: sticky` (`app.css:3970`, `:4282`) |
-| A4 | Dock is a persistent 320px column at 768–1279px | `0100`, `0103`, `0107` | `app.css:3961` `minmax(0,1fr) 20rem`; drawer with Close/Escape/focus-return does not exist |
-| A5 | Media canvas follows the selected theme | `0100`, `DESIGN.md:80` | `.room-stage__canvas` (`app.css:3666`) is built from `--rail`/`--action-soft` |
-| B1 | Header is not the two-line composition; no Back/Home, no privacy/Full/live state, no current Host | `0100`, `DESIGN.md:78` | `RoomHeader` (`RoomShell.tsx:25`) shows eyebrow `Host`/`Member`; Back lives in the shelf (`RoomControlShelf.tsx:47`) |
-| B2 | Only the 1-minute warning changes the countdown | `0103` | `data-countdown` is `urgent`/`normal` only (`RoomAdmittedBoundary.tsx:120`) |
-| B3 | No compact mobile header, no labeled Details sheet | `0103`, `DESIGN.md:94` | absent |
-| C1 | The 2×2 in-place span applies at every width | `0101`, `0103`, `0107` | `app.css:3989` is unconditional; no two-column overview, no stage-plus-strip below 768px |
-| C2 | Previews are cropped | `0101`, `DESIGN.md:80` | `object-fit: cover` (`app.css:3766`) |
-| C3 | Mosaic grows the document instead of scrolling inside bounds | `0100` | depends on A3 |
-| C4 | Watcher stack has no accessible label naming visible watchers | `0101` | avatars `aria-hidden`, text is only the total (`RoomMemberMosaic.tsx:262`) |
-| C5 | Presence tiles carry no reconnecting/compatibility state | `0101`, `0102` | state line is Host/You/Live/freshness only (`RoomMemberMosaic.tsx:146`) |
-| D1 | Kick does not exist | `0009` | no server method, no server fn, no UI |
-| D2 | Host transfer does not exist | `0056` | ditto |
-| D3 | "Host tools" bans instantly, unconfirmed | `0102`, `0057` | `RoomAdmittedBoundary.tsx:73` → `RoomMemberMosaic.tsx:216` |
-| D4 | Host cannot stop another member's stream from the UI | `0058`, `0102` | server side is **complete** — `stream-service.ts:96` supports the Host path and `stopStream` (`room-queries.ts:186`) already takes a `streamId`; only the UI is missing |
-| D6 | `stream-stopped` Activity credits the actor, not the stream's owner | `0102` | `room-queries.ts:199` passes `session.displayName`, so a Host stopping another member's stream reads as the Host's own stream ending |
-| D7 | `member-removed` and `host-transferred` have labels but no emitter | `0009`, `0056` | both are in the event union (`room-events.ts:46`) and labeled (`RoomCompanionDock.tsx:392`, `:395`); nothing in `src/server/` publishes either |
+| A4 | Dock is a persistent 320px column at 768–1279px | `0100`, `0103`, `0107` | `.room-boundary--admitted` still uses `minmax(0, 1fr) 20rem` in the medium range; drawer with Close/Escape/focus-return does not exist |
+| B1 | Header is not the two-line composition; no Back/Home, no privacy/Full/live state, no current Host | `0100`, `DESIGN.md:80` | `RoomHeader` shows eyebrow `Host`/`Member`; Back lives in the shelf |
+| B2 | Only the 1-minute warning changes the countdown | `0103` | `data-countdown` is `urgent`/`normal` only |
+| B3 | No compact mobile header, no labeled Details sheet | `0103`, `DESIGN.md:96` | absent |
+| C1 | The 2×2 in-place span applies at every width | `0101`, `0103`, `0107` | the watched-tile span is unconditional; no two-column overview or stage-plus-strip below 768px |
+| C4 | Watcher stack has no accessible label naming visible watchers | `0101` | avatars are hidden from assistive technology and text exposes only the total |
+| C5 | Presence tiles carry no reconnecting/compatibility state | `0101`, `0102` | state line is Host/You/Live/freshness only |
+| D1 | Kick does not exist | `0009` | no server method, server function, or UI |
+| D2 | Host transfer does not exist | `0056` | no server method, server function, or UI |
+| D3 | Host ban acts immediately without confirmation | `0102`, `0057` | the admitted boundary invokes the ban action directly |
+| D4 | Host cannot stop another member's Stream from the UI | `0058`, `0102` | server support exists; only the UI is missing |
 | D5 | Report/Host actions are loose buttons, not a compact menu | `0101`, `0102` | two bare buttons per tile |
+| D6 | `stream-stopped` Activity credits the actor, not the Stream owner | `0102` | a Host stopping another member's Stream reads as the Host's own Stream ending |
+| D7 | `member-removed` and `host-transferred` have labels but no emitter | `0009`, `0056` | both are in the event union and labeled; nothing publishes either |
 | E1 | Chat has no bottom-anchoring and no `New messages` action | `0102`, `PRODUCT.md:89` | badge only while the tab is hidden |
-| E2 | No per-message menu → no message Report, no chat Mute from the room | `0102`, `0019` | absent; mute is profile-only |
-| E3 | Character counter always visible | `0102` | unconditional in the composer |
-| E4 | Typing collapses 3+ typists to "Several people are typing…" | `0102` | `typingLabel` in `RoomCompanionDock` |
-| E5 | People rows have no avatar and no reconnecting/compatibility/capability state | `0102` | name + Host/You/Streaming only |
-| E6 | Composer stays live while the connection is reconnecting or lost | `0103` | dock never reads `realtime.connection` |
-| E7 | Sheets: no Escape, no focus return; tabs are not a real tablist | `0103`, `0102` | `setSheet` toggles state and nothing else |
-| F1 | Compatibility banner has no `Retry compatibility` | `0103` | `supported` is computed once (`useRoomMedia.ts:67`) so it cannot be re-tested |
-| F2 | Mobile `Desktop only` has no help affordance | `0103` | `data-disabled-reason` attribute only |
-| F3 | Reconnecting never shows the remaining 45-second grace | `0103` | `RECONNECT_GRACE_MS` is a bare timer (`useRoomRealtime.ts:167`) |
-| G1 | Pre-admission is a header plus a seat strip, not 4b's gate | design `:150`, `PRODUCT.md:54` | no chips/hero/stat-pair/presence line composition |
-| H1 | Past Stream summary carries its facts in the header, not 4b's stat pair | design `:181` | cosmetic only; behaviour is correct |
-| I1 | **No e2e spec covers the admitted room** | `0103`, `0106`, `0107` | `tests/e2e/` has `create-and-open-room` and `room-oauth-return` and nothing else |
+| E2 | No per-message menu for message Report or room-level chat Mute | `0102`, `0019` | absent; mute is profile-only |
+| E3 | Character counter is always visible | `0102` | unconditional in the composer |
+| E4 | Typing collapses 3+ typists to “Several people are typing…” | `0102` | it does not use two names plus `and N others` |
+| E5 | People rows have no avatar or reconnecting/compatibility/capability state | `0102` | name + Host/You/Streaming only |
+| E6 | Composer stays live while realtime is reconnecting or lost | `0103` | the dock does not read connection state |
+| E7 | Sheets lack Escape/focus return and tabs are not a semantic tablist | `0103`, `0102` | sheet state only toggles visibility |
+| F1 | Compatibility banner has no `Retry compatibility` | `0103` | support is computed once and cannot be re-tested |
+| F2 | Mobile `Desktop only` has no help affordance | `0103` | disabled reason is an attribute only |
+| F3 | Reconnecting never shows the remaining 45-second grace | `0103` | reconnect grace is a bare timer |
+| G1 | Pre-admission is a header plus a seat strip, not 4b's gate | design `:150`, `PRODUCT.md:54` | no chips/hero/stat-pair/presence-line composition |
+| H1 | Past Stream summary carries its facts in the header, not 4b's stat pair | design `:181` | cosmetic only; behavior is correct |
+| I1 | Admitted-room E2E coverage is incomplete | `0103`, `0106`, `0107` | focused shell coverage exists, but the media, moderation, companion, recovery, and responsive matrix does not |
 
-Standing debt, carried over and still unresolved: `0096` fixes the type scale at
-13/14/16/18/24/30/36px with a 13px floor, and `src/styles/app.css` ships 12.5/12/11.5/11
-and 10px. Not a room regression — it needs its own decision (bring the CSS to the ADR, or
-amend `0096` to the scale the design actually uses). Do not quietly widen this plan to
-cover it.
+Standing implementation debt, carried over and outside this room plan: ADR `0096` fixes
+the type scale at 13/14/16/18/24/30/36px with a 13px floor, while
+`src/styles/app.css` still ships 12.5/12/11.5/11 and 10px text. The accepted scale
+remains authoritative; bring the CSS up to it in separate work rather than amending the
+design decision or widening this plan.
 
 ---
 
-## Phase R1 — Shell correctness
+## Phase R1 — Shell correctness (implemented; focused verification present)
 
-Everything else renders inside this, so it goes first. Four defects, one CSS rewrite.
+The current worktree contains these shell changes and their focused E2E scenarios. The
+steps remain here as the implementation record; the broader admitted-room matrix remains
+open under I1.
 
 1. **Session reaches the room rail (A1).** Extract `getHomeSession`
    (`routes/index.tsx:19`) into a shared server fn — `src/server/auth/session-fn.ts` is
@@ -127,7 +126,7 @@ Everything else renders inside this, so it goes first. Four defects, one CSS rew
    (it already does) and add `.room-shell[data-room-shell="admitted"] .home-bottom-navigation { display: none }`
    inside the `max-width: 47.999rem` block. Only the admitted state suppresses it:
    pre-admission and Past Stream are ordinary pages and keep the global nav
-   (`DESIGN.md:90` says "an admitted room").
+   (`DESIGN.md:92` says "an admitted room").
 3. **Fixed-viewport workspace (A3, C3).** At ≥48rem, `.room-shell` becomes
    `height: 100dvh` with `overflow: hidden`; `.room-boundary--admitted` becomes a grid
    with `grid-template-rows: auto minmax(0, 1fr)` so the header is fixed and the stage
@@ -156,7 +155,7 @@ bottom bar at 390px; rail identity correct in all three states.
 ## Phase R2 — Room header
 
 1. **Two lines (B1).** `RoomHeader` gains an explicit two-row structure per
-   `0100`/`DESIGN.md:78`. Line 1: Back/Home link, room name (`data-room-primary-heading`
+   `0100`/`DESIGN.md:80`. Line 1: Back/Home link, room name (`data-room-primary-heading`
    stays — `RoomRoute` focuses it), `Public`/`Private` chip plus `Full` or live state,
    Host-only Settings. Line 2: description (already clamped), category and tags, current
    Host avatar and name, member and Stream counts, lifetime countdown. Move the Back link
@@ -251,7 +250,7 @@ Unit: watcher-stack label formatting.
 
 ---
 
-## Phase R5 — Host moderation, completed
+## Phase R5 — Host moderation
 
 The largest functional gap: two ADR-decided capabilities have no implementation at all,
 and the one that exists is wired to fire without confirmation.

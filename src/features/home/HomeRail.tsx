@@ -44,6 +44,7 @@ export function HomeRail({
           <PresenceCard presence={presence} />
 
           <HomeSectionBoundary
+            analyticsSection="statistics"
             failed={statisticsFailed}
             label="Statistics"
             pending={statisticsPending && !statistics}

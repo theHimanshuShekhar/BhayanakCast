@@ -1,3 +1,4 @@
+import { observeHome } from './home-observability'
 import type { PastStreamSummary } from './home-types'
 
 interface PastStreamsProps {
@@ -39,6 +40,10 @@ export function PastStreams({ streams }: PastStreamsProps) {
             <a
               aria-label={`Open summary for ${stream.name}`}
               href={`/rooms/${encodeURIComponent(stream.roomId)}`}
+              onClick={() => observeHome({
+                name: 'home_past_stream_opened',
+                properties: {},
+              })}
             >
               {/* The badge sits inside the name block visually, but the name
                   probe stays a leaf so it reads back as just the room name. */}

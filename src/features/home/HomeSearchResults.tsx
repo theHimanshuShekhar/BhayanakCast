@@ -37,6 +37,7 @@ export function HomeSearchResults({
         data-home-center-region="live-rooms"
       >
         <HomeSectionBoundary
+          analyticsSection="live_rooms"
           failed={rooms.failed}
           label="Active rooms"
           pending={rooms.pending && !rooms.data}
@@ -72,6 +73,7 @@ export function HomeSearchResults({
           data-home-center-region="profiles"
         >
           <HomeSectionBoundary
+            analyticsSection="profiles"
             failed={profiles.failed}
             label="Public profiles"
             pending={profiles.pending && !profiles.data}

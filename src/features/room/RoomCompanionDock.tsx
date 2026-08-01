@@ -1,9 +1,26 @@
 import { useThrottler } from '@tanstack/react-pacer'
-import { useEffect, useRef, useState } from 'react'
+import {
+  useEffect,
+  useCallback,
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react'
 import { orderRoomPeople, type RoomRosterMember } from '../../server/rooms/room-roster'
-import { CHAT_BODY_LIMIT } from '../../server/realtime/room-events'
-import { sendChatMessage } from './room-queries'
+import {
+  CHAT_BODY_LIMIT,
+  chatCharacterCount,
+  type RoomChatMessage,
+} from '../../server/realtime/room-events'
+import {
+  getCurrentViewerMuteIds,
+  muteAccount,
+} from '../../server/profile/chat-mute-service'
 import type { RoomRealtime } from './useRoomRealtime'
+import { observeRoom } from './room-observability'
+import { RoomMemberActions } from './RoomMemberActions'
+import { RoomMessageActions } from './RoomMessageActions'
 
 type DockTab = 'chat' | 'people' | 'activity'
 
@@ -19,65 +36,117 @@ interface PendingMessage {
     of stealing focus. */
 export function RoomCompanionDock({
   realtime,
-  roomId,
+  canChat,
   roster,
   selfMembershipId,
   memberCount,
   sheet,
   onDismissSheet,
   onReport,
+  onReportMessage,
   hostActions,
+  onKickMember,
+  onTransferHost,
+  onStopStream,
 }: Readonly<{
   realtime: RoomRealtime
-  roomId: string
+  canChat: boolean
   roster: readonly RoomRosterMember[]
   selfMembershipId: string
   memberCount: number
   /** People rows carry the same member and Host actions as the tiles, so
       safety never depends on hover or on a particular panel (ADR 0102). */
   onReport: (member: RoomRosterMember) => void
+  onReportMessage: (message: RoomChatMessage) => void
   hostActions: ((member: RoomRosterMember) => void) | null
-  /** Below 768px the dock is a bottom sheet the control bar opens on a tab
-      (ADR 0103); null means the desktop dock. */
+  onKickMember: ((member: RoomRosterMember) => void) | null
+  onTransferHost: ((member: RoomRosterMember) => void) | null
+  onStopStream: ((member: RoomRosterMember) => void) | null
+  /** Below 768px the dock is a bottom sheet the control bar opens on a tab. */
   sheet: DockTab | null
-  onDismissSheet: () => void
+  onDismissSheet: (reason: 'control' | 'escape') => void
 }>) {
   const [tab, setTab] = useState<DockTab>('chat')
+  const [open, setOpen] = useState(true)
   const [expanded, setExpanded] = useState(false)
   const [draft, setDraft] = useState('')
   const [pending, setPending] = useState<readonly PendingMessage[]>([])
+  const [mutedAccountIds, setMutedAccountIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  )
+  const [chatStatus, setChatStatus] = useState<string | null>(null)
+  const stage = useCompanionStage()
+  const visible = stage === 'mobile' ? sheet !== null : open
+  const panelId = useId()
+  const tabRefs = useRef<Record<DockTab, HTMLButtonElement | null>>({
+    chat: null,
+    people: null,
+    activity: null,
+  })
   const scrollPositions = useRef<Record<DockTab, number>>({
     chat: 0,
     people: 0,
     activity: 0,
   })
+  const chatPositioned = useRef(false)
   const panelRef = useRef<HTMLDivElement | null>(null)
+  const chatFollowing = useRef(true)
+  const typingActive = useRef(false)
   const seen = useRef({ chat: realtime.messages.length, activity: 0 })
   const [unread, setUnread] = useState({ chat: 0, activity: 0 })
   const [newActivity, setNewActivity] = useState(false)
+  const [newMessages, setNewMessages] = useState(false)
+  const selfAccountId = roster.find(
+    (member) => member.membershipId === selfMembershipId,
+  )?.accountId
+  const visibleMessages = realtime.messages.filter(
+    (message) => !mutedAccountIds.has(message.accountId),
+  )
+  const dismiss = useCallback(
+    (reason: 'control' | 'escape') => {
+      const surface =
+        stage === 'wide' ? 'dock' : stage === 'medium' ? 'drawer' : 'sheet'
+      observeRoom({
+        name: 'room_companion_closed',
+        properties: { surface, reason },
+      })
+      if (stage === 'mobile') {
+        onDismissSheet(reason)
+        return
+      }
+      setOpen(false)
+      requestAnimationFrame(() => tabRefs.current[tab]?.focus())
+    },
+    [onDismissSheet, stage, tab],
+  )
 
   useEffect(() => {
-    if (tab === 'chat') {
-      seen.current.chat = realtime.messages.length
+    const missed = visibleMessages.length - seen.current.chat
+    seen.current.chat = visibleMessages.length
+    if (missed <= 0) return
+    if (tab === 'chat' && visible && chatFollowing.current) {
+      requestAnimationFrame(() => {
+        const panel = panelRef.current
+        if (panel) panel.scrollTop = panel.scrollHeight
+      })
       setUnread((current) => (current.chat === 0 ? current : { ...current, chat: 0 }))
       return
     }
-    const missed = realtime.messages.length - seen.current.chat
-    if (missed > 0) setUnread((current) => ({ ...current, chat: missed }))
-  }, [realtime.messages.length, tab])
+    chatFollowing.current = false
+    setNewMessages(true)
+    setUnread((current) => ({ ...current, chat: current.chat + missed }))
+  }, [visibleMessages.length, tab, visible])
 
   useEffect(() => {
-    if (tab === 'activity') {
+    if (tab === 'activity' && visible) {
       seen.current.activity = realtime.activity.length
       setUnread((current) => (current.activity === 0 ? current : { ...current, activity: 0 }))
-      // Reading older entries is not an invitation to be scrolled away from
-      // them: a cue appears instead, and only you dismiss it (ADR 0102).
       if (!atBottom(panelRef.current)) setNewActivity(true)
       return
     }
     const missed = realtime.activity.length - seen.current.activity
     if (missed > 0) setUnread((current) => ({ ...current, activity: missed }))
-  }, [realtime.activity.length, tab])
+  }, [realtime.activity.length, tab, visible])
 
   useEffect(() => {
     if (sheet) setTab(sheet)
@@ -88,12 +157,74 @@ export function RoomCompanionDock({
     const panel = panelRef.current
     if (panel) panel.scrollTop = scrollPositions.current[tab]
   }, [tab])
+  useEffect(() => {
+    if (chatPositioned.current || tab !== 'chat' || !visible) return
+    chatPositioned.current = true
+    requestAnimationFrame(() => {
+      const panel = panelRef.current
+      if (!panel) return
+      panel.scrollTop = panel.scrollHeight
+      scrollPositions.current.chat = panel.scrollTop
+    })
+  }, [tab, visible])
+
+
+  useEffect(() => {
+    if (!visible || stage === 'wide') return
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      dismiss('escape')
+    }
+    document.addEventListener('keydown', dismissOnEscape)
+    return () => document.removeEventListener('keydown', dismissOnEscape)
+  }, [dismiss, stage, visible])
+
+  useEffect(() => {
+    let active = true
+    void getCurrentViewerMuteIds()
+      .then((accountIds) => {
+        if (active) setMutedAccountIds(new Set(accountIds))
+      })
+      .catch(() => {
+        if (active) setChatStatus('Muted chat preferences could not be loaded.')
+      })
+    return () => {
+      active = false
+    }
+  }, [])
 
   // Typing presence is refreshed, not streamed: one signal per interval while
   // the composer is active, and an explicit stop when it is not (ADR 0102).
   const typingThrottler = useThrottler(
     (value: boolean) => realtime.setTyping(value),
-    { wait: 2_000, leading: true, trailing: false },
+    { wait: 2_000, leading: true, trailing: true },
+  )
+  const stopTyping = () => {
+    typingThrottler.cancel()
+    if (!typingActive.current) return
+    typingActive.current = false
+    realtime.setTyping(false)
+    observeRoom({ name: 'room_chat_typing_changed', properties: { typing: false } })
+  }
+  const refreshTyping = () => {
+    if (!typingActive.current) {
+      typingActive.current = true
+      observeRoom({ name: 'room_chat_typing_changed', properties: { typing: true } })
+    }
+    typingThrottler.maybeExecute(true)
+  }
+
+  useEffect(() => {
+    if (realtime.connection !== 'live') stopTyping()
+  }, [realtime.connection])
+
+  useEffect(
+    () => () => {
+      typingThrottler.cancel()
+      realtime.setTyping(false)
+    },
+    [],
   )
 
   const canonicalMutationIds = new Set(
@@ -102,20 +233,76 @@ export function RoomCompanionDock({
   const visiblePending = pending.filter(
     (message) => !canonicalMutationIds.has(message.mutationId),
   )
+  const visibleTyping = realtime.typing.filter(
+    (member) => !mutedAccountIds.has(member.accountId),
+  )
+  const draftCount = chatCharacterCount(draft)
+  const composerStatus =
+    !canChat
+      ? 'Chat is unavailable on your account. Existing messages remain available.'
+      : realtime.connection === 'reconnecting'
+        ? 'Chat is reconnecting. Sending is unavailable.'
+        : realtime.connection === 'lost'
+          ? 'Chat is unavailable. Rejoin the room to send.'
+          : draftCount > CHAT_BODY_LIMIT
+            ? `Message is ${draftCount - CHAT_BODY_LIMIT} characters too long.`
+            : null
+
+  useEffect(() => {
+    if (
+      visiblePending.length === 0 ||
+      tab !== 'chat' ||
+      !visible ||
+      !chatFollowing.current
+    ) {
+      return
+    }
+    requestAnimationFrame(() => {
+      const panel = panelRef.current
+      if (panel) panel.scrollTop = panel.scrollHeight
+    })
+  }, [visiblePending.length, tab, visible])
 
   return (
     <aside
       aria-label="Room companions"
       className="room-dock"
+      id="room-companions"
+      data-open={visible}
       data-sheet={sheet ? (expanded ? 'expanded' : 'open') : 'docked'}
+      data-stage={stage}
     >
       {sheet && (
         <div className="room-dock__sheet-controls">
-          <button type="button" onClick={() => setExpanded((current) => !current)}>
+          <button
+            aria-label={expanded ? 'Collapse companion sheet to 55%' : 'Expand companion sheet to 90%'}
+            type="button"
+            onClick={() => {
+              const next = !expanded
+              setExpanded(next)
+              observeRoom({
+                name: 'room_companion_resized',
+                properties: { height: next ? '90' : '55' },
+              })
+            }}
+          >
             {expanded ? 'Collapse' : 'Expand'}
           </button>
-          <button type="button" onClick={onDismissSheet}>
+          <button type="button" onClick={() => dismiss('control')}>
             Close
+          </button>
+        </div>
+      )}
+      {!sheet && open && (
+        <div className="room-dock__desktop-controls">
+          <button
+            aria-label={stage === 'wide' ? 'Collapse dock' : 'Close'}
+            className="room-dock__collapse"
+            type="button"
+            onClick={() => dismiss('control')}
+          >
+            <span className="room-dock__wide-label">Collapse dock</span>
+            <span className="room-dock__medium-label">Close</span>
           </button>
         </div>
       )}
@@ -123,38 +310,78 @@ export function RoomCompanionDock({
         <DockTabButton
           active={tab === 'chat'}
           badge={unread.chat}
+          buttonRef={(node) => {
+            tabRefs.current.chat = node
+          }}
+          controls={panelId}
           label="Chat"
+          onKeyDown={navigateTabs}
           onSelect={() => selectTab('chat')}
+          tab="chat"
         />
         <DockTabButton
           active={tab === 'people'}
           badge={memberCount}
           badgeTone="count"
+          buttonRef={(node) => {
+            tabRefs.current.people = node
+          }}
+          controls={panelId}
           label="People"
+          onKeyDown={navigateTabs}
           onSelect={() => selectTab('people')}
+          tab="people"
         />
         <DockTabButton
           active={tab === 'activity'}
           badge={unread.activity}
+          buttonRef={(node) => {
+            tabRefs.current.activity = node
+          }}
+          controls={panelId}
           label="Activity"
+          onKeyDown={navigateTabs}
           onSelect={() => selectTab('activity')}
+          tab="activity"
         />
       </div>
 
       <div
+        aria-labelledby={`${panelId}-${tab}`}
         className="room-dock__panel"
+        hidden={!visible}
+        id={panelId}
         ref={panelRef}
         role="tabpanel"
+        tabIndex={0}
         onScroll={(event) => {
           scrollPositions.current[tab] = event.currentTarget.scrollTop
+          if (tab === 'chat') {
+            chatFollowing.current = atBottom(event.currentTarget)
+            if (chatFollowing.current) {
+              setNewMessages(false)
+              setUnread((current) =>
+                current.chat === 0 ? current : { ...current, chat: 0 },
+              )
+            }
+          }
           if (tab === 'activity' && atBottom(event.currentTarget)) setNewActivity(false)
         }}
       >
         {tab === 'chat' && (
           <ul className="room-chat__log">
-            {realtime.messages.map((message) => (
+            {visibleMessages.map((message) => (
               <li className="room-chat__message" key={message.id}>
-                <p className="room-chat__author">{message.displayName}</p>
+                <div className="room-chat__message-heading">
+                  <p className="room-chat__author">{message.displayName}</p>
+                  {message.accountId !== selfAccountId && (
+                    <RoomMessageActions
+                      message={message}
+                      onMute={(target) => void muteChat(target)}
+                      onReport={onReportMessage}
+                    />
+                  )}
+                </div>
                 <p className="room-chat__body">{message.body}</p>
               </li>
             ))}
@@ -168,10 +395,10 @@ export function RoomCompanionDock({
                 {message.failed ? (
                   <p className="room-chat__failure">
                     Not sent.{' '}
-                    <button type="button" onClick={() => void send(message)}>
+                    <button type="button" onClick={() => void send(message, 'retry')}>
                       Retry
                     </button>{' '}
-                    <button type="button" onClick={() => discard(message.mutationId)}>
+                    <button type="button" onClick={() => discard(message.mutationId, true)}>
                       Discard
                     </button>
                   </p>
@@ -198,16 +425,15 @@ export function RoomCompanionDock({
                     .join(' · ')}
                 </span>
                 {member.membershipId !== selfMembershipId && (
-                  <span className="room-people__actions">
-                    <button type="button" onClick={() => onReport(member)}>
-                      Report
-                    </button>
-                    {hostActions && (
-                      <button type="button" onClick={() => hostActions(member)}>
-                        Host tools
-                      </button>
-                    )}
-                  </span>
+                  <RoomMemberActions
+                    member={member}
+                    onBan={hostActions ?? undefined}
+                    onKick={onKickMember ?? undefined}
+                    onReport={onReport}
+                    onStopStream={onStopStream ?? undefined}
+                    onTransfer={onTransferHost ?? undefined}
+                    surface="people"
+                  />
                 )}
               </li>
             ))}
@@ -235,6 +461,12 @@ export function RoomCompanionDock({
         )}
       </div>
 
+      {tab === 'chat' && newMessages && (
+        <button className="room-chat__cue" type="button" onClick={scrollToLatestChat}>
+          New messages
+        </button>
+      )}
+
       {tab === 'activity' && newActivity && (
         <button className="room-activity__cue" type="button" onClick={scrollToLatestActivity}>
           New activity
@@ -246,32 +478,47 @@ export function RoomCompanionDock({
           className="room-chat__composer"
           onSubmit={(event) => {
             event.preventDefault()
-            const body = draft.trim()
-            if (!body) return
+            const body = draft
+            if (!canChat || !body.trim() || draftCount > CHAT_BODY_LIMIT || realtime.connection !== 'live') {
+              return
+            }
             setDraft('')
-            typingThrottler.cancel()
-            realtime.setTyping(false)
-            void send({ mutationId: crypto.randomUUID(), body, failed: false })
+            stopTyping()
+            void send(
+              { mutationId: crypto.randomUUID(), body, failed: false },
+              'composer',
+            )
           }}
         >
-          {realtime.typing.length > 0 && (
+          {visibleTyping.length > 0 && (
             <p className="room-chat__typing" role="status">
-              {typingLabel(realtime.typing.map((member) => member.displayName))}
+              {typingLabel(visibleTyping.map((member) => member.displayName))}
+            </p>
+          )}
+          {chatStatus && (
+            <p className="room-chat__status" role="status">
+              {chatStatus}
+            </p>
+          )}
+          {composerStatus && (
+            <p className="room-chat__availability" id="room-chat-availability" role="status">
+              {composerStatus}
             </p>
           )}
           <label className="visually-hidden" htmlFor="room-chat-input">
             Message
           </label>
           <textarea
+            aria-describedby={composerStatus ? 'room-chat-availability' : undefined}
+            disabled={!canChat || realtime.connection !== 'live'}
             id="room-chat-input"
-            maxLength={CHAT_BODY_LIMIT}
             rows={2}
             value={draft}
-            onBlur={() => realtime.setTyping(false)}
+            onBlur={stopTyping}
             onChange={(event) => {
               setDraft(event.target.value)
-              if (event.target.value.trim()) typingThrottler.maybeExecute(true)
-              else realtime.setTyping(false)
+              if (event.target.value.trim() && realtime.connection === 'live') refreshTyping()
+              else stopTyping()
             }}
             onKeyDown={(event) => {
               if (event.key !== 'Enter' || event.shiftKey) return
@@ -279,10 +526,23 @@ export function RoomCompanionDock({
               event.currentTarget.form?.requestSubmit()
             }}
           />
-          <p className="room-chat__count tabular-nums">
-            {draft.length} / {CHAT_BODY_LIMIT}
-          </p>
-          <button disabled={draft.trim().length === 0} type="submit">
+          {draftCount >= 450 && (
+            <p
+              className="room-chat__count tabular-nums"
+              data-over-limit={draftCount > CHAT_BODY_LIMIT}
+            >
+              {draftCount} / {CHAT_BODY_LIMIT} characters
+            </p>
+          )}
+          <button
+            disabled={
+              draft.trim().length === 0 ||
+              draftCount > CHAT_BODY_LIMIT ||
+              !canChat ||
+              realtime.connection !== 'live'
+            }
+            type="submit"
+          >
             Send
           </button>
         </form>
@@ -292,8 +552,61 @@ export function RoomCompanionDock({
 
   function selectTab(next: DockTab) {
     const panel = panelRef.current
+    const returningToUnreadChat =
+      next === 'chat' && unread.chat > 0 && (!visible || tab !== 'chat')
     if (panel) scrollPositions.current[tab] = panel.scrollTop
+    const surface = stage === 'wide' ? 'dock' : stage === 'medium' ? 'drawer' : 'sheet'
+    if (!visible) {
+      setOpen(true)
+      observeRoom({
+        name: 'room_companion_opened',
+        properties: { surface, tab: next },
+      })
+    } else if (next !== tab) {
+      observeRoom({
+        name: 'room_companion_tab_selected',
+        properties: { surface, tab: next },
+      })
+    }
     setTab(next)
+    if (returningToUnreadChat) {
+      chatFollowing.current = true
+      setNewMessages(false)
+      setUnread((current) => ({ ...current, chat: 0 }))
+      requestAnimationFrame(() => {
+        const chatPanel = panelRef.current
+        if (chatPanel) chatPanel.scrollTop = chatPanel.scrollHeight
+      })
+    }
+  }
+
+
+  function navigateTabs(event: ReactKeyboardEvent<HTMLButtonElement>) {
+    const tabs: readonly DockTab[] = ['chat', 'people', 'activity']
+    let next: DockTab | undefined
+    if (event.key === 'Home') next = tabs[0]
+    else if (event.key === 'End') next = tabs.at(-1)
+    else if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+      next = tabs[(tabs.indexOf(tab) + 1) % tabs.length]
+    } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+      next = tabs[(tabs.indexOf(tab) - 1 + tabs.length) % tabs.length]
+    }
+    if (!next) return
+    event.preventDefault()
+    selectTab(next)
+    tabRefs.current[next]?.focus()
+  }
+
+  function scrollToLatestChat() {
+    const panel = panelRef.current
+    if (panel) {
+      panel.scrollTop = panel.scrollHeight
+      scrollPositions.current.chat = panel.scrollTop
+    }
+    chatFollowing.current = true
+    setNewMessages(false)
+    setUnread((current) => (current.chat === 0 ? current : { ...current, chat: 0 }))
+    observeRoom({ name: 'room_chat_new_messages_opened', properties: {} })
   }
 
   function scrollToLatestActivity() {
@@ -302,22 +615,26 @@ export function RoomCompanionDock({
     setNewActivity(false)
   }
 
-  function discard(mutationId: string) {
+  function discard(mutationId: string, observed = false) {
     setPending((current) => current.filter((entry) => entry.mutationId !== mutationId))
+    if (observed) observeRoom({ name: 'room_chat_failed_discarded', properties: {} })
   }
 
   /** Retry reuses the original mutation identity so a message that did commit
       before the failure is never posted twice (ADR 0102). */
-  async function send(message: PendingMessage) {
+  async function send(message: PendingMessage, trigger: 'composer' | 'retry') {
     setPending((current) => [
       ...current.filter((entry) => entry.mutationId !== message.mutationId),
       { ...message, failed: false },
     ])
-    const result = await sendChatMessage({
-      data: { roomId, body: message.body, mutationId: message.mutationId },
-    }).catch(() => null)
-    if (result?.status === 'sent') {
+    const result = await realtime.sendMessage(message.body, message.mutationId)
+    if (result.status === 'sent') {
+      realtime.replaceMessage(message.mutationId, result.message)
       discard(message.mutationId)
+      observeRoom({
+        name: 'room_chat_send',
+        properties: { trigger, outcome: 'sent' },
+      })
       return
     }
     setPending((current) =>
@@ -325,6 +642,34 @@ export function RoomCompanionDock({
         entry.mutationId === message.mutationId ? { ...entry, failed: true } : entry,
       ),
     )
+    observeRoom({
+      name: 'room_chat_send',
+      properties: {
+        trigger,
+        outcome: result.status === 'unavailable' ? 'unavailable' : 'failed',
+      },
+    })
+  }
+
+  async function muteChat(message: RoomChatMessage) {
+    setChatStatus(`Muting ${message.displayName}’s chat…`)
+    try {
+      await muteAccount({ data: { accountId: message.accountId } })
+      setMutedAccountIds((current) => new Set([...current, message.accountId]))
+      setChatStatus(
+        `${message.displayName}’s chat is muted. Presence and streams are unchanged.`,
+      )
+      observeRoom({
+        name: 'room_chat_mute_changed',
+        properties: { outcome: 'muted' },
+      })
+    } catch {
+      setChatStatus(`Could not mute ${message.displayName}’s chat. Try again.`)
+      observeRoom({
+        name: 'room_chat_mute_changed',
+        properties: { outcome: 'failed' },
+      })
+    }
   }
 }
 
@@ -341,24 +686,37 @@ function DockTabButton({
   active,
   badge,
   badgeTone = 'unread',
+  buttonRef,
+  controls,
   label,
+  onKeyDown,
   onSelect,
+  tab,
 }: Readonly<{
   active: boolean
   badge: number
   badgeTone?: 'unread' | 'count'
+  buttonRef: (node: HTMLButtonElement | null) => void
+  controls: string
   label: string
+  onKeyDown: (event: ReactKeyboardEvent<HTMLButtonElement>) => void
   onSelect: () => void
+  tab: DockTab
 }>) {
   return (
     <button
+      aria-controls={controls}
       aria-selected={active}
       className="room-dock__tab"
+      id={`${controls}-${tab}`}
+      ref={buttonRef}
       role="tab"
+      tabIndex={active ? 0 : -1}
       type="button"
       onClick={onSelect}
+      onKeyDown={onKeyDown}
     >
-      {label}
+      <span className="room-dock__tab-label">{label}</span>
       {badge > 0 && (
         <span className="room-dock__badge" data-badge-tone={badgeTone}>
           {badge}
@@ -368,10 +726,32 @@ function DockTabButton({
   )
 }
 
+type CompanionStage = 'mobile' | 'medium' | 'wide'
+
+function useCompanionStage(): CompanionStage {
+  const [stage, setStage] = useState<CompanionStage>('wide')
+  useEffect(() => {
+    const mobile = window.matchMedia('(max-width: 47.999rem)')
+    const wide = window.matchMedia('(min-width: 80rem)')
+    const update = () => {
+      setStage(mobile.matches ? 'mobile' : wide.matches ? 'wide' : 'medium')
+    }
+    update()
+    mobile.addEventListener('change', update)
+    wide.addEventListener('change', update)
+    return () => {
+      mobile.removeEventListener('change', update)
+      wide.removeEventListener('change', update)
+    }
+  }, [])
+  return stage
+}
+
 function typingLabel(names: readonly string[]) {
   if (names.length === 1) return `${names[0]} is typing…`
   if (names.length === 2) return `${names[0]} and ${names[1]} are typing…`
-  return 'Several people are typing…'
+  const others = names.length - 2
+  return `${names[0]}, ${names[1]}, and ${others} ${others === 1 ? 'other' : 'others'} are typing…`
 }
 
 function activityLabel(

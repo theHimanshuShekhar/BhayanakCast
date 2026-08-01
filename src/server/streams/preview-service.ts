@@ -88,12 +88,10 @@ export class PreviewService {
     const target = await this.pool.query<{
       streamId: string
       roomId: string
-      previousKey: string | null
       visibility: 'public' | 'private'
     }>(
       `SELECT stream.id AS "streamId",
               stream.room_id AS "roomId",
-              stream.preview_key AS "previousKey",
               room.visibility
          FROM stream
          JOIN room_membership membership
@@ -126,19 +124,40 @@ export class PreviewService {
     const previewKey = randomUUID()
     const updatedAt = this.now()
     await this.valkey.set(this.bytesKey(previewKey), bytes, 'EX', PREVIEW_TTL_SECONDS)
-    const claimed = await this.pool.query(
-      `UPDATE stream
-          SET preview_key = $2, preview_updated_at = $3
-        WHERE id = $1 AND ended_at IS NULL`,
-      [stream.streamId, previewKey, updatedAt],
-    )
-    if (claimed.rowCount === 0) {
-      // The stream stopped underneath this upload; leave nothing behind.
+    const client = await this.pool.connect()
+    let previousKey: string | null
+    try {
+      await client.query('BEGIN')
+      const current = await client.query<{ previousKey: string | null }>(
+        `SELECT preview_key AS "previousKey"
+           FROM stream
+          WHERE id = $1 AND ended_at IS NULL
+          FOR UPDATE`,
+        [stream.streamId],
+      )
+      if (!current.rows[0]) {
+        await client.query('ROLLBACK')
+        await this.valkey.del(this.bytesKey(previewKey))
+        return { status: 'not-streaming' }
+      }
+      previousKey = current.rows[0].previousKey
+      await client.query(
+        `UPDATE stream
+            SET preview_key = $2, preview_updated_at = $3
+          WHERE id = $1`,
+        [stream.streamId, previewKey, updatedAt],
+      )
+      await client.query('COMMIT')
+    } catch (error) {
+      await client.query('ROLLBACK')
       await this.valkey.del(this.bytesKey(previewKey))
-      return { status: 'not-streaming' }
+      throw error
+    } finally {
+      client.release()
     }
-    // Only the latest active preview is retained (ADR 0035).
-    if (stream.previousKey) await this.valkey.del(this.bytesKey(stream.previousKey))
+    // The row lock makes this the key actually displaced by this upload, even
+    // when two accepted uploads reach the claim concurrently.
+    if (previousKey) await this.valkey.del(this.bytesKey(previousKey))
 
     const stored = {
       roomId: stream.roomId,

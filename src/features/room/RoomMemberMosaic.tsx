@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import type { RoomRosterMember, RoomWatcher } from '../../server/rooms/room-roster'
+import {
+  preserveRoomRosterOrder,
+  type RoomRosterMember,
+  type RoomWatcher,
+} from '../../server/rooms/room-roster'
 import { WATCH_MAX_ATTEMPTS, type RoomMedia, type WatchState } from './useRoomMedia'
+import { RoomMemberActions } from './RoomMemberActions'
+import { observeRoom } from './room-observability'
 
 interface RoomMemberMosaicProps {
   readonly roster: readonly RoomRosterMember[]
@@ -11,6 +17,9 @@ interface RoomMemberMosaicProps {
   readonly visibility: 'public' | 'private'
   readonly onReport: (member: RoomRosterMember) => void
   readonly hostActions: ((member: RoomRosterMember) => void) | null
+  readonly onKickMember: ((member: RoomRosterMember) => void) | null
+  readonly onTransferHost: ((member: RoomRosterMember) => void) | null
+  readonly onStopStream: ((member: RoomRosterMember) => void) | null
 }
 
 /** ADR 0101: every admitted member owns one stable tile, streaming or not, and
@@ -25,12 +34,25 @@ export function RoomMemberMosaic({
   visibility,
   onReport,
   hostActions,
+  onKickMember,
+  onTransferHost,
+  onStopStream,
 }: RoomMemberMosaicProps) {
   // Viewer-local and unshared: hiding a member from your own mosaic says
   // nothing to them and nothing to anyone else.
   const [hideQuiet, setHideQuiet] = useState(false)
-  const streaming = roster.filter((member) => member.streamId !== null)
-  const visible = hideQuiet ? streaming : roster
+  const stableRoster = useRef<readonly RoomRosterMember[]>([])
+  stableRoster.current = preserveRoomRosterOrder(
+    stableRoster.current,
+    roster,
+    selfMembershipId,
+  )
+  const streaming = stableRoster.current.filter((member) => member.streamId !== null)
+  const visible = hideQuiet ? streaming : stableRoster.current
+  const watch = media.watch
+  const hasWatch =
+    watch.kind === 'watching' &&
+    visible.some((member) => member.streamId === watch.streamId)
 
   return (
     <div className="room-mosaic-region">
@@ -39,7 +61,14 @@ export function RoomMemberMosaic({
           <input
             checked={hideQuiet}
             type="checkbox"
-            onChange={(event) => setHideQuiet(event.target.checked)}
+            onChange={(event) => {
+              const hidden = event.target.checked
+              setHideQuiet(hidden)
+              observeRoom({
+                name: 'room_mosaic_filter_changed',
+                properties: { hidden },
+              })
+            }}
           />
           Hide non-streaming participants
         </label>
@@ -49,10 +78,17 @@ export function RoomMemberMosaic({
         <p className="room-mosaic-region__empty">No one is sharing yet.</p>
       )}
 
-      <ul className="room-mosaic" data-member-count={visible.length}>
+      <ul
+        className="room-mosaic"
+        data-has-watch={hasWatch}
+        data-member-count={visible.length}
+      >
         {visible.map((member) => (
           <MemberTile
             hostActions={hostActions}
+            onKickMember={onKickMember}
+            onTransferHost={onTransferHost}
+            onStopStream={onStopStream}
             key={member.membershipId}
             media={media}
             member={member}
@@ -73,6 +109,9 @@ function MemberTile({
   visibility,
   onReport,
   hostActions,
+  onKickMember,
+  onTransferHost,
+  onStopStream,
 }: Readonly<{
   member: RoomRosterMember
   selfMembershipId: string
@@ -80,6 +119,9 @@ function MemberTile({
   visibility: 'public' | 'private'
   onReport: (member: RoomRosterMember) => void
   hostActions: ((member: RoomRosterMember) => void) | null
+  onKickMember: ((member: RoomRosterMember) => void) | null
+  onTransferHost: ((member: RoomRosterMember) => void) | null
+  onStopStream: ((member: RoomRosterMember) => void) | null
 }>) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   // Every watch starts muted (ADR 0101); unmuting is the viewer's own act.
@@ -148,6 +190,8 @@ function MemberTile({
               member.role === 'host' ? 'Host' : null,
               you ? 'You' : null,
               member.streamId !== null ? (watching ? 'Watching' : 'Live') : null,
+              member.reconnecting ? 'Reconnecting' : null,
+              you && member.streamId === null ? compatibilityLabel(media.compatibility) : null,
               // Preview freshness, so a still tile says how still it is
               // (ADR 0102's footer, ADR 0035's two-minute cadence).
               member.streamId !== null && !watching
@@ -180,10 +224,31 @@ function MemberTile({
               does not — no overflow menu, no auto-hiding overlay (ADR 0101). */}
           {watching && (
             <>
-              <button type="button" onClick={() => setMuted((current) => !current)}>
+              <button
+                type="button"
+                onClick={() =>
+                  setMuted((current) => {
+                    const next = !current
+                    observeRoom({
+                      name: 'room_watch_audio_changed',
+                      properties: { muted: next },
+                    })
+                    return next
+                  })
+                }
+              >
                 {muted ? 'Unmute' : 'Mute'}
               </button>
-              <button type="button" onClick={() => void videoRef.current?.requestFullscreen()}>
+              <button
+                type="button"
+                onClick={() => {
+                  observeRoom({
+                    name: 'room_watch_fullscreen_requested',
+                    properties: {},
+                  })
+                  void videoRef.current?.requestFullscreen()
+                }}
+              >
                 Fullscreen
               </button>
             </>
@@ -201,7 +266,7 @@ function MemberTile({
             ) : (
               <button
                 className="room-mosaic__watch"
-                disabled={!media.supported || media.watch.kind === 'connecting'}
+                disabled={!media.canWatch || media.watch.kind === 'connecting'}
                 type="button"
                 onClick={() => void media.startWatching(member.streamId as string)}
               >
@@ -209,18 +274,15 @@ function MemberTile({
               </button>
             ))}
           {!you && (
-            <button className="room-mosaic__menu" type="button" onClick={() => onReport(member)}>
-              Report
-            </button>
-          )}
-          {hostActions && !you && (
-            <button
-              className="room-mosaic__menu"
-              type="button"
-              onClick={() => hostActions(member)}
-            >
-              Host tools
-            </button>
+            <RoomMemberActions
+              member={member}
+              onBan={hostActions ?? undefined}
+              onKick={onKickMember ?? undefined}
+              onReport={onReport}
+              onStopStream={onStopStream ?? undefined}
+              onTransfer={onTransferHost ?? undefined}
+              surface="tile"
+            />
           )}
         </div>
       </div>
@@ -264,7 +326,10 @@ function WatcherStack({
   total,
 }: Readonly<{ watchers: readonly RoomWatcher[]; total: number }>) {
   return (
-    <p className="room-mosaic__watchers">
+    <p
+      aria-label={watcherAccessibleLabel(watchers, total)}
+      className="room-mosaic__watchers"
+    >
       <span aria-hidden="true" className="room-mosaic__watcher-avatars">
         {watchers.map((watcher) =>
           watcher.avatarUrl ? (
@@ -281,6 +346,23 @@ function WatcherStack({
       </span>
     </p>
   )
+}
+
+export function watcherAccessibleLabel(
+  watchers: readonly RoomWatcher[],
+  total: number,
+): string {
+  if (total === 0) return 'No watchers'
+  const names = watchers.map((watcher) => watcher.displayName).join(', ')
+  const remaining = Math.max(0, total - watchers.length)
+  const visible = names ? `Watched by ${names}` : 'Watchers'
+  const hidden = remaining > 0 ? ` and ${remaining} more` : ''
+  return `${visible}${hidden}; ${total} ${total === 1 ? 'watcher' : 'watchers'} total`
+}
+
+function compatibilityLabel(compatibility: RoomMedia['compatibility']) {
+  if (compatibility === 'probing') return 'Checking media…'
+  return compatibility === 'compatible' ? 'Media ready' : 'Chat only'
 }
 
 /** The media only — its controls are explicit buttons in the tile footer, so

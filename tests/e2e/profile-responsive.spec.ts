@@ -217,6 +217,12 @@ test('active Profile state has a stable responsive visual baseline', async ({ au
   try {
     await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' })
     await page.goto('/profile')
+    await expect(
+      page.getByText('Muted accounts stay hidden from your future chat presentation.'),
+    ).toBeVisible()
+    await expect(
+      page.getByText('Request deletion when you no longer want to use this account.'),
+    ).toBeVisible()
     await expect(page).toHaveScreenshot('profile-active.png', {
       animations: 'disabled',
       caret: 'hide',

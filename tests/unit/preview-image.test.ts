@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'vitest'
 import { readWebpDimensions } from '../../src/server/streams/preview-image'
-import { previewFreshnessLabel } from '../../src/features/room/RoomMemberMosaic'
+import {
+  previewFreshnessLabel,
+  watcherAccessibleLabel,
+} from '../../src/features/room/RoomMemberMosaic'
 
 /** A WebP container with the given chunk payload, padded to a realistic
     length. The header is all the server ever reads. */
@@ -97,5 +100,29 @@ describe('previewFreshnessLabel', () => {
     expect(previewFreshnessLabel(new Date('2026-07-28T12:00:30.000Z'), now)).toBe(
       'Preview just now',
     )
+  })
+})
+
+describe('watcherAccessibleLabel', () => {
+  const watcher = (accountId: string, displayName: string) => ({
+    accountId,
+    displayName,
+    avatarUrl: null,
+  })
+
+  test('names every visible watcher and states the bounded total', () => {
+    expect(
+      watcherAccessibleLabel(
+        [watcher('ada', 'Ada'), watcher('bea', 'Bea'), watcher('cy', 'Cy')],
+        5,
+      ),
+    ).toBe('Watched by Ada, Bea, Cy and 2 more; 5 watchers total')
+  })
+
+  test('has truthful singular and empty names', () => {
+    expect(watcherAccessibleLabel([watcher('ada', 'Ada')], 1)).toBe(
+      'Watched by Ada; 1 watcher total',
+    )
+    expect(watcherAccessibleLabel([], 0)).toBe('No watchers')
   })
 })

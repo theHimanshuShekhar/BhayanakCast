@@ -1,4 +1,5 @@
 import { RoomFact, RoomHeader, RoomShell } from './RoomShell'
+import { observeRoom } from './room-observability'
 import type { RoomEnded } from './room-types'
 import type { SessionProjection } from '../auth/auth-client'
 
@@ -21,6 +22,7 @@ export function PastStreamSummary({
           eyebrow="Past Stream"
           facts={
             <>
+              <RoomFact>{room.visibility === 'private' ? 'Private' : 'Public'}</RoomFact>
               <RoomFact>
                 {room.memberCount}{' '}
                 {room.memberCount === 1 ? 'member' : 'members'}
@@ -39,16 +41,30 @@ export function PastStreamSummary({
           <div className="room-spotlight" data-spotlight="ended">
             <p className="room-spotlight__state">This room has ended.</p>
             <p className="room-spotlight__note">
-              It is no longer accepting members.{' '}
               <time dateTime={room.endedAt.toISOString()}>
-                Ended {ENDED_FORMATTER.format(room.endedAt)} UTC
-              </time>
-              .
+                Ended {ENDED_FORMATTER.format(room.endedAt)} UTC.
+              </time>{' '}
+              No replay or public transcript is available.
             </p>
           </div>
 
           <div className="room-controls">
-            <a className="room-boundary__back" href="/">Back to Home</a>
+            <a
+              className="room-boundary__back"
+              href="/"
+              onClick={() => {
+                observeRoom({
+                  name: 'room_route_action',
+                  properties: {
+                    state: 'past_stream',
+                    action: 'back_home',
+                    outcome: 'navigated',
+                  },
+                })
+              }}
+            >
+              Back to Home
+            </a>
           </div>
         </div>
       </main>

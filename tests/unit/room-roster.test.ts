@@ -1,7 +1,9 @@
+import fc from 'fast-check'
 import { describe, expect, test } from 'vitest'
 import {
   orderRoomPeople,
   orderRoomRoster,
+  preserveRoomRosterOrder,
   type RoomRosterMember,
 } from '../../src/server/rooms/room-roster'
 
@@ -13,6 +15,7 @@ const member = (
   avatarUrl: null,
   role: 'member',
   joinedAt: new Date('2026-01-01T00:00:00.000Z'),
+  reconnecting: false,
   streamId: null,
   previewKey: null,
   previewUpdatedAt: null,
@@ -77,6 +80,59 @@ describe('Mosaic roster order (ADR 0101)', () => {
     orderRoomRoster(roster, 'me')
 
     expect(names(roster)).toEqual(['b', 'me'])
+  })
+  test('keeps existing positions through Host and Stream changes, then appends joins', () => {
+    const initial = orderRoomRoster(
+      [
+        member({ membershipId: 'host', joinedAt: at(0), role: 'host' }),
+        member({ membershipId: 'me', joinedAt: at(1) }),
+        member({ membershipId: 'later', joinedAt: at(2) }),
+      ],
+      'me',
+    )
+    const refreshed = [
+      member({ membershipId: 'host', joinedAt: at(0), streamId: 'stream-host' }),
+      member({ membershipId: 'me', joinedAt: at(1), role: 'host' }),
+      member({ membershipId: 'later', joinedAt: at(2), reconnecting: true }),
+      member({ membershipId: 'new', joinedAt: at(3) }),
+    ]
+
+    const stable = preserveRoomRosterOrder(initial, refreshed, 'me')
+
+    expect(names(stable)).toEqual(['me', 'host', 'later', 'new'])
+    expect(stable[1]).toMatchObject({ role: 'member', streamId: 'stream-host' })
+    expect(stable[2]).toMatchObject({ reconnecting: true })
+  })
+
+  test('preserves every surviving position for arbitrary state changes and removals', () => {
+    fc.assert(
+      fc.property(
+        fc.uniqueArray(fc.integer({ min: 0, max: 30 }), {
+          minLength: 1,
+          maxLength: 10,
+        }),
+        fc.array(fc.boolean(), { minLength: 31, maxLength: 31 }),
+        (ids, retained) => {
+          const initial = ids.map((id, index) =>
+            member({ membershipId: String(id), joinedAt: at(index) }),
+          )
+          const survivorSet = new Set(ids.filter((id) => retained[id]))
+          const next = initial
+            .filter((entry) => survivorSet.has(Number(entry.membershipId)))
+            .reverse()
+            .map((entry, index) => ({
+              ...entry,
+              role: index === 0 ? ('host' as const) : ('member' as const),
+              reconnecting: index % 2 === 0,
+              streamId: index % 2 === 0 ? `stream-${entry.membershipId}` : null,
+            }))
+
+          expect(names(preserveRoomRosterOrder(initial, next, initial[0]!.membershipId))).toEqual(
+            ids.filter((id) => survivorSet.has(id)).map(String),
+          )
+        },
+      ),
+    )
   })
 })
 

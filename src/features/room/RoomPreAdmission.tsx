@@ -3,6 +3,7 @@ import { admitRoom } from './room-queries'
 import { RoomFact, RoomHeader, RoomSeatStrip, RoomShell } from './RoomShell'
 import { authClient } from '../auth/auth-client'
 import { safeOAuthCallbackPath } from '../auth/SignInButton'
+import { observeRoom } from './room-observability'
 import type { MembershipConfirmation } from '../../server/rooms/room-service'
 import type { RoomPreAdmission as RoomPreAdmissionView } from './room-types'
 import type { SessionProjection } from '../auth/auth-client'
@@ -25,6 +26,8 @@ export function RoomPreAdmission({
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const full = room.admission === 'full'
+  const privateRoom = room.visibility === 'private'
+  const passwordReady = !privateRoom || !room.viewerAuthenticated || password.length >= 8
 
   const join = async () => {
     if (full || pending) return
@@ -32,13 +35,16 @@ export function RoomPreAdmission({
     setPending(true)
     if (!room.viewerAuthenticated) {
       try {
+        observeRouteAction('join', 'oauth_started')
         const result = await authClient.signIn.social({
           provider: 'discord',
           callbackURL: safeOAuthCallbackPath(`/rooms/${encodeURIComponent(room.id)}`),
         })
         if (result.error) setError(result.error.message || 'Unable to open Discord sign-in')
+        if (result.error) observeRouteAction('join', 'failed')
       } catch {
         setError('Unable to open Discord sign-in')
+        observeRouteAction('join', 'failed')
       } finally {
         setPending(false)
       }
@@ -52,10 +58,13 @@ export function RoomPreAdmission({
         },
       })
       if (result.status === 'joined' || result.status === 'already-member') {
+        observeRouteAction('join', 'joined')
         onJoined()
       } else if (result.status === 'confirmation-required') {
+        observeRouteAction('join', 'confirmation_required')
         onConfirmation(result.confirmation, room.visibility === 'private' ? password : undefined)
       } else {
+        observeRouteAction('join', 'rejected')
         if (
           result.status === 'password-required' ||
           result.status === 'full' ||
@@ -67,6 +76,7 @@ export function RoomPreAdmission({
         setError(admissionError(result.status))
       }
     } catch {
+      observeRouteAction('join', 'failed')
       setError('Unable to join this room right now.')
     } finally {
       setPending(false)
@@ -86,6 +96,7 @@ export function RoomPreAdmission({
           eyebrowTone={room.visibility === 'private' ? 'neutral' : 'live'}
           facts={
             <>
+              <RoomFact tone="live">Live</RoomFact>
               <RoomFact tone={room.streamCount > 0 ? 'live' : 'neutral'}>
                 {room.streamCount}{' '}
                 {room.streamCount === 1 ? 'screen shared' : 'screens shared'}
@@ -93,6 +104,7 @@ export function RoomPreAdmission({
               <RoomFact tone={full ? 'warning' : 'neutral'}>
                 {room.memberCount} of {room.capacity} here
               </RoomFact>
+              {full && <RoomFact tone="warning">Full</RoomFact>}
             </>
           }
           name={room.name}
@@ -102,12 +114,18 @@ export function RoomPreAdmission({
         <div className="room-stage">
           <div className="room-spotlight" data-spotlight="gated">
             <p className="room-spotlight__state">
-              {full
-                ? 'This room is full.'
-                : 'You are not in this room yet.'}
+              {full ? 'This room is full.' : 'Join when you are ready.'}
             </p>
             <p className="room-spotlight__note">
-              Join explicitly to enter. Opening this link does not join you.
+              {full
+                ? 'All seats are taken. Browse another room or check back later.'
+                : privateRoom
+                  ? room.viewerAuthenticated
+                    ? 'Enter the room password below. Admission happens only after you choose Join.'
+                    : 'Choose Join to continue with Discord, then return here to enter the room password.'
+                  : room.viewerAuthenticated
+                    ? 'Opening this link did not join you. Admission happens only after you choose Join.'
+                    : 'Choose Join to continue with Discord. You will return here before admission.'}
             </p>
           </div>
 
@@ -119,11 +137,13 @@ export function RoomPreAdmission({
             </p>
           </section>
 
-          {room.viewerAuthenticated && room.visibility === 'private' && !full && (
+          {room.viewerAuthenticated && privateRoom && !full && (
             <label className="room-boundary__password">
-              Password
+              Password (at least 8 characters)
               <input
                 autoComplete="current-password"
+                minLength={8}
+                required
                 type="password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
@@ -133,11 +153,16 @@ export function RoomPreAdmission({
           {error && <p className="form-error" role="alert">{error}</p>}
 
           <div className="room-controls">
-            <a className="room-boundary__back" href="/">Back / Home</a>
+            <a
+              className="room-boundary__back"
+              href="/"
+              onClick={() => observeRouteAction('back_home', 'navigated')}
+            >
+              Back / Home
+            </a>
             <button
               aria-busy={pending}
-              className="room-controls__join"
-              disabled={pending || full}
+              disabled={pending || full || !passwordReady}
               type="button"
               onClick={join}
             >
@@ -147,15 +172,29 @@ export function RoomPreAdmission({
                   ? room.viewerAuthenticated
                     ? 'Joining…'
                     : 'Opening Discord…'
-                  : room.viewerAuthenticated
-                    ? 'Join'
-                    : 'Sign in to join'}
+                  : 'Join'}
             </button>
           </div>
         </div>
       </section>
     </RoomShell>
   )
+}
+
+function observeRouteAction(
+  action: 'join' | 'back_home',
+  outcome:
+    | 'joined'
+    | 'confirmation_required'
+    | 'oauth_started'
+    | 'rejected'
+    | 'failed'
+    | 'navigated',
+) {
+  observeRoom({
+    name: 'room_route_action',
+    properties: { state: 'pre_admission', action, outcome },
+  })
 }
 
 function admissionError(status: string) {

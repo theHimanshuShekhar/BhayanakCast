@@ -114,11 +114,15 @@ describe('room roster projection', () => {
       'INSERT INTO stream (id, room_id, membership_id, started_at) VALUES ($1, $2, $3, $4)',
       [streamId, room.room.id, joined.membership.id, new Date(fixture.clock.now())],
     )
+    await fixture.pool.query(
+      'UPDATE room_membership SET reconnect_until = $2 WHERE id = $1',
+      [joined.membership.id, new Date(fixture.clock.now() + 45_000)],
+    )
 
     const projection = await admitted(fixture.rooms, watcher, room.room.id)
     expect(projection.room.roster).toMatchObject([
-      { displayName: 'Wren', role: 'member', streamId },
-      { displayName: 'Hana', role: 'host', streamId: null },
+      { displayName: 'Wren', role: 'member', reconnecting: true, streamId },
+      { displayName: 'Hana', role: 'host', reconnecting: false, streamId: null },
     ])
     for (const member of projection.room.roster) {
       expect(member.avatarUrl).toMatch(/^https:\/\/cdn\.test\//)

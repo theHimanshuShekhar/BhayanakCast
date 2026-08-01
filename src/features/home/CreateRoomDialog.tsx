@@ -9,6 +9,7 @@ import {
   type CreateRoomEventDetail,
 } from './HomeNavigation'
 import { createRoom, validateCreateRoomInput } from './create-room'
+import { observeHome } from './home-observability'
 import type { MembershipConfirmation } from '../../server/rooms/room-service'
 import { MembershipConsequencesDialog } from '../room/MembershipConsequencesDialog'
 
@@ -66,6 +67,10 @@ export function CreateRoomDialog({ session }: CreateRoomDialogProps) {
     setOauthError(null)
     setControlState?.(opening)
     try {
+      observeHome({
+        name: 'home_discord_sign_in_started',
+        properties: { intent: 'create' },
+      })
       const result = await authClient.signIn.social({
         provider: 'discord',
         callbackURL: safeOAuthCallbackPath('/?intent=create'),
@@ -148,10 +153,26 @@ export function CreateRoomDialog({ session }: CreateRoomDialogProps) {
         visibility,
         password: visibility === 'private' ? password : undefined,
       })
+      observeHome({
+        name: 'home_create_submitted',
+        properties: {
+          visibility: input.visibility,
+          category_selected: Boolean(input.category),
+          tag_count: input.tags.length,
+        },
+      })
       const result = await createRoom({ data: { input } })
       if (result.status === 'confirmation-required') {
         setConfirmation(result.confirmation)
       } else if (result.status === 'created') {
+        observeHome({
+          name: 'home_create_succeeded',
+          properties: {
+            visibility: input.visibility,
+            category_selected: Boolean(input.category),
+            tag_count: input.tags.length,
+          },
+        })
         window.location.assign(`/rooms/${encodeURIComponent(result.room.id)}`)
         return
       } else {
@@ -176,8 +197,24 @@ export function CreateRoomDialog({ session }: CreateRoomDialogProps) {
         visibility,
         password: visibility === 'private' ? password : undefined,
       })
+      observeHome({
+        name: 'home_create_submitted',
+        properties: {
+          visibility: input.visibility,
+          category_selected: Boolean(input.category),
+          tag_count: input.tags.length,
+        },
+      })
       const result = await createRoom({ data: { input, confirmation: token } })
       if (result.status === 'created') {
+        observeHome({
+          name: 'home_create_succeeded',
+          properties: {
+            visibility: input.visibility,
+            category_selected: Boolean(input.category),
+            tag_count: input.tags.length,
+          },
+        })
         window.location.assign(`/rooms/${encodeURIComponent(result.room.id)}`)
         return
       }

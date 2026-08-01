@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
-import { io } from 'socket.io-client'
+import { acquireRealtimeSocket } from '../realtime-socket'
 import type { MembershipConfirmation } from '../../server/rooms/room-service'
 import {
   HOME_ACCOUNT_REVOKED_EVENT,
@@ -73,7 +73,6 @@ export function bindRoomProjectionSocket(
     socket.off(HOME_SOCKET_EVENT, handlers.onRoomEvent)
     socket.off(HOME_ACCOUNT_REVOKED_EVENT, onRevoked)
     socket.off(HOME_ACCOUNT_REPLACED_EVENT, onReplaced)
-    socket.disconnect()
   }
 }
 
@@ -111,9 +110,8 @@ export function RoomRoute({ roomId, initialRoom, session }: RoomRouteProps) {
 
   useEffect(() => {
     if (!authenticated) return
-    const socket = io({ path: '/socket.io/', withCredentials: true })
-    // The room's realtime surface shares this one connection (ADR 0104); a
-    // second `io()` would displace it in the connection registry.
+    const lease = acquireRealtimeSocket('authenticated')
+    const socket = lease.socket
     setRoomSocket(socket)
     const unbind = bindRoomProjectionSocket(socket, {
       onRefresh: () => {
@@ -133,6 +131,7 @@ export function RoomRoute({ roomId, initialRoom, session }: RoomRouteProps) {
     return () => {
       setRoomSocket(null)
       unbind()
+      lease.release()
     }
   }, [authenticated, queryClient, roomId])
 
@@ -149,7 +148,7 @@ export function RoomRoute({ roomId, initialRoom, session }: RoomRouteProps) {
     focusRoomPrimaryHeading()
   }, [projection?.kind])
 
-  if (!projection) return <RoomNotFound />
+  if (!projection) return <RoomNotFound session={session} />
   if (projection.kind === 'pastStream') {
     return <PastStreamSummary room={projection.room} session={session} />
   }

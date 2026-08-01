@@ -9,9 +9,11 @@
 
 export const ROOM_SOCKET_EVENT = 'room:event' as const
 export const ROOM_JOIN_COMMAND = 'room:join' as const
+export const ROOM_CHAT_COMMAND = 'room:chat' as const
 export const ROOM_LEAVE_COMMAND = 'room:leave' as const
 export const ROOM_SIGNAL_COMMAND = 'room:signal' as const
 export const ROOM_TYPING_COMMAND = 'room:typing' as const
+export const ROOM_TYPING_TTL_MS = 5_000
 
 const MAX_ID_LENGTH = 128
 const MAX_NAME_LENGTH = 256
@@ -23,6 +25,19 @@ const MAX_TIMESTAMP_LENGTH = 64
 /** SDP blobs are large; candidates are small. One bound covers both without
     letting a client push unbounded text through the server. */
 const MAX_SIGNAL_PAYLOAD_LENGTH = 64_000
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const MAX_CHAT_COMMAND_LENGTH = 4_000
+
+export interface RoomChatCommand {
+  readonly body: string
+  readonly mutationId: string
+}
+
+/** Counts normalized Unicode code points, matching the persisted chat limit
+    instead of textarea's UTF-16 code-unit length. */
+export function chatCharacterCount(value: string): number {
+  return [...value.normalize('NFKC')].length
+}
 
 export interface RoomChatMessage {
   readonly id: string
@@ -208,6 +223,19 @@ export function normalizeRoomRealtimeEvent(value: unknown): RoomRealtimeEvent | 
     default:
       return null
   }
+}
+
+export function normalizeRoomChatCommand(value: unknown): RoomChatCommand | null {
+  if (!isRecord(value)) return null
+  if (
+    typeof value.body !== 'string' ||
+    value.body.length > MAX_CHAT_COMMAND_LENGTH ||
+    typeof value.mutationId !== 'string' ||
+    !UUID.test(value.mutationId)
+  ) {
+    return null
+  }
+  return { body: value.body, mutationId: value.mutationId }
 }
 
 export function normalizeSignalPayload(value: unknown): RoomSignalPayload | null {

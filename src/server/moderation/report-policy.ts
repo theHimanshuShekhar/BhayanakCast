@@ -27,6 +27,7 @@ export interface ReportInput {
 export type SubmitReportResult =
   | { readonly status: 'received' }
   | { readonly status: 'details-required' }
+  | { readonly status: 'invalid-target' }
 
 export const REPORT_DETAILS_LIMIT = 2_000
 

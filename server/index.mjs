@@ -64,6 +64,7 @@ if (process.send && runtime.bindings.workerId) {
 
 const server = createServer(async (request, response) => {
   try {
+    if (await serveHealth(request, response)) return
     if (await serveClientAsset(request, response)) return
     await serveStart(request, response)
   } catch (error) {
@@ -152,6 +153,39 @@ async function handleRuntimeCommand(message) {
   }
 }
 
+async function serveHealth(request, response) {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return false
+  const pathname = new URL(request.url ?? '/', 'http://local').pathname
+  if (pathname !== '/health' && pathname !== '/health/live' && pathname !== '/health/ready') {
+    return false
+  }
+
+  if (pathname === '/health/live') {
+    writeHealthResponse(request, response, 200, 'live')
+    return true
+  }
+
+  const database = runtime.getDatabasePool()
+  const valkey = runtime.getValkey()
+  const criticalChecks = await Promise.allSettled([
+    database ? database.query('SELECT 1') : Promise.reject(new Error('database is not configured')),
+    valkey ? valkey.ping() : Promise.reject(new Error('Valkey is not configured')),
+  ])
+  const ready = criticalChecks.every((check) => check.status === 'fulfilled')
+  writeHealthResponse(request, response, ready ? 200 : 503, ready ? 'ready' : 'unavailable')
+  return true
+}
+
+function writeHealthResponse(request, response, status, state) {
+  const body = JSON.stringify({ status: state })
+  response.writeHead(status, {
+    'cache-control': 'no-store',
+    'content-length': Buffer.byteLength(body),
+    'content-type': 'application/json; charset=utf-8',
+  })
+  response.end(request.method === 'HEAD' ? undefined : body)
+}
+
 async function serveClientAsset(request, response) {
   if (request.method !== 'GET' && request.method !== 'HEAD') return false
 
@@ -191,7 +225,14 @@ async function serveClientAsset(request, response) {
     response.end()
     return true
   }
-  await pipeline(createReadStream(candidate), response)
+  const asset = createReadStream(candidate)
+  try {
+    await pipeline(asset, response)
+  } catch (error) {
+    if (!request.aborted && !response.destroyed) throw error
+  } finally {
+    asset.destroy()
+  }
   return true
 }
 
@@ -226,7 +267,17 @@ async function serveStart(incoming, outgoing) {
     new URL(incoming.url ?? '/', `http://${host}`),
     init,
   )
-  const response = await startEntry.fetch(request)
+  let response
+  try {
+    response = await startEntry.fetch(request)
+  } catch (error) {
+    if (controller.signal.aborted || outgoing.destroyed) return
+    throw error
+  }
+  if (outgoing.destroyed) {
+    await response.body?.cancel().catch(() => undefined)
+    return
+  }
 
   for (const [name, value] of response.headers) {
     if (name !== 'set-cookie') outgoing.setHeader(name, value)
@@ -235,9 +286,21 @@ async function serveStart(incoming, outgoing) {
   if (cookies.length) outgoing.setHeader('set-cookie', cookies)
   outgoing.writeHead(response.status, response.statusText)
 
-  if (!response.body || incoming.method === 'HEAD') {
+  if (incoming.method === 'HEAD') {
+    await response.body?.cancel().catch(() => undefined)
     outgoing.end()
     return
   }
-  await pipeline(Readable.fromWeb(response.body), outgoing)
+  if (!response.body) {
+    outgoing.end()
+    return
+  }
+  const body = Readable.fromWeb(response.body)
+  try {
+    await pipeline(body, outgoing)
+  } catch (error) {
+    if (!controller.signal.aborted && !outgoing.destroyed) throw error
+  } finally {
+    body.destroy()
+  }
 }

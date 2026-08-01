@@ -30,6 +30,8 @@ export interface RoomProjectionSnapshot {
   readonly roster: readonly RoomRosterMember[]
   /** The viewer's one active remote subscription (ADR 0101), or null. */
   readonly watchingStreamId: string | null
+  /** Private capability state for the admitted viewer only. */
+  readonly viewerSanctionTypes?: readonly ('streaming' | 'chat')[]
 }
 
 interface RoomRouteDetails {
@@ -59,6 +61,8 @@ export interface AdmittedRoom extends RoomRouteDetails {
   /** Ordered per ADR 0101. Present on the admitted projection only; the
       pre-admission and Past Stream projections deliberately have no roster. */
   readonly roster: readonly RoomRosterMember[]
+  readonly canChat: boolean
+  readonly canStream: boolean
 }
 
 export interface PastStreamRoom extends RoomRouteDetails {
@@ -140,6 +144,8 @@ export function selectRoomRouteProjection(
         expiresAt,
         roster: orderRoomRoster(snapshot.roster, snapshot.self.id),
         watchingStreamId: snapshot.watchingStreamId,
+        canChat: !snapshot.viewerSanctionTypes?.includes('chat'),
+        canStream: !snapshot.viewerSanctionTypes?.includes('streaming'),
       },
       self: snapshot.self,
     }

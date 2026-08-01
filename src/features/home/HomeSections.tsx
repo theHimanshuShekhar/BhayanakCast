@@ -62,6 +62,7 @@ export function HomeSections({
       <section className="home-center-section" data-home-center-region="live-rooms">
         {rooms.updating && <p role="status">Updating room results.</p>}
         <HomeSectionBoundary
+          analyticsSection="live_rooms"
           failed={rooms.failed}
           label="Live Rooms"
           pending={rooms.pending && !rooms.data}
@@ -82,6 +83,7 @@ export function HomeSections({
       {showPastStreams ? (
         <section className="home-center-section" data-home-center-region="past-streams">
           <HomeSectionBoundary
+            analyticsSection="past_streams"
             failed={pastStreams.failed}
             label="Past Streams"
             pending={pastStreams.pending && !pastStreams.data}

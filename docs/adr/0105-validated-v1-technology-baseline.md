@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-11
+- **Amended:** 2026-08-01 — records the exact React Router and Rsbuild React plugin versions selected by the validated Start baseline and implementation plan.
 - **Supersedes in part:** ADR 0022, ADR 0092, ADR 0099 where implementation wording conflicts
 
 ## Context
@@ -21,7 +22,9 @@ Start implementation from this exact reviewed baseline and commit the pnpm lockf
 | TypeScript | 5.9.3 |
 | React / React DOM | 19.2.7 |
 | `@tanstack/react-start` | 1.168.27 |
+| `@tanstack/react-router` | 1.170.17 |
 | `@rsbuild/core` | 2.1.5 |
+| `@rsbuild/plugin-react` | 2.1.0 |
 | `@tanstack/react-query` | 5.101.2 |
 | `@tanstack/react-router-ssr-query` | 1.167.1 |
 | `@tanstack/react-pacer` | 0.22.1 |

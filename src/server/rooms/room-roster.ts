@@ -5,6 +5,8 @@ export interface RoomRosterMember {
   readonly avatarUrl: string | null
   readonly role: 'host' | 'member'
   readonly joinedAt: Date
+  /** A disconnected member remains present during reconnect grace. */
+  readonly reconnecting: boolean
   /** The member's current active Stream, or null when they are present but not
       sharing. A presence tile is a member without a Stream, never a member the
       roster left out. */
@@ -44,6 +46,29 @@ export function orderRoomRoster(
     if (member.membershipId === viewerMembershipId) return 0
     return member.role === 'host' ? 1 : 2
   }
+}
+
+/** Keeps the first projection's mosaic positions while refreshing member
+ * state and appending genuinely new memberships in continuous join order.
+ * Host transfer, sharing, reconnect and compatibility updates therefore
+ * cannot move an existing tile.
+ */
+export function preserveRoomRosterOrder(
+  previous: readonly RoomRosterMember[],
+  next: readonly RoomRosterMember[],
+  viewerMembershipId: string,
+): readonly RoomRosterMember[] {
+  if (previous.length === 0) return orderRoomRoster(next, viewerMembershipId)
+
+  const nextById = new Map(next.map((member) => [member.membershipId, member]))
+  const previousIds = new Set(previous.map((member) => member.membershipId))
+  const retained = previous.flatMap((member) => {
+    const refreshed = nextById.get(member.membershipId)
+    return refreshed ? [refreshed] : []
+  })
+  if (retained.length === 0) return orderRoomRoster(next, viewerMembershipId)
+  const joined = next.filter((member) => !previousIds.has(member.membershipId)).sort(byJoin)
+  return [...retained, ...joined]
 }
 
 /** ADR 0102's People order: the Host leads, then the viewer, then whoever is

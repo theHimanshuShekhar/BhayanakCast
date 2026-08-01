@@ -1,3 +1,4 @@
+import { observeHome } from './home-observability'
 import { MemberPresence, PreviewMosaic } from './PreviewMosaic'
 import type { ActiveRoomSummary } from './home-types'
 
@@ -7,6 +8,10 @@ export function RoomSearchResult({ room }: Readonly<{ room: ActiveRoomSummary }>
       <a
         aria-label={`Open ${room.name} room`}
         href={`/rooms/${encodeURIComponent(room.id)}`}
+        onClick={() => observeHome({
+          name: 'home_room_opened',
+          properties: { collection: 'search_results' },
+        })}
       >
         <PreviewMosaic room={room} />
         <div className="room-search-result__body">

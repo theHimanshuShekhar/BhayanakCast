@@ -1,8 +1,11 @@
 import { RoomShell } from './RoomShell'
+import type { SessionProjection } from '../auth/auth-client'
 
-export function RoomNotFound() {
+export function RoomNotFound({
+  session,
+}: Readonly<{ session: SessionProjection | null }>) {
   return (
-    <RoomShell state="not-found">
+    <RoomShell session={session} state="not-found">
       <main className="room-boundary room-boundary--not-found">
         <header className="room-header">
           <div className="room-header__identity">

@@ -147,8 +147,13 @@ test('pending deletion hides and cancellation restores public projections across
     ).toBeVisible()
 
     await pageA.goto(`${authSessions.origin}/profile`)
-    await pageA.getByRole('button', { name: 'Request account deletion' }).click()
-    await pageA.getByRole('dialog').getByRole('button', { name: 'Request deletion now' }).click()
+    const deletionTrigger = pageA.getByRole('button', { name: 'Request account deletion' })
+    const deletionDialog = pageA.getByRole('dialog')
+    await expect(async () => {
+      await deletionTrigger.click()
+      await expect(deletionDialog).toBeVisible()
+    }).toPass({ timeout: 15_000 })
+    await deletionDialog.getByRole('button', { name: 'Request deletion now' }).click()
     await expect(pageA.getByRole('region', { name: 'Account deletion' }).getByRole('status')).toContainText('Deletion request pending')
 
     await pageB.goto(`${authSessions.origin}/users/${session.id}`)
@@ -324,5 +329,58 @@ test('external rejection restores pending profile controls in place', async ({
     await expect(page.getByRole('heading', { name: 'Muted accounts' })).toBeVisible()
   } finally {
     await signedIn.context.close()
+  }
+})
+
+test('Platform Admin rejects or irreversibly approves a pending deletion from the private queue', async ({
+  authSessions,
+}) => {
+  const member = await authSessions.createBrowserContext(PROFILE)
+  const admin = await authSessions.createBrowserContext({
+    id: '102938475610293900',
+    username: 'deletion-admin',
+    global_name: 'Deletion Admin',
+    avatar: null,
+    email: 'deletion-admin@example.test',
+    verified: true,
+  })
+  const memberPage = await member.context.newPage()
+  const adminPage = await admin.context.newPage()
+  try {
+    await memberPage.goto(`${authSessions.origin}/profile`)
+    await memberPage.getByRole('button', { name: 'Request account deletion' }).click()
+    await memberPage
+      .getByRole('dialog')
+      .getByRole('button', { name: 'Request deletion now' })
+      .click()
+    await expect(memberPage.getByText(/Deletion request pending/)).toBeVisible()
+
+    await adminPage.goto(`${authSessions.origin}/admin`)
+    const review = adminPage.getByRole('listitem').filter({ hasText: 'Deletion member' })
+    await review.getByRole('button', { name: 'Reject' }).click()
+    await review.getByRole('button', { name: 'Confirm rejection' }).click()
+    await expect(review).toHaveCount(0)
+
+    await memberPage.reload()
+    await expect(memberPage.getByRole('button', { name: 'Request account deletion' })).toBeVisible()
+    await memberPage.getByRole('button', { name: 'Request account deletion' }).click()
+    await memberPage
+      .getByRole('dialog')
+      .getByRole('button', { name: 'Request deletion now' })
+      .click()
+    await expect(memberPage.getByText(/Deletion request pending/)).toBeVisible()
+
+    await adminPage.reload()
+    const resubmitted = adminPage.getByRole('listitem').filter({ hasText: 'Deletion member' })
+    await resubmitted.getByRole('button', { name: 'Approve' }).click()
+    await resubmitted.getByRole('button', { name: 'Confirm permanent deletion' }).click()
+    await expect(resubmitted).toHaveCount(0)
+
+    await memberPage.reload()
+    await expect(
+      memberPage.getByText('Sign in to see your public activity and account details.'),
+    ).toBeVisible()
+  } finally {
+    await Promise.all([member.context.close(), admin.context.close()])
   }
 })

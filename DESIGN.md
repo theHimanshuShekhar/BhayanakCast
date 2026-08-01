@@ -4,6 +4,8 @@
 
 BhayanakCast is a **community clubhouse**: people browse an active public community and move between social screen-sharing rooms. The product should feel welcoming, lively, and easy to scan—not like a broadcast studio or a dense operations console.
 
+Accepted ADRs define structure and behavior. Files under `docs/design/` are visual explorations only: reuse their visual language where it agrees with this brief, but do not inherit conflicting layout, typography, controls, or product concepts.
+
 ## Functional interface invariants
 
 - Live room state, capacity, privacy, host authority, stream availability, and watch state must remain clear before decoration.
@@ -33,13 +35,13 @@ Use adaptive density by surface: discovery should feel welcoming and breathable,
 
 ## Home composition
 
-Home uses three composition stages while preserving center order. At 1280px above, show persistent left sidebar, fluid center discovery column, right utility rail. At 768–1279px, keep compact left sidebar, remove right rail, collapse global statistics within search utilities. Below 768px, replace both rails with a compact top brand bar containing `B`, live connected-Account count, and an avatar only when signed in; persistent bottom navigation shows Home, Create, and Profile for signed-in visitors or `Discord` for anonymous visitors. The anonymous `Discord` control visibly reads `Discord`, has the full accessible name `Continue with Discord`, and starts full-page Discord OAuth directly, returning Home. Fixed small-stage bars respect safe areas, visible focus, and touch targets; no separate login page or duplicate anonymous top-bar authentication control exists.
+Home uses three composition stages while preserving center order. At 1280px above, show persistent left sidebar, fluid center discovery column, right utility rail. At 768–1279px, keep compact left sidebar, remove right rail, collapse global statistics within search utilities. Below 768px, replace both rails with a compact top brand bar containing `B`, live connected-people count, and an avatar only when signed in; persistent bottom navigation shows Home, Create, and Profile for signed-in visitors or `Discord` for anonymous visitors. The anonymous `Discord` control visibly reads `Discord`, has the full accessible name `Continue with Discord`, and starts full-page Discord OAuth directly, returning Home. Fixed small-stage bars respect safe areas, visible focus, 44px targets, and content clearance.
 
 At wide widths, center frame capped 1600px: 216px left rail, fluid 640–1040px center, 280px right rail, 24px gaps/padding. Medium uses 72px icon rail and least 16px center gutters; an anonymous dedicated Discord affordance may use the Discord mark alone only with accessible name and hover/focus tooltip `Continue with Discord`. Small uses 16px gutters, 56px top bar, 64px bottom navigation plus safe-area inset.
 
-The center strictly ordered: prominent search filters, Live Rooms including featured room, then quieter ten-item Past Streams section. Create Room lives outside center on wide/medium layouts; no title toolbar or promotional hero pushes discovery down. wide left sidebar carries large `B`, connected-Account count, Create Room, bottom account menu. wide right rail carries global statistics and an always-available Create Room launch panel; for anonymous visitors it starts full-page Discord OAuth directly rather than being replaced by a separate authentication control.
+The center strictly ordered: prominent search filters, Live Rooms including featured room, then quieter ten-item Past Streams section. Create Room lives outside center on wide/medium layouts; no title toolbar or promotional hero pushes discovery down. wide left sidebar carries large `B`, connected-people count, Create Room, bottom account menu. wide right rail carries global statistics and an always-available Create Room launch panel; for anonymous visitors it starts full-page Discord OAuth directly rather than being replaced by a separate authentication control.
 
-Every Home Create affordance opens one shared form. Wide/medium use a centered modal; small uses a full-screen safe-area- and keyboard-aware dialog. Both keep identical fields, defaults, validation, Cancel/Create actions, focus trap/return, and dismiss behavior. Anonymous activation signs in first, carries only an opaque create intent, then reopens a blank dialog on Home; no draft/password crosses OAuth and creation is never automatic.
+Every Home Create affordance opens one shared form. Wide/medium use a centered modal; small uses a full-screen safe-area- and keyboard-aware dialog. Both keep identical name, optional category, optional tags, optional single-line description, visibility, and conditional private-password fields, defaults, validation, Cancel/Create actions, focus trap/return, and dismiss behavior. Anonymous activation signs in first, carries only an opaque create intent, then reopens a blank dialog on Home; no draft/password crosses OAuth and creation is never automatic.
 
 Use one normal document scroll. Wide rails—and the medium left rail—are sticky viewport-height companions without independent scroll regions; if their content cannot fit a short viewport, it rejoins document flow. Search/filters scroll normally during unfiltered discovery, but become sticky whenever a query/category/tag is active, below the small-stage top bar where applicable. Clearing all controls removes stickiness; bottom navigation remains fixed on small screens.
 
@@ -65,7 +67,7 @@ Each Live Room card is one accessible link target: clicking or activating anywhe
 
 ## Past Streams layout
 
-The ten recent Past Streams use a compact grid of metadata blocks: one column on mobile, two on desktop, three on the widest layout so a block never stretches its metadata line apart. Each block shows name, visibility, optional category/tags, and a single baseline of participation/Stream summary, ended time, and an Open action linking to the summary. They use no preview image, fake thumbnail, carousel, pagination, or table styling.
+The ten recent Past Streams use a compact grid of metadata blocks: one column on mobile and two on desktop. Each block shows name, visibility, optional category/tags, and a single baseline of participation/Stream summary, ended time, and an Open action linking to the summary. They use no preview image, fake thumbnail, carousel, pagination, or table styling.
 
 ## Empty discovery
 

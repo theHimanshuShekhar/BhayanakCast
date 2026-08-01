@@ -5,6 +5,7 @@ import type { Page } from '@playwright/test'
 // first the way the bare Playwright fixture does.
 import { expect, test } from './fixtures'
 import type { AuthSessionFixture } from './fixtures'
+import { installWebRtcProbe } from '../helpers/webrtc'
 
 const HOST_PROFILE = {
   id: '271828182845904523',
@@ -25,6 +26,7 @@ const VISITOR_PROFILE = {
 }
 
 const DISCORD_DOOR = 'Continue with Discord'
+
 
 /** The shipped route into an admitted room: create it from Home and land in it
     as Host, exactly as `create-and-open-room.spec.ts` does. */
@@ -49,6 +51,12 @@ async function dropRoom(authSessions: AuthSessionFixture, roomId: string) {
      WHERE room_id = $1 AND account_id LIKE 'shell-filler-%'`,
     [roomId],
   )) as { readonly accountId: string }[]
+  await authSessions.sql(
+    `DELETE FROM stream_subscription
+      WHERE stream_id IN (SELECT id FROM stream WHERE room_id = $1)`,
+    [roomId],
+  )
+  await authSessions.sql('DELETE FROM stream WHERE room_id = $1', [roomId])
   await authSessions.sql('DELETE FROM room_membership WHERE room_id = $1', [roomId])
   await authSessions.sql('DELETE FROM room WHERE id = $1', [roomId])
   for (const { accountId } of seeded) {
@@ -196,6 +204,18 @@ test('the room rail carries the viewer identity in every room state', async ({
   }
 })
 
+test('a signed-in viewer sees their own rail on a nonexistent room', async ({
+  authSessions,
+}) => {
+  const visitor = await authSessions.createBrowserContext(VISITOR_PROFILE)
+  const visitorPage = await visitor.context.newPage()
+  await visitorPage.goto(`/rooms/${randomUUID()}`)
+  await expect(
+    visitorPage.getByRole('button', { name: 'Shell Visitor account' }),
+  ).toBeVisible()
+  await expect(visitorPage.getByRole('button', { name: DISCORD_DOOR })).toHaveCount(0)
+})
+
 test('a phone gets one bottom bar in an admitted room and the global one elsewhere', async ({
   authSessions,
 }) => {
@@ -213,6 +233,10 @@ test('a phone gets one bottom bar in an admitted room and the global one elsewhe
     await expect(roomBar).toBeVisible()
     await expect(hostPage.getByTestId('home-bottom-navigation')).toBeHidden()
     expect(await bottomEdgeFixedCount(hostPage)).toBe(1)
+    const desktopOnly = roomBar.getByRole('button', { name: 'Desktop only' })
+    await expect(desktopOnly).toBeVisible()
+    await expect(desktopOnly).toBeDisabled()
+    await expect(desktopOnly).toHaveAttribute('aria-describedby', 'mobile-stream-guidance')
     // The identity fix has to survive the suppressed navigation.
     await expect(
       hostPage.getByRole('button', { name: 'Shell Host account' }),
@@ -396,6 +420,373 @@ test('a pre-admission room keeps its whole boundary reachable on a desktop', asy
     expect(reach.boundaryHidden).toBeLessThanOrEqual(1)
     expect(reach.documentOverflow).toBeGreaterThan(1)
     expect(reach.boundaryBottom).toBeLessThanOrEqual(reach.viewportHeight + 1)
+  } finally {
+    await dropRoom(authSessions, roomId)
+  }
+})
+
+test('wide companions keep a 360px collapsible dock and preserve room-session state', async ({
+  authSessions,
+}) => {
+  const host = await authSessions.createBrowserContext(HOST_PROFILE)
+  const page = await host.context.newPage()
+  const roomId = await createAdmittedRoom(page, 'Persistent companions room')
+  try {
+    await fillRoom(authSessions, roomId)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.reload()
+    await expect(page.locator('[data-room-state="admitted"]')).toBeVisible()
+    await expect(page.getByText('Bounded scroll needs something to scroll, line 60.')).toBeAttached()
+
+    const dock = page.locator('.room-dock')
+    await expect(dock).toHaveCSS('width', '360px')
+    const tabs = dock.getByRole('tab')
+    await expect(tabs).toHaveCount(3)
+    await expect(tabs.nth(0)).toHaveAttribute('aria-controls', /.+/)
+    await expect(tabs.nth(0)).toHaveAttribute('aria-selected', 'true')
+    await tabs.nth(0).focus()
+    await page.keyboard.press('ArrowRight')
+    await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true')
+    await page.keyboard.press('ArrowLeft')
+    await expect(tabs.nth(0)).toHaveAttribute('aria-selected', 'true')
+
+    const composer = page.getByLabel('Message')
+    await composer.fill('Draft survives companion transitions')
+    const panel = dock.getByRole('tabpanel')
+    await panel.evaluate((node) => {
+      node.scrollTop = Math.floor(node.scrollHeight / 2)
+    })
+    const chatScroll = await panel.evaluate((node) => node.scrollTop)
+    expect(chatScroll).toBeGreaterThan(0)
+
+    await tabs.getByText('People', { exact: true }).click()
+    await tabs.getByText('Chat', { exact: true }).click()
+    await expect(composer).toHaveValue('Draft survives companion transitions')
+    expect(await panel.evaluate((node) => node.scrollTop)).toBe(chatScroll)
+
+    await tabs.getByText('People', { exact: true }).click()
+    const firstTile = page.locator('.room-mosaic__tile').first()
+    await firstTile.evaluate((node) => node.setAttribute('data-companion-continuity', 'kept'))
+    await dock.getByRole('button', { name: 'Collapse dock' }).click()
+    await expect(dock).toHaveCSS('width', '56px')
+    await expect(tabs.filter({ hasText: /^People/ })).toHaveAttribute('aria-selected', 'true')
+    await tabs.getByText('People', { exact: true }).click()
+    await expect(dock).toHaveCSS('width', '360px')
+    await expect(firstTile).toHaveAttribute('data-companion-continuity', 'kept')
+  } finally {
+    await dropRoom(authSessions, roomId)
+  }
+})
+
+test('hidden Chat retains unread state until the viewer returns', async ({
+  authSessions,
+}) => {
+  const host = await authSessions.createBrowserContext(HOST_PROFILE)
+  const hostPage = await host.context.newPage()
+  const roomId = await createAdmittedRoom(hostPage, 'Unread companions room')
+  try {
+    await hostPage.setViewportSize({ width: 1440, height: 900 })
+    const dock = hostPage.locator('.room-dock')
+    await dock.getByRole('button', { name: 'Collapse dock' }).click()
+
+    const visitor = await authSessions.createBrowserContext(VISITOR_PROFILE)
+    const visitorPage = await visitor.context.newPage()
+    await visitorPage.goto(`/rooms/${roomId}`)
+    await visitorPage.getByRole('button', { name: 'Join', exact: true }).click()
+    await expect(visitorPage.locator('[data-room-state="admitted"]')).toBeVisible()
+    await visitorPage.setViewportSize({ width: 1440, height: 900 })
+    await visitorPage.getByLabel('Message').fill('A canonical unread message')
+    await visitorPage.getByRole('button', { name: 'Send', exact: true }).click()
+
+    const chatTab = dock.getByRole('tab', { name: /Chat/ })
+    await expect(chatTab.locator('.room-dock__badge')).toHaveText('1')
+    await chatTab.click()
+    await expect(hostPage.getByText('A canonical unread message')).toBeVisible()
+    await expect(chatTab.locator('.room-dock__badge')).toHaveCount(0)
+  } finally {
+    await dropRoom(authSessions, roomId)
+  }
+})
+
+test('medium companions are a non-modal drawer with Escape focus return and no grid reflow', async ({
+  authSessions,
+}) => {
+  const host = await authSessions.createBrowserContext(HOST_PROFILE)
+  const page = await host.context.newPage()
+  const roomId = await createAdmittedRoom(page, 'Workspace drawer room')
+  try {
+    await page.setViewportSize({ width: 1024, height: 768 })
+    const dock = page.locator('.room-dock')
+    const mosaic = page.locator('.room-mosaic')
+    const mosaicBox = () =>
+      mosaic.evaluate((node) => {
+        const { x, y, width, height } = node.getBoundingClientRect()
+        return { x, y, width, height }
+      })
+    await expect(mosaic).toBeVisible()
+    await expect(dock).toHaveCSS('width', '360px')
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    await expect.poll(async () => (await mosaicBox()).width).toBeGreaterThan(0)
+    const before = await mosaicBox()
+
+    await dock.getByRole('tabpanel').focus()
+    await page.keyboard.press('Escape')
+    await expect(dock).toHaveCSS('width', '56px')
+    await expect(dock.getByRole('tab', { name: /Chat/ })).toBeFocused()
+    expect(await mosaicBox()).toEqual(before)
+
+    await dock.getByRole('tab', { name: /Chat/ }).click()
+    await expect(dock).toHaveCSS('width', '360px')
+    await dock.getByRole('button', { name: 'Close' }).click()
+    await expect(dock.getByRole('tab', { name: /Chat/ })).toBeFocused()
+    expect(await mosaicBox()).toEqual(before)
+  } finally {
+    await dropRoom(authSessions, roomId)
+  }
+})
+
+test('mobile companion sheets expose 55% and 90% heights and return focus', async ({
+  authSessions,
+}) => {
+  const host = await authSessions.createBrowserContext(HOST_PROFILE)
+  const page = await host.context.newPage()
+  const roomId = await createAdmittedRoom(page, 'Mobile companions room')
+  try {
+    await page.setViewportSize({ width: 390, height: 844 })
+    const roomBar = page.getByRole('navigation', { name: 'Room controls' })
+    const chatControl = roomBar.getByRole('button', { name: 'Chat' })
+    await chatControl.click()
+    const dock = page.locator('.room-dock[data-sheet="open"]')
+    await expect(dock).toBeVisible()
+    expect((await dock.boundingBox())?.height).toBeCloseTo(844 * 0.55, 0)
+
+    await page.getByLabel('Message').fill('Mobile draft stays here')
+    await roomBar.getByRole('button', { name: 'People' }).click()
+    await expect(page.locator('.room-dock').getByRole('tab', { name: /People/ })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    await chatControl.click()
+    await expect(page.getByLabel('Message')).toHaveValue('Mobile draft stays here')
+
+    await page
+      .getByRole('button', { name: 'Expand companion sheet to 90%' })
+      .click()
+    const expanded = page.locator('.room-dock[data-sheet="expanded"]')
+    expect((await expanded.boundingBox())?.height).toBeCloseTo(844 * 0.9, 0)
+    await page
+      .getByRole('button', { name: 'Collapse companion sheet to 55%' })
+      .click()
+
+    await page.keyboard.press('Escape')
+    await expect(chatControl).toBeFocused()
+    await roomBar.getByRole('button', { name: 'Activity' }).click()
+    await page.locator('.room-dock').getByRole('button', { name: 'Close' }).click()
+    await expect(roomBar.getByRole('button', { name: 'Activity' })).toBeFocused()
+    await expect(roomBar).toBeVisible()
+  } finally {
+    await dropRoom(authSessions, roomId)
+  }
+})
+
+test('the member mosaic exposes responsive emphasis, presence, watcher, media, and failure states', async ({
+  authSessions,
+}) => {
+  const host = await authSessions.createBrowserContext(HOST_PROFILE)
+  await installWebRtcProbe(host.context, 'pass')
+  const page = await host.context.newPage()
+  const roomId = await createAdmittedRoom(page, 'Adaptive mosaic room')
+  try {
+    await fillRoom(authSessions, roomId)
+    const memberships = (await authSessions.sql(
+      `SELECT membership.id, account.name
+         FROM room_membership membership
+         JOIN "user" account ON account.id = membership.account_id
+        WHERE membership.room_id = $1`,
+      [roomId],
+    )) as { readonly id: string; readonly name: string }[]
+    const membership = (name: string) => {
+      const found = memberships.find((entry) => entry.name === name)
+      if (!found) throw new Error(`Missing ${name}`)
+      return found.id
+    }
+    await authSessions.sql(
+      `UPDATE room_membership
+          SET reconnect_until = now() + interval '45 seconds'
+        WHERE id = $1`,
+      [membership('Filler 9')],
+    )
+    const streamId = randomUUID()
+    await authSessions.sql(
+      `INSERT INTO stream
+         (id, room_id, membership_id, preview_key, preview_updated_at, started_at)
+       VALUES ($1, $2, $3, $4, now(), now())`,
+      [streamId, roomId, membership('Filler 1'), `mosaic-${randomUUID()}`],
+    )
+    for (const [index, name] of ['Filler 2', 'Filler 3', 'Filler 4', 'Filler 5'].entries()) {
+      await authSessions.sql(
+        `INSERT INTO stream_subscription
+           (id, viewer_membership_id, stream_id, started_at)
+         VALUES ($1, $2, $3, now() + ($4 * interval '1 second'))`,
+        [randomUUID(), membership(name), streamId, index],
+      )
+    }
+
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await page.reload()
+    const tiles = page.locator('.room-mosaic__tile')
+    await expect(tiles).toHaveCount(10)
+    await expect(tiles.first().locator('.room-mosaic__name')).toHaveText('Shell Host')
+    await expect(tiles.first().locator('.room-mosaic__state')).toHaveText(
+      /Host · You · (Checking media…|Media ready|Chat only)/,
+    )
+    await expect(
+      tiles.filter({ hasText: 'Filler 9' }).locator('.room-mosaic__state'),
+    ).toContainText('Reconnecting')
+    await expect(
+      page.locator(
+        '[aria-label="Watched by Filler 2, Filler 3, Filler 4 and 1 more; 4 watchers total"]',
+      ),
+    ).toBeVisible()
+    await expect(page.locator('.room-mosaic__preview')).toHaveCSS('object-fit', 'contain')
+
+    // The no-watch phone overview has exactly two columns.
+    await page.setViewportSize({ width: 390, height: 844 })
+    const overview = await tiles.evaluateAll((nodes) =>
+      nodes.slice(0, 4).map((node) => {
+        const box = node.getBoundingClientRect()
+        return { x: Math.round(box.x), y: Math.round(box.y) }
+      }),
+    )
+    expect(new Set(overview.map(({ x }) => x)).size).toBe(2)
+    expect(new Set(overview.map(({ y }) => y)).size).toBe(2)
+
+    // Exercise the two accepted final watch layouts against the real cascade.
+    const streamTile = tiles.filter({ hasText: 'Filler 1' })
+    await page.setViewportSize({ width: 1024, height: 768 })
+    const mediumWatchLayout = await page.locator('.room-mosaic').evaluate((mosaic) => {
+      const watched = mosaic.querySelector<HTMLElement>('.room-mosaic__tile')
+      if (!watched) throw new Error('Medium watch layout is incomplete')
+      watched.setAttribute('data-member-watched', 'true')
+      mosaic.setAttribute('data-has-watch', 'true')
+      const style = getComputedStyle(watched)
+      return { columnStart: style.gridColumnStart, rowStart: style.gridRowStart }
+    })
+    expect(mediumWatchLayout).toEqual({ columnStart: 'span 2', rowStart: 'span 2' })
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await streamTile.evaluate((node) => node.setAttribute('data-member-watched', 'true'))
+    await page.locator('.room-mosaic').evaluate((node) => node.setAttribute('data-has-watch', 'true'))
+    const mobile = await page.locator('.room-mosaic').evaluate((mosaic) => {
+      const watched = mosaic.querySelector<HTMLElement>('[data-member-watched="true"]')
+      const remaining = mosaic.querySelector<HTMLElement>(
+        '.room-mosaic__tile:not([data-member-watched="true"])',
+      )
+      if (!watched || !remaining) throw new Error('Mobile watch layout is incomplete')
+      const stage = watched.getBoundingClientRect()
+      const strip = remaining.getBoundingClientRect()
+      return {
+        stageWidth: stage.width,
+        stageTop: stage.top,
+        stripTop: strip.top,
+        scrollWidth: mosaic.scrollWidth,
+        clientWidth: mosaic.clientWidth,
+      }
+    })
+    expect(mobile.stageWidth).toBeGreaterThanOrEqual(350)
+    expect(mobile.stripTop).toBeGreaterThan(mobile.stageTop)
+    expect(mobile.scrollWidth).toBeGreaterThan(mobile.clientWidth)
+
+    // A publisher-free seeded Stream deterministically exhausts the watch and
+    // returns to Preview/Retry without creating a hidden fallback watch.
+    await streamTile.evaluate((node) => node.setAttribute('data-member-watched', 'false'))
+    await streamTile.getByRole('button', { name: 'Watch', exact: true }).click()
+    await expect(streamTile.getByText('Could not connect to this stream.')).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(streamTile.getByRole('button', { name: 'Retry', exact: true })).toBeVisible()
+    await expect(streamTile).toHaveAttribute('data-member-watched', 'false')
+    await expect
+      .poll(async () => {
+        const rows = (await authSessions.sql(
+          `SELECT count(*)::int AS count
+             FROM stream_subscription subscription
+            WHERE subscription.viewer_membership_id = $1
+              AND subscription.ended_at IS NULL`,
+          [membership('Shell Host')],
+        )) as { count: number }[]
+        return rows[0]?.count ?? 0
+      })
+      .toBe(0)
+  } finally {
+    await dropRoom(authSessions, roomId)
+  }
+})
+
+test('a failed compatibility gate can be re-probed without readmission', async ({
+  authSessions,
+}) => {
+  const host = await authSessions.createBrowserContext(HOST_PROFILE)
+  await installWebRtcProbe(host.context, 'fail')
+  const page = await host.context.newPage()
+  const roomId = await createAdmittedRoom(page, 'Compatibility recovery room')
+  try {
+    const retry = page.getByRole('button', { name: 'Retry compatibility' })
+    await expect(retry).toBeVisible()
+    await page.evaluate(() => {
+      ;(window as typeof window & { failCompatibilityProbe?: boolean })
+        .failCompatibilityProbe = false
+    })
+    await retry.click()
+    await expect(retry).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Start Stream' })).toBeEnabled()
+    await expect(page.locator('[data-room-state="admitted"]')).toBeVisible()
+  } finally {
+    await dropRoom(authSessions, roomId)
+  }
+})
+
+test('watch recovery exhausts once, cancels explicitly, and stays stopped after reclaim', async ({
+  authSessions,
+}) => {
+  const host = await authSessions.createBrowserContext(HOST_PROFILE)
+  const hostPage = await host.context.newPage()
+  const roomId = await createAdmittedRoom(hostPage, 'Watch recovery room')
+  const streamId = randomUUID()
+  try {
+    const memberships = (await authSessions.sql(
+      'SELECT id FROM room_membership WHERE room_id = $1 AND role = $2',
+      [roomId, 'host'],
+    )) as { readonly id: string }[]
+    await authSessions.sql(
+      'INSERT INTO stream (id, room_id, membership_id, started_at) VALUES ($1, $2, $3, now())',
+      [streamId, roomId, memberships[0]!.id],
+    )
+
+    const viewer = await authSessions.createBrowserContext(VISITOR_PROFILE)
+    await installWebRtcProbe(viewer.context, 'pass')
+    const page = await viewer.context.newPage()
+    await page.goto(`/rooms/${roomId}`)
+    await page.getByRole('button', { name: 'Join' }).click()
+
+    await expect(page.locator('[data-room-state="admitted"]')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Watch' })).toBeEnabled()
+    await page.getByRole('button', { name: 'Watch' }).click()
+    await expect(page.getByText('Connecting… attempt 1 of 4')).toBeVisible()
+    await expect(page.getByText('Connecting… attempt 4 of 4')).toBeVisible()
+    const retry = page.getByRole('button', { name: 'Retry' })
+    await expect(retry).toBeVisible()
+    await retry.click()
+    await expect(page.getByRole('button', { name: 'Stop watching' })).toBeVisible()
+    await page.getByRole('button', { name: 'Stop watching' }).click()
+    await expect(page.getByRole('button', { name: 'Watch' })).toBeVisible()
+
+    await viewer.context.setOffline(true)
+    await expect(page.getByText(/Reconnecting… 45s remaining/)).toBeVisible()
+    await viewer.context.setOffline(false)
+    await expect(page.getByRole('button', { name: 'Watch' })).toBeEnabled()
+    await expect(page.getByRole('button', { name: 'Start Stream' })).toBeEnabled()
+    await expect(page.getByText(/Start or Watch again after recovery/)).toHaveCount(0)
   } finally {
     await dropRoom(authSessions, roomId)
   }

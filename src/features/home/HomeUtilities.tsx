@@ -61,6 +61,7 @@ export function HomeUtilities({
           this boundary keeps owning the pending and failed states so an outage
           is still reported somewhere visible. */}
       <HomeSectionBoundary
+        analyticsSection="presence"
         failed={presenceFailed}
         label="Connected presence"
         pending={presencePending && !presence}
