@@ -132,7 +132,7 @@ test('multi-Account Chat preserves reading position and exposes canonical local 
       )
       .toBeLessThanOrEqual(24)
     await panel.evaluate((node) => {
-      node.scrollTop = 0
+      node.scrollTop = Math.floor((node.scrollHeight - node.clientHeight) / 2)
       node.dispatchEvent(new Event('scroll'))
     })
     const retainedPosition = await panel.evaluate((node) => node.scrollTop)

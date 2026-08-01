@@ -82,14 +82,15 @@ test('Admin sanctions update every affected Account capability and remain unavai
     [streamId, roomId, membershipId],
   )
 
-  await targetPage.goto('/admin')
+  await gotoHydrated(targetPage, '/admin')
   await expect(targetPage.getByRole('heading', { name: 'Page not found' })).toBeVisible()
-  await targetPage.goto(`/rooms/${roomId}`)
+  await gotoHydrated(targetPage, `/rooms/${roomId}`)
   await expect(targetPage.locator('[data-room-state="admitted"]')).toBeVisible()
+  await expect(targetPage.getByLabel('Message', { exact: true })).toBeEnabled()
 
   for (const width of [390, 1024, 1440]) {
     await adminPage.setViewportSize({ width, height: 900 })
-    await adminPage.goto('/admin')
+    await gotoHydrated(adminPage, '/admin')
     await expect(adminPage.getByRole('heading', { name: 'Platform sanctions' })).toBeVisible()
     await expect(adminPage.getByRole('button', { name: 'Apply sanction' })).toBeVisible()
   }
@@ -123,8 +124,9 @@ test('Admin sanctions update every affected Account capability and remain unavai
   await expect(createRoom.getByRole('alert')).toHaveText('This account cannot create rooms right now.')
   await liftSanction(adminPage, 'Room creation')
 
-  await targetPage.goto(`/rooms/${roomId}`)
+  await gotoHydrated(targetPage, `/rooms/${roomId}`)
   await expect(targetPage.locator('[data-room-state="admitted"]')).toBeVisible()
+  await expect(targetPage.getByLabel('Message', { exact: true })).toBeEnabled()
   await applySanction(adminPage, targetId, 'all_access')
   await expect(targetPage.locator('[data-room-state="pre-admission"]')).toBeVisible()
   await expect(targetPage.locator('[data-room-state="admitted"]')).toHaveCount(0)
