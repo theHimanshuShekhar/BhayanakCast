@@ -1,0 +1,69 @@
+{
+  "study": "ADR 0013 core-journey unaided completion",
+  "protocol": "docs/operations/usability-qualification.md",
+  "build": "REPLACE_WITH_COMMIT_SHA",
+  "origin": "REPLACE_WITH_STUDY_ORIGIN",
+  "sessions": [
+    {
+      "participant": "P00",
+      "dry_run": true,
+      "struck": false,
+      "consent": true,
+      "consent_at": "REPLACE_WITH_ISO_TIMESTAMP",
+      "client": "chrome-desktop",
+      "viewport_stage": "1280+",
+      "facilitator": "REPLACE_WITH_INITIALS",
+      "observer": "REPLACE_WITH_DIFFERENT_INITIALS",
+      "steps": {
+        "sign_in": { "result": "pass", "seconds": 31, "difficulty": 1 },
+        "find_room": { "result": "pass", "seconds": 22, "difficulty": 2 },
+        "stream_or_watch": { "result": "pass", "seconds": 48, "difficulty": 2 },
+        "chat": { "result": "pass", "seconds": 14, "difficulty": 1 },
+        "leave": { "result": "pass", "seconds": 11, "difficulty": 1 }
+      },
+      "notes": "Dry run. Observed behavior only — no chat bodies, no identities."
+    },
+    {
+      "participant": "P01",
+      "dry_run": false,
+      "struck": false,
+      "consent": true,
+      "consent_at": "REPLACE_WITH_ISO_TIMESTAMP",
+      "client": "ios-safari",
+      "viewport_stage": "390",
+      "facilitator": "REPLACE_WITH_INITIALS",
+      "observer": "REPLACE_WITH_DIFFERENT_INITIALS",
+      "steps": {
+        "sign_in": { "result": "pass", "seconds": 44, "difficulty": 2 },
+        "find_room": { "result": "pass", "seconds": 37, "difficulty": 2 },
+        "stream_or_watch": {
+          "result": "fail",
+          "seconds": 240,
+          "difficulty": 5,
+          "obstacle": "not_found",
+          "observation": "Scrolled past the watch control twice and looked for it in the member list.",
+          "screenshot": "evidence/P01-stream_or_watch-390.png"
+        },
+        "chat": { "result": "pass", "seconds": 29, "difficulty": 2 },
+        "leave": { "result": "pass", "seconds": 12, "difficulty": 1 }
+      },
+      "notes": "Delete the example rows before the qualifying study; keep the shape."
+    },
+    {
+      "participant": "P02",
+      "dry_run": false,
+      "struck": true,
+      "strike_reason": "Disclosed mid-session that they had seen an internal demo.",
+      "consent": true,
+      "consent_at": "REPLACE_WITH_ISO_TIMESTAMP",
+      "client": "firefox-desktop",
+      "viewport_stage": "768-1279",
+      "facilitator": "REPLACE_WITH_INITIALS",
+      "observer": "REPLACE_WITH_DIFFERENT_INITIALS",
+      "steps": {
+        "sign_in": { "result": "pass", "seconds": 26, "difficulty": 1 }
+      },
+      "notes": "A struck row records only the steps that actually ran, and is excluded from both numerator and denominator."
+    }
+  ]
+}
