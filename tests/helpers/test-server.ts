@@ -15,8 +15,14 @@ export interface TestAuthConfiguration {
   readonly discordClientSecret: string
 }
 
+export interface TestServerMetrics {
+  readonly eventLoopDelayP99Ms: number
+  readonly eventLoopDelayMaxMs: number
+}
+
 export interface TestServer {
   readonly port: number
+  readonly pid: number
   readonly origin: string
   readonly bindings: RuntimeBindings
   readonly auth: TestAuthConfiguration
@@ -24,6 +30,7 @@ export interface TestServer {
   set(key: string, value: string): Promise<'OK'>
   get(key: string): Promise<string | null>
   advanceClock(instant: number): Promise<number>
+  metrics(): Promise<TestServerMetrics>
   stop(): Promise<void>
 }
 
@@ -126,6 +133,9 @@ export async function startTestServer(
     })
 
   return {
+    pid: child.pid ?? (() => {
+      throw new Error('test server did not expose a process id')
+    })(),
     port,
     origin: `http://127.0.0.1:${port}`,
     bindings,
@@ -134,6 +144,7 @@ export async function startTestServer(
     set: (key, value) => callRuntime('set', { key, value }),
     get: (key) => callRuntime('get', { key }),
     advanceClock: (instant) => callRuntime('advance-clock', { instant }),
+    metrics: () => callRuntime('metrics', {}),
     stop() {
       stopPromise ??= stopChild(child)
       return stopPromise

@@ -72,7 +72,7 @@ describe('Room analytics companion allowlist', () => {
         event: 'room_companion_opened',
         distinctId: '271828182845904523',
         properties: {
-          inventory_version: 1,
+          inventory_version: 2,
           identity_kind: 'signed_in',
           surface: 'sheet',
           tab: 'people',
@@ -214,7 +214,12 @@ describe('Room analytics media-recovery allowlist', () => {
     },
     {
       name: 'room_watch_action',
-      properties: { action: 'retry', outcome: 'retrying', attempt: 3 },
+      properties: {
+        action: 'retry',
+        outcome: 'retrying',
+        attempt: 3,
+        watch_sequence_id: 'c6db6c55-dfa5-4edc-8758-3ca062646c7c',
+      },
     },
     {
       name: 'room_reconnect_recovery',
@@ -238,7 +243,21 @@ describe('Room analytics media-recovery allowlist', () => {
     },
     {
       name: 'room_watch_action',
-      properties: { action: 'retry', outcome: 'retrying', attempt: 5 },
+      properties: {
+        action: 'retry',
+        outcome: 'retrying',
+        attempt: 5,
+        watch_sequence_id: 'c6db6c55-dfa5-4edc-8758-3ca062646c7c',
+      },
+    },
+    {
+      name: 'room_watch_action',
+      properties: {
+        action: 'watch',
+        outcome: 'connected',
+        attempt: 0,
+        watch_sequence_id: 'c6db6c55-dfa5-4edc-8758-3ca062646c7c',
+      },
     },
     {
       name: 'room_reconnect_recovery',

@@ -2,6 +2,7 @@ import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { Readable } from 'node:stream'
+import { monitorEventLoopDelay } from 'node:perf_hooks'
 import { pipeline } from 'node:stream/promises'
 import { extname, resolve, sep } from 'node:path'
 
@@ -49,6 +50,11 @@ if (usesEphemeralTestOrigin) {
   process.env.BETTER_AUTH_URL = `http://${HOST}`
 }
 const runtime = startModule.createServerRuntime(process.env)
+const eventLoopDelay =
+  typeof process.send === 'function'
+    ? monitorEventLoopDelay({ resolution: 20 })
+    : null
+eventLoopDelay?.enable()
 // Nothing is served against an out-of-date schema: a failure here should stop
 // the process rather than surface as a broken page.
 await runtime.migrate()
@@ -102,6 +108,7 @@ async function shutdown() {
   shuttingDown = true
   const deadline = setTimeout(() => process.exit(1), 10_000)
   deadline.unref()
+  eventLoopDelay?.disable()
   sockets.disconnectSockets(true)
   try {
     await sockets.close()
@@ -139,6 +146,14 @@ async function handleRuntimeCommand(message) {
         break
       case 'advance-clock':
         result = runtime.advanceClock(message.instant)
+        break
+      case 'metrics':
+        if (!eventLoopDelay) throw new Error('runtime metrics are unavailable')
+        result = {
+          eventLoopDelayP99Ms: eventLoopDelay.percentile(99) / 1_000_000,
+          eventLoopDelayMaxMs: eventLoopDelay.max / 1_000_000,
+        }
+        eventLoopDelay.reset()
         break
       default:
         throw new Error(`unknown runtime operation: ${message.operation}`)

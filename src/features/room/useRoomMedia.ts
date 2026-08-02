@@ -53,6 +53,36 @@ export function beginWatchSelection(current: WatchState, streamId: string) {
   }
 }
 
+export function roomWatchEvent(
+  action: 'watch' | 'retry' | 'cancel',
+  outcome: 'started' | 'retrying' | 'connected' | 'exhausted' | 'cancelled',
+  attempt: number,
+  watchSequenceId: string,
+) {
+  return {
+    name: 'room_watch_action',
+    properties: {
+      action,
+      outcome,
+      attempt,
+      watch_sequence_id: watchSequenceId,
+    },
+  } as const
+}
+
+export interface WatchSequence {
+  readonly id: string
+  readonly attempt: number
+}
+
+export function beginWatchSequence(id = crypto.randomUUID()): WatchSequence {
+  return { id, attempt: 1 }
+}
+
+export function retryWatchSequence(sequence: WatchSequence): WatchSequence {
+  return { ...sequence, attempt: sequence.attempt + 1 }
+}
+
 export interface RoomMedia {
   /** Compatibility-passed alias retained for tile/control call sites. */
   readonly supported: boolean
@@ -106,7 +136,7 @@ export function useRoomMedia({
   /** The single inbound connection. */
   const inbound = useRef<{ id: string; peer: RTCPeerConnection } | null>(null)
   /** The retryer for the current selection, if one is in flight (ADR 0077). */
-  const watchAction = useRef<'watch' | 'retry'>('watch')
+  const watchSequence = useRef<WatchSequence | null>(null)
   const watchAttempt = useRef<AsyncRetryer<(streamId: string) => Promise<void>> | null>(null)
 
   const runCompatibilityProbe = useCallback(async (trigger: 'admission' | 'retry') => {
@@ -145,6 +175,7 @@ export function useRoomMedia({
   const discardWatchAttempt = useCallback(() => {
     watchAttempt.current?.abort()
     watchAttempt.current = null
+    watchSequence.current = null
     closeInbound()
   }, [closeInbound])
 
@@ -396,38 +427,46 @@ export function useRoomMedia({
       if (compatibility !== 'compatible' || connection !== 'live' || roomEnded) return
       setError(null)
       const action = watch.kind === 'failed' && watch.streamId === streamId ? 'retry' : 'watch'
-      watchAction.current = action
-      if (watch.kind !== 'idle' && watch.kind !== 'failed') {
-        observeRoom({
-          name: 'room_watch_action',
-          properties: {
-            action: 'cancel',
-            outcome: 'cancelled',
-            attempt: watch.kind === 'connecting' ? watch.attempt : 0,
-          },
-        })
+      const previousSequence = watchSequence.current
+      if (watch.kind !== 'idle' && watch.kind !== 'failed' && previousSequence) {
+        observeRoom(
+          roomWatchEvent(
+            'cancel',
+            'cancelled',
+            previousSequence.attempt,
+            previousSequence.id,
+          ),
+        )
       }
       discardWatchAttempt()
+      let sequence = beginWatchSequence()
+      watchSequence.current = sequence
       setWatch(beginWatchSelection(watch, streamId).next)
-      observeRoom({
-        name: 'room_watch_action',
-        properties: { action, outcome: 'started', attempt: 1 },
-      })
+      observeRoom(roomWatchEvent(action, 'started', sequence.attempt, sequence.id))
       let exhausted = false
       const retryer: AsyncRetryer<(id: string) => Promise<void>> = new AsyncRetryer(
-        (id: string) => negotiate(id, retryer.getAbortSignal()),
+        (id: string) =>
+          negotiate(
+            id,
+            retryer.getAbortSignal(),
+            action,
+            sequence.attempt,
+            sequence.id,
+          ),
         {
           ...WATCH_RETRY_OPTIONS,
-          onRetry: (attempt) => {
+          onRetry: () => {
+            if (watchSequence.current?.id !== sequence.id) return
             closeInbound()
-            const nextAttempt = attempt + 1
-            setWatch({ kind: 'connecting', streamId, attempt: nextAttempt })
-            observeRoom({
-              name: 'room_watch_action',
-              properties: { action, outcome: 'retrying', attempt: nextAttempt },
-            })
+            sequence = retryWatchSequence(sequence)
+            watchSequence.current = sequence
+            setWatch({ kind: 'connecting', streamId, attempt: sequence.attempt })
+            observeRoom(
+              roomWatchEvent(action, 'retrying', sequence.attempt, sequence.id),
+            )
           },
           onLastError: () => {
+            if (watchSequence.current?.id !== sequence.id) return
             exhausted = true
             watchAttempt.current = null
             closeInbound()
@@ -436,27 +475,33 @@ export function useRoomMedia({
       )
       watchAttempt.current = retryer
       await retryer.execute(streamId)
-      if (exhausted) {
+      if (exhausted && watchSequence.current?.id === sequence.id) {
         const cleaned = await cleanupWatchSubscription()
+        if (watchSequence.current?.id !== sequence.id) return
         setWatch({ kind: 'failed', streamId })
-        observeRoom({
-          name: 'room_watch_action',
-          properties: { action, outcome: 'exhausted', attempt: WATCH_MAX_ATTEMPTS },
-        })
+        observeRoom(
+          roomWatchEvent(
+            action,
+            'exhausted',
+            sequence.attempt,
+            sequence.id,
+          ),
+        )
+        watchSequence.current = null
         if (!cleaned) {
           setError('The failed watch could not be released. Retry when the connection recovers.')
         }
       }
     },
     async stopWatchingStream() {
-      const attempt = watch.kind === 'connecting' ? watch.attempt : 0
-      if (watch.kind !== 'idle') {
-        observeRoom({
-          name: 'room_watch_action',
-          properties: { action: 'cancel', outcome: 'cancelled', attempt },
-        })
+      const sequence = watchSequence.current
+      if (watch.kind !== 'idle' && sequence) {
+        observeRoom(
+          roomWatchEvent('cancel', 'cancelled', sequence.attempt, sequence.id),
+        )
       }
       discardWatchAttempt()
+      watchSequence.current = null
       const cleaned = await cleanupWatchSubscription()
       setWatch({ kind: 'idle' })
       if (!cleaned) setError('The watch could not be released. Try again when connected.')
@@ -482,7 +527,13 @@ export function useRoomMedia({
 
   /** One direct-watch attempt: a fresh subscription and peer connection that
       settles only when the publisher's media arrives (ADR 0104). */
-  async function negotiate(streamId: string, signal: AbortSignal | null) {
+  async function negotiate(
+    streamId: string,
+    signal: AbortSignal | null,
+    action: 'watch' | 'retry',
+    attempt: number,
+    sequenceId: string,
+  ) {
     const result = await watchStream({ data: { roomId, streamId } })
     if (result.status !== 'subscribed') throw new Error(result.status)
     if (signal?.aborted) throw new Error('aborted')
@@ -505,10 +556,7 @@ export function useRoomMedia({
       peer.ontrack = (event) => {
         setRemoteStream(event.streams[0] ?? new MediaStream([event.track]))
         setWatch({ kind: 'watching', streamId })
-        observeRoom({
-          name: 'room_watch_action',
-          properties: { action: watchAction.current, outcome: 'connected', attempt: 0 },
-        })
+        observeRoom(roomWatchEvent(action, 'connected', attempt, sequenceId))
         resolve()
       }
       peer.addTransceiver('video', { direction: 'recvonly' })
