@@ -32,6 +32,7 @@ coverage/
 .playwright/
 test-results/
 playwright-report/
+ops/evidence/capacity-qualification-*.json
 
 # Local/editor files
 *.local

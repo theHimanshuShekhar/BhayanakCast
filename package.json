@@ -17,7 +17,8 @@
     "test:integration": "vitest run tests/integration",
     "test:smoke": "vitest run tests/smoke",
     "test:e2e": "playwright test",
-    "retention:run": "pnpm build && node --env-file-if-exists=.env scripts/run-retention.mjs"
+    "retention:run": "pnpm build && node --env-file-if-exists=.env scripts/run-retention.mjs",
+    "qualify:capacity": "pnpm build && tsx --env-file-if-exists=.env scripts/qualify-capacity.ts"
   },
   "dependencies": {
     "@icons-pack/react-simple-icons": "^13.13.0",
@@ -49,6 +50,7 @@
     "@types/react-dom": "19.2.3",
     "drizzle-kit": "0.31.10",
     "fast-check": "4.9.0",
+    "seroval": "1.5.5",
     "tailwindcss": "4.3.2",
     "tsx": "4.23.0",
     "typescript": "5.9.3",

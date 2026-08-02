@@ -1,5 +1,5 @@
 export const ROOM_ANALYTICS_INVENTORY = {
-  version: 1,
+  version: 2,
   sharedProperties: ['inventory_version', 'identity_kind'] as const,
   identity: {
     anonymous: 'anonymous:<random UUID>',
@@ -15,7 +15,7 @@ export const ROOM_ANALYTICS_INVENTORY = {
     room_details_closed: ['reason'],
     room_details_resized: ['height'],
     room_media_compatibility_checked: ['trigger', 'outcome'],
-    room_watch_action: ['action', 'outcome', 'attempt'],
+    room_watch_action: ['action', 'outcome', 'attempt', 'watch_sequence_id'],
     room_reconnect_recovery: ['outcome', 'seconds_remaining'],
     room_stream_action: ['action', 'outcome'],
     room_mosaic_filter_changed: ['hidden'],
@@ -115,6 +115,7 @@ export type RoomAnalyticsEvent =
         readonly action: 'watch' | 'retry' | 'cancel'
         readonly outcome: 'started' | 'retrying' | 'connected' | 'exhausted' | 'cancelled'
         readonly attempt: number
+        readonly watch_sequence_id: string
       }
     }
   | {
@@ -227,7 +228,7 @@ interface RoomAnalyticsFailureLog {
   readonly level: 'warn'
   readonly event: 'analytics.delivery_failed'
   readonly provider: 'posthog'
-  readonly inventory_version: 1
+  readonly inventory_version: 2
   readonly product_surface: 'room'
 }
 
@@ -432,15 +433,22 @@ function validateEvent(name: string, properties: unknown): RoomAnalyticsEvent {
       }
     }
     case 'room_watch_action': {
-      const source = exactObject(properties, ['action', 'outcome', 'attempt'])
+      const source = exactObject(properties, [
+        'action',
+        'outcome',
+        'attempt',
+        'watch_sequence_id',
+      ])
       if (
         (source.action !== 'watch' && source.action !== 'retry' && source.action !== 'cancel') ||
         !['started', 'retrying', 'connected', 'exhausted', 'cancelled'].includes(
           String(source.outcome),
         ) ||
         !Number.isInteger(source.attempt) ||
-        Number(source.attempt) < 0 ||
-        Number(source.attempt) > 4
+        Number(source.attempt) < 1 ||
+        Number(source.attempt) > 4 ||
+        typeof source.watch_sequence_id !== 'string' ||
+        !UUID.test(source.watch_sequence_id)
       ) {
         invalidProperties()
       }
@@ -455,6 +463,7 @@ function validateEvent(name: string, properties: unknown): RoomAnalyticsEvent {
             | 'exhausted'
             | 'cancelled',
           attempt: Number(source.attempt),
+          watch_sequence_id: source.watch_sequence_id,
         },
       }
     }
@@ -598,7 +607,7 @@ function deliveryFailure(): RoomAnalyticsFailureLog {
     level: 'warn',
     event: 'analytics.delivery_failed',
     provider: 'posthog',
-    inventory_version: 1,
+    inventory_version: 2,
     product_surface: 'room',
   }
 }
