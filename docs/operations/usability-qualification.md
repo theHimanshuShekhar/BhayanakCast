@@ -48,6 +48,7 @@ Required spread across the cohort:
 | Browser engine | ≥ 2 non-Chromium (Firefox, Safari, or iOS Safari) |
 | Stream branch | ≥ 3 on Chromium desktop, so the capture branch of Step 3 is exercised |
 | Streaming role | ≥ 4 who host/produce, ≥ 4 who only watch |
+| Input mode | ≥ 1 desktop session driven keyboard-only by the participant |
 | Prior Discord-adjacent tools | ≤ 60% heavy power users |
 
 Step 3 branches on **capture capability, not device**. Stream creation is
@@ -56,9 +57,10 @@ capture branch and everyone else — mobile *and* non-Chromium desktop — takes
 branch. Asking a Firefox or Safari participant to share their screen would score a
 documented product limit as a usability failure.
 
-`scripts/usability-acceptance.mjs` enforces the n, client, engine, and viewport minima
-in this table and reports `gate: "unproven"` for a cohort that misses any of them. A
-small or lopsided cohort therefore cannot certify the criterion by accident.
+`scripts/usability-acceptance.mjs` enforces the n, client, engine, viewport, and
+keyboard-only minima in this table and reports `gate: "unproven"` for a cohort that
+misses any of them. A small or lopsided cohort therefore cannot certify the criterion by
+accident.
 
 ## 2. Consent
 
@@ -206,6 +208,30 @@ changes what the participant sees.
 9. Discard the recording within 7 days; the result row and screenshots are the retained
    evidence.
 
+### Evidence per session
+
+The ticket's UI-impact classification requires keyboard, state, and console/a11y evidence
+alongside the completion rate. Two lanes, because collecting it all live would turn the
+observer into an auditor and break the silence discipline of §4.
+
+**Live, non-intrusive** — the observer records only what the session actually produced:
+
+- `viewport_stage` and `client`, confirmed at screening, not guessed afterwards.
+- A screenshot per failed step, reviewed under §2 before retention.
+- Which of the loading, empty, error, and overflow states the participant happened to
+  hit, by step. Never manufacture one mid-session; a state the journey did not reach is
+  recorded as `not_reached`, and #26 covers the exhaustive state matrix.
+- For the keyboard-only session: whether focus order, visible focus, and control reach
+  carried the participant through each step unaided.
+
+**Post-session replay** — after the participant leaves, on the same viewport stage and
+client, the observer replays the journey themselves with devtools open and records
+console errors and a11y-tree findings. This is deliberately *not* done during the
+session: devtools in the participant's window changes the layout they are being asked to
+navigate, and a mid-session console check is facilitator attention the participant can
+read as a hint. Replay findings are diagnostic evidence for the ticket; they never change
+a step's `pass`/`fail`, which §4 fixes at the moment the step ended.
+
 ## 6. Failure categorization
 
 Every failed step gets exactly one obstacle code plus the step, viewport stage, and
@@ -257,10 +283,16 @@ those sessions where all five steps are `pass`. A struck session must carry a
 `strike_reason`; because a mid-session strike stops the journey, struck rows are exempt
 from the five-step requirement.
 
-Every row must carry `consent_at`, a `facilitator`, and a different `observer`; every
-step must carry a 1–5 `difficulty`; every failed step must carry an `obstacle` and a
-one-sentence `observation`. A `pass` past 240 seconds, or a `pass` carrying an obstacle,
-is rejected rather than counted — §4 already classifies both as failures.
+Every row must carry `consent_at`, a `facilitator`, a different `observer`, and a
+`keyboard_only` boolean; every step must carry a 1–5 `difficulty`; every failed step must
+carry an `obstacle` and a one-sentence `observation`. A `pass` past 240 seconds, or a
+`pass` carrying an obstacle, is rejected rather than counted — §4 already classifies both
+as failures.
+
+Each row also carries the evidence block from §5: `states_observed` per step,
+`keyboard_findings` on the keyboard-only session, and `replay_console_a11y` from the
+post-session replay. These are recorded and retained, not scored; the gate is the
+completion rate alone.
 
 ## 8. Dry run
 
@@ -284,6 +316,7 @@ Retained for the ticket:
 - `usability-results.json` with one row per session.
 - `scripts/usability-acceptance.mjs` output, verbatim.
 - Screenshots per failed step, reviewed for prohibited content.
+- Per-session `states_observed`, `keyboard_findings`, and `replay_console_a11y` blocks.
 - Dry-run row and its acceptance output.
 
 ## 10. Gate

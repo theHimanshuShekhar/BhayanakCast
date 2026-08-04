@@ -67,6 +67,9 @@ question fails the step. If you slip, the observer marks it `aided` — say so o
 Then record: `pass`/`fail`, seconds, difficulty 1–5. On a failure also record the obstacle
 code, a one-sentence observation with no product content, and a screenshot.
 
+Also note, per step, which of loading / empty / error / overflow the participant actually
+hit — `not_reached` is a valid answer. Never manufacture a state mid-session.
+
 `not_found` · `wrong_mental_model` · `blocked_by_permission` · `blocked_by_latency` ·
 `blocked_by_defect` · `abandoned` · `aided`
 
@@ -83,8 +86,13 @@ retake rather than redact a chat body.
 
 1. Three open questions: what was confusing, what was missing, would you come back.
 2. Offer Account deletion. Stop recording.
-3. Append the row to `study/usability-results.json`.
-4. `node scripts/usability-acceptance.mjs study/usability-results.json`
+3. Replay the journey yourself on the same client and viewport with devtools open; record
+   console errors and a11y-tree findings as `replay_console_a11y` (`none` if clean). This
+   is diagnostic only — it never changes a step's pass/fail.
+4. On the keyboard-only session, record `keyboard_findings`: focus order, focus visibility,
+   and whether every needed control was reachable.
+5. Append the row to `study/usability-results.json`.
+6. `node scripts/usability-acceptance.mjs study/usability-results.json`
 
 `unproven` means the cohort does not yet satisfy §1 — expected until recruitment finishes.
 `failed` means the cohort is representative and the rate is below 90%. Record it as a
