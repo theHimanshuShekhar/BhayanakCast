@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test'
 // The project fixture provisions a migrated per-worker schema and its own
 // server, so these cases do not depend on whoever migrated the default schema
 // first the way the bare Playwright fixture does.
-import { expect, test } from './fixtures'
+import { expect, test, gotoHydrated } from './fixtures'
 import type { AuthSessionFixture } from './fixtures'
 import { installWebRtcProbe } from '../helpers/webrtc'
 
@@ -31,7 +31,7 @@ const DISCORD_DOOR = 'Continue with Discord'
 /** The shipped route into an admitted room: create it from Home and land in it
     as Host, exactly as `create-and-open-room.spec.ts` does. */
 async function createAdmittedRoom(page: Page, name: string) {
-  await page.goto('/')
+  await gotoHydrated(page, '/')
   await page
     .getByTestId('home-bottom-navigation')
     .getByRole('button', { name: 'Create room' })

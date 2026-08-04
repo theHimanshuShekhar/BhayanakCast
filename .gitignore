@@ -32,6 +32,7 @@ coverage/
 .playwright/
 test-results/
 playwright-report/
+ops/evidence/capacity-qualification-*.json
 
 # Usability study artifacts: participant-adjacent, reviewed before they leave the machine
 study/

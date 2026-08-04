@@ -1,4 +1,4 @@
-import { expect, test } from './fixtures'
+import { expect, test, gotoHydrated } from './fixtures'
 
 const ACCOUNT = {
   id: '564738291056473829',
@@ -20,14 +20,14 @@ const OTHER_ACCOUNT = {
 
 test('anonymous theme uses local override and device fallback', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'dark' })
-  await page.goto('/profile')
+  await gotoHydrated(page, '/profile')
   await page.evaluate(() => localStorage.setItem('bhayanakcast.theme', 'light'))
-  await page.reload()
+  await gotoHydrated(page, page.url())
 
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
 
   await page.evaluate(() => localStorage.removeItem('bhayanakcast.theme'))
-  await page.reload()
+  await gotoHydrated(page, page.url())
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
 })
 
@@ -37,7 +37,7 @@ test('account preference updates immediately, persists, and stays isolated', asy
   const signedIn = await authSessions.createBrowserContext(ACCOUNT)
   const page = await signedIn.context.newPage()
   await page.emulateMedia({ colorScheme: 'light' })
-  await page.goto(`${authSessions.origin}/profile`)
+  await gotoHydrated(page, `${authSessions.origin}/profile`)
 
   const preference = page.getByRole('combobox', { name: 'Theme preference' })
   await expect(preference).toHaveValue('system')
@@ -47,14 +47,14 @@ test('account preference updates immediately, persists, and stays isolated', asy
   const secondContext = await authSessions.createBrowserContext(ACCOUNT)
   const secondPage = await secondContext.context.newPage()
   await secondPage.emulateMedia({ colorScheme: 'light' })
-  await secondPage.goto(`${authSessions.origin}/profile`)
+  await gotoHydrated(secondPage, `${authSessions.origin}/profile`)
   await expect(secondPage.getByRole('combobox', { name: 'Theme preference' })).toHaveValue('dark')
   await expect(secondPage.locator('html')).toHaveAttribute('data-theme', 'dark')
 
   const otherContext = await authSessions.createBrowserContext(OTHER_ACCOUNT)
   const otherPage = await otherContext.context.newPage()
   await otherPage.emulateMedia({ colorScheme: 'light' })
-  await otherPage.goto(`${authSessions.origin}/profile`)
+  await gotoHydrated(otherPage, `${authSessions.origin}/profile`)
   await expect(otherPage.getByRole('combobox', { name: 'Theme preference' })).toHaveValue('system')
   await expect(otherPage.locator('html')).toHaveAttribute('data-theme', 'light')
 })
@@ -66,9 +66,9 @@ test('sign out returns to anonymous local theme behavior', async ({ authSessions
   )
   const page = await signedIn.context.newPage()
   await page.emulateMedia({ colorScheme: 'dark' })
-  await page.goto(`${authSessions.origin}/profile`)
+  await gotoHydrated(page, `${authSessions.origin}/profile`)
   await page.getByRole('combobox', { name: 'Theme preference' }).selectOption('dark')
-  await page.goto(`${authSessions.origin}/`)
+  await gotoHydrated(page, `${authSessions.origin}/`)
   const accountButton = page.getByRole('button', { name: 'Theme member account' })
   await expect(accountButton).toBeVisible()
   await accountButton.click()
@@ -98,7 +98,7 @@ test('account preference applies before document readiness', async ({ authSessio
       { once: true },
     )
   })
-  await page.goto(`${authSessions.origin}/profile`)
+  await gotoHydrated(page, `${authSessions.origin}/profile`)
 
   await expect(page.locator('html')).toHaveAttribute('data-theme-at-ready', 'dark')
 })
@@ -115,13 +115,12 @@ test('failed account update restores the previous effective theme', async ({ aut
     await held
     await route.fulfill({ status: 500, body: 'preference unavailable' })
   })
-  await page.goto(`${authSessions.origin}/profile`)
+  await gotoHydrated(page, `${authSessions.origin}/profile`)
 
   const preference = page.getByRole('combobox', { name: 'Theme preference' })
   await expect(preference).toHaveValue('system')
-  // The select is in the SSR markup before React has attached its onChange, and
-  // a selection made in that window is silently swallowed. Retry until one
-  // takes; the route holds every POST, so a duplicate mutation cannot land.
+  // Programmatic select events can precede selective route hydration under load.
+  // The held request makes retrying safe: only the first handled change can mutate.
   await expect(async () => {
     await preference.selectOption('dark')
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark', {
@@ -148,7 +147,7 @@ test('failed update still restores the theme after Profile unmounts', async ({
     await held
     await route.fulfill({ status: 500, body: 'preference unavailable' })
   })
-  await page.goto(`${authSessions.origin}/profile`)
+  await gotoHydrated(page, `${authSessions.origin}/profile`)
   await page.getByRole('combobox', { name: 'Theme preference' }).selectOption('dark')
   await authSessions.sql(
     `INSERT INTO account_preference (account_id, theme)
@@ -184,7 +183,7 @@ test('theme controls disable while one account update is pending', async ({
     await held
     await route.fulfill({ response })
   })
-  await page.goto(`${authSessions.origin}/profile`)
+  await gotoHydrated(page, `${authSessions.origin}/profile`)
 
   const preference = page.getByRole('combobox', { name: 'Theme preference' })
   await preference.selectOption('dark')

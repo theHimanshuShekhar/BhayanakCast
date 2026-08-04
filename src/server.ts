@@ -60,6 +60,7 @@ import { bindDeletionRuntime } from './server/profile/deletion-service'
 import { createAccountLifecycleAnalytics } from './server/observability/account-lifecycle-analytics'
 import type { ServerRuntime } from './server/runtime'
 export { createServerRuntime } from './server/runtime'
+export { runRetention } from './server/retention/retention-service'
 export {
   parseTrustedProxyIps,
   resolveTrustedClientIp,

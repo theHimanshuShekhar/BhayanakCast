@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test'
-import { test } from './fixtures'
+import { test, gotoHydrated } from './fixtures'
 
 const ACCEPTED_FONT_SIZES = [13, 14, 16, 18, 24, 30, 36]
 
@@ -65,7 +65,7 @@ test('compact Room typography remains on-scale and operable at 200% zoom', async
   })
   const page = await signedIn.context.newPage()
   await page.setViewportSize({ width: 1440, height: 1000 })
-  await page.goto('/')
+  await gotoHydrated(page, '/')
   await page
     .getByTestId('home-bottom-navigation')
     .getByRole('button', { name: 'Create room' })

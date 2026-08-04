@@ -1,12 +1,11 @@
-import { Pool } from 'pg'
-import { runRetention } from '../src/server/retention/retention-service'
+import * as server from '../dist/server/index.js'
 
-const databaseUrl = process.env.DATABASE_URL?.trim()
-if (!databaseUrl) throw new Error('DATABASE_URL is required')
+if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required')
+const runtime = server.createServerRuntime(process.env)
 
-const pool = new Pool({ connectionString: databaseUrl, max: 1 })
 try {
-  const result = await runRetention(pool)
+  await runtime.migrate()
+  const result = await server.runRetention(runtime.getDatabasePool())
   console.info(
     JSON.stringify({
       timestamp: result.ranAt.toISOString(),
@@ -18,5 +17,5 @@ try {
     }),
   )
 } finally {
-  await pool.end()
+  await runtime.close()
 }
