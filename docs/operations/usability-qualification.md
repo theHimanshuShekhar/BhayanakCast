@@ -190,6 +190,25 @@ Close the rehearsal browser before the participant arrives, and confirm the room
 holds only the confederate: a leftover member or stale Stream from earlier development
 changes what the participant sees.
 
+The qualifying study needs a **clean database**, not merely a clean room. Step 2 asks the
+participant to "find a room you'd want to be in", so the discovery list is part of the
+journey being scored. A development database carries demo fixtures and leftover rooms
+named `TEST`, `TESTTEST`, and `The Very Long Room Name That Someone Inevitably Types` —
+a participant browsing those is not evaluating the product, and their hesitation would be
+recorded as a `find_room` usability failure the product does not deserve.
+
+Start the study database from an empty volume and let the server migrate it:
+
+```bash
+docker compose -f compose.yml -f compose.dev.yml down -v
+docker compose -f compose.yml -f compose.dev.yml up -d postgres valkey
+pnpm build && pnpm start
+node --env-file-if-exists=.env scripts/usability-study-setup.mjs
+```
+
+Then confirm `/` lists only the confederate's room before the first session. A discovery
+list holding anything else invalidates the session.
+
 ### Per session
 
 1. Screen and schedule. Confirm client, browser, and viewport stage; record them.

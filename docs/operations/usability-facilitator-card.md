@@ -6,6 +6,8 @@ One page for use during a session. The full rules are in
 ## Before the participant arrives
 
 ```bash
+docker compose -f compose.yml -f compose.dev.yml down -v          # empty volume: no dev fixtures
+docker compose -f compose.yml -f compose.dev.yml up -d postgres valkey
 pnpm build && pnpm start                                          # production build, not pnpm dev
 node --env-file-if-exists=.env scripts/usability-study-setup.mjs  # study Accounts + cookies
 ```
@@ -29,6 +31,7 @@ stranger in the roster changes what the participant sees.
 - [ ] Confederate Host streaming in a public room
 - [ ] Rehearsal watch played video and rehearsal chat posted
 - [ ] Rehearsal browser closed, its Account signed out
+- [ ] `/` lists **only** the confederate's room — no `TEST` or demo fixtures
 - [ ] Participant browser: fresh profile, signed out, at `/`
 - [ ] `study/usability-results.json` open, `study/evidence/` ready for screenshots
 - [ ] Observer present, stopwatch ready, and **not** the facilitator
