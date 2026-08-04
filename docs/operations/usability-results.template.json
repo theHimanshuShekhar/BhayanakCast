@@ -14,6 +14,9 @@
       "viewport_stage": "1280+",
       "facilitator": "REPLACE_WITH_INITIALS",
       "observer": "REPLACE_WITH_DIFFERENT_INITIALS",
+      "keyboard_only": true,
+      "keyboard_findings": "Focus reached every control; focus ring was hard to see on the watch control.",
+      "replay_console_a11y": "none",
       "steps": {
         "sign_in": { "result": "pass", "seconds": 31, "difficulty": 1 },
         "find_room": { "result": "pass", "seconds": 22, "difficulty": 2 },
@@ -21,6 +24,7 @@
         "chat": { "result": "pass", "seconds": 14, "difficulty": 1 },
         "leave": { "result": "pass", "seconds": 11, "difficulty": 1 }
       },
+      "states_observed": { "find_room": "loading", "chat": "not_reached" },
       "notes": "Dry run. Observed behavior only — no chat bodies, no identities."
     },
     {
@@ -33,6 +37,8 @@
       "viewport_stage": "390",
       "facilitator": "REPLACE_WITH_INITIALS",
       "observer": "REPLACE_WITH_DIFFERENT_INITIALS",
+      "keyboard_only": false,
+      "replay_console_a11y": "One console warning on room mount; no a11y-tree violations at 390.",
       "steps": {
         "sign_in": { "result": "pass", "seconds": 44, "difficulty": 2 },
         "find_room": { "result": "pass", "seconds": 37, "difficulty": 2 },
@@ -47,6 +53,7 @@
         "chat": { "result": "pass", "seconds": 29, "difficulty": 2 },
         "leave": { "result": "pass", "seconds": 12, "difficulty": 1 }
       },
+      "states_observed": { "stream_or_watch": "error", "leave": "not_reached" },
       "notes": "Delete the example rows before the qualifying study; keep the shape."
     },
     {
@@ -60,6 +67,8 @@
       "viewport_stage": "768-1279",
       "facilitator": "REPLACE_WITH_INITIALS",
       "observer": "REPLACE_WITH_DIFFERENT_INITIALS",
+      "keyboard_only": false,
+      "replay_console_a11y": "Struck before replay; recorded as 'none'.",
       "steps": {
         "sign_in": { "result": "pass", "seconds": 26, "difficulty": 1 }
       },

@@ -74,6 +74,10 @@ for (const [index, session] of document.sessions.entries()) {
     throw new Error(`${at}.viewport_stage must be one of ${VIEWPORT_STAGES.join(', ')}`)
   if (!Object.hasOwn(CLIENTS, session.client))
     throw new Error(`${at}.client must be a supported client: ${Object.keys(CLIENTS).join(', ')}`)
+  if (typeof session.keyboard_only !== 'boolean')
+    throw new Error(`${at}.keyboard_only must be recorded as a boolean at screening`)
+  if (session.keyboard_only && CLIENTS[session.client].form !== 'desktop')
+    throw new Error(`${at} is keyboard_only on a ${session.client} client; §1 requires a desktop session`)
 
   if (!session.facilitator || !session.observer)
     throw new Error(`${at} needs both a facilitator and a separate observer`)
@@ -107,6 +111,11 @@ for (const [index, session] of document.sessions.entries()) {
       throw new Error(`${where} failed without a valid obstacle code`)
     if (!outcome.observation) throw new Error(`${where} failed without a one-sentence observation`)
   }
+
+  if (!session.replay_console_a11y)
+    throw new Error(`${at}.replay_console_a11y is required; record 'none' when the replay was clean`)
+  if (session.keyboard_only && !session.keyboard_findings)
+    throw new Error(`${at} is the keyboard-only session and must carry keyboard_findings`)
 }
 
 const qualifying = document.sessions.filter((session) => session.struck !== true && session.dry_run !== true)
@@ -126,6 +135,7 @@ for (const [label, minimum, predicate] of [
   ['sessions at 1280+', 4, (session) => session.viewport_stage === '1280+'],
   ['iOS Safari sessions', 1, (session) => session.client === 'ios-safari'],
   ['Android Chrome sessions', 1, (session) => session.client === 'android-chrome'],
+  ['keyboard-only sessions', 1, (session) => session.keyboard_only === true],
 ]) {
   const actual = count(predicate)
   if (actual < minimum) shortfalls.push(`${actual} ${label}, below the required ${minimum}`)
@@ -167,6 +177,7 @@ const report = {
   struck: document.sessions.filter((session) => session.struck === true).length,
   qualifying_sessions: qualifying.length,
   unaided_completions: completed.length,
+  keyboard_only_sessions: count((session) => session.keyboard_only === true),
   rate: Number(rate.toFixed(4)),
   threshold: THRESHOLD,
   gate,
