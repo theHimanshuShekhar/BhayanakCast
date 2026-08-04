@@ -1,7 +1,24 @@
+# Local overlay: publishes Postgres and Valkey to the loopback interface so `pnpm dev`,
+# Playwright, and the usability study scripts can reach them from the host.
+#
+# The published ports need `devhost` as well as `data`. `compose.yml` declares `data` as
+# `internal: true`, and Docker silently drops host bindings on an internal-only container
+# rather than failing, so an overlay that adds `ports` alone appears to work while
+# 127.0.0.1:5432 stays closed. `devhost` is a plain bridge that exists only in this file,
+# so scripts/check-compose-exposure.mjs still sees the private production topology.
 services:
   postgres:
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    networks:
+      - data
+      - devhost
   valkey:
     ports:
       - "127.0.0.1:${VALKEY_PORT:-6379}:6379"
+    networks:
+      - data
+      - devhost
+
+networks:
+  devhost:
