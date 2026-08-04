@@ -156,21 +156,53 @@ A single person may not hold both roles. Sessions with only a facilitator are st
 
 ## 5. Session procedure
 
+### Study environment
+
+Run the study against the **production build**, never `pnpm dev`:
+
+```bash
+pnpm build && pnpm start
+node --env-file-if-exists=.env scripts/usability-study-setup.mjs
+```
+
+Under the rsbuild dev server the server functions resolve their own copy of
+`src/server/rooms/room-runtime`, so `bindRoomRealtimeRuntime` never reaches them and
+`startStream` answers `Stream service is not configured`. Screen sharing is therefore
+impossible under `pnpm dev`. Playwright already runs `pnpm build && pnpm start` for the
+same reason.
+
+The setup script seeds two study-owned Accounts and prints their signed session cookies:
+
+| Account | Use |
+| --- | --- |
+| `Study Host` | The confederate. Opens a public room, starts a Stream, and stays streaming for the session so watch-branch participants have something real to find. |
+| `Study Rehearsal` | The facilitator's pre-session check. Joins the room, watches, and sends one message to prove the environment before the participant arrives. |
+
+Neither Account is a participant and neither ever produces a result row. They are seeded
+rather than signed in through Discord because a study-owned prop should not need a real
+person's credentials before every session. Each has its own Account because ADR 0040
+allows one connection per Account — reusing one cookie in two browsers displaces the
+first, which silently breaks the confederate's Stream.
+
+Close the rehearsal browser before the participant arrives, and confirm the room's roster
+holds only the confederate: a leftover member or stale Stream from earlier development
+changes what the participant sees.
+
+### Per session
+
 1. Screen and schedule. Confirm client, browser, and viewport stage; record them.
 2. Assign participant code `P##`. Never write the real identity into study artifacts.
 3. Start recording. Read the consent script. Log consent timestamp.
-4. Open a fresh browser profile at the study origin, signed out, at `/`.
-   - Watch-branch sessions need something to watch. Before the participant arrives, a
-     confederate Host on a Chromium desktop opens a public room and starts a Stream, and
-     keeps it running for the session. This setup is the study's, not the participant's,
-     and is never scored.
+4. Bring the environment up as above, then open a fresh browser profile at the study
+   origin, signed out, at `/`. `docs/operations/usability-facilitator-card.md` is the
+   one-page version to hold during the session.
 5. Run the five steps in order. Observer starts a stopwatch per step.
 6. After each step: difficulty rating 1–5, then move on. A failed step does **not** end
    the session — set the participant up at the next step's starting state manually
    (this setup is not scored) and continue, so later steps still yield data.
 7. Post-session: three open questions — what was confusing, what was missing, would you
    come back. Free-text, no product content.
-8. Offer Account deletion. Stop recording. Write the result row.
+8. Offer Account deletion. Stop recording. Append the row to the results file.
 9. Discard the recording within 7 days; the result row and screenshots are the retained
    evidence.
 
