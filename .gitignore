@@ -33,6 +33,9 @@ coverage/
 test-results/
 playwright-report/
 
+# Usability study artifacts: participant-adjacent, reviewed before they leave the machine
+study/
+
 # Local/editor files
 *.local
 .DS_Store
