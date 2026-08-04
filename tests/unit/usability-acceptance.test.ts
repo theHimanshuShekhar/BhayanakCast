@@ -66,6 +66,12 @@ function cohort(
       viewport_stage: REPRESENTATIVE_VIEWPORTS[index % REPRESENTATIVE_VIEWPORTS.length],
       facilitator: 'FA',
       observer: 'OB',
+      // Slot 3 is a desktop slot, so it carries the §1 keyboard-only session by default.
+      keyboard_only: index % REPRESENTATIVE_CLIENTS.length === 3,
+      ...(index % REPRESENTATIVE_CLIENTS.length === 3
+        ? { keyboard_findings: 'Focus order held; the focus ring was faint on the watch control.' }
+        : {}),
+      replay_console_a11y: 'none',
       struck: false,
       steps: Object.fromEntries(
         STEPS.map((step) => [step, steps[step] ?? { result: 'pass', seconds: 20, difficulty: 2 }]),
@@ -221,6 +227,24 @@ describe('cohort representativeness', () => {
 
     expect(status).toBe(1)
     expect(stderr).toContain('must be a supported client')
+  })
+
+  test('refuses a cohort with no keyboard-only session', () => {
+    const { status, report } = run(cohort(10, () => ({ session: { keyboard_only: false } })))
+
+    expect(status).toBe(1)
+    expect(report.rate).toBe(1)
+    expect(report.gate).toBe('unproven')
+    expect(report.keyboard_only_sessions).toBe(0)
+    expect(report.cohort_shortfalls).toEqual([expect.stringContaining('0 keyboard-only sessions')])
+  })
+
+  test('rejects a keyboard-only session recorded on a mobile client', () => {
+    // Keyboard-only is a desktop claim; a touch client cannot evidence focus order.
+    const { status, stderr } = run(cohort(10, (index) => ({ session: index === 0 ? { keyboard_only: true } : {} })))
+
+    expect(status).toBe(1)
+    expect(stderr).toContain('§1 requires a desktop session')
   })
 })
 
@@ -383,6 +407,36 @@ describe('capture integrity', () => {
     expect(status).toBe(0)
     expect(report.struck).toBe(1)
     expect(report.qualifying_sessions).toBe(10)
+  })
+
+  test('rejects a scored session with no post-session replay finding', () => {
+    const sessions = cohort(10)
+    delete sessions[5].replay_console_a11y
+
+    const { status, stderr } = run(sessions)
+
+    expect(status).toBe(1)
+    expect(stderr).toContain('replay_console_a11y is required')
+  })
+
+  test('rejects the keyboard-only session when it carries no keyboard findings', () => {
+    const sessions = cohort(10)
+    delete sessions[3].keyboard_findings
+
+    const { status, stderr } = run(sessions)
+
+    expect(status).toBe(1)
+    expect(stderr).toContain('must carry keyboard_findings')
+  })
+
+  test('rejects a session with no recorded keyboard_only decision', () => {
+    const sessions = cohort(10)
+    delete sessions[0].keyboard_only
+
+    const { status, stderr } = run(sessions)
+
+    expect(status).toBe(1)
+    expect(stderr).toContain('keyboard_only must be recorded as a boolean')
   })
 })
 
