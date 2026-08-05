@@ -70,17 +70,19 @@ export interface MessageContext {
     refreshes, and failing section queries, so "no console output" was never the right gate
     — it would force those specs to pretend the failure they are testing did not happen.
 
-    What must stay at zero is output that means the product is broken however the test drove
-    it, plus anything this classifier does not recognise. An unrecognised message fails the
-    matrix rather than passing silently, so a new class of error cannot slip in behind an
-    allowlist.
+    Every tolerance is keyed to a declared name, never to a count, and the default is to
+    fail:
 
-    Two distinctions carry the weight. A *mismatch* ("didn't match") means the server and
-    client disagreed and is a defect; a *recovery* notice means React caught a thrown error
-    and re-rendered, which is the expected consequence of a spec that induces one. And both
-    quarantines are keyed by name — a component for a mismatch, a spec for an induced
-    failure — because a numeric budget would silently absorb the next unrelated occurrence
-    while a name cannot. */
+    - A *mismatch* ("didn't match") is a defect unless the message names a component in
+      `knownHydrationSources`. Name the component, not a shared CSS class: an earlier
+      version quarantined `home-metrics-skeleton`, which `HomeFilters` also renders, so a
+      second component's mismatch was absorbed under the first one's ticket.
+    - Network, storage, and React-recovery output is tolerated only from a spec listed in
+      `inducedFailureSpecs`. The same output from an undeclared spec is `unclassified` and
+      fails, so a genuine 500 cannot hide behind the fact that some other spec provokes
+      one. Adding a spec that deliberately breaks something means declaring it.
+
+    Anything unrecognised also fails, so a new class of error cannot slip in silently. */
 export function classifyBrowserMessage(
   message: string,
   context: MessageContext = { file: '', knownHydrationSources: [], inducedFailureSpecs: [] },
@@ -90,12 +92,16 @@ export function classifyBrowserMessage(
       ? 'known-hydration'
       : 'hydration'
   }
+  const induced = context.inducedFailureSpecs.includes(context.file)
   if (/React was able to recover|error while hydrating/i.test(message)) {
-    return context.inducedFailureSpecs.includes(context.file) ? 'induced-render' : 'react-recovery'
+    return induced ? 'induced-render' : 'react-recovery'
   }
-  if (/Failed to load resource|net::ERR_/i.test(message)) return 'induced-network'
-  if (/Access is denied for this document|localStorage|sessionStorage/i.test(message))
-    return 'induced-storage'
+  if (/Failed to load resource|net::ERR_/i.test(message)) {
+    return induced ? 'induced-network' : 'unclassified'
+  }
+  if (/Access is denied for this document|localStorage|sessionStorage/i.test(message)) {
+    return induced ? 'induced-storage' : 'unclassified'
+  }
   return 'unclassified'
 }
 

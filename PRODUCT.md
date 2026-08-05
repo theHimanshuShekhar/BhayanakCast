@@ -134,8 +134,8 @@ BhayanakCast is a public community clubhouse for small social screen-sharing roo
 - PostgreSQL receives encrypted daily same-site NAS backups retained for 30 days; exercise a documented restore monthly. Up to 24 hours of persisted data loss and no recovery guarantee for a home/site-wide loss are accepted.
 - Launch as a single production application/signaling node. Prove 25 simultaneous full rooms (250 active members) before launch; horizontal scaling is out of scope.
 - Scheduled interruptions may disconnect live rooms; provide advance warning where practical and document recovery behavior.
-- At least 90% of a representative usability cohort must complete the core journey unaided: sign in; discover, create, or join; start or watch; chat; and leave.
-- At the 25-room target, at least 99% of compatible watch attempts on consumer Wi-Fi/residential broadband or normal cellular must establish direct media without manual retry.
+- The core journey must work unaided — sign in; discover, create, or join; start or watch; chat; and leave — proven by the browser journey matrix and operator walkthrough. V1 does not gate launch on a measured cohort completion rate (ADR 0013, amended 2026-08-05).
+- At the 25-room target, at least 99% of compatible watch attempts on consumer Wi-Fi/residential broadband or normal cellular must establish direct media without manual retry. Measured post-launch from the self-hosted PostHog inventory rather than pre-launch: sampling real consumer networks is not something the repository can produce (#27 rescope).
 - Engagement is observed qualitatively at launch; it has no numeric release threshold.
 
 ## UI direction

@@ -1,13 +1,24 @@
 # Usability qualification protocol
 
-Qualifies the ADR 0013 launch criterion: **at least 90% of a representative usability
-cohort completes the core journey unaided**. ADR 0013 also requires that the cohort be
+> **Not a V1 launch gate.** ADR 0013 was amended on 2026-08-05: the 90% unaided-completion
+> cohort study is no longer required to ship V1. BhayanakCast is a hobby project, and
+> recruiting a representative cohort with consent, a separate observer, and per-session
+> scoring is disproportionate to that scope. V1 confidence comes from the ADR 0106 browser
+> journey matrix (`ops/evidence/v1-journey-matrix.json`) plus operator walkthrough.
+>
+> This protocol is kept because it is the expensive part to rebuild, and it stays correct
+> if the study is ever run. Nothing below has been weakened to make it easier to pass — in
+> particular `scripts/usability-acceptance.mjs` still refuses to certify a cohort that
+> misses any §1 minimum. If the study is run later, it is run as written.
+
+Describes how to qualify the **withdrawn** ADR 0013 criterion: at least 90% of a
+representative usability cohort completes the core journey unaided, with the cohort being
 representative rather than internal implementers alone.
 
-This document is the protocol. It is authored and dry-run by the implementation team;
-the qualifying study itself is run by a facilitator against a real external cohort. No
-agent, Playwright run, or synthetic browser session substitutes for cohort results
-(ADR 0106 §3 — Playwright proves browser-observable journeys, not launch usability).
+The protocol is authored and dry-run by the implementation team; the study itself is run
+by a facilitator against a real external cohort. No agent, Playwright run, or synthetic
+browser session substitutes for cohort results (ADR 0106 §3 — Playwright proves
+browser-observable journeys, not launch usability).
 
 ## 1. Cohort definition
 

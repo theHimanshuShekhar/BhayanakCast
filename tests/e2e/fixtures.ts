@@ -137,6 +137,24 @@ export async function gotoHydrated(page: Page, url: string) {
   await expect(page.locator('body')).toHaveAttribute('data-hydrated', 'true')
 }
 
+/** Waits until the admitted room reports a live realtime connection.
+
+    Watch and Start are disabled while `connection` is anything but `live`, so a spec that
+    clicks them straight after admission is racing the socket join. That race used to be
+    absorbed by `retries: 1`; with retries disabled it surfaces as a 15s action timeout on
+    an element that exists but stays disabled, which reads like a missing control rather
+    than a precondition that had not been met.
+
+    The explicit timeout is deliberate: under a full-suite run every test owns a server, so
+    a join can be slow without anything being wrong. Bounding this wait by the test timeout
+    rather than the action timeout keeps a genuinely missing control a fast failure. */
+export async function expectRoomLive(page: Page) {
+  await expect(page.locator('[data-room-state="admitted"]')).toBeVisible()
+  await expect(page.locator('[data-connection="live"]').first()).toBeAttached({
+    timeout: 30_000,
+  })
+}
+
 
 /** Preflight zeroes the auto margins the UA uses to centre an open modal, so a
     dialog only sits in the middle of the viewport while the base `dialog` rule

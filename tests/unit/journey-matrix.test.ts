@@ -105,25 +105,45 @@ describe('journey matrix verdict', () => {
     expect(evaluateJourneyMatrix(blind, expectations).checks.screenshotsRecorded).toBe(false)
   })
 
-  /** The suite deliberately drops sockets, denies storage, and requests missing rooms.
-      Those specs must be able to record what they provoked without failing the matrix. */
-  it('tolerates the failures the suite deliberately induces', () => {
-    const induced = [
-      ...passing.slice(1),
-      record({
-        consoleErrors: [
-          'Failed to load resource: the server responded with a status of 404 ()',
-          'Failed to load resource: net::ERR_INTERNET_DISCONNECTED',
-          "Failed to read the 'localStorage' property from 'Window': Access is denied for this document",
-        ],
-      }),
+  /** Induced network and storage output is tolerated only from a spec that declares it.
+      An undeclared spec producing the same output is a real defect, not scenery. */
+  it('tolerates induced failures only from the spec that declares them', () => {
+    const messages = [
+      'Failed to load resource: the server responded with a status of 500 (Internal Server Error)',
+      'Failed to load resource: net::ERR_INTERNET_DISCONNECTED',
+      "Failed to read the 'localStorage' property from 'Window': Access is denied for this document",
     ]
-    const evaluated = evaluateJourneyMatrix(induced, expectations)
+    const declared = record({
+      file: 'tests/e2e/home-section-recovery.spec.ts',
+      consoleErrors: messages,
+    })
+    const tolerated = evaluateJourneyMatrix([...passing.slice(1), declared], expectations)
 
-    expect(evaluated.summary.inducedNetworkMessageCount).toBe(2)
-    expect(evaluated.summary.inducedStorageMessageCount).toBe(1)
-    expect(evaluated.summary.unclassifiedMessages).toEqual([])
-    expect(evaluated.verdict).toBe('pass')
+    expect(tolerated.summary.inducedNetworkMessageCount).toBe(2)
+    expect(tolerated.summary.inducedStorageMessageCount).toBe(1)
+    expect(tolerated.summary.unclassifiedMessages).toEqual([])
+    expect(tolerated.verdict).toBe('pass')
+
+    const undeclared = record({ file: 'tests/e2e/room-chat.spec.ts', consoleErrors: messages })
+    const regressed = evaluateJourneyMatrix([...passing.slice(1), undeclared], expectations)
+
+    expect(regressed.summary.unclassifiedMessages).toHaveLength(3)
+    expect(regressed.checks.noUnclassifiedMessages).toBe(false)
+    expect(regressed.verdict).toBe('fail')
+  })
+
+  /** A shared CSS class as a quarantine key absorbed a second component's mismatch, which
+      is why the key is a component name. */
+  it('does not quarantine a second component behind a shared skeleton class', () => {
+    const other = record({
+      consoleErrors: [
+        "Hydration failed: <HomeFilters> ... className=\"home-section-skeleton home-metrics-skeleton\" didn't match",
+      ],
+    })
+    const evaluated = evaluateJourneyMatrix([...passing.slice(1), other], expectations)
+
+    expect(evaluated.checks.noHydrationMismatch).toBe(false)
+    expect(evaluated.verdict).toBe('fail')
   })
 
   /** A named quarantine, not a numeric budget: the ticketed mismatch is tolerated while an

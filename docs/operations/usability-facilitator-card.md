@@ -1,5 +1,8 @@
 # Facilitator card
 
+> Post-V1. ADR 0013 was amended on 2026-08-05 and this study no longer gates a V1 release.
+> The card stays accurate for whenever the study is run.
+
 One page for use during a session. The full rules are in
 `docs/operations/usability-qualification.md`; this is the part you hold.
 

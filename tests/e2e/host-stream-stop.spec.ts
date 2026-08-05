@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { Page } from '@playwright/test'
-import { expect, test, gotoHydrated } from './fixtures'
+import { expect, test, gotoHydrated, expectRoomLive } from './fixtures'
 import type { AuthSessionFixture } from './fixtures'
 import { installWebRtcProbe } from '../helpers/webrtc'
 
@@ -94,10 +94,11 @@ test('Host stops one member Stream while viewers fall back and the owner stays e
       [streamId, roomId, ownerMembershipId],
     )
     await Promise.all([hostPage.reload(), viewerPage.reload()])
+    // Both pages just reloaded, so the socket has to rejoin before Watch is enabled.
     await Promise.all([
-      expect(hostPage.locator('[data-room-state="admitted"]')).toBeVisible(),
-      expect(ownerPage.locator('[data-room-state="admitted"]')).toBeVisible(),
-      expect(viewerPage.locator('[data-room-state="admitted"]')).toBeVisible(),
+      expectRoomLive(hostPage),
+      expectRoomLive(ownerPage),
+      expectRoomLive(viewerPage),
     ])
 
     const viewerMenuTrigger = viewerPage.getByRole('button', {

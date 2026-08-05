@@ -24,16 +24,37 @@ const EXPECTATIONS: JourneyExpectations = {
   requiredRoutes: ['/', '/rooms/:id'],
   requiredStages: ['390', '768-1279', '1280+'],
   minimumMultiAccountTests: 5,
-  /** #30: Home streams statistics into a shape-matched skeleton per DESIGN.md, but the
+  /** #30: Home streams these sections into shape-matched skeletons per DESIGN.md, but the
       branch is a manual `pending` boolean rather than a Suspense boundary, so when the
       dehydrated payload lands before hydration the client renders the resolved section
-      against the server's skeleton. Quarantined by component name so any other component
-      producing a mismatch still fails this gate; #30 empties this list. */
-  knownHydrationSources: ['StatisticsStrip', 'home-metrics-skeleton'],
-  /** This spec makes Home section queries fail on purpose to prove inline Retry, so React's
-      "recovered by re-rendering" notice is the behaviour under test. Named, not budgeted:
-      the same notice from any other spec still fails the matrix. */
-  inducedFailureSpecs: ['tests/e2e/home-section-recovery.spec.ts'],
+      against the server's skeleton. Named by component, never by the shared
+      `home-metrics-skeleton` class both render — a class would absorb a third component's
+      mismatch under this ticket. #30 empties this list. */
+  knownHydrationSources: ['StatisticsStrip', 'HomeFilters'],
+  /** Specs that deliberately break something: dropped sockets, denied storage, failing
+      section queries, rejected mutations. Their network, storage, and React-recovery output
+      is the behaviour under test. The same output from any spec absent here is
+      unclassified and fails, so a real 500 cannot hide behind a spec that provokes one. */
+  inducedFailureSpecs: [
+    'tests/e2e/admin-reports.spec.ts',
+    'tests/e2e/admin-room-termination.spec.ts',
+    'tests/e2e/admin-sanctions.spec.ts',
+    'tests/e2e/create-and-open-room.spec.ts',
+    'tests/e2e/home-discovery.spec.ts',
+    'tests/e2e/home-reconnect.spec.ts',
+    'tests/e2e/home-search.spec.ts',
+    'tests/e2e/home-section-recovery.spec.ts',
+    'tests/e2e/home-shell.spec.ts',
+    'tests/e2e/profile-deletion.spec.ts',
+    'tests/e2e/profile-mutes.spec.ts',
+    'tests/e2e/profile-theme.spec.ts',
+    'tests/e2e/public-profile-boundary.spec.ts',
+    'tests/e2e/room-chat.spec.ts',
+    'tests/e2e/room-host-transfer.spec.ts',
+    'tests/e2e/room-oauth-return.spec.ts',
+    'tests/e2e/room-shell.spec.ts',
+    'tests/e2e/root-theme.spec.ts',
+  ],
   maximumImpactfulAxeViolations: 0,
 }
 
