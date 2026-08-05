@@ -24,13 +24,10 @@ const EXPECTATIONS: JourneyExpectations = {
   requiredRoutes: ['/', '/rooms/:id'],
   requiredStages: ['390', '768-1279', '1280+'],
   minimumMultiAccountTests: 5,
-  /** #30: Home streams these sections into shape-matched skeletons per DESIGN.md, but the
-      branch is a manual `pending` boolean rather than a Suspense boundary, so when the
-      dehydrated payload lands before hydration the client renders the resolved section
-      against the server's skeleton. Named by component, never by the shared
-      `home-metrics-skeleton` class both render — a class would absorb a third component's
-      mismatch under this ticket. #30 empties this list. */
-  knownHydrationSources: ['StatisticsStrip', 'HomeFilters'],
+  /** Empty, and it must stay that way: a hydration mismatch is a defect, not a budget line.
+      #30 removed the last entries by holding the unawaited Home sections on their skeletons
+      through the hydration render. */
+  knownHydrationSources: [],
   /** Specs that deliberately break something: dropped sockets, denied storage, failing
       section queries, rejected mutations. Their network, storage, and React-recovery output
       is the behaviour under test. The same output from any spec absent here is

@@ -245,10 +245,19 @@ test('Home hydrates critical SSR sections without duplicate browser fetches', as
   const serverResponse = await signedIn.context.request.get('/')
   expect(serverResponse.ok()).toBe(true)
   const serverHtml = await serverResponse.text()
+  // ADR 0098 splits Home in two: the loader blocks on discovery and visible Past Streams so
+  // that content is server-rendered and indexable, while facets, statistics, and connected
+  // presence prefetch non-blockingly into shape-matched skeletons. This asserted content for
+  // all five, which passed only because the unawaited prefetches usually resolved before the
+  // render — encoding a race as a requirement, and contradicting the accepted decision.
   expect(serverHtml).toMatch(/aria-label="Live Rooms"/)
-  expect(serverHtml).toMatch(/<h2[^>]*>Filters<\/h2>/)
-  expect(serverHtml).toMatch(/<h2[^>]*>Statistics<\/h2>/)
-  expect(serverHtml).toMatch(/data-testid="home-counter"/)
+  expect(serverHtml).toMatch(/data-home-center-region="past-streams"/)
+  expect(serverHtml).not.toMatch(/<h2[^>]*>Filters<\/h2>/)
+  expect(serverHtml).not.toMatch(/<h2[^>]*>Statistics<\/h2>/)
+  expect(serverHtml).not.toMatch(/data-testid="home-counter"/)
+  for (const label of ['Loading filters', 'Loading statistics', 'Loading connected presence']) {
+    expect(serverHtml).toContain(`aria-label="${label}"`)
+  }
 
   const requests: string[] = []
   signedIn.context.on('request', (request) => {
@@ -263,6 +272,13 @@ test('Home hydrates critical SSR sections without duplicate browser fetches', as
   await page.goto('/')
   await expect(page.getByRole('region', { name: 'Live Rooms' })).toBeVisible()
   await expect(page.getByRole('region', { name: 'Past Streams' })).toBeVisible()
+  // The skeletons the server sent must resolve into their real sections once hydrated, and
+  // must do so from the dehydrated cache rather than a second trip to the server.
+  await expect(page.getByTestId('home-statistics')).toBeVisible()
+  // Attached rather than visible: at the wide stage the rail draws the count and this
+  // counter is display:none, while its boundary still owns the pending and failed states.
+  await expect(page.getByTestId('home-counter')).toBeAttached()
+  await expect(page.locator('.home-section-skeleton')).toHaveCount(0)
   await page.waitForTimeout(250)
   expect(requests.filter((url) => !url.includes('/socket.io/'))).toHaveLength(1)
 })

@@ -128,6 +128,7 @@ export function HomeSearch({
         label="Filters"
         pending={facetsPending && !facets}
         queryKey={facetsQueryKey}
+        streamed
         skeleton={<HomeMetricsSkeleton label="Loading filters" />}
       >
         <HomeFilters facets={facets} onChange={updateSearch} search={search} />

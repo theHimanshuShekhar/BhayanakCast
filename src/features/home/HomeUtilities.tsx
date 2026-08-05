@@ -66,6 +66,7 @@ export function HomeUtilities({
         label="Connected presence"
         pending={presencePending && !presence}
         queryKey={presenceQueryKey}
+        streamed
         skeleton={<HomeMetricsSkeleton label="Loading connected presence" />}
       >
         <PresenceCounter

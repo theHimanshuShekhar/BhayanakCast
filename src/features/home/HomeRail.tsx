@@ -49,6 +49,7 @@ export function HomeRail({
             label="Statistics"
             pending={statisticsPending && !statistics}
             queryKey={statisticsQueryKey}
+            streamed
             skeleton={<HomeMetricsSkeleton label="Loading statistics" />}
           >
             <StatisticsStrip statistics={statistics} />

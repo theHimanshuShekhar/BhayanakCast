@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { Page } from '@playwright/test'
-import { expect, test, gotoHydrated, expectRoomLive } from './fixtures'
+import { expect, test, gotoHydrated } from './fixtures'
 import type { AuthSessionFixture } from './fixtures'
 import { installWebRtcProbe } from '../helpers/webrtc'
 
@@ -94,11 +94,10 @@ test('Host stops one member Stream while viewers fall back and the owner stays e
       [streamId, roomId, ownerMembershipId],
     )
     await Promise.all([hostPage.reload(), viewerPage.reload()])
-    // Both pages just reloaded, so the socket has to rejoin before Watch is enabled.
     await Promise.all([
-      expectRoomLive(hostPage),
-      expectRoomLive(ownerPage),
-      expectRoomLive(viewerPage),
+      expect(hostPage.locator('[data-room-state="admitted"]')).toBeVisible(),
+      expect(ownerPage.locator('[data-room-state="admitted"]')).toBeVisible(),
+      expect(viewerPage.locator('[data-room-state="admitted"]')).toBeVisible(),
     ])
 
     const viewerMenuTrigger = viewerPage.getByRole('button', {
@@ -115,7 +114,13 @@ test('Host stops one member Stream while viewers fall back and the owner stays e
     const viewerTile = viewerPage
       .getByRole('listitem')
       .filter({ has: viewerPage.getByText('Stream Owner', { exact: true }) })
-    await viewerTile.getByRole('button', { name: 'Watch', exact: true }).click()
+    const watch = viewerTile.getByRole('button', { name: 'Watch', exact: true })
+    // Watch stays disabled until the media probe and the rejoined socket both settle, and
+    // both pages reloaded a moment ago. Waiting for the control to become actionable — rather
+    // than clicking into the 15s action timeout — makes the precondition explicit without
+    // asserting which of the two gates is still closed.
+    await expect(watch).toBeEnabled({ timeout: 30_000 })
+    await watch.click()
     await expect(viewerTile.getByText(/Connecting… attempt/)).toBeVisible()
 
     await hostPage.getByRole('button', { name: 'People' }).click()
