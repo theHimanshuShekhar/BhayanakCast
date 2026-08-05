@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
+import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import type { BrowserContext, Page, TestInfo } from '@playwright/test'
 import type {
@@ -19,8 +20,13 @@ import type {
     Records land as one file per test under `ops/evidence/journey-matrix/records/`.
     Playwright workers are separate processes, so a file per test avoids the cross-worker
     coordination a single shared file would need. */
-
-const RECORD_DIRECTORY = 'ops/evidence/journey-matrix/records'
+/** Outside the working tree on purpose. These are scratch files for one run, and an
+    untracked directory under `ops/` is one `git clean`, `git stash`, or branch switch in
+    another session away from being deleted mid-run — which silently drops records and makes
+    the matrix under-count tests rather than fail loudly. The driver passes the directory in;
+    the fallback keeps a bare `pnpm test:e2e` working. */
+const RECORD_DIRECTORY =
+  process.env.JOURNEY_RECORD_DIR ?? join(tmpdir(), 'bhayanakcast-journey-records')
 const MAX_INTERACTIONS = 200
 const MAX_MESSAGES = 50
 

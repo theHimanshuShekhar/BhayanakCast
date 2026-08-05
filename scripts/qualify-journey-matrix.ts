@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import {
   evaluateJourneyMatrix,
@@ -15,7 +16,9 @@ import {
 
     Usage: pnpm qualify:journey [--output PATH] */
 
-const RECORD_DIRECTORY = resolve('ops/evidence/journey-matrix/records')
+/** Per-run and outside the working tree, so a concurrent git operation in another session
+    cannot delete this run's records while the suite is still writing them. */
+const RECORD_DIRECTORY = join(tmpdir(), `journey-records-${process.pid}`)
 
 /** The canonical V1 journey from ADR 0013: discovery, a live room, and a public profile.
     A matrix that never reaches one of these is not the V1 contract, whatever it reports. */
@@ -71,7 +74,7 @@ const exitCode = await new Promise<number>((resolvePromise, reject) => {
   const child = spawn(
     'pnpm',
     ['test:e2e', '--', '--retries=0', '--reporter=list'],
-    { stdio: 'inherit' },
+    { stdio: 'inherit', env: { ...process.env, JOURNEY_RECORD_DIR: RECORD_DIRECTORY } },
   )
   child.on('error', reject)
   child.on('close', (code) => resolvePromise(code ?? 1))
