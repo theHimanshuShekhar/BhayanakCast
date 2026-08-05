@@ -37,7 +37,7 @@ export function RoomControlShelf({
           )}
         </div>
       )}
-      {!media.captureSupported && (
+      {media.captureSupported === false && (
         <p className="room-shelf__guidance" id="desktop-stream-guidance">
           Sharing a screen requires a Chromium-family browser on a desktop computer.
           You can still watch streams on this device after the media check passes.
@@ -100,7 +100,9 @@ function StreamSlot({
       </button>
     )
   }
-  if (!media.captureSupported) {
+  // `null` means the client has not been determined yet, so fall through to the ordinary
+  // probing copy rather than claiming this device cannot share.
+  if (media.captureSupported === false) {
     return (
       <button
         aria-describedby="desktop-stream-guidance"

@@ -3,12 +3,16 @@ import { defineConfig, devices } from '@playwright/test'
 export default defineConfig({
   testDir: './tests/e2e',
   timeout: 120_000,
-  retries: 1,
+  // The V1 journey matrix (#26) is only evidence if it passes unaided: a retry lets a
+  // flaky journey report green. A genuine flake must be fixed, not absorbed.
+  retries: 0,
   outputDir: 'test-results',
   use: {
     baseURL: 'http://127.0.0.1:3000',
     actionTimeout: 15_000,
-    trace: 'on-first-retry',
+    // `on-first-retry` cannot fire with retries disabled.
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
   },
   projects: [
     {

@@ -9,6 +9,7 @@ import {
 } from '../helpers/test-account'
 import { createTestEnvironment } from '../helpers/test-environment'
 import { startTestServer } from '../helpers/test-server'
+import { createJourneyRecorder, type JourneyRecorder } from './journey-evidence'
 
 export interface AuthenticatedBrowserContext {
   readonly context: BrowserContext
@@ -28,8 +29,33 @@ export interface AuthSessionFixture {
   ): Promise<void>
 }
 
-export const test = base.extend<{ authSessions: AuthSessionFixture }>({
-  authSessions: async ({ browser }, use, testInfo) => {
+export const test = base.extend<{
+  authSessions: AuthSessionFixture
+  journeyEvidence: JourneyRecorder
+}>({
+  /** Auto so the #26 matrix records every test, including the specs that never ask for
+      an authenticated context. Patching `browser.newContext` for the test's lifetime is
+      what makes that automatic: contexts built inside `createBrowserContext` are
+      instrumented without every spec having to opt in. */
+  journeyEvidence: [
+    async ({ browser }, use, testInfo) => {
+      const recorder = createJourneyRecorder(testInfo)
+      const openContext = browser.newContext.bind(browser)
+      browser.newContext = async (options) => {
+        const context = await openContext(options)
+        await recorder.instrumentContext(context)
+        return context
+      }
+      try {
+        await use(recorder)
+      } finally {
+        browser.newContext = openContext
+        await recorder.flush()
+      }
+    },
+    { auto: true },
+  ],
+  authSessions: async ({ browser, journeyEvidence }, use, testInfo) => {
     const environment = await createTestEnvironment(
       `e2e-${testInfo.workerIndex}-${process.pid}-${randomUUID()}`,
     )
@@ -53,6 +79,7 @@ export const test = base.extend<{ authSessions: AuthSessionFixture }>({
         },
         async createBrowserContext(profile) {
           const signedIn = await accounts!.signInDiscord(profile)
+          journeyEvidence.recordAccount()
           const separator = signedIn.sessionCookie.indexOf('=')
           if (separator < 1) throw new Error('Test sign-in returned an invalid cookie')
           const context = await browser.newContext({ baseURL: server.origin })

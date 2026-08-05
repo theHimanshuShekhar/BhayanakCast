@@ -87,7 +87,7 @@ export interface RoomMedia {
   /** Compatibility-passed alias retained for tile/control call sites. */
   readonly supported: boolean
   readonly compatibility: CompatibilityState
-  readonly captureSupported: boolean
+  readonly captureSupported: boolean | null
   readonly canWatch: boolean
   readonly publish: PublishState
   readonly localStream: MediaStream | null
@@ -120,7 +120,17 @@ export function useRoomMedia({
 }): RoomMedia {
   const { onSignal, onStreamStopped, sendSignal } = realtime
   const [compatibility, setCompatibility] = useState<CompatibilityState>('probing')
-  const [captureSupported] = useState(() => isDesktopCaptureClient())
+  /** `null` until the client has mounted.
+
+      `isDesktopCaptureClient` reads `navigator`, so a server render always answers
+      `false` while a Chromium desktop answers `true`. Resolving it during the first
+      client render therefore made the shelf hydrate a different branch than the server
+      sent, and React discarded and regenerated the subtree on every admitted-room load.
+      Staying `null` through hydration keeps both renders identical; the shelf shows its
+      ordinary probing state until the real answer arrives one effect later, so no
+      "Desktop only" copy flashes at a client that does support capture. */
+  const [captureSupported, setCaptureSupported] = useState<boolean | null>(null)
+  useEffect(() => setCaptureSupported(isDesktopCaptureClient()), [])
   const [publish, setPublish] = useState<PublishState>({ kind: 'idle' })
   const [watch, setWatch] = useState<WatchState>({ kind: 'idle' })
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
@@ -341,7 +351,7 @@ export function useRoomMedia({
     async startPublishing() {
       if (
         compatibility !== 'compatible' ||
-        !captureSupported ||
+        captureSupported !== true ||
         connection !== 'live' ||
         roomEnded ||
         publish.kind !== 'idle'

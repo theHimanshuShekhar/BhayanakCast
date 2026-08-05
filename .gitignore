@@ -33,6 +33,9 @@ coverage/
 test-results/
 playwright-report/
 ops/evidence/capacity-qualification-*.json
+# Per-test journey records are the driver's transient input; the artifact it writes and the
+# captured screenshots are the retained evidence.
+ops/evidence/journey-matrix/records/
 
 # Usability study artifacts: participant-adjacent, reviewed before they leave the machine
 study/
