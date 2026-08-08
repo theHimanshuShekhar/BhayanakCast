@@ -1,10 +1,15 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import {
   preserveRoomRosterOrder,
   type RoomRosterMember,
   type RoomWatcher,
 } from '../../server/rooms/room-roster'
-import { WATCH_MAX_ATTEMPTS, type RoomMedia, type WatchState } from './useRoomMedia'
+import {
+  WATCH_MAX_ATTEMPTS,
+  type RoomMedia,
+  type WatchBlockedReason,
+  type WatchState,
+} from './useRoomMedia'
 import { RoomMemberActions } from './RoomMemberActions'
 import { observeRoom } from './room-observability'
 
@@ -21,6 +26,16 @@ interface RoomMemberMosaicProps {
   readonly onTransferHost: ((member: RoomRosterMember) => void) | null
   readonly onStopStream: ((member: RoomRosterMember) => void) | null
 }
+
+/** Mirrors `--transition-duration-layout` and `--ease-clubhouse`: the FLIP runs
+    through the Web Animations API, which cannot read the stylesheet's tokens. */
+const TILE_MOVE_MS = 240
+const STAGE_ARRIVE_MS = 320
+const EASE_CLUBHOUSE = 'cubic-bezier(0.2, 0.8, 0.2, 1)'
+
+/** The mosaic renders on the server (ADR 0099 hydrates the admitted room), and
+    a layout effect there is both useless and noisy. */
+const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
 /** ADR 0101: every admitted member owns one stable tile, streaming or not, and
     a non-streaming member gets a presence tile anchored by their real avatar —
@@ -54,8 +69,76 @@ export function RoomMemberMosaic({
     watch.kind === 'watching' &&
     visible.some((member) => member.streamId === watch.streamId)
 
+  // The whole watch lifecycle is a sequence of silent DOM swaps: preview to
+  // `Connecting`, four attempts, then media or guidance. One polite region for
+  // the mosaic narrates it, because the viewer who most needs to know whether
+  // the click landed is the one who cannot see the tile change.
+  const watchTarget =
+    watch.kind === 'idle'
+      ? null
+      : (stableRoster.current.find((member) => member.streamId === watch.streamId) ?? null)
+  const lastWatched = useRef<string | null>(null)
+  useEffect(() => {
+    if (watchTarget) lastWatched.current = watchTarget.displayName
+  }, [watchTarget])
+  const announcement = watchAnnouncement(
+    watch,
+    watchTarget?.displayName ?? lastWatched.current,
+  )
+
+  // The one authored moment on this surface: a stream you asked for arrives
+  // and takes the stage. Without it the grid teleports — the chosen tile is
+  // suddenly full width in row one and every other member has jumped to a new
+  // place, with nothing connecting the click to the result. Tiles translate
+  // from where they were; the promoted tile also grows its media region out of
+  // the preview's footprint, so the thing you picked is visibly the thing that
+  // got bigger. Only the media scales — scaling a whole tile would smear its
+  // name and controls.
+  const mosaicRef = useRef<HTMLUListElement | null>(null)
+  const lastTileRects = useRef(new Map<string, DOMRect>())
+  useIsomorphicLayoutEffect(() => {
+    const list = mosaicRef.current
+    if (!list) return
+    const previous = lastTileRects.current
+    const current = new Map<string, DOMRect>()
+    const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    for (const node of list.children) {
+      const tile = node as HTMLElement
+      const key = tile.dataset.membershipId
+      if (!key) continue
+      const to = tile.getBoundingClientRect()
+      current.set(key, to)
+      const from = previous.get(key)
+      if (!from || still) continue
+      const dx = from.left - to.left
+      const dy = from.top - to.top
+      if (Math.abs(dx) >= 1 || Math.abs(dy) >= 1) {
+        tile.animate(
+          [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }],
+          { duration: TILE_MOVE_MS, easing: EASE_CLUBHOUSE },
+        )
+      }
+      const media = tile.querySelector<HTMLElement>('.room-mosaic__presence')
+      const grew = to.width / from.width
+      if (media && grew > 1.1) {
+        media.animate(
+          [
+            { transform: `scale(${1 / grew})`, opacity: 0.4 },
+            { transform: 'none', opacity: 1 },
+          ],
+          { duration: STAGE_ARRIVE_MS, easing: EASE_CLUBHOUSE },
+        )
+      }
+    }
+    lastTileRects.current = current
+  })
+
   return (
     <div className="room-mosaic-region">
+      <p aria-live="polite" className="visually-hidden" role="status">
+        {announcement}
+      </p>
+
       <div className="room-mosaic-region__controls">
         <label className="room-mosaic-region__filter">
           <input
@@ -82,6 +165,7 @@ export function RoomMemberMosaic({
         className="room-mosaic"
         data-has-watch={hasWatch}
         data-member-count={visible.length}
+        ref={mosaicRef}
       >
         {visible.map((member) => (
           <MemberTile
@@ -126,21 +210,78 @@ function MemberTile({
   const videoRef = useRef<HTMLVideoElement | null>(null)
   // Every watch starts muted (ADR 0101); unmuting is the viewer's own act.
   const [muted, setMuted] = useState(true)
+  const [previewFailed, setPreviewFailed] = useState(false)
+  const [fullscreenError, setFullscreenError] = useState<string | null>(null)
+  const tileId = useId()
+  const nameId = `${tileId}-name`
+  const blockId = `${tileId}-blocked`
   const you = member.membershipId === selfMembershipId
   const attempt = subscriptionFor(media.watch, member.streamId)
   const watching = attempt?.kind === 'watching'
+  // The roster can say you are streaming after your capture has already gone —
+  // a reconnect stops local media but the server still holds the Stream. Your
+  // own tile must not answer that with a stale thumbnail labelled `Live`.
+  const selfCaptureLost = you && member.streamId !== null && media.localStream === null
+  const sharing = member.streamId !== null && !selfCaptureLost
 
   useEffect(() => {
     if (!watching) setMuted(true)
   }, [watching])
+  useEffect(() => setPreviewFailed(false), [member.previewKey])
+  useEffect(() => {
+    if (!watching) setFullscreenError(null)
+  }, [watching])
+
+  const showPreview = sharing && member.previewKey !== null && !previewFailed
+  const showWatchButton =
+    sharing && !you && !watching && attempt?.kind !== 'connecting'
+  const badge = sharingLabel(attempt)
+
+  // Four conditions grey out Watch and the button looks the same for all of
+  // them. `watchBlockedReason` covers the three the media layer owns; the
+  // fourth is local — one subscription at a time, so a connect in flight
+  // blocks every other tile until it settles.
+  const otherConnecting =
+    media.watch.kind === 'connecting' && media.watch.streamId !== member.streamId
+  const watchBlock = media.watchBlockedReason
+    ? WATCH_BLOCKED_COPY[media.watchBlockedReason]
+    : otherConnecting
+      ? 'Finishing the stream you just picked. Try again in a moment.'
+      : null
+
+  // iOS Safari never implemented the standard call on a video element; it
+  // exposes `webkitEnterFullscreen` instead. Without this branch the most
+  // prominent control on a watched tile silently does nothing on the phones
+  // ADR 0014 promises to support.
+  async function enterFullscreen() {
+    const video = videoRef.current
+    if (!video) return
+    observeRoom({ name: 'room_watch_fullscreen_requested', properties: {} })
+    setFullscreenError(null)
+    const legacy = (video as HTMLVideoElement & { webkitEnterFullscreen?: () => void })
+      .webkitEnterFullscreen
+    try {
+      if (typeof video.requestFullscreen === 'function') {
+        await video.requestFullscreen()
+      } else if (typeof legacy === 'function') {
+        legacy.call(video)
+      } else {
+        setFullscreenError('This browser cannot show the stream fullscreen.')
+      }
+    } catch {
+      setFullscreenError('Your browser blocked fullscreen. Try again from this tile.')
+    }
+  }
 
   return (
     <li
+      aria-labelledby={nameId}
       className="room-mosaic__tile"
       data-member-role={member.role}
-      data-member-sharing={member.streamId !== null}
+      data-member-sharing={sharing}
       data-member-self={you}
       data-member-watched={watching}
+      data-membership-id={member.membershipId}
     >
       <div className="room-mosaic__presence">
         {you && media.localStream ? (
@@ -161,20 +302,25 @@ function MemberTile({
           <>
             {/* Before a subscription, a streaming tile shows the Stream
                 Preview — non-interactive, with Watch in the footer where every
-                other control lives (ADR 0102). */}
-            {member.streamId !== null && member.previewKey ? (
+                other control lives (ADR 0102). A preview that cannot be
+                fetched falls back to the member rather than to an empty frame
+                that reads as a stream with nothing in it. */}
+            {showPreview ? (
               <img
                 alt=""
                 className="room-mosaic__preview"
                 data-preview-visibility={visibility}
                 decoding="async"
-                src={`/api/stream-previews/${encodeURIComponent(member.previewKey)}`}
+                src={`/api/stream-previews/${encodeURIComponent(member.previewKey as string)}`}
+                onError={() => setPreviewFailed(true)}
               />
             ) : (
               <Avatar member={member} />
             )}
-            {member.streamId !== null && (
-              <span className="room-mosaic__sharing">{sharingLabel(attempt)}</span>
+            {sharing && (
+              <span className="room-mosaic__sharing" data-tone={badge.tone}>
+                {badge.text}
+              </span>
             )}
           </>
         )}
@@ -184,26 +330,31 @@ function MemberTile({
           out of the shared content and out of hover. */}
       <div className="room-mosaic__footer">
         <div className="room-mosaic__identity">
-          <p className="room-mosaic__name">{member.displayName}</p>
+          <p className="room-mosaic__name" id={nameId}>
+            {member.displayName}
+          </p>
           <p className="room-mosaic__state">
-            {[
-              member.role === 'host' ? 'Host' : null,
-              you ? 'You' : null,
-              member.streamId !== null ? (watching ? 'Watching' : 'Live') : null,
-              member.reconnecting ? 'Reconnecting' : null,
-              you && member.streamId === null ? compatibilityLabel(media.compatibility) : null,
+            {tileStateFragments({
+              role: member.role,
+              you,
+              sharing,
+              watching,
+              selfCaptureLost,
+              reconnecting: member.reconnecting,
+              compatibility:
+                you && member.streamId === null ? media.compatibility : null,
               // Preview freshness, so a still tile says how still it is
               // (ADR 0102's footer, ADR 0035's two-minute cadence).
-              member.streamId !== null && !watching
-                ? previewFreshnessLabel(member.previewUpdatedAt)
-                : null,
-            ]
-              .filter(Boolean)
-              .join(' · ') || 'Here'}
+              previewUpdatedAt: sharing && !watching ? member.previewUpdatedAt : undefined,
+            }).map((fragment) => (
+              <span data-tone={fragment.tone} key={fragment.text}>
+                {fragment.text}
+              </span>
+            ))}
           </p>
         </div>
 
-        {member.streamId !== null && (
+        {sharing && (
           <WatcherStack total={member.watcherCount} watchers={member.watchers} />
         )}
 
@@ -214,6 +365,16 @@ function MemberTile({
           <p className="room-mosaic__failure">
             Could not connect to this stream. Chat and the rest of the room keep
             working — try again, or use a recent Chrome, Edge, Firefox or Safari.
+          </p>
+        )}
+
+        {fullscreenError && <p className="room-mosaic__failure">{fullscreenError}</p>}
+
+        {watchBlock && showWatchButton && (
+          // The reason, not just the grey: four different conditions disable
+          // Watch and a viewer cannot tell them apart from the button alone.
+          <p className="room-mosaic__blocked" id={blockId}>
+            {watchBlock}
           </p>
         )}
 
@@ -239,36 +400,48 @@ function MemberTile({
               >
                 {muted ? 'Unmute' : 'Mute'}
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  observeRoom({
-                    name: 'room_watch_fullscreen_requested',
-                    properties: {},
-                  })
-                  void videoRef.current?.requestFullscreen()
-                }}
-              >
+              <button type="button" onClick={() => void enterFullscreen()}>
                 Fullscreen
               </button>
             </>
           )}
-          {member.streamId !== null &&
+          {sharing &&
             !you &&
             (watching || attempt?.kind === 'connecting' ? (
               <button
+                aria-label={
+                  watching
+                    ? `Stop watching ${member.displayName}'s screen`
+                    : `Cancel connecting to ${member.displayName}'s screen`
+                }
                 className="room-mosaic__watch"
                 type="button"
                 onClick={() => void media.stopWatchingStream()}
               >
-                Stop watching
+                {watching ? 'Stop watching' : 'Cancel'}
               </button>
             ) : (
+              // `aria-disabled` rather than `disabled`: a blocked Watch that
+              // leaves the tab order takes its own explanation with it. The
+              // member is in the accessible name, not the visible one — ten
+              // buttons reading `Watch` are indistinguishable in a screen
+              // reader's element list, and a 35-character display name inside
+              // the label wraps the button onto two lines.
               <button
+                aria-describedby={watchBlock ? blockId : undefined}
+                aria-disabled={watchBlock ? true : undefined}
+                aria-label={
+                  attempt?.kind === 'failed'
+                    ? `Retry watching ${member.displayName}'s screen`
+                    : `Watch ${member.displayName}'s screen`
+                }
                 className="room-mosaic__watch"
-                disabled={!media.canWatch || media.watch.kind === 'connecting'}
+                data-blocked={watchBlock ? true : undefined}
                 type="button"
-                onClick={() => void media.startWatching(member.streamId as string)}
+                onClick={() => {
+                  if (watchBlock) return
+                  void media.startWatching(member.streamId as string)
+                }}
               >
                 {attempt?.kind === 'failed' ? 'Retry' : 'Watch'}
               </button>
@@ -291,9 +464,35 @@ function MemberTile({
 }
 
 /** The viewer's single subscription, when it belongs to this member's stream. */
-function subscriptionFor(watch: WatchState, streamId: string | null) {
+export type WatchAttempt = Exclude<WatchState, { readonly kind: 'idle' }> | null
+
+function subscriptionFor(watch: WatchState, streamId: string | null): WatchAttempt {
   if (streamId === null || watch.kind === 'idle' || watch.streamId !== streamId) return null
   return watch
+}
+
+/** What the mosaic's live region says as a watch progresses. The visible tile
+    already carries all of this; the region exists so the sequence is available
+    to someone who cannot watch the tile change. */
+export function watchAnnouncement(watch: WatchState, displayName: string | null): string {
+  const whose = displayName ? `${displayName}'s screen` : 'the stream'
+  if (watch.kind === 'connecting') {
+    return `Connecting to ${whose}, attempt ${watch.attempt} of ${WATCH_MAX_ATTEMPTS}.`
+  }
+  if (watch.kind === 'watching') return `Watching ${whose}. Audio starts muted.`
+  if (watch.kind === 'failed') {
+    return `Could not connect to ${whose}. Chat and the rest of the room keep working.`
+  }
+  return displayName ? `Stopped watching ${whose}.` : ''
+}
+
+/** Named so the greyed-out button and the sentence under it come from one
+    place; ADR 0059 keeps every one of these recoverable rather than terminal. */
+const WATCH_BLOCKED_COPY: Record<NonNullable<WatchBlockedReason>, string> = {
+  probing: 'Checking whether this browser can watch streams.',
+  incompatible: 'This browser cannot watch streams. Chat and presence still work.',
+  reconnecting: 'Reconnecting to the room. Watching resumes once you are back.',
+  'room-ended': 'This room has ended.',
 }
 
 /** How old the tile's preview is, coarsely — previews refresh every two
@@ -311,13 +510,20 @@ export function previewFreshnessLabel(
 
 const RELATIVE_TIME = new Intl.RelativeTimeFormat('en', { numeric: 'auto' })
 
-function sharingLabel(attempt: ReturnType<typeof subscriptionFor>) {
+function sharingLabel(attempt: WatchAttempt) {
   if (attempt?.kind === 'connecting') {
     // Bounded progress, so a viewer can see the retries end (ADR 0077).
-    return `Connecting… attempt ${attempt.attempt} of ${WATCH_MAX_ATTEMPTS}`
+    return {
+      text: `Connecting… attempt ${attempt.attempt} of ${WATCH_MAX_ATTEMPTS}`,
+      tone: 'warning' as const,
+    }
   }
-  if (attempt?.kind === 'failed') return 'Could not connect'
-  return 'Screen up'
+  // A failure wearing the Live colour reads as a celebration; keep the Live
+  // family for the one state that is actually live (ADR 0096).
+  if (attempt?.kind === 'failed') {
+    return { text: 'Could not connect', tone: 'danger' as const }
+  }
+  return { text: 'Screen up', tone: 'live' as const }
 }
 
 /** Up to three avatars plus the total, ordered by watch start. */
@@ -360,10 +566,52 @@ export function watcherAccessibleLabel(
   return `${visible}${hidden}; ${total} ${total === 1 ? 'watcher' : 'watchers'} total`
 }
 
-function compatibilityLabel(compatibility: RoomMedia['compatibility']) {
-  if (compatibility === 'probing') return 'Checking media…'
-  return compatibility === 'compatible' ? 'Media ready' : 'Chat only'
+/** One tile status line, split into fragments that each own a semantic tone.
+    The old single joined string forced every state — role, sharing, health,
+    compatibility, thumbnail age — through one muted colour, so nothing in the
+    grid was scannable. Each fragment now carries its family (ADR 0096) and the
+    Live fragment also carries a dot, so hue is never the only signal. */
+export function tileStateFragments({
+  role,
+  you,
+  sharing,
+  watching,
+  selfCaptureLost,
+  reconnecting,
+  compatibility,
+  previewUpdatedAt,
+}: Readonly<{
+  role: RoomRosterMember['role']
+  you: boolean
+  sharing: boolean
+  watching: boolean
+  selfCaptureLost: boolean
+  reconnecting: boolean
+  compatibility: RoomMedia['compatibility'] | null
+  previewUpdatedAt?: Date | null
+}>): readonly { readonly text: string; readonly tone: StateTone }[] {
+  const fragments: { text: string; tone: StateTone }[] = []
+  if (role === 'host') fragments.push({ text: 'Host', tone: 'host' })
+  if (you) fragments.push({ text: 'You', tone: 'muted' })
+  if (sharing) fragments.push({ text: watching ? 'Watching' : 'Live', tone: 'live' })
+  if (selfCaptureLost) fragments.push({ text: 'Screen stopped', tone: 'warning' })
+  if (reconnecting) fragments.push({ text: 'Reconnecting', tone: 'warning' })
+  if (compatibility === 'probing') {
+    fragments.push({ text: 'Checking media…', tone: 'muted' })
+  } else if (compatibility === 'compatible') {
+    fragments.push({ text: 'Media ready', tone: 'host' })
+  } else if (compatibility === 'incompatible') {
+    fragments.push({ text: 'Chat only', tone: 'danger' })
+  }
+  if (previewUpdatedAt !== undefined) {
+    const freshness = previewFreshnessLabel(previewUpdatedAt)
+    if (freshness) fragments.push({ text: freshness, tone: 'muted' })
+  }
+  if (fragments.length === 0) fragments.push({ text: 'Here', tone: 'muted' })
+  return fragments
 }
+
+type StateTone = 'host' | 'live' | 'warning' | 'danger' | 'muted'
 
 /** The media only — its controls are explicit buttons in the tile footer, so
     nothing floats over what is being shared and nothing auto-hides (ADR 0101). */

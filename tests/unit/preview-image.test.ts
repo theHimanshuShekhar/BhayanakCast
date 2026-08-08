@@ -2,6 +2,8 @@ import { describe, expect, test } from 'vitest'
 import { readWebpDimensions } from '../../src/server/streams/preview-image'
 import {
   previewFreshnessLabel,
+  tileStateFragments,
+  watchAnnouncement,
   watcherAccessibleLabel,
 } from '../../src/features/room/RoomMemberMosaic'
 
@@ -124,5 +126,78 @@ describe('watcherAccessibleLabel', () => {
       'Watched by Ada; 1 watcher total',
     )
     expect(watcherAccessibleLabel([], 0)).toBe('No watchers')
+  })
+})
+
+describe('tileStateFragments', () => {
+  const base = {
+    role: 'member' as const,
+    you: false,
+    sharing: false,
+    watching: false,
+    selfCaptureLost: false,
+    reconnecting: false,
+    compatibility: null,
+  }
+
+  test('gives every state its own semantic family instead of one muted run', () => {
+    expect(tileStateFragments({ ...base, role: 'host', sharing: true, reconnecting: true })).toEqual([
+      { text: 'Host', tone: 'host' },
+      { text: 'Live', tone: 'live' },
+      { text: 'Reconnecting', tone: 'warning' },
+    ])
+  })
+
+  test('a host who is reconnecting does not read as a success', () => {
+    const tones = tileStateFragments({ ...base, role: 'host', reconnecting: true })
+    expect(tones.find((fragment) => fragment.text === 'Reconnecting')?.tone).toBe('warning')
+  })
+
+  test('a lost capture never claims to be live', () => {
+    expect(
+      tileStateFragments({ ...base, you: true, sharing: false, selfCaptureLost: true }),
+    ).toEqual([
+      { text: 'You', tone: 'muted' },
+      { text: 'Screen stopped', tone: 'warning' },
+    ])
+  })
+
+  test('an incompatible viewer is an error, a probing one is not', () => {
+    expect(tileStateFragments({ ...base, you: true, compatibility: 'incompatible' })).toEqual([
+      { text: 'You', tone: 'muted' },
+      { text: 'Chat only', tone: 'danger' },
+    ])
+    expect(
+      tileStateFragments({ ...base, you: true, compatibility: 'probing' }).at(-1)?.tone,
+    ).toBe('muted')
+  })
+
+  test('falls back to presence rather than an empty line', () => {
+    expect(tileStateFragments(base)).toEqual([{ text: 'Here', tone: 'muted' }])
+  })
+})
+
+describe('watchAnnouncement', () => {
+  test('names the streamer and bounds the wait', () => {
+    expect(
+      watchAnnouncement({ kind: 'connecting', streamId: 's', attempt: 2 }, 'Ada'),
+    ).toBe("Connecting to Ada's screen, attempt 2 of 4.")
+  })
+
+  test('confirms the guarantee a viewer cannot see: the watch starts muted', () => {
+    expect(watchAnnouncement({ kind: 'watching', streamId: 's' }, 'Ada')).toBe(
+      "Watching Ada's screen. Audio starts muted.",
+    )
+  })
+
+  test('scopes an exhausted watch to the stream, not the room', () => {
+    expect(watchAnnouncement({ kind: 'failed', streamId: 's' }, 'Ada')).toContain(
+      'Chat and the rest of the room keep working',
+    )
+  })
+
+  test('says nothing before the first watch and reports the end of one', () => {
+    expect(watchAnnouncement({ kind: 'idle' }, null)).toBe('')
+    expect(watchAnnouncement({ kind: 'idle' }, 'Ada')).toBe("Stopped watching Ada's screen.")
   })
 })

@@ -46,6 +46,28 @@ export type WatchState =
 
 export type CompatibilityState = 'probing' | 'compatible' | 'incompatible'
 
+/** Why a viewer cannot start a watch right now, or `null` when they can. One
+    derivation for both the boolean and the explanation, so a greyed-out Watch
+    button can never disagree with the reason printed beside it. */
+export type WatchBlockedReason =
+  | 'probing'
+  | 'incompatible'
+  | 'reconnecting'
+  | 'room-ended'
+  | null
+
+export function watchBlockedReason(
+  compatibility: CompatibilityState,
+  connection: 'live' | 'reconnecting' | 'lost',
+  roomEnded: boolean,
+): WatchBlockedReason {
+  if (roomEnded) return 'room-ended'
+  if (connection !== 'live') return 'reconnecting'
+  if (compatibility === 'probing') return 'probing'
+  if (compatibility !== 'compatible') return 'incompatible'
+  return null
+}
+
 export function beginWatchSelection(current: WatchState, streamId: string) {
   return {
     previousStreamId: current.kind === 'idle' ? null : current.streamId,
@@ -89,6 +111,8 @@ export interface RoomMedia {
   readonly compatibility: CompatibilityState
   readonly captureSupported: boolean | null
   readonly canWatch: boolean
+  /** `null` when Watch is available; otherwise why it is not. */
+  readonly watchBlockedReason: WatchBlockedReason
   readonly publish: PublishState
   readonly localStream: MediaStream | null
   readonly watch: WatchState
@@ -335,11 +359,13 @@ export function useRoomMedia({
     releaseLocal()
   }, [discardWatchAttempt, releaseLocal])
 
+  const blocked = watchBlockedReason(compatibility, connection, roomEnded)
   return {
     supported: compatibility === 'compatible',
     compatibility,
     captureSupported,
-    canWatch: compatibility === 'compatible' && connection === 'live' && !roomEnded,
+    canWatch: blocked === null,
+    watchBlockedReason: blocked,
     publish,
     localStream,
     watch,

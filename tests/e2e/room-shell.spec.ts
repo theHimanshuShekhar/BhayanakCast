@@ -665,14 +665,49 @@ test('the member mosaic exposes responsive emphasis, presence, watcher, media, a
     const streamTile = tiles.filter({ hasText: 'Filler 1' })
     await page.setViewportSize({ width: 1024, height: 768 })
     const mediumWatchLayout = await page.locator('.room-mosaic').evaluate((mosaic) => {
-      const watched = mosaic.querySelector<HTMLElement>('.room-mosaic__tile')
-      if (!watched) throw new Error('Medium watch layout is incomplete')
+      const all = [...mosaic.querySelectorAll<HTMLElement>('.room-mosaic__tile')]
+      // Deliberately not the first tile: the stage takes the first row even when
+      // earlier members precede it in DOM/roster order.
+      const watched = all[2]
+      const canvas = mosaic.closest<HTMLElement>('.room-stage__canvas')
+      if (!watched || !canvas) throw new Error('Medium watch layout is incomplete')
       watched.setAttribute('data-member-watched', 'true')
       mosaic.setAttribute('data-has-watch', 'true')
-      const style = getComputedStyle(watched)
-      return { columnStart: style.gridColumnStart, rowStart: style.gridRowStart }
+      const stage = watched.getBoundingClientRect()
+      const viewport = canvas.getBoundingClientRect()
+      const others = all
+        .filter((tile) => tile !== watched)
+        .map((tile) => tile.getBoundingClientRect())
+      return {
+        stageWidth: Math.round(stage.width),
+        mosaicWidth: Math.round(mosaic.clientWidth),
+        stageTop: Math.round(stage.top),
+        stageBottom: Math.round(stage.bottom),
+        canvasBottom: Math.round(viewport.bottom),
+        highestOtherTop: Math.round(Math.min(...others.map((box) => box.top))),
+        widestOther: Math.round(Math.max(...others.map((box) => box.width))),
+        footerRows: Math.round(
+          watched.querySelector('.room-mosaic__footer')!.getBoundingClientRect().height,
+        ),
+        overflows: mosaic.scrollWidth > mosaic.clientWidth,
+      }
     })
-    expect(mediumWatchLayout).toEqual({ columnStart: 'span 2', rowStart: 'span 2' })
+    // Full mosaic width, first row, every remaining member beneath it.
+    expect(mediumWatchLayout.stageWidth).toBe(mediumWatchLayout.mosaicWidth)
+    expect(mediumWatchLayout.highestOtherTop).toBeGreaterThan(mediumWatchLayout.stageTop)
+    expect(mediumWatchLayout.widestOther).toBeLessThan(mediumWatchLayout.stageWidth)
+    expect(mediumWatchLayout.overflows).toBe(false)
+    // The stage and its one-row footer fit the canvas, and the next row still
+    // peeks: a viewer can see there is another Stream to switch to.
+    expect(mediumWatchLayout.stageBottom).toBeLessThanOrEqual(mediumWatchLayout.canvasBottom)
+    expect(mediumWatchLayout.canvasBottom - mediumWatchLayout.highestOtherTop).toBeGreaterThan(48)
+    expect(mediumWatchLayout.footerRows).toBeLessThan(96)
+
+    await page.locator('.room-mosaic').evaluate((mosaic) => {
+      for (const tile of mosaic.querySelectorAll('[data-member-watched="true"]')) {
+        tile.setAttribute('data-member-watched', 'false')
+      }
+    })
 
     await page.setViewportSize({ width: 390, height: 844 })
     await streamTile.evaluate((node) => node.setAttribute('data-member-watched', 'true'))

@@ -132,6 +132,7 @@ body[data-hydrated="false"] :is(button, input, select, textarea) {
   --on-media-ink: #f4f7fc;
   --on-media-live: #ff72a5;
   --on-media-warning: #f2b84b;
+  --on-media-danger: #ff7b72;
   --on-media-private: #b99aff;
   --raised-shadow: 0 8px 24px rgb(23 32 51 / 0.08);
   --card-shadow: 0 0 0 1px var(--border), 0 8px 24px rgb(23 32 51 / 0.08);
@@ -1946,7 +1947,9 @@ p.home-filters__facets {
     transform: none !important;
   }
 
-  .live-pulse {
+  .live-pulse,
+  .room-mosaic__state > span[data-tone='live']::before,
+  .room-mosaic__video {
     animation-name: none !important;
   }
 }
@@ -3865,7 +3868,9 @@ body:has(.room-shell) > .root-controls {
 }
 
 /* Pinned on the media, so it takes Home's preview-mosaic treatment rather than
-   floating a porcelain chip on a midnight frame. */
+   floating a porcelain chip on a midnight frame. Its colour follows the state
+   it names: one chip carried `Screen up`, `Connecting…` and `Could not
+   connect` in the Live pink, which painted a failure as a celebration. */
 .room-mosaic__sharing {
   position: absolute;
   left: 0.5rem;
@@ -3873,13 +3878,21 @@ body:has(.room-shell) > .root-controls {
   border-radius: 0.3125rem;
   padding: 0.125rem 0.4375rem;
   background: var(--media-scrim);
-  box-shadow: inset 0 0 0 1px
-    color-mix(in srgb, var(--on-media-live) 42%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentcolor 42%, transparent);
   color: var(--on-media-live);
   font-size: var(--text-label);
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.room-mosaic__sharing[data-tone='warning'] {
+  color: var(--on-media-warning);
+}
+
+.room-mosaic__sharing[data-tone='danger'] {
+  color: var(--on-media-danger);
 }
 
 /* Below the media region, never over it, and never revealed by hover. */
@@ -3901,14 +3914,59 @@ body:has(.room-shell) > .root-controls {
   white-space: nowrap;
 }
 
+/* One fragment per state, each in its own semantic family (ADR 0096). The
+   previous single joined string ran role, sharing, health, compatibility and
+   thumbnail age through one muted colour, and the host rule then recoloured
+   the whole line green — so a reconnecting host read as a success. */
 .room-mosaic__state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.3125rem;
+  min-width: 0;
   margin: 0;
   color: var(--ink-muted);
   font-size: var(--text-label);
 }
 
-.room-mosaic__tile[data-member-role="host"] .room-mosaic__state {
+.room-mosaic__state > span:not(:last-child)::after {
+  content: '·';
+  margin-inline-start: 0.3125rem;
+  color: var(--ink-muted);
+}
+
+.room-mosaic__state > span[data-tone='host'] {
   color: var(--host);
+  font-weight: 600;
+}
+
+.room-mosaic__state > span[data-tone='warning'] {
+  color: var(--warning);
+}
+
+.room-mosaic__state > span[data-tone='danger'] {
+  color: var(--danger);
+}
+
+/* Live is the product's signature state and had no colour at all. The dot is
+   the non-colour carrier, so the state survives a monochrome or colour-blind
+   reading (ADR 0096's "never hue alone"). */
+.room-mosaic__state > span[data-tone='live'] {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3125rem;
+  color: var(--live);
+  font-weight: 600;
+}
+
+/* The one pulse ADR 0096 permits, spent on the state it was defined for. */
+.room-mosaic__state > span[data-tone='live']::before {
+  content: '';
+  width: 0.4375rem;
+  height: 0.4375rem;
+  border-radius: var(--radius-pill);
+  background: currentcolor;
+  animation: var(--animate-live-pulse);
 }
 
 .room-seats {
@@ -4208,6 +4266,9 @@ body:has(.room-shell) > .root-controls {
   }
 }
 
+/* A watch that succeeds swaps a still thumbnail for moving media in one frame.
+   The fade is what tells the viewer the connection landed, before they have
+   read a single word of the footer. */
 .room-mosaic__video {
   width: 100%;
   aspect-ratio: 16 / 9;
@@ -4215,8 +4276,18 @@ body:has(.room-shell) > .root-controls {
      media canvas, not the pure black ADR 0096 rules out at either end. */
   background: var(--media-canvas);
   object-fit: contain;
+  animation: room-stream-arrive var(--transition-duration-layout) var(--ease-clubhouse);
 }
 
+@keyframes room-stream-arrive {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
 
 .room-mosaic__watchers {
   display: flex;
@@ -4244,17 +4315,92 @@ body:has(.room-shell) > .root-controls {
   object-fit: cover;
 }
 
+/* The negative margin overlaps the avatars into a stack; the last one must not
+   also overlap the count beside it. */
+.room-mosaic__watcher-avatars > *:last-child {
+  margin-inline-end: 0;
+}
+
+/* An exhausted watch is an error, not a caution: `--warning` shares its family
+   with `Reconnecting`, which is the state that resolves itself. */
 .room-mosaic__failure {
   margin: 0.375rem 0 0;
-  color: var(--warning);
+  color: var(--danger);
   font-size: var(--text-meta);
+}
+
+/* Why Watch is unavailable, in the tile that owns it. Quieter than a failure —
+   every one of these clears on its own or with one action (ADR 0059). */
+.room-mosaic__blocked {
+  margin: 0.375rem 0 0;
+  color: var(--ink-muted);
+  font-size: var(--text-label);
 }
 
 .room-mosaic__actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 0.375rem;
   margin-top: 0.5rem;
+}
+
+/* Three tiers, because `.room-boundary button` painted all five tile controls
+   the same solid cobalt: a preview tile gave Watch no more authority than an
+   overflow trigger, and a watched tile showed four equal primaries with the
+   exit sitting at the same weight as a menu holding Kick and Ban.
+
+   Tier 2 — adjustments to a watch already running. */
+.room-mosaic__actions > button {
+  border-color: var(--border-strong);
+  background: transparent;
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.room-mosaic__actions > button:hover {
+  background: var(--surface-subtle);
+}
+
+/* Tier 1 — the one thing this tile is for. Watch keeps the cobalt fill; so
+   does Stop watching, because leaving a watch is the same decision reversed
+   and must be as findable as entering it. */
+.room-mosaic__actions > button.room-mosaic__watch {
+  border-color: var(--action);
+  background: var(--action);
+  color: var(--action-ink);
+  font-weight: 600;
+}
+
+.room-mosaic__actions > button.room-mosaic__watch:hover {
+  border-color: var(--action-hover);
+  background: var(--action-hover);
+}
+
+/* Tier 3 — safety and moderation stay permanently visible and never hover-only
+   (ADR 0101), but they are not what a viewer came to the tile to do. */
+.room-mosaic__actions .room-member-actions__trigger {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-muted);
+  font-weight: 500;
+}
+
+.room-mosaic__actions .room-member-actions__trigger:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-subtle);
+  color: var(--ink);
+}
+
+/* Blocked, not gone: `aria-disabled` keeps the button focusable so its reason
+   is reachable, so it must also read as unavailable without dropping below the
+   contrast the rest of the surface holds. */
+.room-mosaic__actions > button.room-mosaic__watch[data-blocked],
+.room-mosaic__actions > button.room-mosaic__watch[data-blocked]:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-subtle);
+  color: var(--ink-muted);
+  cursor: not-allowed;
 }
 
 /* ADR 0100's control shelf. */
@@ -4704,12 +4850,69 @@ body:has(.room-shell) > .root-controls {
   }
 }
 
-/* ADR 0101: desktop and medium enlarge the watched stream in place to a
-   stable two-column-by-two-row span. Mobile uses its separate stage rule. */
+/* ADR 0101 (amended 2026-08-08): desktop and medium give the watched Stream
+   layout precedence — a full-width stage in the mosaic's first row, with every
+   remaining member tile flowing beneath it in unchanged order. Mobile keeps its
+   separate sticky-stage-and-strip rule. */
 @media (min-width: 48rem) {
-  .room-mosaic__tile[data-member-watched='true'] {
-    grid-column: span 2;
-    grid-row: span 2;
+  .room-mosaic[data-has-watch='true']
+    .room-mosaic__tile[data-member-watched='true'] {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  /* A full-width stage is the definition of "space permits", so its footer
+     collapses to the one row ADR 0101 allows instead of the four stacked rows
+     a narrow cell needs. */
+  .room-mosaic[data-has-watch='true']
+    .room-mosaic__tile[data-member-watched='true']
+    .room-mosaic__footer {
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+
+  .room-mosaic[data-has-watch='true']
+    .room-mosaic__tile[data-member-watched='true']
+    .room-mosaic__identity {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .room-mosaic[data-has-watch='true']
+    .room-mosaic__tile[data-member-watched='true']
+    .room-mosaic__watchers,
+  .room-mosaic[data-has-watch='true']
+    .room-mosaic__tile[data-member-watched='true']
+    .room-mosaic__actions {
+    margin-top: 0;
+  }
+
+  .room-mosaic[data-has-watch='true']
+    .room-mosaic__tile[data-member-watched='true']
+    .room-mosaic__failure {
+    flex-basis: 100%;
+    margin-top: 0;
+  }
+
+  /* 16:9 until that would hide the room. The admitted shell is 100dvh and the
+     chrome around the canvas is a fixed amount, so the cap reserves the stage's
+     own one-row footer plus roughly 110px of the next tile row. The remaining
+     members stay partly on screen — the viewer can see there is someone else to
+     switch to without scrolling to find out. Past the cap the contained media
+     letterboxes into the same midnight ground rather than cropping (ADR 0096). */
+  .room-mosaic[data-has-watch='true']
+    .room-mosaic__tile[data-member-watched='true']
+    .room-mosaic__presence {
+    max-block-size: max(9rem, calc(100dvh - 32rem));
+  }
+
+  .room-mosaic[data-has-watch='true']
+    .room-mosaic__tile[data-member-watched='true']
+    .room-mosaic__video {
+    block-size: 100%;
+    aspect-ratio: auto;
   }
 }
 
