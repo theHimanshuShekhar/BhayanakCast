@@ -11,6 +11,7 @@ interface RoomProjectionRecord {
   readonly visibility: RoomVisibility
   readonly createdAt: Date
   readonly endedAt: Date | null
+  readonly thumbnailCapturedAt: Date | null
 }
 
 export interface SelfMembership {
@@ -67,6 +68,7 @@ export interface AdmittedRoom extends RoomRouteDetails {
 
 export interface PastStreamRoom extends RoomRouteDetails {
   readonly endedAt: Date
+  readonly thumbnailCapturedAt: Date | null
   /** The account's realtime connection is account-scoped, not room-scoped, so
       the route needs to know a signed-in viewer is still signed in here — an
       ended room must not tear down the connection their other memberships and
@@ -131,6 +133,7 @@ export function selectRoomRouteProjection(
       room: {
         ...details,
         endedAt: room.endedAt,
+        thumbnailCapturedAt: room.thumbnailCapturedAt,
         viewerAuthenticated: snapshot.viewerAuthenticated,
       },
     }

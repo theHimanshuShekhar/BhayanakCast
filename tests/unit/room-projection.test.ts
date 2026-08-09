@@ -17,6 +17,7 @@ const snapshot = (
     visibility: 'public',
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     endedAt: null,
+    thumbnailCapturedAt: null,
   },
   memberCount: 2,
   streamCount: 1,
@@ -161,6 +162,7 @@ describe('Room route projection selector', () => {
         streamCount: 4,
         capacity: 10,
         endedAt,
+        thumbnailCapturedAt: null,
         viewerAuthenticated: true,
       },
     })

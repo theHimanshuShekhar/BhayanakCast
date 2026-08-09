@@ -2921,6 +2921,10 @@ p.home-filters__facets {
   filter: blur(0.875rem);
 }
 
+.past-stream-summary__media {
+  box-shadow: var(--feature-shadow);
+}
+
 .past-stream-item__name {
   display: flex;
   min-width: 0;

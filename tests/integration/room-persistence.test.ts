@@ -316,6 +316,81 @@ describe('room persistence and admission', () => {
     ).resolves.toBeNull()
   })
 
+  test('projects only public archived capture timestamps on ended Room routes', async () => {
+    const fixture = await createFixture()
+    const [publicOwner, privateOwner, noCaptureOwner] = await Promise.all([
+      fixture.account(),
+      fixture.account(),
+      fixture.account(),
+    ])
+    const publicRoom = created(
+      await fixture.service.createRoom(publicOwner, { name: 'Public archive route' }),
+    )
+    const privateRoom = created(
+      await fixture.service.createRoom(privateOwner, {
+        name: 'Private archive route',
+        visibility: 'private',
+        password: 'correct horse battery',
+      }),
+    )
+    const noCaptureRoom = created(
+      await fixture.service.createRoom(noCaptureOwner, { name: 'No capture route' }),
+    )
+    const capturedAt = new Date(fixture.now.value - MINUTE_MS)
+    for (const room of [publicRoom, privateRoom]) {
+      const streamId = randomUUID()
+      await fixture.pool.query(
+        `INSERT INTO stream
+           (id, room_id, membership_id, started_at, ended_at)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [
+          streamId,
+          room.room.id,
+          room.membership.id,
+          new Date(fixture.now.value - 2 * MINUTE_MS),
+          new Date(fixture.now.value),
+        ],
+      )
+      await fixture.pool.query(
+        `INSERT INTO past_stream_thumbnail
+           (room_id, stream_id, bytes, captured_at)
+         VALUES ($1, $2, decode('00', 'hex'), $3)`,
+        [room.room.id, streamId, capturedAt],
+      )
+    }
+    await fixture.pool.query(
+      `UPDATE room
+          SET ended_at = $2
+        WHERE id = ANY($1::uuid[])`,
+      [
+        [publicRoom.room.id, privateRoom.room.id, noCaptureRoom.room.id],
+        new Date(fixture.now.value),
+      ],
+    )
+
+    const publicProjection = await fixture.service.inspectRouteProjection(
+      publicRoom.room.id,
+      null,
+    )
+    expect(publicProjection).toMatchObject({
+      kind: 'pastStream',
+      room: { thumbnailCapturedAt: capturedAt },
+    })
+    expect(JSON.stringify(publicProjection)).not.toContain('bytes')
+    await expect(
+      fixture.service.inspectRouteProjection(privateRoom.room.id, null),
+    ).resolves.toMatchObject({
+      kind: 'pastStream',
+      room: { thumbnailCapturedAt: null },
+    })
+    await expect(
+      fixture.service.inspectRouteProjection(noCaptureRoom.room.id, null),
+    ).resolves.toMatchObject({
+      kind: 'pastStream',
+      room: { thumbnailCapturedAt: null },
+    })
+  })
+
   test('rechecks a target that becomes private while admission waits for its lock', async () => {
     const fixture = await createFixture()
     const [sourceOwner, targetOwner] = await Promise.all([

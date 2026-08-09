@@ -1,3 +1,4 @@
+import { PastStreamMedia } from '../PastStreamMedia'
 import { RoomFact, RoomHeader, RoomShell } from './RoomShell'
 import { observeRoom } from './room-observability'
 import type { RoomEnded } from './room-types'
@@ -38,6 +39,13 @@ export function PastStreamSummary({
         />
 
         <div className="room-stage">
+          <PastStreamMedia
+            className="past-stream-summary__media"
+            roomId={room.id}
+            streamCount={room.streamCount}
+            thumbnailCapturedAt={room.thumbnailCapturedAt}
+            visibility={room.visibility}
+          />
           <div className="room-spotlight" data-spotlight="ended">
             <p className="room-spotlight__state">This room has ended.</p>
             <p className="room-spotlight__note">

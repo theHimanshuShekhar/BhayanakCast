@@ -245,7 +245,7 @@ export class HomeRepository {
             WHERE m.account_id = c.id
          ) aggregates ON true
          LEFT JOIN LATERAL (
-           SELECT json_agg(json_build_object('roomId', item."roomId", 'name', item.name, 'endedAt', item."endedAt", 'visibility', item.visibility, 'category', item.category, 'description', item.description, 'tags', item.tags, 'memberCount', item."memberCount", 'streamCount', item."streamCount") ORDER BY item."endedAt" DESC, item."roomId" ASC) AS items
+           SELECT json_agg(json_build_object('roomId', item."roomId", 'name', item.name, 'endedAt', item."endedAt", 'visibility', item.visibility, 'category', item.category, 'description', item.description, 'tags', item.tags, 'memberCount', item."memberCount", 'streamCount', item."streamCount", 'thumbnailCapturedAt', item."thumbnailCapturedAt") ORDER BY item."endedAt" DESC, item."roomId" ASC) AS items
              FROM (
                SELECT r.id AS "roomId",
                       r.name,
@@ -255,7 +255,15 @@ export class HomeRepository {
                       r.description,
                       r.tags,
                       COUNT(DISTINCT all_members.id)::int AS "memberCount",
-                      COUNT(DISTINCT all_streams.id)::int AS "streamCount"
+                      COUNT(DISTINCT all_streams.id)::int AS "streamCount",
+                      CASE
+                        WHEN r.visibility = 'public' THEN (
+                          SELECT MAX(thumbnail.captured_at)
+                            FROM past_stream_thumbnail thumbnail
+                           WHERE thumbnail.room_id = r.id
+                        )
+                        ELSE NULL
+                      END AS "thumbnailCapturedAt"
                  FROM room_membership own_membership
                  JOIN room r ON r.id = own_membership.room_id
                            AND r.ended_at IS NOT NULL
