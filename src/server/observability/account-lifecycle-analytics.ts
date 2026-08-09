@@ -23,9 +23,12 @@ export function createAccountLifecycleAnalytics(
   const projectApiKey = environment.POSTHOG_PROJECT_API_KEY?.trim()
   const projectId = environment.POSTHOG_PROJECT_ID?.trim()
   const personalApiKey = environment.POSTHOG_PERSONAL_API_KEY?.trim()
+  const hasAnyCredentials = Boolean(projectApiKey || projectId || personalApiKey)
+  const hasAllCredentials = Boolean(projectApiKey && projectId && personalApiKey)
   if (
     environment.NODE_ENV === 'production' &&
-    (!host || !projectApiKey || !projectId || !personalApiKey)
+    hasAnyCredentials &&
+    (!host || !hasAllCredentials)
   ) {
     throw new Error('PostHog Account lifecycle analytics is not configured')
   }

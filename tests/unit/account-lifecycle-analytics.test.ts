@@ -67,9 +67,24 @@ describe('Account lifecycle analytics allowlist', () => {
     vi.unstubAllGlobals()
   })
 
-  test('refuses production startup without PostHog deletion credentials', () => {
+  test('allows production startup when PostHog is disabled', async () => {
+    const analytics = createAccountLifecycleAnalytics({
+      NODE_ENV: 'production',
+      POSTHOG_HOST: 'http://posthog:8000',
+    })
     expect(() =>
-      createAccountLifecycleAnalytics({ NODE_ENV: 'production' }),
+      analytics.record('account_deletion_requested', '102938475610293847'),
+    ).not.toThrow()
+    await expect(analytics.forget('102938475610293847')).resolves.toBeUndefined()
+  })
+
+  test('refuses partial production PostHog configuration', () => {
+    expect(() =>
+      createAccountLifecycleAnalytics({
+        NODE_ENV: 'production',
+        POSTHOG_HOST: 'http://posthog:8000',
+        POSTHOG_PROJECT_API_KEY: 'project-key',
+      }),
     ).toThrow('PostHog Account lifecycle analytics is not configured')
   })
 

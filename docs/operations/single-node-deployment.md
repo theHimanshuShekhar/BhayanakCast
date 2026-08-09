@@ -21,13 +21,13 @@ The production Compose file publishes no ports. `compose.dev.yml` is only for lo
 
 ## Initial configuration
 
-Copy `.env.example` to `.env`, keep it mode `0600`, and replace every placeholder. For production:
+Copy `.env.example` to `.env`, keep it mode `0600`, and replace every required placeholder. For production:
 
 - set `BETTER_AUTH_URL` and `CLOUDFLARED_PUBLIC_URL` to the identical HTTPS application origin;
 - set `TRUSTED_PROXY_IPS=172.30.0.3`, the fixed `cloudflared` address on `edge`;
-- set a reviewed immutable `CLOUDFLARED_IMAGE`, the Tunnel token, Discord credentials, a random Better Auth secret, PostgreSQL password, the PostHog project key and numeric project ID;
-- create a least-privilege PostHog personal API key with person read/delete access and set `POSTHOG_PERSONAL_API_KEY`; Account approval removes the Discord-ID person association with `delete_events=false` before committing local anonymization, so aggregate events remain and an unavailable PostHog leaves the request pending for retry;
-- retain `POSTHOG_HOST=http://posthog:8000` inside Compose;
+- set a reviewed immutable `CLOUDFLARED_IMAGE`, the Tunnel token, Discord credentials, a random Better Auth secret, and the PostgreSQL password;
+- to enable PostHog, set all three `POSTHOG_PROJECT_API_KEY`, `POSTHOG_PROJECT_ID`, and `POSTHOG_PERSONAL_API_KEY`; the personal key needs person read/delete access so Account approval can remove the Discord-ID person association with `delete_events=false` before local anonymization;
+- leave all three PostHog credentials empty to disable analytics, or retain `POSTHOG_HOST=http://posthog:8000` and configure all three together;
 - verify `172.30.0.0/24` does not overlap a host/LAN route before starting. If it overlaps, change both the `edge` subnet and fixed `cloudflared` address, then update `TRUSTED_PROXY_IPS`.
 
 Create the shared private analytics network once:
