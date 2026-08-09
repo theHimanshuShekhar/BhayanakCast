@@ -1,3 +1,4 @@
+import { PastStreamMedia } from '../PastStreamMedia'
 import { observeHome } from './home-observability'
 import type { PastStreamSummary } from './home-types'
 
@@ -45,22 +46,12 @@ export function PastStreams({ streams }: PastStreamsProps) {
                 properties: {},
               })}
             >
-              {stream.visibility === 'public' && stream.thumbnailCapturedAt && (
-                <span aria-hidden="true" className="past-stream-item__media">
-                  <img
-                    alt=""
-                    decoding="async"
-                    loading="lazy"
-                    src={`/api/past-stream-previews/${encodeURIComponent(stream.roomId)}?capturedAt=${encodeURIComponent(stream.thumbnailCapturedAt)}`}
-                  />
-                </span>
-              )}
-              {stream.visibility === 'private' && stream.streamCount > 0 && (
-                <span
-                  aria-hidden="true"
-                  className="past-stream-item__media past-stream-item__media--private"
-                />
-              )}
+              <PastStreamMedia
+                roomId={stream.roomId}
+                streamCount={stream.streamCount}
+                thumbnailCapturedAt={stream.thumbnailCapturedAt}
+                visibility={stream.visibility}
+              />
               {/* The badge sits inside the name block visually, but the name
                   probe stays a leaf so it reads back as just the room name. */}
               <span className="past-stream-item__name">

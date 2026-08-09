@@ -975,6 +975,7 @@ export class RoomService {
       visibility: RoomVisibility
       createdAt: Date
       endedAt: Date | null
+      thumbnailCapturedAt: Date | null
       memberCount: number
       streamCount: number
       membershipId: string | null
@@ -990,6 +991,15 @@ export class RoomService {
               room.visibility,
               room.created_at AS "createdAt",
               room.ended_at AS "endedAt",
+              CASE
+                WHEN room.visibility = 'public' AND room.ended_at IS NOT NULL
+                THEN (
+                  SELECT thumbnail.captured_at
+                    FROM past_stream_thumbnail thumbnail
+                   WHERE thumbnail.room_id = room.id
+                )
+                ELSE NULL
+              END AS "thumbnailCapturedAt",
               (
                 SELECT count(*)::int
                   FROM room_membership
@@ -1095,6 +1105,7 @@ export class RoomService {
             visibility: row.visibility,
             createdAt: row.createdAt,
             endedAt: row.endedAt,
+            thumbnailCapturedAt: row.thumbnailCapturedAt,
           }
         : null,
       memberCount: row?.memberCount ?? 0,

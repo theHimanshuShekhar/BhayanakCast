@@ -170,22 +170,25 @@ describe('Home PostgreSQL projections', () => {
       visibility: 'public',
       endedAt: new Date(endedAt.getTime() - 2_000),
     })
-    for (const roomId of [publicRoom, privateRoom]) {
+    for (const roomId of [publicRoom, privateRoom, noThumbnailRoom]) {
       const membershipId = await data.membership(roomId, owner, true)
       const streamId = randomUUID()
       await data.pool.query(
         'INSERT INTO stream (id, room_id, membership_id, started_at, ended_at) VALUES ($1, $2, $3, $4, $5)',
         [streamId, roomId, membershipId, new Date(endedAt.getTime() - 60_000), endedAt],
       )
-      await data.pool.query(
-        'INSERT INTO past_stream_thumbnail (room_id, stream_id, bytes, captured_at) VALUES ($1, $2, $3, $4)',
-        [roomId, streamId, Buffer.from('thumbnail bytes'), capturedAt],
-      )
+      if (roomId !== noThumbnailRoom) {
+        await data.pool.query(
+          'INSERT INTO past_stream_thumbnail (room_id, stream_id, bytes, captured_at) VALUES ($1, $2, $3, $4)',
+          [roomId, streamId, Buffer.from('thumbnail bytes'), capturedAt],
+        )
+      }
     }
 
-    const projected = await new HomeRepository(
+    const repository = new HomeRepository(
       createPoolHomeQueryExecutor(data.pool),
-    ).pastStreams()
+    )
+    const projected = await repository.pastStreams()
     expect(projected.find(({ roomId }) => roomId === publicRoom)).toMatchObject({
       thumbnailCapturedAt: capturedAt.toISOString(),
     })
@@ -196,6 +199,19 @@ describe('Home PostgreSQL projections', () => {
       thumbnailCapturedAt: null,
     })
     for (const stream of projected) expect(stream).not.toHaveProperty('bytes')
+    const profile = await repository.publicProfile(owner)
+    expect(profile?.pastStreams.find(({ roomId }) => roomId === publicRoom)).toMatchObject({
+      thumbnailCapturedAt: capturedAt.toISOString(),
+    })
+    expect(profile?.pastStreams.find(({ roomId }) => roomId === privateRoom)).toMatchObject({
+      thumbnailCapturedAt: null,
+    })
+    expect(profile?.pastStreams.find(({ roomId }) => roomId === noThumbnailRoom)).toMatchObject({
+      thumbnailCapturedAt: null,
+    })
+    for (const stream of profile?.pastStreams ?? []) {
+      expect(stream).not.toHaveProperty('bytes')
+    }
   })
 
   test('hides pending-deletion identities and live activity from profiles', async () => {

@@ -125,7 +125,7 @@ test('anonymous and signed-in visitors get canonical responsive pre-admission ga
 test('Past Stream keeps bounded metadata and end facts without active-room affordances', async ({
   authSessions,
   browser,
-}) => {
+}, testInfo) => {
   const ownerId = randomUUID()
   const roomId = randomUUID()
   const membershipId = randomUUID()
@@ -158,6 +158,11 @@ test('Past Stream keeps bounded metadata and end facts without active-room affor
   try {
     const page = await context.newPage()
     await page.setViewportSize({ width: 390, height: 844 })
+    const previewRequests: string[] = []
+    await page.route('**/api/past-stream-previews/**', (route) => {
+      previewRequests.push(route.request().url())
+      return route.abort()
+    })
     await page.goto(`/rooms/${roomId}`)
     await expect(page.getByText('Past Stream', { exact: true })).toBeVisible()
     await expect(page.getByText('Private', { exact: true })).toBeVisible()
@@ -168,11 +173,151 @@ test('Past Stream keeps bounded metadata and end facts without active-room affor
     await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', /noindex/)
     await expect(page.getByRole('button', { name: /Join|Replay|Transcript/i })).toHaveCount(0)
     await expect(page.getByRole('link', { name: /Join|Replay|Transcript/i })).toHaveCount(0)
+    const placeholder = page.locator('.past-stream-item__media--private')
+    await expect(placeholder).toHaveCount(1)
+    await expect(placeholder).toHaveAttribute('aria-hidden', 'true')
+    await expect(page.locator('.room-stage img, .room-stage video')).toHaveCount(0)
+    expect(previewRequests).toEqual([])
+    const placeholderBox = await placeholder.boundingBox()
+    expect(placeholderBox).not.toBeNull()
+    expect(placeholderBox!.width / placeholderBox!.height).toBeGreaterThan(1.7)
+    expect(placeholderBox!.width / placeholderBox!.height).toBeLessThan(1.85)
+    await page.screenshot({
+      fullPage: true,
+      path: testInfo.outputPath('private-past-stream-summary-mobile.png'),
+    })
   } finally {
     await context.close()
     await authSessions.sql('DELETE FROM stream WHERE room_id = $1', [roomId])
     await authSessions.sql('DELETE FROM room_membership WHERE room_id = $1', [roomId])
     await authSessions.sql('DELETE FROM room WHERE id = $1', [roomId])
+    await authSessions.sql('DELETE FROM "user" WHERE id = $1', [ownerId])
+  }
+})
+
+test('Past Stream summary shows public captures and collapses missing media', async ({
+  authSessions,
+  browser,
+}, testInfo) => {
+  const ownerId = randomUUID()
+  const publicRoomId = randomUUID()
+  const noCaptureRoomId = randomUUID()
+  const publicMembershipId = randomUUID()
+  const noCaptureMembershipId = randomUUID()
+  const publicStreamId = randomUUID()
+  await authSessions.sql(
+    `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
+     VALUES ($1, 'Past media owner', $2, false, now(), now())`,
+    [ownerId, `${ownerId}@example.test`],
+  )
+  await authSessions.sql(
+    `INSERT INTO room
+       (id, name, tags, visibility, created_by, created_at, ended_at)
+     VALUES
+       ($1, 'Public capture summary', ARRAY[]::text[], 'public', $3,
+        now() - interval '2 hours', now()),
+       ($2, 'No capture summary', ARRAY[]::text[], 'public', $3,
+        now() - interval '2 hours', now())`,
+    [publicRoomId, noCaptureRoomId, ownerId],
+  )
+  await authSessions.sql(
+    `INSERT INTO room_membership
+       (id, room_id, account_id, role, joined_at, left_at)
+     VALUES
+       ($1, $3, $5, 'host', now() - interval '2 hours', now()),
+       ($2, $4, $5, 'host', now() - interval '2 hours', now())`,
+    [
+      publicMembershipId,
+      noCaptureMembershipId,
+      publicRoomId,
+      noCaptureRoomId,
+      ownerId,
+    ],
+  )
+  await authSessions.sql(
+    `INSERT INTO stream
+       (id, room_id, membership_id, started_at, ended_at)
+     VALUES
+       ($1, $3, $5, now() - interval '90 minutes', now()),
+       ($2, $4, $6, now() - interval '90 minutes', now())`,
+    [
+      publicStreamId,
+      randomUUID(),
+      publicRoomId,
+      noCaptureRoomId,
+      publicMembershipId,
+      noCaptureMembershipId,
+    ],
+  )
+  await authSessions.sql(
+    `INSERT INTO past_stream_thumbnail
+       (room_id, stream_id, bytes, captured_at)
+     VALUES ($1, $2, decode('00', 'hex'), now() - interval '1 minute')`,
+    [publicRoomId, publicStreamId],
+  )
+
+  const context = await browser.newContext({ baseURL: authSessions.origin })
+  try {
+    const page = await context.newPage()
+    await page.setViewportSize({ width: 1024, height: 900 })
+    const previewRequests: string[] = []
+    await page.route('**/api/past-stream-previews/**', (route) => {
+      previewRequests.push(route.request().url())
+      return route.fulfill({
+        body: Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+          'base64',
+        ),
+        contentType: 'image/png',
+        status: 200,
+      })
+    })
+    await page.goto(`/rooms/${publicRoomId}`)
+    const image = page.locator('.room-stage img')
+    await expect(image).toHaveCount(1)
+    await expect(image).toHaveAttribute(
+      'src',
+      new RegExp(`/api/past-stream-previews/${publicRoomId}\\?capturedAt=`),
+    )
+    await image.scrollIntoViewIfNeeded()
+    await expect.poll(() => previewRequests.length).toBe(1)
+    await expect(page.getByRole('button', { name: /Join|Replay/i })).toHaveCount(0)
+    await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', /noindex/)
+    const imageBox = await image.boundingBox()
+    expect(imageBox).not.toBeNull()
+    expect(imageBox!.width / imageBox!.height).toBeGreaterThan(1.7)
+    expect(imageBox!.width / imageBox!.height).toBeLessThan(1.85)
+    await page.screenshot({
+      fullPage: true,
+      path: testInfo.outputPath('public-past-stream-summary-desktop.png'),
+    })
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.screenshot({
+      fullPage: true,
+      path: testInfo.outputPath('public-past-stream-summary-mobile.png'),
+    })
+
+    await page.goto(`/rooms/${noCaptureRoomId}`)
+    await expect(page.locator('.past-stream-item__media')).toHaveCount(0)
+    await expect(page.getByText('This room has ended.')).toBeVisible()
+  } finally {
+    await context.close()
+    await authSessions.sql(
+      'DELETE FROM past_stream_thumbnail WHERE room_id = $1',
+      [publicRoomId],
+    )
+    await authSessions.sql(
+      'DELETE FROM stream WHERE room_id = ANY($1::uuid[])',
+      [[publicRoomId, noCaptureRoomId]],
+    )
+    await authSessions.sql(
+      'DELETE FROM room_membership WHERE room_id = ANY($1::uuid[])',
+      [[publicRoomId, noCaptureRoomId]],
+    )
+    await authSessions.sql(
+      'DELETE FROM room WHERE id = ANY($1::uuid[])',
+      [[publicRoomId, noCaptureRoomId]],
+    )
     await authSessions.sql('DELETE FROM "user" WHERE id = $1', [ownerId])
   }
 })
