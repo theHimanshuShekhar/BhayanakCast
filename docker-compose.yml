@@ -32,7 +32,7 @@ services:
       POSTHOG_PERSONAL_API_KEY: ${POSTHOG_PERSONAL_API_KEY:-}
       DATABASE_URL: postgres://${POSTGRES_USER:-bhayanakcast}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-bhayanakcast}
       VALKEY_URL: redis://valkey:6379
-      POSTHOG_HOST: http://posthog:8000
+      POSTHOG_HOST: ${POSTHOG_HOST:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -44,7 +44,6 @@ services:
       - "${APP_PORT:-3000}:3000"
     networks:
       - data
-      - analytics
     healthcheck:
       <<: *service-health
       test:
@@ -82,9 +81,6 @@ services:
 networks:
   data:
     internal: true
-  analytics:
-    name: ${POSTHOG_NETWORK:-bhayanakcast-analytics}
-    external: true
 
 volumes:
   postgres-data:

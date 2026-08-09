@@ -6,7 +6,7 @@ This runbook operates the accepted one-node topology. It does not add a second a
 
 - `cloudflared` and `app` share only the `edge` network. The tunnel sends the one public hostname to `http://app:3000`; the same Node listener owns HTTP and `/socket.io/` upgrades.
 - `app`, `postgres`, and `valkey` share the internal `data` network. PostgreSQL and Valkey publish no host ports in `compose.yml`.
-- PostHog runs from its official pinned hobby Compose release. Its operator-managed configuration disables Caddy, binds the operator UI to host loopback, and attaches only PostHog `web` and `app` to the internal external network named `bhayanakcast-analytics`. PostHog's ClickHouse, Kafka, Redis, PostgreSQL, and object-storage services stay on PostHog's own default network.
+- PostHog runs separately from this stack. The application sends analytics to the configured `POSTHOG_HOST` URL and does not join a PostHog Docker network.
 - PostHog is non-critical: an analytics outage must not change application readiness or block product requests. Valkey is disposable, but mutations whose abuse limits require it fail closed; durable reads and PostgreSQL data remain available. PostgreSQL unavailability makes application readiness fail.
 
 The production Compose file publishes no ports. `compose.dev.yml` is only for local dependency development and binds PostgreSQL and Valkey to loopback.
@@ -26,26 +26,13 @@ Copy `.env.example` to `.env`, keep it mode `0600`, and replace every required p
 - set `BETTER_AUTH_URL` and `CLOUDFLARED_PUBLIC_URL` to the identical HTTPS application origin;
 - set `TRUSTED_PROXY_IPS=172.30.0.3`, the fixed `cloudflared` address on `edge`;
 - set a reviewed immutable `CLOUDFLARED_IMAGE`, the Tunnel token, Discord credentials, a random Better Auth secret, and the PostgreSQL password;
-- to enable PostHog, set all three `POSTHOG_PROJECT_API_KEY`, `POSTHOG_PROJECT_ID`, and `POSTHOG_PERSONAL_API_KEY`; the personal key needs person read/delete access so Account approval can remove the Discord-ID person association with `delete_events=false` before local anonymization;
-- leave all three PostHog credentials empty to disable analytics, or retain `POSTHOG_HOST=http://posthog:8000` and configure all three together;
+- to enable PostHog, set `POSTHOG_HOST`, `POSTHOG_PROJECT_API_KEY`, `POSTHOG_PROJECT_ID`, and `POSTHOG_PERSONAL_API_KEY`; the host must be reachable from the application container, and the personal key needs person read/delete access so Account approval can remove the Discord-ID person association with `delete_events=false` before local anonymization;
+- leave all four PostHog values empty to disable analytics;
 - verify `172.30.0.0/24` does not overlap a host/LAN route before starting. If it overlaps, change both the `edge` subnet and fixed `cloudflared` address, then update `TRUSTED_PROXY_IPS`.
 
-Create the shared private analytics network once:
-
-```sh
-docker network create --internal bhayanakcast-analytics
-```
-
-In the pinned PostHog checkout, create its production secrets according to that release's official hobby documentation. Then apply this repository's override after the upstream file:
-
-```sh
-docker compose \
-  -f /opt/posthog/docker-compose.hobby.yml \
-  -f /opt/bhayanakcast/ops/posthog.compose.override.yml \
-  up -d
-```
-
-Confirm PostHog `web` is healthy from the application network and its UI is reachable only on the host at `http://127.0.0.1:8000`. Configure PostHog event retention to 365 days. Never enable the override's `public-posthog-disabled` profile.
+Run PostHog separately and keep its operator UI and ingestion endpoint private. Confirm
+`POSTHOG_HOST` is reachable from the application container, then configure PostHog event
+retention to 365 days.
 
 In Cloudflare Zero Trust, configure exactly one public hostname. Its service is `http://app:3000`; the final ingress rule must return `http_status:404`. Do not create public routes for PostHog or any data service. WebSockets must remain enabled. Store the Tunnel token only in `.env` or the host's secret manager.
 
@@ -83,7 +70,7 @@ node scripts/check-public-exposure.mjs https://PUBLIC_APPLICATION_HOSTNAME
 
 Record the JSON output, Compose image digests, PostHog commit/release tags, Tunnel identifier, and UTC time in the release evidence store. Also scan the residential WAN address from that external machine or verify the router/firewall rule set: the Cloudflare hostname port probe cannot prove that an unrelated origin IP has no forwarding rule.
 
-The smoke command proves application HTTP, same-origin routing, Socket.IO polling, and an actual WebSocket upgrade. The Compose check proves the repository topology publishes no ports and keeps `cloudflared` off data/analytics networks. Only the off-LAN run and Cloudflare dashboard/firewall inspection prove the real public boundary.
+The smoke command proves application HTTP, same-origin routing, Socket.IO polling, and an actual WebSocket upgrade. The Compose check proves that only the application publishes a host port and that PostgreSQL and Valkey remain on the internal data network. Only the off-LAN run and Cloudflare dashboard/firewall inspection prove the real public boundary.
 
 ## Scheduled interruption and dependency recovery
 
