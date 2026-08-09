@@ -55,6 +55,12 @@ export function PastStreams({ streams }: PastStreamsProps) {
                   />
                 </span>
               )}
+              {stream.visibility === 'private' && stream.streamCount > 0 && (
+                <span
+                  aria-hidden="true"
+                  className="past-stream-item__media past-stream-item__media--private"
+                />
+              )}
               {/* The badge sits inside the name block visually, but the name
                   probe stays a leaf so it reads back as just the room name. */}
               <span className="past-stream-item__name">

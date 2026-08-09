@@ -108,10 +108,20 @@ async function seedPastStreams(authSessions: AuthSessionFixture) {
     name: 'Late Night Study',
     visibility: 'private',
     memberCount: 1,
-    previewCount: 0,
+    previewCount: 1,
     category: null,
     tags: [],
     endedAt: '2026-07-15T14:00:00.000Z',
+  })
+  await addRoom(authSessions, {
+    id: '20000000-0000-4000-8000-000000000003',
+    name: 'Silent Reading Room',
+    visibility: 'private',
+    memberCount: 1,
+    previewCount: 0,
+    category: null,
+    tags: [],
+    endedAt: '2026-07-15T13:00:00.000Z',
   })
 }
 
@@ -287,7 +297,7 @@ test('places the frozen feature responsively while preserving DOM rank order', a
   }
 })
 
-test('renders public Past Stream thumbnails inside the unchanged card link', async ({
+test('renders public and private Past Stream media inside unchanged card links', async ({
   authSessions,
   page,
 }, testInfo) => {
@@ -307,12 +317,13 @@ test('renders public Past Stream thumbnails inside the unchanged card link', asy
   await page.goto(authSessions.origin)
 
   const items = page.locator('.past-stream-item')
-  await expect(items).toHaveCount(2)
+  await expect(items).toHaveCount(3)
   expect(await items.locator('[data-past-stream-name]').allTextContents()).toEqual([
     'Yesterday’s Drawing Table',
     'Late Night Study',
+    'Silent Reading Room',
   ])
-  await expect(items.locator('a')).toHaveCount(2)
+  await expect(items.locator('a')).toHaveCount(3)
   const publicLink = items.first().getByRole('link')
   await expect(publicLink).toHaveAccessibleName(
     'Open summary for Yesterday’s Drawing Table',
@@ -326,7 +337,15 @@ test('renders public Past Stream thumbnails inside the unchanged card link', asy
     'src',
     /\/api\/past-stream-previews\/20000000-0000-4000-8000-000000000001\?capturedAt=/,
   )
-  await expect(items.nth(1).locator('img, video')).toHaveCount(0)
+  const privateWithStream = items.nth(1)
+  const privateLink = privateWithStream.getByRole('link')
+  const placeholder = privateLink.locator('.past-stream-item__media--private')
+  await expect(placeholder).toHaveCount(1)
+  await expect(placeholder).toHaveAttribute('aria-hidden', 'true')
+  await expect(privateWithStream.locator('img, video')).toHaveCount(0)
+  await expect(privateLink).toHaveAccessibleName('Open summary for Late Night Study')
+  await expect(privateWithStream.locator('.past-stream-item__private')).toHaveText('Private')
+  await expect(items.nth(2).locator('.past-stream-item__media')).toHaveCount(0)
   await image.scrollIntoViewIfNeeded()
   await expect.poll(() => previewRequests.length).toBe(1)
   expect(previewRequests[0]).toContain('capturedAt=')
@@ -352,7 +371,18 @@ test('renders public Past Stream thumbnails inside the unchanged card link', asy
   expect(imageBox).not.toBeNull()
   expect(imageBox!.width / imageBox!.height).toBeGreaterThan(1.7)
   expect(imageBox!.width / imageBox!.height).toBeLessThan(1.85)
+  const placeholderBox = await placeholder.boundingBox()
+  expect(placeholderBox).not.toBeNull()
+  expect(placeholderBox!.width / placeholderBox!.height).toBeGreaterThan(1.7)
+  expect(placeholderBox!.width / placeholderBox!.height).toBeLessThan(1.85)
+  await placeholder.scrollIntoViewIfNeeded()
+  await page.waitForTimeout(100)
+  expect(previewRequests).toHaveLength(1)
   await screenshot(page, testInfo, 'past-stream-thumbnail-desktop.png')
+  await page.getByRole('button', { name: 'Dark theme' }).click()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+  await page.waitForTimeout(150)
+  await screenshot(page, testInfo, 'past-stream-thumbnail-dark.png')
   await page.setViewportSize({ width: 390, height: 900 })
   const mobile = await items.evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().x))
   expect(Math.round(mobile[0]!)).toBe(Math.round(mobile[1]!))
