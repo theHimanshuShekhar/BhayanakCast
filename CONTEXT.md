@@ -132,6 +132,9 @@ BhayanakCast is a public discovery platform for small social screen-sharing room
 **Stream**
 : A Room Member's direct peer-to-peer screen or application share, with only browser-picker-approved captured audio when available. V1 has no app-level audio setting, microphone capture, synthesized audio, or shared voice channel. A member may have one active Stream per room. To change source, they stop it then start a new browser-picked Stream; browser capture end uses the same stop path. Each Room Member explicitly chooses one active remote Stream to watch; selecting another stops the prior subscription. A Stream end always clears the subscription, and a later Stream needs explicit reselection.
 
+**Stream quality**
+: A Stream aims at 1080p and 60 frames per second and never exceeds or enlarges its captured source, so a shared window smaller than that is carried at its own size. Motion is kept ahead of sharpness: when a watcher's connection cannot carry the full picture, the resolution falls while the frame rate holds, and the resolution returns as the connection recovers. Each watcher's picture follows that watcher's own connection, so people watching one Stream may see different resolutions at the same moment. V1 has no Streamer or watcher quality control. A Streamer whose computer cannot encode the full target delivers less to every watcher, and a Stream watched by many people is softer than one watched by a single person.
+
 **Capture failure**
 : Own Stream uses one bottom-shelf state slot: Start Stream opens the native picker, usable tracks move it to `Starting…` with Cancel during local media/startup work, canonical start acknowledgement moves it to Stop Stream, and Cancel/failure returns it to Start with specific inline guidance. The authorized start command is submitted only after usable tracks and local setup are ready; pre-submit cancellation releases tracks and creates no Stream, Preview, peer connection, or Activity start event. Room/chat/current remote watch remain unchanged, and the picker never reopens automatically.
 
@@ -376,3 +379,4 @@ BhayanakCast is a public discovery platform for small social screen-sharing room
 - [`docs/adr/0107-room-visual-language.md`](docs/adr/0107-room-visual-language.md) — adopts the 4a room design as visual language only, subordinate to the room structure ADRs.
 - [`docs/adr/0108-anonymous-visitors-in-home-presence.md`](docs/adr/0108-anonymous-visitors-in-home-presence.md) — blends anonymous visitors into the Home count over listener-free anonymous sockets.
 - [`docs/adr/0109-retain-final-past-stream-thumbnail.md`](docs/adr/0109-retain-final-past-stream-thumbnail.md) — retains one final public Stream Preview as a durable Past Stream thumbnail.
+- [`docs/adr/0110-framerate-preserving-stream-encoding.md`](docs/adr/0110-framerate-preserving-stream-encoding.md) — keeps Stream frame rate ahead of resolution under a fixed per-watcher ceiling.
