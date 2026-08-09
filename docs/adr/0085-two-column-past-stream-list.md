@@ -2,16 +2,17 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-11
+- **Amended:** 2026-08-09 — ADR `0109` permits one optional retained thumbnail for a public Past Stream, a CSS-only blurred placeholder for a private Past Stream that had Streams, and no media block otherwise.
 
 ## Context
 
-Home includes exactly ten recent Past Streams as quiet community continuity beneath live discovery. These records contain no replay media, so a thumbnail gallery would imply content that does not exist.
+Home includes exactly ten recent Past Streams as quiet community continuity beneath live discovery. These records contain no replay media, but one retained still image can make public history easier to scan without implying playback.
 
 ## Decision
 
 Desktop shows the ten recent Past Streams in a compact two-column list; mobile collapses to one column. Each item shows the room name, ended time, public/private state, category/tags when present, participation/Stream summary, and an action to open the stable Past Stream summary.
 
-Past Stream items use no preview image, fake thumbnail, carousel, pagination, or table treatment. They are visually quieter than Live Room cards and remain ordered by end time descending.
+Past Stream items may show one retained public thumbnail, a CSS-only blurred private placeholder when Streams existed, or no media block otherwise. They use no fake thumbnail, carousel, pagination, or table treatment. They are visually quieter than Live Room cards and remain ordered by end time descending.
 
 ## Consequences
 
