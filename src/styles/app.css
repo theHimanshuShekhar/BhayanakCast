@@ -2891,6 +2891,36 @@ p.home-filters__facets {
   object-fit: cover;
 }
 
+.past-stream-item__media--private {
+  position: relative;
+  border: 1px solid var(--private);
+  background: color-mix(in srgb, var(--private) 14%, var(--surface));
+}
+
+.past-stream-item__media--private::before {
+  position: absolute;
+  inset: -12%;
+  background:
+    radial-gradient(
+      circle at 24% 32%,
+      color-mix(in srgb, var(--private) 62%, transparent) 0 12%,
+      transparent 34%
+    ),
+    radial-gradient(
+      ellipse at 72% 64%,
+      color-mix(in srgb, var(--private) 45%, var(--surface)) 0 18%,
+      transparent 48%
+    ),
+    linear-gradient(
+      118deg,
+      transparent 20%,
+      color-mix(in srgb, var(--private) 36%, transparent) 42% 58%,
+      transparent 78%
+    );
+  content: "";
+  filter: blur(0.875rem);
+}
+
 .past-stream-item__name {
   display: flex;
   min-width: 0;
