@@ -26,6 +26,7 @@ todos.json
 .tokensave/tokensave.db
 .tokensave/tokensave.db-shm
 .tokensave/tokensave.db-wal
+.impeccable/
 
 # Test and coverage outputs
 coverage/
