@@ -67,7 +67,7 @@ Each Live Room card is one accessible link target: clicking or activating anywhe
 
 ## Past Streams layout
 
-The ten recent Past Streams use a compact grid of metadata blocks: one column on mobile and two on desktop. Each block shows name, visibility, optional category/tags, and a single baseline of participation/Stream summary, ended time, and an Open action linking to the summary. They use no preview image, fake thumbnail, carousel, pagination, or table styling.
+The ten recent Past Streams use a compact grid of metadata blocks: one column on mobile and two on desktop. Each block shows name, visibility, optional category/tags, and a single baseline of participation/Stream summary, ended time, and an Open action linking to the summary. A public Past Stream with an archived capture uses its real thumbnail; a private Past Stream with a non-zero Stream count uses a CSS-only blurred placeholder; all other cases use no media block. The blocks use no fake thumbnail, carousel, pagination, or table styling.
 
 ## Empty discovery
 

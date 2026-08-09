@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-10
 - **Amended:** 2026-07-29 — a private-room preview's blur is a property of the stored image, not of its presentation: private previews are captured and stored at most 64px wide, and the server enforces that cap by reading the WebP header.
+- **Amended:** 2026-08-09 — ADR `0109` allows a public-room preview to outlive its Stream only as a separate archived Past Stream thumbnail; private-room captures are never archived, and live preview keys remain live-only.
 
 ## Context
 
@@ -23,4 +24,4 @@ Blur applied in the browser is a presentation choice, and a preview key resolves
 - Preview bytes remain excluded from logs and PostHog regardless of room visibility.
 - A private-room preview cannot be recovered into a readable thumbnail by any client, including one that ignores the styling, because the detail was never encoded.
 - A room turning private retires the previews its live Streams stored under the public rule, in the same transaction as the visibility change; waiting for the next upload would keep readable thumbnails of a now-private room servable for up to two minutes. The reverse direction needs nothing: a private-width preview is merely coarse.
-- Serving a preview is not membership-gated, since Home shows previews to visitors who have joined nothing (ADR `0084`); the stored image, not the request, is what carries the privacy boundary. A key serves only while its Stream is live.
+- Serving a live preview is not membership-gated, since Home shows previews to visitors who have joined nothing (ADR `0084`); the stored image, not the request, is what carries the privacy boundary. A live preview key serves only while its Stream is live. ADR `0109` separately permits one public capture to persist as an archived Past Stream thumbnail.

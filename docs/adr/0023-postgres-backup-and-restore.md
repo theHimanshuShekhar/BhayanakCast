@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-10
+- **Amended:** 2026-08-09 — ADR `0109` places archived Past Stream thumbnails in PostgreSQL, inside the daily backup and monthly restore boundary; live preview bytes remain excluded.
 
 ## Context
 
@@ -16,4 +17,4 @@ Create encrypted PostgreSQL backups daily to the operator's same-site NAS, retai
 - The NAS destination, encryption-key handling, and restore runbook are required homelab deployment artifacts.
 - Same-site NAS backups protect against Compose-host failure but do not provide recovery from a home/site-wide loss.
 - Daily retention jobs and account-data retention policies do not replace backup retention.
-- Live-only Socket.IO/WebRTC state and non-persisted preview thumbnails are outside database recovery guarantees.
+- Live-only Socket.IO/WebRTC state and non-persisted live preview thumbnails are outside database recovery guarantees. Archived Past Stream thumbnails are persisted in PostgreSQL and therefore included.
