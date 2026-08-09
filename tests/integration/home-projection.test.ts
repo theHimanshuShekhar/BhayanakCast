@@ -150,6 +150,54 @@ describe('Home PostgreSQL projections', () => {
     expect(JSON.stringify(profiles[0]?.coUsers)).not.toContain('Bob')
   })
 
+  test('projects only public Past Stream thumbnail timestamps', async () => {
+    const data = await fixture()
+    const owner = await data.account('Thumbnail owner')
+    const endedAt = new Date('2026-08-09T00:00:00.000Z')
+    const capturedAt = new Date('2026-08-08T23:59:00.000Z')
+    const publicRoom = await data.room({
+      name: 'Public thumbnail',
+      visibility: 'public',
+      endedAt,
+    })
+    const privateRoom = await data.room({
+      name: 'Private thumbnail',
+      visibility: 'private',
+      endedAt: new Date(endedAt.getTime() - 1_000),
+    })
+    const noThumbnailRoom = await data.room({
+      name: 'No thumbnail',
+      visibility: 'public',
+      endedAt: new Date(endedAt.getTime() - 2_000),
+    })
+    for (const roomId of [publicRoom, privateRoom]) {
+      const membershipId = await data.membership(roomId, owner, true)
+      const streamId = randomUUID()
+      await data.pool.query(
+        'INSERT INTO stream (id, room_id, membership_id, started_at, ended_at) VALUES ($1, $2, $3, $4, $5)',
+        [streamId, roomId, membershipId, new Date(endedAt.getTime() - 60_000), endedAt],
+      )
+      await data.pool.query(
+        'INSERT INTO past_stream_thumbnail (room_id, stream_id, bytes, captured_at) VALUES ($1, $2, $3, $4)',
+        [roomId, streamId, Buffer.from('thumbnail bytes'), capturedAt],
+      )
+    }
+
+    const projected = await new HomeRepository(
+      createPoolHomeQueryExecutor(data.pool),
+    ).pastStreams()
+    expect(projected.find(({ roomId }) => roomId === publicRoom)).toMatchObject({
+      thumbnailCapturedAt: capturedAt.toISOString(),
+    })
+    expect(projected.find(({ roomId }) => roomId === privateRoom)).toMatchObject({
+      thumbnailCapturedAt: null,
+    })
+    expect(projected.find(({ roomId }) => roomId === noThumbnailRoom)).toMatchObject({
+      thumbnailCapturedAt: null,
+    })
+    for (const stream of projected) expect(stream).not.toHaveProperty('bytes')
+  })
+
   test('hides pending-deletion identities and live activity from profiles', async () => {
     const data = await fixture()
     const alice = await data.account('Visible Alice', 'alice-visible')

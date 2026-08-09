@@ -10,12 +10,17 @@ import {
   PREVIEW_BYTE_LIMIT,
   PREVIEW_UPLOAD_WINDOW_SECONDS,
 } from '../../src/server/streams/preview-service'
+import {
+  bindPreviewRuntime,
+  handleStreamPreviewRequest,
+} from '../../src/server/streams/preview-http'
 import { TestClock } from '../helpers/test-clock'
 import { getIntegrationContext } from '../setup/integration'
 
 const fixtures: Array<() => Promise<void>> = []
 
 afterEach(async () => {
+  bindPreviewRuntime({})
   await Promise.all(fixtures.splice(0).map((cleanup) => cleanup()))
 })
 
@@ -113,7 +118,19 @@ async function streaming(
   )
   const started = await fixture.streams.start(host, room.room.id)
   if (started.status !== 'started') throw new Error(`Expected started, got ${started.status}`)
-  return { host, roomId: room.room.id, streamId: started.streamId }
+  return {
+    host,
+    roomId: room.room.id,
+    streamId: started.streamId,
+    expiresAt: room.room.expiresAt,
+  }
+}
+
+async function leaveConfirmed(rooms: RoomService, accountId: string) {
+  const result = await rooms.leave(accountId)
+  return result.status === 'confirmation-required'
+    ? rooms.leave(accountId, { confirmation: result.confirmation })
+    : result
 }
 
 describe('stream previews', () => {
@@ -140,6 +157,167 @@ describe('stream previews', () => {
     // The bytes are live-only: Valkey expires them without anyone sweeping.
     const ttl = await fixture.valkey.ttl(`${fixture.valkeyPrefix}preview:${result.previewKey}`)
     expect(ttl).toBeGreaterThan(0)
+  })
+
+  test('archives the latest public capture through Stream stop and empty-room end', async () => {
+    const fixture = await createFixture()
+    const { host, roomId, streamId } = await streaming(fixture)
+    const firstBytes = webp(640, 360)
+    const secondBytes = webp(320, 180)
+
+    const first = await fixture.previews.store(host, firstBytes)
+    if (first.status !== 'stored') throw new Error('Expected a stored preview')
+    await fixture.clearRateLimit(streamId)
+    fixture.clock.advanceTo(fixture.clock.now() + 120_000)
+    const second = await fixture.previews.store(host, secondBytes)
+    if (second.status !== 'stored') throw new Error('Expected a replacement preview')
+
+    await fixture.streams.stop(host)
+    await expect(leaveConfirmed(fixture.rooms, host)).resolves.toMatchObject({ status: 'left' })
+    fixture.clock.advanceTo(fixture.clock.now() + 5 * 60_000)
+    expect(await fixture.rooms.endDueRooms()).toBeGreaterThanOrEqual(1)
+
+    await expect(fixture.previews.readArchived(roomId)).resolves.toEqual({
+      bytes: secondBytes,
+      capturedAt: second.updatedAt,
+    })
+  })
+
+  test('keeps a public archive through lifetime and Platform Admin end paths', async () => {
+    const lifetime = await createFixture()
+    const due = await streaming(lifetime)
+    const lifetimeBytes = webp(640, 360)
+    await lifetime.previews.store(due.host, lifetimeBytes)
+    lifetime.clock.advanceTo(due.expiresAt.getTime())
+    expect(await lifetime.rooms.endDueRooms()).toBeGreaterThanOrEqual(1)
+    await expect(lifetime.previews.readArchived(due.roomId)).resolves.toMatchObject({
+      bytes: lifetimeBytes,
+    })
+
+    const enforced = await createFixture()
+    const live = await streaming(enforced)
+    const admin = await enforced.account('Admin')
+    const adminBytes = webp(320, 180)
+    await enforced.previews.store(live.host, adminBytes)
+    await expect(
+      enforced.rooms.adminEndRoom(
+        { accountId: admin, isPlatformAdmin: true },
+        live.roomId,
+      ),
+    ).resolves.toMatchObject({ status: 'ended' })
+    await expect(enforced.previews.readArchived(live.roomId)).resolves.toMatchObject({
+      bytes: adminBytes,
+    })
+  })
+
+  test('never reads a live or private Room archive', async () => {
+    const fixture = await createFixture()
+    const publicRoom = await streaming(fixture)
+    await fixture.previews.store(publicRoom.host, webp(640, 360))
+    await expect(fixture.previews.readArchived(publicRoom.roomId)).resolves.toBeNull()
+
+    const privateFixture = await createFixture()
+    const privateRoom = await streaming(privateFixture, 'private')
+    await privateFixture.previews.store(privateRoom.host, webp(64, 36))
+    await expect(
+      privateFixture.pool.query(
+        'SELECT room_id FROM past_stream_thumbnail WHERE room_id = $1',
+        [privateRoom.roomId],
+      ),
+    ).resolves.toMatchObject({ rows: [] })
+    const admin = await privateFixture.account('Admin')
+    await privateFixture.rooms.adminEndRoom(
+      { accountId: admin, isPlatformAdmin: true },
+      privateRoom.roomId,
+    )
+    await expect(privateFixture.previews.readArchived(privateRoom.roomId)).resolves.toBeNull()
+  })
+
+  test('deletes a public archive on privacy change and archives a later public capture', async () => {
+    const fixture = await createFixture()
+    const { host, roomId, streamId } = await streaming(fixture)
+    await fixture.previews.store(host, webp(640, 360))
+
+    await fixture.rooms.updateRoom(host, roomId, {
+      name: 'Now private',
+      visibility: 'private',
+      password: 'correct horse battery',
+    })
+    await expect(
+      fixture.pool.query(
+        'SELECT room_id FROM past_stream_thumbnail WHERE room_id = $1',
+        [roomId],
+      ),
+    ).resolves.toMatchObject({ rows: [] })
+    await fixture.rooms.updateRoom(host, roomId, {
+      name: 'Public again',
+      visibility: 'public',
+    })
+    await fixture.clearRateLimit(streamId)
+    fixture.clock.advanceTo(fixture.clock.now() + 120_000)
+    const replacementBytes = webp(320, 180)
+    await fixture.previews.store(host, replacementBytes)
+    const admin = await fixture.account('Admin')
+    await fixture.rooms.adminEndRoom(
+      { accountId: admin, isPlatformAdmin: true },
+      roomId,
+    )
+
+    await expect(fixture.previews.readArchived(roomId)).resolves.toMatchObject({
+      bytes: replacementBytes,
+    })
+  })
+
+  test('serves only ended public archives over the immutable HTTP path', async () => {
+    const fixture = await createFixture()
+    const { host, roomId } = await streaming(fixture)
+    const bytes = webp(640, 360)
+    await fixture.previews.store(host, bytes)
+    bindPreviewRuntime({ previews: fixture.previews })
+
+    const live = await handleStreamPreviewRequest(
+      new Request(`http://example.test/api/past-stream-previews/${roomId}`),
+    )
+    expect(live?.status).toBe(404)
+    expect(live?.headers.get('cache-control')).toBe('no-store')
+
+    const admin = await fixture.account('Admin')
+    await fixture.rooms.adminEndRoom(
+      { accountId: admin, isPlatformAdmin: true },
+      roomId,
+    )
+    const ended = await handleStreamPreviewRequest(
+      new Request(`http://example.test/api/past-stream-previews/${roomId}`),
+    )
+    expect(ended?.status).toBe(200)
+    expect(ended?.headers.get('content-type')).toBe('image/webp')
+    expect(ended?.headers.get('cache-control')).toBe(
+      'public, max-age=31536000, immutable',
+    )
+    expect(Buffer.from(await ended!.arrayBuffer())).toEqual(bytes)
+
+    const noCapture = await streaming(fixture)
+    const privateCapture = await streaming(fixture, 'private')
+    await fixture.previews.store(privateCapture.host, webp(64, 36))
+    for (const absent of [noCapture.roomId, privateCapture.roomId]) {
+      await fixture.rooms.adminEndRoom(
+        { accountId: admin, isPlatformAdmin: true },
+        absent,
+      )
+      const missing = await handleStreamPreviewRequest(
+        new Request(`http://example.test/api/past-stream-previews/${absent}`),
+      )
+      expect(missing?.status).toBe(404)
+      expect(missing?.headers.get('cache-control')).toBe('no-store')
+    }
+
+    for (const segment of [randomUUID(), 'not-a-room-id']) {
+      const missing = await handleStreamPreviewRequest(
+        new Request(`http://example.test/api/past-stream-previews/${segment}`),
+      )
+      expect(missing?.status).toBe(404)
+      expect(missing?.headers.get('cache-control')).toBe('no-store')
+    }
   })
 
   test('keeps only the newest preview and drops the bytes behind the old key', async () => {
@@ -242,6 +420,25 @@ describe('stream previews', () => {
     await expect(
       fixture.previews.store(host, Buffer.from('PNG, or anything else at all')),
     ).resolves.toEqual({ status: 'rejected', reason: 'not-webp' })
+  })
+
+  test('archives a capture at the exact byte limit', async () => {
+    const fixture = await createFixture()
+    const { host, roomId } = await streaming(fixture)
+    const base = webp(640, 360)
+    const bytes = webp(640, 360, PREVIEW_BYTE_LIMIT - base.byteLength)
+    expect(bytes.byteLength).toBe(PREVIEW_BYTE_LIMIT)
+    await expect(fixture.previews.store(host, bytes)).resolves.toMatchObject({
+      status: 'stored',
+    })
+    const admin = await fixture.account('Admin')
+    await fixture.rooms.adminEndRoom(
+      { accountId: admin, isPlatformAdmin: true },
+      roomId,
+    )
+    await expect(fixture.previews.readArchived(roomId)).resolves.toMatchObject({
+      bytes,
+    })
   })
 
   test('has nothing to store without a live stream, and stops serving when one ends', async () => {

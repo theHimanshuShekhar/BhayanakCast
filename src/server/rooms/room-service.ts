@@ -1541,13 +1541,17 @@ export class RoomService {
         ],
       )
       if (normalized.visibility === 'private') {
-        // A preview stored under the public rule is a readable thumbnail
-        // (ADR 0035). Retire it now rather than serving it until the next
-        // upload replaces it at the private width.
+        // A capture stored under the public rule is readable (ADRs 0035 and
+        // 0109). Retire both the live key and durable archive in this privacy
+        // transaction rather than relying on either serving path to hide it.
         await client.query(
           `UPDATE stream
               SET preview_key = NULL, preview_updated_at = NULL
             WHERE room_id = $1 AND ended_at IS NULL AND preview_key IS NOT NULL`,
+          [roomId],
+        )
+        await client.query(
+          'DELETE FROM past_stream_thumbnail WHERE room_id = $1',
           [roomId],
         )
       }

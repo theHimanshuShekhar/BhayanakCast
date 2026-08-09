@@ -41,6 +41,7 @@ export interface PastStreamSummary {
   readonly tags: readonly string[]
   readonly memberCount: number
   readonly streamCount: number
+  readonly thumbnailCapturedAt: string | null
 }
 
 export interface CoUserSummary {

@@ -84,8 +84,9 @@ async function addRoom(
 }
 
 async function seedPastStreams(authSessions: AuthSessionFixture) {
+  const publicRoomId = '20000000-0000-4000-8000-000000000001'
   await addRoom(authSessions, {
-    id: '20000000-0000-4000-8000-000000000001',
+    id: publicRoomId,
     name: 'Yesterday’s Drawing Table',
     visibility: 'public',
     memberCount: 2,
@@ -94,6 +95,14 @@ async function seedPastStreams(authSessions: AuthSessionFixture) {
     tags: ['drawing'],
     endedAt: '2026-07-15T15:00:00.000Z',
   })
+  await authSessions.sql(
+    `INSERT INTO past_stream_thumbnail (room_id, stream_id, bytes, captured_at)
+     SELECT $1, id, decode('00', 'hex'), $2::timestamp
+       FROM stream
+      WHERE room_id = $1
+      LIMIT 1`,
+    [publicRoomId, '2026-07-15T14:59:00.000Z'],
+  )
   await addRoom(authSessions, {
     id: '20000000-0000-4000-8000-000000000002',
     name: 'Late Night Study',
@@ -278,10 +287,22 @@ test('places the frozen feature responsively while preserving DOM rank order', a
   }
 })
 
-test('renders Past Streams as newest metadata-only summaries in two columns then one', async ({
+test('renders public Past Stream thumbnails inside the unchanged card link', async ({
   authSessions,
   page,
-}) => {
+}, testInfo) => {
+  const previewRequests: string[] = []
+  await page.route('**/api/past-stream-previews/**', (route) => {
+    previewRequests.push(route.request().url())
+    return route.fulfill({
+      body: Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        'base64',
+      ),
+      contentType: 'image/png',
+      status: 200,
+    })
+  })
   await seedDiscovery(authSessions)
   await page.goto(authSessions.origin)
 
@@ -292,12 +313,28 @@ test('renders Past Streams as newest metadata-only summaries in two columns then
     'Late Night Study',
   ])
   await expect(items.locator('a')).toHaveCount(2)
-  await expect(items.locator('img, video')).toHaveCount(0)
+  const publicLink = items.first().getByRole('link')
+  await expect(publicLink).toHaveAccessibleName(
+    'Open summary for Yesterday’s Drawing Table',
+  )
+  const image = publicLink.locator('img')
+  await expect(image).toHaveCount(1)
+  await expect(image).toHaveAttribute('alt', '')
+  await expect(image).toHaveAttribute('loading', 'lazy')
+  await expect(image).toHaveAttribute('decoding', 'async')
+  await expect(image).toHaveAttribute(
+    'src',
+    /\/api\/past-stream-previews\/20000000-0000-4000-8000-000000000001\?capturedAt=/,
+  )
+  await expect(items.nth(1).locator('img, video')).toHaveCount(0)
+  await image.scrollIntoViewIfNeeded()
+  await expect.poll(() => previewRequests.length).toBe(1)
+  expect(previewRequests[0]).toContain('capturedAt=')
   await expect(page.getByText(/replay|carousel|pagination/i)).toHaveCount(0)
   await expect(items.first()).toContainText('2 members')
   await expect(items.first()).toContainText('1 screen')
   await expect(items.first().locator('.past-stream-item__private')).toHaveCount(0)
-  await expect(items.first().getByRole('link')).toHaveAttribute(
+  await expect(publicLink).toHaveAttribute(
     'href',
     '/rooms/20000000-0000-4000-8000-000000000001',
   )
@@ -305,9 +342,21 @@ test('renders Past Streams as newest metadata-only summaries in two columns then
   await page.setViewportSize({ width: 1024, height: 900 })
   const desktop = await items.evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().x))
   expect(Math.round(desktop[0]!)).not.toBe(Math.round(desktop[1]!))
+  const desktopBoxes = await items.evaluateAll((rows) =>
+    rows.map((row) => row.getBoundingClientRect()),
+  )
+  expect(Math.round(desktopBoxes[0]!.height)).toBe(
+    Math.round(desktopBoxes[1]!.height),
+  )
+  const imageBox = await image.boundingBox()
+  expect(imageBox).not.toBeNull()
+  expect(imageBox!.width / imageBox!.height).toBeGreaterThan(1.7)
+  expect(imageBox!.width / imageBox!.height).toBeLessThan(1.85)
+  await screenshot(page, testInfo, 'past-stream-thumbnail-desktop.png')
   await page.setViewportSize({ width: 390, height: 900 })
   const mobile = await items.evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().x))
   expect(Math.round(mobile[0]!)).toBe(Math.round(mobile[1]!))
+  await screenshot(page, testInfo, 'past-stream-thumbnail-mobile.png')
 })
 
 test('leads empty discovery with one Create Room invitation', async ({

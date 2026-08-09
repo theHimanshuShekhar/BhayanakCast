@@ -45,6 +45,16 @@ export function PastStreams({ streams }: PastStreamsProps) {
                 properties: {},
               })}
             >
+              {stream.visibility === 'public' && stream.thumbnailCapturedAt && (
+                <span aria-hidden="true" className="past-stream-item__media">
+                  <img
+                    alt=""
+                    decoding="async"
+                    loading="lazy"
+                    src={`/api/past-stream-previews/${encodeURIComponent(stream.roomId)}?capturedAt=${encodeURIComponent(stream.thumbnailCapturedAt)}`}
+                  />
+                </span>
+              )}
               {/* The badge sits inside the name block visually, but the name
                   probe stays a leaf so it reads back as just the room name. */}
               <span className="past-stream-item__name">
