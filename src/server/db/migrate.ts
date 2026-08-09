@@ -1,14 +1,23 @@
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 import type { Pool } from 'pg'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { createDatabase } from './client'
 
-// Joined rather than built from a `new URL('./migrations', …)` literal, which
-// the bundler would try to resolve as a module at build time. The folder ships
-// beside whatever loads this — the sources in development and tests, the
-// server bundle in a build.
-const MIGRATIONS_FOLDER = join(dirname(fileURLToPath(import.meta.url)), 'migrations')
+// The bundler rewrites import.meta.url to the source path used during the
+// image build. Resolve from the process root instead so production reads the
+// copied runtime assets rather than the absent build-stage sources.
+export function resolveMigrationsFolder(
+  nodeEnv = process.env.NODE_ENV,
+  cwd = process.cwd(),
+) {
+  return join(
+    cwd,
+    nodeEnv === 'production'
+      ? 'dist/server/migrations'
+      : 'src/server/db/migrations',
+  )
+}
+const MIGRATIONS_FOLDER = resolveMigrationsFolder()
 const POSTGRES_IDENTIFIER = /^[a-z_][a-z0-9_]*$/
 
 export async function migrateAuthDatabase(pool: Pool, schema: string) {
