@@ -164,10 +164,15 @@ export class HomeRepository {
               r.description,
               r.tags,
               COUNT(DISTINCT m.id)::int AS "memberCount",
-              COUNT(DISTINCT s.id)::int AS "streamCount"
+              COUNT(DISTINCT s.id)::int AS "streamCount",
+              CASE
+                WHEN r.visibility = 'public' THEN MAX(thumbnail.captured_at)
+                ELSE NULL
+              END AS "thumbnailCapturedAt"
          FROM room r
          LEFT JOIN room_membership m ON m.room_id = r.id
          LEFT JOIN stream s ON s.room_id = r.id
+         LEFT JOIN past_stream_thumbnail thumbnail ON thumbnail.room_id = r.id
         WHERE r.ended_at IS NOT NULL
         GROUP BY r.id
         ORDER BY r.ended_at DESC, r.id ASC
@@ -371,8 +376,10 @@ type RankedRoomRow = Omit<ActiveRoomRow, 'activityAt'> & {
   readonly activityAt: string
 }
 
-interface PastStreamRow extends Omit<PastStreamSummary, 'endedAt'> {
+interface PastStreamRow
+  extends Omit<PastStreamSummary, 'endedAt' | 'thumbnailCapturedAt'> {
   readonly endedAt: Date | string
+  readonly thumbnailCapturedAt?: Date | string | null
 }
 
 interface ProfileIdentityRow extends ProfileSearchCandidate {
@@ -421,6 +428,9 @@ function toPastStream(row: PastStreamRow): PastStreamSummary {
     tags: row.tags,
     memberCount: row.memberCount,
     streamCount: row.streamCount,
+    thumbnailCapturedAt: row.thumbnailCapturedAt
+      ? new Date(row.thumbnailCapturedAt).toISOString()
+      : null,
   }
 }
 

@@ -10,9 +10,9 @@ import { readWebpDimensions } from './preview-image'
 export const PREVIEW_BYTE_LIMIT = 100 * 1024
 export const PREVIEW_UPLOAD_WINDOW_SECONDS = 110
 
-/** Previews are live-only state — ADR 0023 keeps them out of the database
-    recovery guarantee, so the bytes live in Valkey and expire on their own if
-    a publisher disappears without stopping. Two missed refreshes' worth. */
+/** Live previews remain outside the database recovery guarantee: their keys
+    and serving bytes live in Valkey and expire if a publisher disappears.
+    ADR 0109 separately archives one public capture per Room in PostgreSQL. */
 export const PREVIEW_TTL_SECONDS = 300
 
 /** A public-room preview is a readable thumbnail. A private-room preview must
@@ -41,6 +41,11 @@ export interface StoredPreview {
   readonly visibility: 'public' | 'private'
 }
 
+export interface ArchivedPreview {
+  readonly bytes: Buffer
+  readonly capturedAt: Date
+}
+
 const PREVIEW_KEY = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 export interface PreviewServiceConfiguration {
@@ -58,8 +63,8 @@ export interface PreviewServiceConfiguration {
   }) => void
 }
 
-/** ADR 0035's capture target: the latest preview of each live Stream, held
-    live-only, replaced rather than accumulated. */
+/** Owns live Stream Preview replacement plus ADR 0109's single durable public
+    capture per Room. The live key remains latest-only and Valkey-backed. */
 export class PreviewService {
   private readonly pool: Pool
   private readonly valkey: Redis
@@ -128,6 +133,28 @@ export class PreviewService {
     let previousKey: string | null
     try {
       await client.query('BEGIN')
+      const currentRoom = await client.query<{
+        visibility: 'public' | 'private'
+      }>(
+        `SELECT visibility
+           FROM room
+          WHERE id = $1 AND ended_at IS NULL
+          FOR UPDATE`,
+        [stream.roomId],
+      )
+      const visibility = currentRoom.rows[0]?.visibility
+      if (!visibility) {
+        await client.query('ROLLBACK')
+        await this.valkey.del(this.bytesKey(previewKey))
+        return { status: 'not-streaming' }
+      }
+      const currentMaxWidth =
+        visibility === 'private' ? PRIVATE_PREVIEW_MAX_WIDTH : PUBLIC_PREVIEW_MAX_WIDTH
+      if (dimensions.width > currentMaxWidth) {
+        await client.query('ROLLBACK')
+        await this.valkey.del(this.bytesKey(previewKey))
+        return { status: 'rejected', reason: 'too-detailed' }
+      }
       const current = await client.query<{ previousKey: string | null }>(
         `SELECT preview_key AS "previousKey"
            FROM stream
@@ -147,6 +174,18 @@ export class PreviewService {
           WHERE id = $1`,
         [stream.streamId, previewKey, updatedAt],
       )
+      if (stream.visibility === 'public' && visibility === 'public') {
+        await client.query(
+          `INSERT INTO past_stream_thumbnail (room_id, stream_id, bytes, captured_at)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (room_id) DO UPDATE
+             SET stream_id = EXCLUDED.stream_id,
+                 bytes = EXCLUDED.bytes,
+                 captured_at = EXCLUDED.captured_at
+           WHERE past_stream_thumbnail.captured_at <= EXCLUDED.captured_at`,
+          [stream.roomId, stream.streamId, bytes, updatedAt],
+        )
+      }
       await client.query('COMMIT')
     } catch (error) {
       await client.query('ROLLBACK')
@@ -193,6 +232,27 @@ export class PreviewService {
     if (!visibility) return null
     const bytes = await this.valkey.getBuffer(this.bytesKey(previewKey))
     return bytes ? { bytes, visibility } : null
+  }
+
+  /** Archived bytes are public history only after the Room has ended. The
+      visibility predicate is repeated here so storage is not the sole privacy
+      boundary and no live Room can use this as a second preview URL. */
+  async readArchived(roomId: string): Promise<ArchivedPreview | null> {
+    if (!PREVIEW_KEY.test(roomId)) return null
+    const archived = await this.pool.query<{
+      bytes: Buffer
+      capturedAt: Date
+    }>(
+      `SELECT thumbnail.bytes,
+              thumbnail.captured_at AS "capturedAt"
+         FROM past_stream_thumbnail thumbnail
+         JOIN room ON room.id = thumbnail.room_id
+        WHERE thumbnail.room_id = $1
+          AND room.ended_at IS NOT NULL
+          AND room.visibility = 'public'`,
+      [roomId],
+    )
+    return archived.rows[0] ?? null
   }
 
   private bytesKey(previewKey: string) {

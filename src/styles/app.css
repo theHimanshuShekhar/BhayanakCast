@@ -2876,6 +2876,21 @@ p.home-filters__facets {
   color: var(--action);
 }
 
+.past-stream-item__media {
+  display: block;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+
+.past-stream-item__media img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .past-stream-item__name {
   display: flex;
   min-width: 0;

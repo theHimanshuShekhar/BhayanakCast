@@ -5,9 +5,10 @@ import {
   type PreviewService,
 } from './preview-service'
 
-/** ADR 0029 keeps the documented thumbnail path stable, and an `<img>` cannot
-    call a server function, so previews travel over plain HTTP on this path. */
+/** An `<img>` cannot call a server function, so live and archived previews
+    travel over plain HTTP. ADR 0029 keeps the live path stable. */
 const PREVIEW_PATH = '/api/stream-previews'
+const PAST_STREAM_PREVIEW_PATH = '/api/past-stream-previews'
 
 let service: PreviewService | undefined
 
@@ -26,15 +27,27 @@ export async function handleStreamPreviewRequest(
   request: Request,
 ): Promise<Response | null> {
   const url = new URL(request.url)
-  if (url.pathname !== PREVIEW_PATH && !url.pathname.startsWith(`${PREVIEW_PATH}/`)) {
-    return null
-  }
+  const isLivePreview =
+    url.pathname === PREVIEW_PATH || url.pathname.startsWith(`${PREVIEW_PATH}/`)
+  const isPastStreamPreview =
+    url.pathname === PAST_STREAM_PREVIEW_PATH ||
+    url.pathname.startsWith(`${PAST_STREAM_PREVIEW_PATH}/`)
+  if (!isLivePreview && !isPastStreamPreview) return null
   if (!service) return new Response(null, { status: 503 })
   if (request.method === 'POST' && url.pathname === PREVIEW_PATH) {
     return upload(service, request)
   }
-  if (request.method === 'GET' && url.pathname.length > PREVIEW_PATH.length + 1) {
+  if (request.method === 'GET' && url.pathname.startsWith(`${PREVIEW_PATH}/`)) {
     return serve(service, url.pathname.slice(PREVIEW_PATH.length + 1))
+  }
+  if (
+    request.method === 'GET' &&
+    url.pathname.startsWith(`${PAST_STREAM_PREVIEW_PATH}/`)
+  ) {
+    return serveArchived(
+      service,
+      url.pathname.slice(PAST_STREAM_PREVIEW_PATH.length + 1),
+    )
   }
   return new Response(null, { status: 405 })
 }
@@ -77,6 +90,25 @@ async function serve(previews: PreviewService, segment: string): Promise<Respons
       // Each upload gets its own key, so the bytes behind one never change.
       // `private` keeps a shared cache out of a private room's previews.
       'cache-control': `private, max-age=${PREVIEW_TTL_SECONDS}, immutable`,
+    },
+  })
+}
+
+async function serveArchived(
+  previews: PreviewService,
+  roomId: string,
+): Promise<Response> {
+  const stored = await previews.readArchived(roomId)
+  if (!stored) {
+    return new Response(null, {
+      status: 404,
+      headers: { 'cache-control': 'no-store' },
+    })
+  }
+  return new Response(new Uint8Array(stored.bytes), {
+    headers: {
+      'content-type': 'image/webp',
+      'cache-control': 'public, max-age=31536000, immutable',
     },
   })
 }

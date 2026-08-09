@@ -11,6 +11,7 @@ import { message } from './messages'
 import { report, reportAudit } from './reports'
 import { deletionRequest, deletionRequestAudit } from './deletion-requests'
 import { retentionRunAudit } from './retention'
+import { pastStreamThumbnail } from './past-stream-thumbnails'
 export const databaseSchema = {
   ...authSchema,
   accountState,
@@ -21,6 +22,7 @@ export const databaseSchema = {
   roomBan,
   stream,
   streamSubscription,
+  pastStreamThumbnail,
   accountPreference,
   chatMute,
   message,
