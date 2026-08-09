@@ -475,6 +475,14 @@ async function approveDeletion(
       )`,
     [accountId],
   )
+  await client.query(
+    `DELETE FROM past_stream_thumbnail archive
+      USING stream, room_membership membership
+      WHERE archive.stream_id = stream.id
+        AND stream.membership_id = membership.id
+        AND membership.account_id = $1`,
+    [accountId],
+  )
   await client.query('UPDATE room SET created_by = NULL WHERE created_by = $1', [accountId])
   await client.query(
     'DELETE FROM chat_mute WHERE muting_account_id = $1 OR muted_account_id = $1',
