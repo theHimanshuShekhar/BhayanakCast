@@ -2,10 +2,86 @@ import { AsyncRetryer } from '@tanstack/pacer'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { startStream, stopStream, stopWatching, watchStream } from './room-queries'
 import type { RoomRealtime } from './useRoomRealtime'
+import type { RoomAnalyticsEvent } from '../../server/observability/room-analytics'
 import { observeRoom } from './room-observability'
 
 /** ADR 0104: browser-native WebRTC, public STUN only, no TURN. */
 const ICE_SERVERS: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }]
+
+/** ADR 0110: one flat ceiling per directed video subscription. */
+const STREAM_MAX_BITRATE = 8_000_000
+/** ADR 0110: one best-effort encoder sample after congestion control begins settling. */
+const STREAM_QUALITY_SAMPLE_DELAY = 10_000
+
+/** ADR 0110: capture is capped, never enlarged, and lower frame rates remain valid. */
+export const STREAM_CAPTURE_CONSTRAINTS = {
+  video: {
+    frameRate: { ideal: 60 },
+    width: { max: 1920 },
+    height: { max: 1080 },
+  },
+  audio: true,
+} satisfies DisplayMediaStreamOptions
+
+export function markStreamTracksAsMotion<
+  T extends { getVideoTracks(): Array<{ contentHint: string }> },
+>(stream: T): T {
+  for (const track of stream.getVideoTracks()) track.contentHint = 'motion'
+  return stream
+}
+
+export async function applyStreamEncodingContract(
+  sender: Pick<RTCRtpSender, 'getParameters' | 'setParameters'>,
+): Promise<void> {
+  const parameters = sender.getParameters()
+  if (parameters.encodings.length === 0) return
+  for (const encoding of parameters.encodings) encoding.maxBitrate = STREAM_MAX_BITRATE
+  parameters.degradationPreference = 'maintain-framerate'
+  await sender.setParameters(parameters)
+}
+
+type RoomStreamQualityEvent = Extract<
+  RoomAnalyticsEvent,
+  { readonly name: 'room_stream_quality' }
+>
+
+export function roomStreamQualityEvent(
+  report: Iterable<readonly [unknown, unknown]>,
+): RoomStreamQualityEvent | undefined {
+  for (const [, value] of report) {
+    if (!isStatsRecord(value) || value.type !== 'outbound-rtp') continue
+    if (value.kind !== 'video' && value.mediaType !== 'video') continue
+    if (
+      typeof value.encoderImplementation !== 'string' ||
+      value.encoderImplementation.length === 0 ||
+      value.encoderImplementation.length > 256 ||
+      (value.qualityLimitationReason !== 'cpu' &&
+        value.qualityLimitationReason !== 'bandwidth' &&
+        value.qualityLimitationReason !== 'none') ||
+      typeof value.framesPerSecond !== 'number' ||
+      !Number.isFinite(value.framesPerSecond) ||
+      value.framesPerSecond < 0 ||
+      !Number.isInteger(value.frameHeight) ||
+      Number(value.frameHeight) <= 0
+    ) {
+      return undefined
+    }
+    return {
+      name: 'room_stream_quality',
+      properties: {
+        encoder_implementation: value.encoderImplementation,
+        quality_limitation_reason: value.qualityLimitationReason,
+        frames_per_second: value.framesPerSecond,
+        frame_height: Number(value.frameHeight),
+      },
+    }
+  }
+  return undefined
+}
+
+function isStatsRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
 
 /** ADR 0077: the first attempt plus three retries at 1s, 2s and 4s. */
 export const WATCH_MAX_ATTEMPTS = 4
@@ -165,6 +241,8 @@ export function useRoomMedia({
   const publishAttempt = useRef(0)
   const localStreamRef = useRef<MediaStream | null>(null)
   const publishedStreamId = useRef<string | null>(null)
+  const qualitySampleTimer = useRef<number | null>(null)
+  const qualitySample = useRef<{ streamId: string; subscriptionId: string } | null>(null)
   /** Outbound connections, one per watcher (≤9). */
   const outbound = useRef(new Map<string, RTCPeerConnection>())
   /** The single inbound connection. */
@@ -214,6 +292,9 @@ export function useRoomMedia({
   }, [closeInbound])
 
   const releaseLocal = useCallback(() => {
+    window.clearTimeout(qualitySampleTimer.current ?? undefined)
+    qualitySampleTimer.current = null
+    qualitySample.current = null
     for (const [id, peer] of outbound.current) {
       sendSignal(id, { kind: 'close' })
       peer.close()
@@ -225,12 +306,45 @@ export function useRoomMedia({
     publishedStreamId.current = null
   }, [sendSignal])
 
+  const scheduleQualitySample = useCallback(
+    (
+      sender: Pick<RTCRtpSender, 'getStats'>,
+      streamId: string,
+      subscriptionId: string,
+    ) => {
+      if (qualitySample.current?.streamId === streamId) return
+      qualitySample.current = { streamId, subscriptionId }
+      qualitySampleTimer.current = window.setTimeout(() => {
+        qualitySampleTimer.current = null
+        void (async () => {
+          try {
+            const report = await sender.getStats()
+            if (publishedStreamId.current !== streamId) return
+            const event = roomStreamQualityEvent(report)
+            if (event) observeRoom(event)
+          } catch {
+            // Telemetry must never affect a working Stream.
+          }
+        })()
+      }, STREAM_QUALITY_SAMPLE_DELAY)
+    },
+    [],
+  )
+
   // Publisher side of negotiation. The viewer offers, so a subscription this
   // client has never heard of is exactly how it learns a watcher arrived.
   useEffect(() => {
     return onSignal(async ({ subscriptionId, streamId, signal }) => {
       const existing = outbound.current.get(subscriptionId)
       if (signal.kind === 'close') {
+        if (
+          qualitySampleTimer.current !== null &&
+          qualitySample.current?.subscriptionId === subscriptionId
+        ) {
+          window.clearTimeout(qualitySampleTimer.current)
+          qualitySampleTimer.current = null
+          qualitySample.current = null
+        }
         existing?.close()
         outbound.current.delete(subscriptionId)
         if (inbound.current?.id === subscriptionId) {
@@ -269,6 +383,17 @@ export function useRoomMedia({
       await peer.setRemoteDescription({ type: 'offer', sdp: signal.sdp })
       const answer = await peer.createAnswer()
       await peer.setLocalDescription(answer)
+      const videoSender = peer
+        .getSenders()
+        .find((sender) => sender.track?.kind === 'video')
+      if (videoSender) {
+        try {
+          await applyStreamEncodingContract(videoSender)
+        } catch {
+          // A browser parameter rejection must not break an otherwise valid watch.
+        }
+        scheduleQualitySample(videoSender, streamId, subscriptionId)
+      }
       sendSignal(subscriptionId, { kind: 'answer', sdp: answer.sdp ?? '' })
     })
 
@@ -285,7 +410,7 @@ export function useRoomMedia({
       }
       return peer
     }
-  }, [onSignal, sendSignal])
+  }, [onSignal, sendSignal, scheduleQualitySample])
 
   // A publisher stopping is authoritative: close the peer immediately rather
   // than waiting for the media to go silent (ADR 0104).
@@ -391,7 +516,9 @@ export function useRoomMedia({
       setPublish({ kind: 'starting' })
       let stream: MediaStream
       try {
-        stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
+        stream = markStreamTracksAsMotion(
+          await navigator.mediaDevices.getDisplayMedia(STREAM_CAPTURE_CONSTRAINTS),
+        )
       } catch {
         if (generation !== publishAttempt.current) return
         setPublish({ kind: 'idle' })

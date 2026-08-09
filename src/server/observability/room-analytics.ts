@@ -18,6 +18,12 @@ export const ROOM_ANALYTICS_INVENTORY = {
     room_watch_action: ['action', 'outcome', 'attempt', 'watch_sequence_id'],
     room_reconnect_recovery: ['outcome', 'seconds_remaining'],
     room_stream_action: ['action', 'outcome'],
+    room_stream_quality: [
+      'encoder_implementation',
+      'quality_limitation_reason',
+      'frames_per_second',
+      'frame_height',
+    ],
     room_mosaic_filter_changed: ['hidden'],
     room_watch_audio_changed: ['muted'],
     room_watch_fullscreen_requested: [],
@@ -130,6 +136,15 @@ export type RoomAnalyticsEvent =
       readonly properties: {
         readonly action: 'start' | 'cancel' | 'stop'
         readonly outcome: 'requested' | 'succeeded' | 'failed'
+      }
+    }
+  | {
+      readonly name: 'room_stream_quality'
+      readonly properties: {
+        readonly encoder_implementation: string
+        readonly quality_limitation_reason: 'cpu' | 'bandwidth' | 'none'
+        readonly frames_per_second: number
+        readonly frame_height: number
       }
     }
   | {
@@ -504,6 +519,38 @@ function validateEvent(name: string, properties: unknown): RoomAnalyticsEvent {
         invalidProperties()
       }
       return { name, properties: { action: source.action, outcome: source.outcome } }
+    }
+    case 'room_stream_quality': {
+      const source = exactObject(properties, [
+        'encoder_implementation',
+        'quality_limitation_reason',
+        'frames_per_second',
+        'frame_height',
+      ])
+      if (
+        typeof source.encoder_implementation !== 'string' ||
+        source.encoder_implementation.length === 0 ||
+        source.encoder_implementation.length > 256 ||
+        (source.quality_limitation_reason !== 'cpu' &&
+          source.quality_limitation_reason !== 'bandwidth' &&
+          source.quality_limitation_reason !== 'none') ||
+        typeof source.frames_per_second !== 'number' ||
+        !Number.isFinite(source.frames_per_second) ||
+        source.frames_per_second < 0 ||
+        !Number.isInteger(source.frame_height) ||
+        Number(source.frame_height) <= 0
+      ) {
+        invalidProperties()
+      }
+      return {
+        name,
+        properties: {
+          encoder_implementation: source.encoder_implementation,
+          quality_limitation_reason: source.quality_limitation_reason,
+          frames_per_second: source.frames_per_second,
+          frame_height: Number(source.frame_height),
+        },
+      }
     }
     case 'room_mosaic_filter_changed': {
       const source = exactObject(properties, ['hidden'])

@@ -380,3 +380,35 @@ describe('Room analytics Chat allowlist', () => {
     expect(() => validateRoomAnalyticsEnvelope({ anonymousId, event })).toThrow()
   })
 })
+
+describe('Room stream quality analytics delivery', () => {
+  it('round-trips the exact encoder quality sample', () => {
+    const deliveries: RoomAnalyticsDelivery[] = []
+    const analytics = createRoomAnalytics({
+      sink: { capture: (delivery) => { deliveries.push(delivery) } },
+    })
+    const event = {
+      name: 'room_stream_quality' as const,
+      properties: {
+        encoder_implementation: 'ExternalEncoderFactory',
+        quality_limitation_reason: 'none' as const,
+        frames_per_second: 60,
+        frame_height: 1080,
+      },
+    }
+
+    analytics.record({ anonymousId, event }, '271828182845904523')
+
+    expect(deliveries).toEqual([
+      {
+        event: 'room_stream_quality',
+        distinctId: '271828182845904523',
+        properties: {
+          inventory_version: 2,
+          identity_kind: 'signed_in',
+          ...event.properties,
+        },
+      },
+    ])
+  })
+})
