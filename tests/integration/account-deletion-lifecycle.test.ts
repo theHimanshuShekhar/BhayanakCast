@@ -38,7 +38,45 @@ async function fixture(discordId = '102938475610293847') {
      VALUES ($1, $2, 'discord', $3, now(), now())`,
     [randomUUID(), discordId, accountId],
   )
-  return { pool, accountId }
+  return { pool, accountId, origin: context.server.origin }
+}
+
+async function archivedStream(pool: Pool, accountId: string, name: string) {
+  const roomId = randomUUID()
+  const membershipId = randomUUID()
+  const streamId = randomUUID()
+  const capturedAt = new Date()
+  await pool.query(
+    `INSERT INTO room
+       (id, name, tags, visibility, created_by, created_at, ended_at)
+     VALUES
+       ($1, $2, ARRAY[]::text[], 'public', $3, now() - interval '2 hours',
+        now() - interval '1 hour')`,
+    [roomId, name, accountId],
+  )
+  await pool.query(
+    `INSERT INTO room_membership
+       (id, room_id, account_id, role, joined_at, left_at)
+     VALUES
+       ($1, $2, $3, 'host', now() - interval '2 hours',
+        now() - interval '1 hour')`,
+    [membershipId, roomId, accountId],
+  )
+  await pool.query(
+    `INSERT INTO stream
+       (id, room_id, membership_id, started_at, ended_at)
+     VALUES
+       ($1, $2, $3, now() - interval '90 minutes',
+        now() - interval '1 hour')`,
+    [streamId, roomId, membershipId],
+  )
+  await pool.query(
+    `INSERT INTO past_stream_thumbnail
+       (room_id, stream_id, bytes, captured_at)
+     VALUES ($1, $2, decode('00', 'hex'), $3)`,
+    [roomId, streamId, capturedAt],
+  )
+  return { roomId, streamId, capturedAt }
 }
 
 describe('complete Account deletion lifecycle', () => {
@@ -115,6 +153,107 @@ describe('complete Account deletion lifecycle', () => {
     ).resolves.toEqual(['chat'])
     await expect(pool.query('SELECT type FROM platform_sanction WHERE account_id = $1', [freshAccountId])).resolves.toMatchObject({ rows: [{ type: 'chat' }] })
     await expect(new HomeRepository(createPoolHomeQueryExecutor(pool)).publicProfile(freshAccountId)).resolves.toMatchObject({ roomCount: 0, streamCount: 0 })
+  })
+
+  test('deletes only archives produced by the approved Account', async () => {
+    const { pool, accountId, origin } = await fixture('102938475610293849')
+    const remainingAccountId = randomUUID()
+    await pool.query(
+      `INSERT INTO "user"
+         (id, name, email, email_verified, created_at, updated_at)
+       VALUES ($1, 'Remaining member', $2, true, now(), now())`,
+      [remainingAccountId, `${remainingAccountId}@example.test`],
+    )
+    const removed = await archivedStream(pool, accountId, 'Removed capture')
+    const retained = await archivedStream(pool, remainingAccountId, 'Retained capture')
+    await pool.query(
+      `WITH member AS (
+         INSERT INTO room_membership
+           (id, room_id, account_id, role, joined_at, left_at)
+         VALUES
+           ($1, $2, $3, 'member', now() - interval '2 hours',
+            now() - interval '1 hour')
+         RETURNING id
+       )
+       INSERT INTO stream
+         (id, room_id, membership_id, started_at, ended_at)
+       SELECT $4, $2, id, now() - interval '90 minutes',
+              now() - interval '1 hour'
+         FROM member`,
+      [randomUUID(), retained.roomId, accountId, randomUUID()],
+    )
+
+    const service = createDeletionService(pool)
+    await service.submit(accountId)
+    await service.cancel(accountId)
+    await expect(
+      pool.query(
+        'SELECT room_id FROM past_stream_thumbnail WHERE room_id = ANY($1::uuid[])',
+        [[removed.roomId, retained.roomId]],
+      ),
+    ).resolves.toMatchObject({ rowCount: 2 })
+    await service.submit(accountId)
+    await service.respond(accountId, 'rejected')
+    await expect(
+      pool.query(
+        'SELECT room_id FROM past_stream_thumbnail WHERE room_id = ANY($1::uuid[])',
+        [[removed.roomId, retained.roomId]],
+      ),
+    ).resolves.toMatchObject({ rowCount: 2 })
+
+    await service.submit(accountId)
+    await expect(service.respond(accountId, 'approved')).resolves.toMatchObject({
+      status: 'approved',
+    })
+    await expect(
+      pool.query(
+        'SELECT room_id FROM past_stream_thumbnail WHERE room_id = ANY($1::uuid[])',
+        [[removed.roomId, retained.roomId]],
+      ),
+    ).resolves.toMatchObject({ rows: [{ room_id: retained.roomId }] })
+
+    const projected = await new HomeRepository(
+      createPoolHomeQueryExecutor(pool),
+    ).pastStreams()
+    expect(projected.find(({ roomId }) => roomId === removed.roomId)).toMatchObject({
+      thumbnailCapturedAt: null,
+    })
+    expect(projected.find(({ roomId }) => roomId === retained.roomId)).toMatchObject({
+      thumbnailCapturedAt: retained.capturedAt.toISOString(),
+    })
+    const missing = await fetch(
+      `${origin}/api/past-stream-previews/${removed.roomId}`,
+    )
+    expect(missing.status).toBe(404)
+    expect(missing.headers.get('cache-control')).toBe('no-store')
+  })
+
+  test('rolls archive deletion back when approval fails', async () => {
+    const { pool, accountId } = await fixture('102938475610293850')
+    const archived = await archivedStream(pool, accountId, 'Rollback capture')
+    await pool.query(
+      `CREATE TABLE deletion_approval_blocker (
+         account_id text PRIMARY KEY REFERENCES account(id)
+       )`,
+    )
+    await pool.query(
+      `INSERT INTO deletion_approval_blocker (account_id)
+       SELECT id FROM account WHERE user_id = $1`,
+      [accountId],
+    )
+    const service = createDeletionService(pool)
+    await service.submit(accountId)
+
+    await expect(service.respond(accountId, 'approved')).rejects.toThrow()
+    await expect(service.current(accountId)).resolves.toMatchObject({
+      status: 'pending',
+    })
+    await expect(
+      pool.query('SELECT room_id FROM past_stream_thumbnail WHERE room_id = $1', [
+        archived.roomId,
+      ]),
+    ).resolves.toMatchObject({ rows: [{ room_id: archived.roomId }] })
+    await pool.query('DROP TABLE deletion_approval_blocker')
   })
 
   test('keeps approval pending until PostHog removes the Discord identity', async () => {
@@ -196,6 +335,7 @@ describe('complete Account deletion lifecycle', () => {
       [expiredReportId, ranAt, adminId, randomUUID(), pendingReportId],
     )
 
+    const archived = await archivedStream(pool, accountId, 'Retained thumbnail')
     await expect(runRetention(pool, ranAt)).resolves.toMatchObject({
       transcriptRowsDeleted: 1,
       reportRowsDeleted: 1,
@@ -218,5 +358,10 @@ describe('complete Account deletion lifecycle', () => {
     ).resolves.toMatchObject({
       rows: [{ transcript_rows_deleted: 1, report_rows_deleted: 1 }],
     })
+    await expect(
+      pool.query('SELECT room_id FROM past_stream_thumbnail WHERE room_id = $1', [
+        archived.roomId,
+      ]),
+    ).resolves.toMatchObject({ rows: [{ room_id: archived.roomId }] })
   })
 })
