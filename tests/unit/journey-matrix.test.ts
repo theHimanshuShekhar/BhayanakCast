@@ -30,7 +30,7 @@ function record(overrides: Partial<JourneyRecord> = {}): JourneyRecord {
     consoleErrors: [],
     pageErrors: [],
     axeViolations: [],
-    screenshots: ['ops/evidence/journey-matrix/home-1280.png'],
+    screenshots: ['test-results/journey-matrix/home-1280.png'],
     ...overrides,
   }
 }

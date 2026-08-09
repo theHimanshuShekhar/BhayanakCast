@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   clearRoomBan,
   roomBansQueryOptions,
@@ -30,6 +30,20 @@ export function RoomSettingsDialog({
   const [clearingAccountId, setClearingAccountId] = useState<string | null>(null)
   const [banError, setBanError] = useState<string | null>(null)
   const bans = useQuery({ ...roomBansQueryOptions(room.id), enabled: open && tab === 'bans' })
+  // Capture phase, so the modal answers Escape before the Details sheet or a
+  // companion sheet underneath it does. Without this, Escape over the dialog
+  // dismisses an invisible surface behind the scrim and moves focus there.
+  useEffect(() => {
+    if (!open) return
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      onClose()
+    }
+    document.addEventListener('keydown', dismissOnEscape, true)
+    return () => document.removeEventListener('keydown', dismissOnEscape, true)
+  }, [onClose, open])
 
   if (!open) return null
 

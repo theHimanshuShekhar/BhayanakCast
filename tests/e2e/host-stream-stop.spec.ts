@@ -100,7 +100,9 @@ test('Host stops one member Stream while viewers fall back and the owner stays e
       expect(viewerPage.locator('[data-room-state="admitted"]')).toBeVisible(),
     ])
 
-    const viewerMenuTrigger = viewerPage.getByRole('button', {
+    await viewerPage.getByRole('tab', { name: /People/ }).click()
+    const viewerPeople = viewerPage.getByRole('tabpanel', { name: 'People' })
+    const viewerMenuTrigger = viewerPeople.getByRole('button', {
       name: 'Actions for Stream Owner',
     })
     await viewerMenuTrigger.click()
@@ -111,10 +113,12 @@ test('Host stops one member Stream while viewers fall back and the owner stays e
     ).toHaveCount(0)
     await viewerPage.keyboard.press('Escape')
 
-    const viewerTile = viewerPage
-      .getByRole('listitem')
-      .filter({ has: viewerPage.getByText('Stream Owner', { exact: true }) })
-    const watch = viewerTile.getByRole('button', { name: 'Watch', exact: true })
+    const viewerTile = viewerPage.locator('.room-mosaic__tile', {
+      hasText: 'Stream Owner',
+    })
+    const watch = viewerTile.getByRole('button', {
+      name: "Watch Stream Owner's screen",
+    })
     // Watch stays disabled until the media probe and the rejoined socket both settle, and
     // both pages reloaded a moment ago. Waiting for the control to become actionable — rather
     // than clicking into the 15s action timeout — makes the precondition explicit without

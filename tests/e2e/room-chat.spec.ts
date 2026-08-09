@@ -72,7 +72,7 @@ async function sessionId(page: Page) {
 }
 
 async function send(page: Page, body: string) {
-  await page.getByLabel('Message', { exact: true }).fill(body)
+  await page.getByLabel('Message the room', { exact: true }).fill(body)
   await page.getByRole('button', { name: 'Send', exact: true }).click()
 }
 
@@ -116,10 +116,10 @@ test('multi-Account Chat preserves reading position and exposes canonical local 
       )
     }
     await gotoHydrated(hostPage, hostPage.url())
-    await expect(hostPage.getByLabel('Message', { exact: true })).toBeEnabled({
+    await expect(hostPage.getByLabel('Message the room', { exact: true })).toBeEnabled({
       timeout: 15_000,
     })
-    await expect(memberPage.getByLabel('Message', { exact: true })).toBeEnabled()
+    await expect(memberPage.getByLabel('Message the room', { exact: true })).toBeEnabled()
     await expect(hostPage.getByText(/Earlier message 17/)).toBeVisible()
     const panel = hostPage.locator('.room-dock').getByRole('tabpanel')
     await panel.evaluate((node) => {
@@ -136,10 +136,10 @@ test('multi-Account Chat preserves reading position and exposes canonical local 
       node.dispatchEvent(new Event('scroll'))
     })
     const retainedPosition = await panel.evaluate((node) => node.scrollTop)
-    await hostPage.getByLabel('Message', { exact: true }).fill('Retained draft')
+    await hostPage.getByLabel('Message the room', { exact: true }).fill('Retained draft')
     await hostPage.getByRole('tab', { name: 'People' }).click()
     await hostPage.getByRole('tab', { name: 'Chat' }).click()
-    await expect(hostPage.getByLabel('Message', { exact: true })).toHaveValue('Retained draft')
+    await expect(hostPage.getByLabel('Message the room', { exact: true })).toHaveValue('Retained draft')
     expect(await panel.evaluate((node) => node.scrollTop)).toBe(retainedPosition)
 
     await hostPage.getByRole('tab', { name: 'People' }).click()
@@ -148,8 +148,8 @@ test('multi-Account Chat preserves reading position and exposes canonical local 
     await hostPage.getByRole('tab', { name: 'Chat' }).click()
     await expect(hostPage.getByRole('tab', { name: 'Chat' }).locator('.room-dock__badge')).toHaveCount(0)
     await expect(hostPage.getByText('Hidden tab unread', { exact: true })).toBeVisible()
-    await expect(hostPage.getByLabel('Message', { exact: true })).toHaveValue('Retained draft')
-    await hostPage.getByLabel('Message', { exact: true }).fill('')
+    await expect(hostPage.getByLabel('Message the room', { exact: true })).toHaveValue('Retained draft')
+    await hostPage.getByLabel('Message the room', { exact: true }).fill('')
 
 
     await send(memberPage, 'Follow the latest')
@@ -207,15 +207,15 @@ test('multi-Account Chat preserves reading position and exposes canonical local 
       [roomId, memberAccountId],
     )
 
-    await memberPage.getByLabel('Message', { exact: true }).fill('x'.repeat(450))
+    await memberPage.getByLabel('Message the room', { exact: true }).fill('x'.repeat(450))
     await memberPage.setViewportSize({ width: 900, height: 800 })
-    await expect(memberPage.getByLabel('Message', { exact: true })).toBeVisible()
+    await expect(memberPage.getByLabel('Message the room', { exact: true })).toBeVisible()
     await memberPage.setViewportSize({ width: 390, height: 844 })
     await memberPage
       .locator('.room-mobile-bar')
       .getByRole('button', { name: 'Chat', exact: true })
       .click()
-    await expect(memberPage.getByLabel('Message', { exact: true })).toBeVisible()
+    await expect(memberPage.getByLabel('Message the room', { exact: true })).toBeVisible()
     const mobileComposer = await memberPage.locator('.room-chat__composer').boundingBox()
     expect(mobileComposer?.x ?? 391).toBeGreaterThanOrEqual(0)
     expect((mobileComposer?.x ?? 0) + (mobileComposer?.width ?? 391)).toBeLessThanOrEqual(390)
@@ -223,9 +223,9 @@ test('multi-Account Chat preserves reading position and exposes canonical local 
     await expect(memberPage.getByText('450 / 500 characters')).toBeVisible()
     await member.context.setOffline(true)
     await expect(memberPage.getByText('Chat is reconnecting. Sending is unavailable.')).toBeVisible()
-    await expect(memberPage.getByLabel('Message', { exact: true })).toBeDisabled()
+    await expect(memberPage.getByLabel('Message the room', { exact: true })).toBeDisabled()
     await member.context.setOffline(false)
-    await expect(memberPage.getByLabel('Message', { exact: true })).toBeEnabled()
+    await expect(memberPage.getByLabel('Message the room', { exact: true })).toBeEnabled()
   } finally {
     await dropRoom(authSessions, roomId)
   }
@@ -245,10 +245,10 @@ test('multi-Account Chat summarizes typing and keeps Report and chat-only Mute p
     members.push({ page })
   }
   try {
-    await expect(hostPage.getByLabel('Message', { exact: true })).toBeEnabled()
+    await expect(hostPage.getByLabel('Message the room', { exact: true })).toBeEnabled()
     for (const [index, { page }] of members.entries()) {
-      await expect(page.getByLabel('Message', { exact: true })).toBeEnabled()
-      await page.getByLabel('Message', { exact: true }).fill(`typing ${index}`)
+      await expect(page.getByLabel('Message the room', { exact: true })).toBeEnabled()
+      await page.getByLabel('Message the room', { exact: true }).fill(`typing ${index}`)
     }
     await expect(
       hostPage.getByText('Alex, Bailey, and 1 other are typing…', { exact: true }),
@@ -258,7 +258,7 @@ test('multi-Account Chat summarizes typing and keeps Report and chat-only Mute p
     ).toHaveCount(0, { timeout: 7_000 })
 
 
-    await members[0]!.page.getByLabel('Message', { exact: true }).fill('Report then mute this message')
+    await members[0]!.page.getByLabel('Message the room', { exact: true }).fill('Report then mute this message')
     await members[0]!.page.getByRole('button', { name: 'Send', exact: true }).click()
     const message = hostPage
       .locator('.room-chat__message')
@@ -269,9 +269,9 @@ test('multi-Account Chat summarizes typing and keeps Report and chat-only Mute p
     await report.locator('button[type="submit"]').click()
     await expect(report.getByText('Thanks — this report is with the review queue.')).toBeVisible()
     await report.getByRole('button', { name: 'Close' }).click()
-    await members[0]!.page.getByLabel('Message', { exact: true }).fill('muted typing')
-    await members[1]!.page.getByLabel('Message', { exact: true }).fill('typing again')
-    await members[2]!.page.getByLabel('Message', { exact: true }).fill('typing again')
+    await members[0]!.page.getByLabel('Message the room', { exact: true }).fill('muted typing')
+    await members[1]!.page.getByLabel('Message the room', { exact: true }).fill('typing again')
+    await members[2]!.page.getByLabel('Message the room', { exact: true }).fill('typing again')
     await expect(
       hostPage.getByText(/^(Alex|Bailey|Casey), (Alex|Bailey|Casey), and 1 other are typing…$/),
     ).toBeVisible()

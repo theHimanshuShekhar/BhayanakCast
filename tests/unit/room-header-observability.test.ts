@@ -18,6 +18,10 @@ describe('Room header and Details analytics allowlist', () => {
       properties: { reason: 'escape' },
     },
     {
+      name: 'room_details_closed',
+      properties: { reason: 'backdrop' },
+    },
+    {
       name: 'room_details_resized',
       properties: { height: '90' },
     },

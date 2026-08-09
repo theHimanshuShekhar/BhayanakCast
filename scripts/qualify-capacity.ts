@@ -707,7 +707,7 @@ async function preserveExistingEvidence(output: string) {
 
 function parseOptions(arguments_: readonly string[]) {
   let durationSeconds = DEFAULT_DURATION_SECONDS
-  let output = resolve('ops/evidence/capacity-qualification.json')
+  let output = resolve('test-results/capacity-qualification.json')
   let seed = randomUUID()
   for (let index = 0; index < arguments_.length; index += 1) {
     if (arguments_[index] === '--') continue

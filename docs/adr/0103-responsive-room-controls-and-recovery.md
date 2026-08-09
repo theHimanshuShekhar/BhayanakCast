@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-11
+- **Amended:** 2026-08-09 — the mobile room bar no longer carries a Stream slot. A control that can never enable spent a fifth of the only mobile action surface while communicating nothing: the reason lived in a `data-` attribute and screen-reader-only text, and `disabled` kept it out of the tab order, so no sighted or keyboard user could reach the explanation. The bar now exposes Chat, People, Activity, and Leave. Mobile members learn about screen sharing from the desktop shelf, not from a dead button.
 
 ## Context
 
@@ -11,7 +12,7 @@ The admitted room needs a phone composition that preserves watched media and liv
 
 ### Small-screen shell
 
-Below 768px, the admitted room replaces the global Home/Create/Profile bottom navigation with one fixed, safe-area-aware room control bar. It exposes Stream, Chat, People, Activity, and Leave/More. Back/Home remains explicit in the room header. On watch-capable but stream-creation-incompatible mobile clients, Stream remains visible but disabled as `Desktop only`; a help affordance explains the Chromium-family desktop requirement.
+Below 768px, the admitted room replaces the global Home/Create/Profile bottom navigation with one fixed, safe-area-aware room control bar. It exposes Chat, People, Activity, and Leave/More. Back/Home remains explicit in the room header. **(Amended 2026-08-09: the bar no longer carries a Stream slot; the original `Desktop only` disabled control is withdrawn.)**
 
 The compact mobile header shows Back, a truncated room name, privacy state, and lifetime countdown. A labeled Details action opens a sheet containing category/tags, current Host, member/Stream counts, and authorized Settings. Do not horizontally scroll core metadata.
 
@@ -25,7 +26,7 @@ At 768–1279px, the room retains the 72px application rail and fixed workspace,
 
 A member who fails the direct-media Compatibility Gate sees a persistent compact inline banner above the control shelf/room bar explaining that Chat and presence remain available, with Retry compatibility and recovery guidance. Start/Watch controls remain visibly disabled with the same reason; Stream Previews and companions remain usable. Do not block admission with a modal.
 
-On a supported capture client, the bottom-shelf Stream slot progresses Start Stream → `Starting…` with Cancel during local setup → Stop Stream after canonical acknowledgement. Capture cancellation/denial/failure returns that slot to Start with inline guidance and creates no Stream state. Mobile keeps the same destination visible but disabled as `Desktop only`. Watch connection states remain inside the selected tile: Connecting, retry timing, manual Retry, and current Preview. Status changes use polite announcements without moving focus.
+On a supported capture client, the bottom-shelf Stream slot progresses Start Stream → `Starting…` with Cancel during local setup → Stop Stream after canonical acknowledgement. Capture cancellation/denial/failure returns that slot to Start with inline guidance and creates no Stream state. Mobile has no Stream destination at all. **(Amended 2026-08-09.)** Watch connection states remain inside the selected tile: Connecting, retry timing, manual Retry, and current Preview. Status changes use polite announcements without moving focus.
 
 ### Reconnect and invalid membership
 

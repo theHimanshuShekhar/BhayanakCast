@@ -1,4 +1,5 @@
 import { useThrottler } from '@tanstack/react-pacer'
+import { Activity, MessageCircle, PanelRightClose, PanelRightOpen, Users } from 'lucide-react'
 import {
   useEffect,
   useCallback,
@@ -17,11 +18,22 @@ import {
   getCurrentViewerMuteIds,
   muteAccount,
 } from '../../server/profile/chat-mute-service'
+import type { RoomMedia } from './useRoomMedia'
+import { tileStateFragments } from './RoomMemberMosaic'
 import type { RoomRealtime } from './useRoomRealtime'
 import { observeRoom } from './room-observability'
 import { RoomMemberActions } from './RoomMemberActions'
 import { RoomMessageActions } from './RoomMessageActions'
 
+const ACTIVITY_TIME_FORMATTER = new Intl.DateTimeFormat('en', {
+  hour: 'numeric',
+  minute: '2-digit',
+})
+
+export function formatActivityTime(value: string): string | null {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : ACTIVITY_TIME_FORMATTER.format(date)
+}
 type DockTab = 'chat' | 'people' | 'activity'
 
 interface PendingMessage {
@@ -39,6 +51,7 @@ export function RoomCompanionDock({
   canChat,
   roster,
   selfMembershipId,
+  media,
   memberCount,
   sheet,
   onDismissSheet,
@@ -53,6 +66,7 @@ export function RoomCompanionDock({
   canChat: boolean
   roster: readonly RoomRosterMember[]
   selfMembershipId: string
+  media: Pick<RoomMedia, 'compatibility' | 'localStream'>
   memberCount: number
   /** People rows carry the same member and Host actions as the tiles, so
       safety never depends on hover or on a particular panel (ADR 0102). */
@@ -172,7 +186,7 @@ export function RoomCompanionDock({
   useEffect(() => {
     if (!visible || stage === 'wide') return
     const dismissOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
+      if (event.key !== 'Escape' || event.defaultPrevented) return
       event.preventDefault()
       dismiss('escape')
     }
@@ -274,6 +288,11 @@ export function RoomCompanionDock({
     >
       {sheet && (
         <div className="room-dock__sheet-controls">
+          <div className="room-dock__heading">
+            <span aria-hidden="true" className="room-dock__presence" />
+            <span>Room companions</span>
+            <span className="room-dock__here">{memberCount} here</span>
+          </div>
           <button
             aria-label={expanded ? 'Collapse companion sheet to 55%' : 'Expand companion sheet to 90%'}
             type="button"
@@ -293,16 +312,50 @@ export function RoomCompanionDock({
           </button>
         </div>
       )}
-      {!sheet && open && (
+      {!sheet && (
         <div className="room-dock__desktop-controls">
+          {open && (
+            <div className="room-dock__heading">
+              <span aria-hidden="true" className="room-dock__presence" />
+              <span>Room companions</span>
+              <span className="room-dock__here">{memberCount} here</span>
+            </div>
+          )}
           <button
-            aria-label={stage === 'wide' ? 'Collapse dock' : 'Close'}
+            aria-controls={panelId}
+            aria-expanded={open}
+            aria-label={open ? (stage === 'wide' ? 'Collapse dock' : 'Close') : 'Expand dock'}
             className="room-dock__collapse"
+            data-tooltip={open ? undefined : 'Expand dock'}
+            title={open ? undefined : 'Expand dock'}
             type="button"
-            onClick={() => dismiss('control')}
+            onClick={() => {
+              if (open) {
+                dismiss('control')
+                return
+              }
+              setOpen(true)
+              observeRoom({
+                name: 'room_companion_opened',
+                properties: {
+                  surface: stage === 'wide' ? 'dock' : 'drawer',
+                  tab,
+                },
+              })
+            }}
           >
-            <span className="room-dock__wide-label">Collapse dock</span>
-            <span className="room-dock__medium-label">Close</span>
+            {open ? (
+              <>
+                <PanelRightClose aria-hidden="true" size={18} />
+                <span className="room-dock__wide-label">Collapse dock</span>
+                <span className="room-dock__medium-label">Close</span>
+              </>
+            ) : (
+              <>
+                <PanelRightOpen aria-hidden="true" size={18} />
+                <span className="visually-hidden">Expand dock</span>
+              </>
+            )}
           </button>
         </div>
       )}
@@ -370,6 +423,15 @@ export function RoomCompanionDock({
       >
         {tab === 'chat' && (
           <ul className="room-chat__log">
+            {visibleMessages.length === 0 && visiblePending.length === 0 && (
+              <li className="room-chat__empty">
+                <MessageCircle aria-hidden="true" className="room-chat__empty-icon" size={20} />
+                <span className="room-chat__empty-copy">
+                  <strong>No messages yet</strong>
+                  <span>Say hello when you’re ready.</span>
+                </span>
+              </li>
+            )}
             {visibleMessages.map((message) => (
               <li className="room-chat__message" key={message.id}>
                 <div className="room-chat__message-heading">
@@ -414,15 +476,45 @@ export function RoomCompanionDock({
           <ul className="room-people">
             {orderRoomPeople(roster, selfMembershipId).map((member) => (
               <li className="room-people__member" key={member.membershipId}>
-                <span className="room-people__name">{member.displayName}</span>
-                <span className="room-people__state">
-                  {[
-                    member.role === 'host' ? 'Host' : null,
-                    member.membershipId === selfMembershipId ? 'You' : null,
-                    member.streamId ? 'Streaming' : null,
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')}
+                <span className="room-people__avatar" aria-hidden="true">
+                  {member.avatarUrl ? (
+                    <img alt="" loading="lazy" src={member.avatarUrl} />
+                  ) : (
+                    member.displayName.slice(0, 1).toUpperCase()
+                  )}
+                </span>
+                <span className="room-people__identity">
+                  <span className="room-people__name">{member.displayName}</span>
+                  <span className="room-people__state">
+                    {tileStateFragments({
+                      role: member.role,
+                      you: member.membershipId === selfMembershipId,
+                      sharing:
+                        member.streamId !== null &&
+                        !(
+                          member.membershipId === selfMembershipId &&
+                          media.localStream === null
+                        ),
+                      watching: false,
+                      selfCaptureLost:
+                        member.membershipId === selfMembershipId &&
+                        member.streamId !== null &&
+                        media.localStream === null,
+                      reconnecting:
+                        member.reconnecting ||
+                        (member.membershipId === selfMembershipId &&
+                          realtime.connection === 'reconnecting'),
+                      compatibility:
+                        member.membershipId === selfMembershipId && member.streamId === null
+                          ? media.compatibility
+                          : null,
+                    }).map((fragment, index) => (
+                      <span data-state-tone={fragment.tone} key={fragment.text}>
+                        {index > 0 && ' · '}
+                        {fragment.text}
+                      </span>
+                    ))}
+                  </span>
                 </span>
                 {member.membershipId !== selfMembershipId && (
                   <RoomMemberActions
@@ -432,7 +524,6 @@ export function RoomCompanionDock({
                     onReport={onReport}
                     onStopStream={onStopStream ?? undefined}
                     onTransfer={onTransferHost ?? undefined}
-                    surface="people"
                   />
                 )}
               </li>
@@ -442,38 +533,48 @@ export function RoomCompanionDock({
 
         {tab === 'activity' && (
           <ul className="room-activity">
+          {/* Activity begins at admission: it is what happened while you were
+              here, not a history of the room (ADR 0102). */}
             {realtime.activity.length === 0 && (
-              // Activity begins empty on admission: it is what happened while
-              // you were here, not a history of the room (ADR 0102).
               <li className="room-activity__empty">Nothing has happened yet.</li>
             )}
-            {realtime.activity.map((entry) => (
-              <li
-                className="room-activity__entry"
-                data-activity-kind={entry.kind}
-                data-activity-prominence={entry.minutes === 1 ? 'warning' : 'normal'}
-                key={entry.id}
-              >
-                {activityLabel(entry.kind, entry.displayName, entry.minutes)}
-              </li>
-            ))}
+            {realtime.activity.map((entry) => {
+              const time = formatActivityTime(entry.at)
+              return (
+                <li
+                  className="room-activity__entry"
+                  data-activity-kind={entry.kind}
+                  data-activity-prominence={entry.minutes === 1 ? 'warning' : 'normal'}
+                  key={entry.id}
+                >
+                  <span className="room-activity__label">
+                    {activityLabel(entry.kind, entry.displayName, entry.minutes)}
+                  </span>
+                  {time !== null && (
+                    <time className="room-activity__time" dateTime={entry.at}>
+                      {time}
+                    </time>
+                  )}
+                </li>
+              )
+            })}
           </ul>
         )}
       </div>
 
-      {tab === 'chat' && newMessages && (
+      {visible && tab === 'chat' && newMessages && (
         <button className="room-chat__cue" type="button" onClick={scrollToLatestChat}>
           New messages
         </button>
       )}
 
-      {tab === 'activity' && newActivity && (
+      {visible && tab === 'activity' && newActivity && (
         <button className="room-activity__cue" type="button" onClick={scrollToLatestActivity}>
           New activity
         </button>
       )}
 
-      {tab === 'chat' && (
+      {visible && tab === 'chat' && (
         <form
           className="room-chat__composer"
           onSubmit={(event) => {
@@ -506,15 +607,28 @@ export function RoomCompanionDock({
             </p>
           )}
           <label className="visually-hidden" htmlFor="room-chat-input">
-            Message
+            Message the room
           </label>
           <textarea
-            aria-describedby={composerStatus ? 'room-chat-availability' : undefined}
+            aria-describedby={
+              composerStatus
+                ? 'room-chat-availability room-chat-guidance'
+                : 'room-chat-guidance'
+            }
             disabled={!canChat || realtime.connection !== 'live'}
             id="room-chat-input"
+            placeholder="Say hello to the room"
             rows={2}
             value={draft}
             onBlur={stopTyping}
+            onFocus={() => {
+              if (stage !== 'mobile' || expanded) return
+              setExpanded(true)
+              observeRoom({
+                name: 'room_companion_resized',
+                properties: { height: '90' },
+              })
+            }}
             onChange={(event) => {
               setDraft(event.target.value)
               if (event.target.value.trim() && realtime.connection === 'live') refreshTyping()
@@ -526,14 +640,6 @@ export function RoomCompanionDock({
               event.currentTarget.form?.requestSubmit()
             }}
           />
-          {draftCount >= 450 && (
-            <p
-              className="room-chat__count tabular-nums"
-              data-over-limit={draftCount > CHAT_BODY_LIMIT}
-            >
-              {draftCount} / {CHAT_BODY_LIMIT} characters
-            </p>
-          )}
           <button
             disabled={
               draft.trim().length === 0 ||
@@ -545,6 +651,17 @@ export function RoomCompanionDock({
           >
             Send
           </button>
+          <p className="room-chat__guidance" id="room-chat-guidance">
+            Enter to send · Shift+Enter for a new line
+          </p>
+          {draftCount >= 450 && (
+            <p
+              className="room-chat__count tabular-nums"
+              data-over-limit={draftCount > CHAT_BODY_LIMIT}
+            >
+              {draftCount} / {CHAT_BODY_LIMIT} characters
+            </p>
+          )}
         </form>
       )}
     </aside>
@@ -708,6 +825,7 @@ function DockTabButton({
       aria-controls={controls}
       aria-selected={active}
       className="room-dock__tab"
+      data-tooltip={label}
       id={`${controls}-${tab}`}
       ref={buttonRef}
       role="tab"
@@ -716,6 +834,13 @@ function DockTabButton({
       onClick={onSelect}
       onKeyDown={onKeyDown}
     >
+      {tab === 'chat' ? (
+        <MessageCircle aria-hidden="true" size={18} />
+      ) : tab === 'people' ? (
+        <Users aria-hidden="true" size={18} />
+      ) : (
+        <Activity aria-hidden="true" size={18} />
+      )}
       <span className="room-dock__tab-label">{label}</span>
       {badge > 0 && (
         <span className="room-dock__badge" data-badge-tone={badgeTone}>

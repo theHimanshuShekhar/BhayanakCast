@@ -58,7 +58,7 @@ const EXPECTATIONS: JourneyExpectations = {
   maximumImpactfulAxeViolations: 0,
 }
 
-let output = resolve('ops/evidence/v1-journey-matrix.json')
+let output = resolve('test-results/v1-journey-matrix.json')
 for (let index = 0; index < process.argv.length - 2; index += 1) {
   const argument = process.argv[index + 2]
   if (argument === '--output') output = resolve(process.argv[index + 3] ?? '')

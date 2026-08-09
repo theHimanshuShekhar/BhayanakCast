@@ -61,7 +61,9 @@ test('Host kick confirms immediate re-entry, preserves the URL and Host, and cre
     await memberPage.getByRole('button', { name: 'Join' }).click()
     await expect(memberPage.locator('[data-room-state="admitted"]')).toBeVisible()
 
-    const memberMenuTrigger = memberPage.getByRole('button', { name: 'Actions for Kick Host' })
+    await memberPage.getByRole('button', { name: 'People', exact: true }).click()
+    const memberPeople = memberPage.getByRole('tabpanel', { name: 'People' })
+    const memberMenuTrigger = memberPeople.getByRole('button', { name: 'Actions for Kick Host' })
     await memberMenuTrigger.focus()
     await memberMenuTrigger.press('ArrowDown')
     const memberMenu = memberPage.getByRole('menu', { name: 'Actions for Kick Host' })
@@ -70,7 +72,9 @@ test('Host kick confirms immediate re-entry, preserves the URL and Host, and cre
     await memberMenu.press('Escape')
     await expect(memberMenuTrigger).toBeFocused()
 
-    const hostMenuTrigger = hostPage.getByRole('button', { name: 'Actions for Kick Target' })
+    await hostPage.getByRole('tab', { name: /People/ }).click()
+    const hostPeople = hostPage.getByRole('tabpanel', { name: 'People' })
+    const hostMenuTrigger = hostPeople.getByRole('button', { name: 'Actions for Kick Target' })
     await hostMenuTrigger.focus()
     await hostMenuTrigger.press('ArrowDown')
     await hostPage
@@ -101,7 +105,9 @@ test('Host kick confirms immediate re-entry, preserves the URL and Host, and cre
     await expect(memberPage).toHaveURL(new RegExp(`${roomUrl}$`))
     await expect(memberPage.locator('[data-room-state="pre-admission"]')).toBeVisible()
     await expect(hostPage.locator('.room-live-header__host')).toContainText('Kick Host')
-    await expect(hostPage.getByRole('button', { name: 'Actions for Kick Target' })).toHaveCount(0)
+    await expect(hostPeople.getByRole('button', { name: 'Actions for Kick Target' })).toHaveCount(
+      0,
+    )
     await hostPage.getByRole('tab', { name: 'Activity' }).click()
     await expect(hostPage.getByText('Kick Target is no longer in this room.')).toBeVisible()
 
@@ -114,7 +120,10 @@ test('Host kick confirms immediate re-entry, preserves the URL and Host, and cre
     await memberPage.getByRole('button', { name: 'Join' }).click()
     await expect(memberPage).toHaveURL(new RegExp(`${roomUrl}$`))
     await expect(memberPage.locator('[data-room-state="admitted"]')).toBeVisible()
-    await expect(hostPage.getByRole('button', { name: 'Actions for Kick Target' })).toBeVisible()
+    await hostPage.getByRole('tab', { name: /People/ }).click()
+    await expect(
+      hostPeople.getByRole('button', { name: 'Actions for Kick Target' }),
+    ).toBeVisible()
     await expect(hostPage.locator('.room-live-header__host')).toContainText('Kick Host')
   } finally {
     await removeRoom(authSessions, roomId)

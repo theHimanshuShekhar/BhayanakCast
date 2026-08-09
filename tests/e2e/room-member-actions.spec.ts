@@ -59,11 +59,17 @@ test('keyboard member menus enforce Host-only confirmed Room Bans and clear-ban 
     await memberPage.goto(`/rooms/${roomId}`)
     await memberPage.getByRole('button', { name: 'Join' }).click()
     await expect(memberPage.locator('[data-room-state="admitted"]')).toBeVisible()
-    await expect(hostPage.getByRole('button', { name: 'Actions for Ban Target' })).toBeVisible()
+    await Promise.all([
+      hostPage.getByRole('tab', { name: /People/ }).click(),
+      memberPage.getByRole('tab', { name: /People/ }).click(),
+    ])
+    const hostPeople = hostPage.getByRole('tabpanel', { name: 'People' })
+    const memberPeople = memberPage.getByRole('tabpanel', { name: 'People' })
+    await expect(hostPeople.getByRole('button', { name: 'Actions for Ban Target' })).toBeVisible()
 
     // Report is persistent and keyboard reachable for an ordinary member;
     // Host-only actions do not exist in that Account's menu.
-    const memberMenuTrigger = memberPage.getByRole('button', { name: 'Actions for Ban Host' })
+    const memberMenuTrigger = memberPeople.getByRole('button', { name: 'Actions for Ban Host' })
     await memberMenuTrigger.focus()
     await memberMenuTrigger.press('ArrowDown')
     const memberMenu = memberPage.getByRole('menu', { name: 'Actions for Ban Host' })
@@ -72,7 +78,7 @@ test('keyboard member menus enforce Host-only confirmed Room Bans and clear-ban 
     await memberMenu.press('Escape')
     await expect(memberMenuTrigger).toBeFocused()
 
-    const hostMenuTrigger = hostPage.getByRole('button', { name: 'Actions for Ban Target' })
+    const hostMenuTrigger = hostPeople.getByRole('button', { name: 'Actions for Ban Target' })
     await hostMenuTrigger.focus()
     await hostMenuTrigger.press('ArrowDown')
     const hostMenu = hostPage.getByRole('menu', { name: 'Actions for Ban Target' })
@@ -100,7 +106,7 @@ test('keyboard member menus enforce Host-only confirmed Room Bans and clear-ban 
       .click()
 
     await expect(memberPage.locator('[data-room-state="pre-admission"]')).toBeVisible()
-    await expect(hostPage.getByRole('button', { name: 'Actions for Ban Target' })).toHaveCount(0)
+    await expect(hostPeople.getByRole('button', { name: 'Actions for Ban Target' })).toHaveCount(0)
     await hostPage.getByRole('tab', { name: 'Activity' }).click()
     await expect(hostPage.getByText('Ban Target is no longer in this room.')).toBeVisible()
 

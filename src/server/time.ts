@@ -7,13 +7,20 @@ export interface Clock {
   scheduleAt(instant: number, task: () => void): ScheduledTask
 }
 
+/** Node clamps any `setTimeout` delay above 2^31-1 ms to 1 ms, so a deadline
+    further out than ~24.8 days fires immediately and, because the deadline is
+    still unmet, reschedules into a hot loop. Cap the wait instead and let the
+    task re-arm from its own deadline check. */
+const MAX_TIMEOUT_MS = 2 ** 31 - 1
+
 export class SystemClock implements Clock {
   now() {
     return Date.now()
   }
 
   scheduleAt(instant: number, task: () => void): ScheduledTask {
-    const timeout = setTimeout(task, Math.max(0, instant - this.now()))
+    const wait = Number.isFinite(instant) ? instant - this.now() : 0
+    const timeout = setTimeout(task, Math.min(MAX_TIMEOUT_MS, Math.max(0, wait)))
     return { cancel: () => clearTimeout(timeout) }
   }
 }

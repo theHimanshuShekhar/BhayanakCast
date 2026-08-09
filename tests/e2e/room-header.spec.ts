@@ -66,7 +66,7 @@ test('desktop and medium keep the complete admitted Room header in two bounded r
     await expect(header.getByText('Public', { exact: true })).toBeVisible()
     await expect(header.getByText('Live', { exact: true })).toBeVisible()
     await expect(header.getByText('Header Host', { exact: true })).toBeVisible()
-    await expect(header.getByText('1 member', { exact: true })).toBeVisible()
+    await expect(header.getByText('1 of 10 members', { exact: true })).toBeVisible()
     await expect(header.getByText('0 Streams', { exact: true })).toBeVisible()
     await expect(header.locator('.room-live-header__secondary time')).toBeVisible()
     await expect(header.getByText(LONG_DESCRIPTION, { exact: true })).toBeAttached()

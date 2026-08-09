@@ -10,7 +10,6 @@ import {
   type WatchBlockedReason,
   type WatchState,
 } from './useRoomMedia'
-import { RoomMemberActions } from './RoomMemberActions'
 import { observeRoom } from './room-observability'
 
 interface RoomMemberMosaicProps {
@@ -20,11 +19,6 @@ interface RoomMemberMosaicProps {
   /** Decides the preview treatment: a private room's previews are blurred
       (ADR 0035), on top of being captured small enough to carry no detail. */
   readonly visibility: 'public' | 'private'
-  readonly onReport: (member: RoomRosterMember) => void
-  readonly hostActions: ((member: RoomRosterMember) => void) | null
-  readonly onKickMember: ((member: RoomRosterMember) => void) | null
-  readonly onTransferHost: ((member: RoomRosterMember) => void) | null
-  readonly onStopStream: ((member: RoomRosterMember) => void) | null
 }
 
 /** Mirrors `--transition-duration-layout` and `--ease-clubhouse`: the FLIP runs
@@ -47,11 +41,6 @@ export function RoomMemberMosaic({
   selfMembershipId,
   media,
   visibility,
-  onReport,
-  hostActions,
-  onKickMember,
-  onTransferHost,
-  onStopStream,
 }: RoomMemberMosaicProps) {
   // Viewer-local and unshared: hiding a member from your own mosaic says
   // nothing to them and nothing to anyone else.
@@ -169,16 +158,11 @@ export function RoomMemberMosaic({
       >
         {visible.map((member) => (
           <MemberTile
-            hostActions={hostActions}
-            onKickMember={onKickMember}
-            onTransferHost={onTransferHost}
-            onStopStream={onStopStream}
             key={member.membershipId}
             media={media}
             member={member}
             selfMembershipId={selfMembershipId}
             visibility={visibility}
-            onReport={onReport}
           />
         ))}
       </ul>
@@ -191,21 +175,11 @@ function MemberTile({
   selfMembershipId,
   media,
   visibility,
-  onReport,
-  hostActions,
-  onKickMember,
-  onTransferHost,
-  onStopStream,
 }: Readonly<{
   member: RoomRosterMember
   selfMembershipId: string
   media: RoomMedia
   visibility: 'public' | 'private'
-  onReport: (member: RoomRosterMember) => void
-  hostActions: ((member: RoomRosterMember) => void) | null
-  onKickMember: ((member: RoomRosterMember) => void) | null
-  onTransferHost: ((member: RoomRosterMember) => void) | null
-  onStopStream: ((member: RoomRosterMember) => void) | null
 }>) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   // Every watch starts muted (ADR 0101); unmuting is the viewer's own act.
@@ -301,10 +275,9 @@ function MemberTile({
         ) : (
           <>
             {/* Before a subscription, a streaming tile shows the Stream
-                Preview — non-interactive, with Watch in the footer where every
-                other control lives (ADR 0102). A preview that cannot be
-                fetched falls back to the member rather than to an empty frame
-                that reads as a stream with nothing in it. */}
+                Preview with one explicit Watch action. A preview that cannot
+                be fetched falls back to the member rather than to an empty
+                frame that reads as a stream with nothing in it. */}
             {showPreview ? (
               <img
                 alt=""
@@ -322,12 +295,32 @@ function MemberTile({
                 {badge.text}
               </span>
             )}
+            {showWatchButton && (
+              <button
+                aria-describedby={watchBlock ? blockId : undefined}
+                aria-disabled={watchBlock ? true : undefined}
+                aria-label={
+                  attempt?.kind === 'failed'
+                    ? `Retry watching ${member.displayName}'s screen`
+                    : `Watch ${member.displayName}'s screen`
+                }
+                className="room-mosaic__watch room-mosaic__watch--overlay"
+                data-blocked={watchBlock ? true : undefined}
+                type="button"
+                onClick={() => {
+                  if (watchBlock) return
+                  void media.startWatching(member.streamId as string)
+                }}
+              >
+                {attempt?.kind === 'failed' ? 'Retry' : 'Watch'}
+              </button>
+            )}
           </>
         )}
       </div>
 
-      {/* Below the media region, not over it: ADR 0101 keeps the footer
-          out of the shared content and out of hover. */}
+      {/* Identity and current controls stay below live media. The initial
+          Watch action belongs to the still Preview above. */}
       <div className="room-mosaic__footer">
         <div className="room-mosaic__identity">
           <p className="room-mosaic__name" id={nameId}>
@@ -346,9 +339,14 @@ function MemberTile({
               // Preview freshness, so a still tile says how still it is
               // (ADR 0102's footer, ADR 0035's two-minute cadence).
               previewUpdatedAt: sharing && !watching ? member.previewUpdatedAt : undefined,
-            }).map((fragment) => (
+            }).map((fragment, index, fragments) => (
               <span data-tone={fragment.tone} key={fragment.text}>
                 {fragment.text}
+                {index < fragments.length - 1 && (
+                  <span aria-hidden="true" className="room-mosaic__state-separator">
+                    {' · '}
+                  </span>
+                )}
               </span>
             ))}
           </p>
@@ -378,86 +376,44 @@ function MemberTile({
           </p>
         )}
 
-        <div className="room-mosaic__actions">
-          {/* Every control for a remote stream lives on that stream's tile;
-              the shelf below the canvas is only ever about your own stream
-              (ADR 0100). One row when it fits, wrapping to a second when it
-              does not — no overflow menu, no auto-hiding overlay (ADR 0101). */}
-          {watching && (
-            <>
-              <button
-                type="button"
-                onClick={() =>
-                  setMuted((current) => {
-                    const next = !current
-                    observeRoom({
-                      name: 'room_watch_audio_changed',
-                      properties: { muted: next },
+        {(watching || attempt?.kind === 'connecting') && (
+          <div className="room-mosaic__actions">
+            {watching && (
+              <>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setMuted((current) => {
+                      const next = !current
+                      observeRoom({
+                        name: 'room_watch_audio_changed',
+                        properties: { muted: next },
+                      })
+                      return next
                     })
-                    return next
-                  })
-                }
-              >
-                {muted ? 'Unmute' : 'Mute'}
-              </button>
-              <button type="button" onClick={() => void enterFullscreen()}>
-                Fullscreen
-              </button>
-            </>
-          )}
-          {sharing &&
-            !you &&
-            (watching || attempt?.kind === 'connecting' ? (
-              <button
-                aria-label={
-                  watching
-                    ? `Stop watching ${member.displayName}'s screen`
-                    : `Cancel connecting to ${member.displayName}'s screen`
-                }
-                className="room-mosaic__watch"
-                type="button"
-                onClick={() => void media.stopWatchingStream()}
-              >
-                {watching ? 'Stop watching' : 'Cancel'}
-              </button>
-            ) : (
-              // `aria-disabled` rather than `disabled`: a blocked Watch that
-              // leaves the tab order takes its own explanation with it. The
-              // member is in the accessible name, not the visible one — ten
-              // buttons reading `Watch` are indistinguishable in a screen
-              // reader's element list, and a 35-character display name inside
-              // the label wraps the button onto two lines.
-              <button
-                aria-describedby={watchBlock ? blockId : undefined}
-                aria-disabled={watchBlock ? true : undefined}
-                aria-label={
-                  attempt?.kind === 'failed'
-                    ? `Retry watching ${member.displayName}'s screen`
-                    : `Watch ${member.displayName}'s screen`
-                }
-                className="room-mosaic__watch"
-                data-blocked={watchBlock ? true : undefined}
-                type="button"
-                onClick={() => {
-                  if (watchBlock) return
-                  void media.startWatching(member.streamId as string)
-                }}
-              >
-                {attempt?.kind === 'failed' ? 'Retry' : 'Watch'}
-              </button>
-            ))}
-          {!you && (
-            <RoomMemberActions
-              member={member}
-              onBan={hostActions ?? undefined}
-              onKick={onKickMember ?? undefined}
-              onReport={onReport}
-              onStopStream={onStopStream ?? undefined}
-              onTransfer={onTransferHost ?? undefined}
-              surface="tile"
-            />
-          )}
-        </div>
+                  }
+                >
+                  {muted ? 'Unmute' : 'Mute'}
+                </button>
+                <button type="button" onClick={() => void enterFullscreen()}>
+                  Fullscreen
+                </button>
+              </>
+            )}
+            <button
+              aria-label={
+                watching
+                  ? `Stop watching ${member.displayName}'s screen`
+                  : `Cancel connecting to ${member.displayName}'s screen`
+              }
+              className="room-mosaic__watch"
+              type="button"
+              onClick={() => void media.stopWatchingStream()}
+            >
+              {watching ? 'Stop watching' : 'Cancel'}
+            </button>
+          </div>
+        )}
       </div>
     </li>
   )

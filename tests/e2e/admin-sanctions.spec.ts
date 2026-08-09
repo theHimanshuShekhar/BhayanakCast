@@ -86,7 +86,7 @@ test('Admin sanctions update every affected Account capability and remain unavai
   await expect(targetPage.getByRole('heading', { name: 'Page not found' })).toBeVisible()
   await gotoHydrated(targetPage, `/rooms/${roomId}`)
   await expect(targetPage.locator('[data-room-state="admitted"]')).toBeVisible()
-  await expect(targetPage.getByLabel('Message', { exact: true })).toBeEnabled()
+  await expect(targetPage.getByLabel('Message the room', { exact: true })).toBeEnabled()
 
   for (const width of [390, 1024, 1440]) {
     await adminPage.setViewportSize({ width, height: 900 })
@@ -108,9 +108,9 @@ test('Admin sanctions update every affected Account capability and remain unavai
   await expect(
     targetPage.getByText('Chat is unavailable on your account. Existing messages remain available.'),
   ).toBeVisible()
-  await expect(targetPage.getByLabel('Message', { exact: true })).toBeDisabled()
+  await expect(targetPage.getByLabel('Message the room', { exact: true })).toBeDisabled()
   await liftSanction(adminPage, 'Chat')
-  await expect(targetPage.getByLabel('Message', { exact: true })).toBeEnabled()
+  await expect(targetPage.getByLabel('Message the room', { exact: true })).toBeEnabled()
 
   await gotoHydrated(targetPage, '/')
   await applySanction(adminPage, targetId, 'room_creation')
@@ -126,7 +126,7 @@ test('Admin sanctions update every affected Account capability and remain unavai
 
   await gotoHydrated(targetPage, `/rooms/${roomId}`)
   await expect(targetPage.locator('[data-room-state="admitted"]')).toBeVisible()
-  await expect(targetPage.getByLabel('Message', { exact: true })).toBeEnabled()
+  await expect(targetPage.getByLabel('Message the room', { exact: true })).toBeEnabled()
   await applySanction(adminPage, targetId, 'all_access')
   await expect(targetPage.locator('[data-room-state="pre-admission"]')).toBeVisible()
   await expect(targetPage.locator('[data-room-state="admitted"]')).toHaveCount(0)

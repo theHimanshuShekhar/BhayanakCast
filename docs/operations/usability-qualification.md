@@ -4,7 +4,7 @@
 > cohort study is no longer required to ship V1. BhayanakCast is a hobby project, and
 > recruiting a representative cohort with consent, a separate observer, and per-session
 > scoring is disproportionate to that scope. V1 confidence comes from the ADR 0106 browser
-> journey matrix (`ops/evidence/v1-journey-matrix.json`) plus operator walkthrough.
+> journey matrix plus operator walkthrough.
 >
 > This protocol is kept because it is the expensive part to rebuild, and it stays correct
 > if the study is ever run. Nothing below has been weakened to make it easier to pass — in

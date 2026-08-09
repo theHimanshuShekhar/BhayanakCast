@@ -2403,6 +2403,12 @@ p.home-filters__facets {
   padding: 1rem 1.25rem;
 }
 
+/* The leader rule only has a job in the rail row, where label and value sit at
+   opposite ends. The stacked stages keep the pair adjacent and hide it. */
+.home-statistics__leader {
+  display: none;
+}
+
 .home-statistics dt {
   color: var(--ink-faint);
   font-size: var(--text-label);
@@ -2642,6 +2648,28 @@ p.home-filters__facets {
   box-shadow: none;
   color: var(--warning);
   font-weight: 500;
+}
+
+.room-chip--live {
+  background: color-mix(in srgb, var(--live) 12%, transparent);
+  box-shadow: none;
+  color: var(--live);
+  font-weight: 500;
+}
+
+/* DESIGN.md asks for three control weights inside the room. `.room-boundary
+   button` fills every button with cobalt, which leaves disclosure and
+   configuration shouting as loudly as the action a member came for. This is
+   the quiet weight; it has to out-specify that rule to win. */
+.room-boundary .room-button--quiet {
+  border-color: var(--border-strong);
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+
+.room-boundary .room-button--quiet:hover {
+  border-color: var(--action-line);
+  color: var(--action);
 }
 
 .live-room-card__footer {
@@ -3532,10 +3560,9 @@ p.home-filters__facets {
   }
 
   .home-rail .home-statistics__cell {
-    flex-direction: row-reverse;
+    flex-direction: row;
     align-items: baseline;
-    justify-content: space-between;
-    gap: 1rem;
+    gap: 0.75rem;
     box-shadow: inset 0 -1px 0 var(--border);
     padding: 0.75rem 1.25rem;
   }
@@ -3544,8 +3571,24 @@ p.home-filters__facets {
     box-shadow: none;
   }
 
+  .home-rail .home-statistics dt,
   .home-rail .home-statistics dd {
+    flex: 0 0 auto;
+  }
+
+  /* A ledger leader carries the eye from the label to its count, so the row
+     reads in the order the label is written rather than number first. */
+  .home-rail .home-statistics__leader {
+    display: block;
+    flex: 1 1 auto;
+    translate: 0 -0.2em;
+    border-bottom: 1px dotted var(--border-strong);
+  }
+
+  .home-rail .home-statistics dd {
+    color: var(--ink);
     font-size: var(--text-body);
+    font-weight: 600;
   }
 
   .live-rooms-grid,
@@ -3868,9 +3911,17 @@ body:has(.room-shell) > .root-controls {
   display: flex;
   flex-direction: column;
   border-radius: 0.625rem;
-  background: var(--rail);
+  background: var(--surface-subtle);
   box-shadow: inset 0 0 0 1px var(--border-strong);
   overflow: hidden;
+}
+
+.room-mosaic__tile:has(.room-mosaic__watch--overlay) .room-mosaic__avatar {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  width: 2.25rem;
+  height: 2.25rem;
 }
 
 /* The tile's media region: same midnight ground as the canvas, both themes. */
@@ -3948,6 +3999,7 @@ body:has(.room-shell) > .root-controls {
 .room-mosaic__footer {
   display: flex;
   flex-direction: column;
+  flex: 1;
   gap: 0.125rem;
   padding: 0.5rem 0.625rem;
   background: var(--surface-subtle);
@@ -3978,10 +4030,9 @@ body:has(.room-shell) > .root-controls {
   font-size: var(--text-label);
 }
 
-.room-mosaic__state > span:not(:last-child)::after {
-  content: '·';
-  margin-inline-start: 0.3125rem;
+.room-mosaic__state-separator {
   color: var(--ink-muted);
+  font-weight: 400;
 }
 
 .room-mosaic__state > span[data-tone='host'] {
@@ -4182,7 +4233,7 @@ body:has(.room-shell) > .root-controls {
     min-height: 0;
   }
 
-  .room-boundary--admitted .room-header,
+  .room-boundary--admitted .room-live-header,
   .room-boundary--admitted .room-boundary__error {
     grid-column: 1;
   }
@@ -4232,6 +4283,48 @@ body:has(.room-shell) > .root-controls {
 
   .room-dock[data-open="false"] {
     width: 3.5rem;
+  }
+
+  .room-dock[data-open="false"] {
+    padding: 0.375rem;
+    overflow: visible;
+    transform: translateX(0.125rem);
+  }
+
+  .room-dock[data-open="false"] .room-dock__collapse,
+  .room-dock[data-open="false"] .room-dock__tab {
+    position: relative;
+    width: 2.75rem;
+    min-height: 2.75rem;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .room-dock[data-open="false"] [data-tooltip]::after {
+    position: absolute;
+    z-index: 18;
+    top: 50%;
+    right: calc(100% + 0.5rem);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-control);
+    background: var(--surface);
+    box-shadow: var(--raised-shadow);
+    color: var(--ink);
+    content: attr(data-tooltip);
+    opacity: 0;
+    padding: 0.375rem 0.5rem;
+    pointer-events: none;
+    transform: translate(0.25rem, -50%);
+    transition:
+      opacity var(--transition-duration-control) var(--ease-clubhouse),
+      transform var(--transition-duration-control) var(--ease-clubhouse);
+    white-space: nowrap;
+  }
+
+  .room-dock[data-open="false"] [data-tooltip]:hover::after,
+  .room-dock[data-open="false"] [data-tooltip]:focus-visible::after {
+    opacity: 1;
+    transform: translate(0, -50%);
   }
 
   .room-dock[data-open="false"] .room-dock__tabs {
@@ -4289,7 +4382,7 @@ body:has(.room-shell) > .root-controls {
     grid-column: 2;
   }
 
-  .room-boundary--admitted .room-header,
+  .room-boundary--admitted .room-live-header,
   .room-boundary--admitted .room-boundary__error {
     grid-column: 1 / -1;
   }
@@ -4394,12 +4487,7 @@ body:has(.room-shell) > .root-controls {
   margin-top: 0.5rem;
 }
 
-/* Three tiers, because `.room-boundary button` painted all five tile controls
-   the same solid cobalt: a preview tile gave Watch no more authority than an
-   overflow trigger, and a watched tile showed four equal primaries with the
-   exit sitting at the same weight as a menu holding Kick and Ban.
-
-   Tier 2 — adjustments to a watch already running. */
+/* Adjustments to a watch already running stay in the footer below live media. */
 .room-mosaic__actions > button {
   border-color: var(--border-strong);
   background: transparent;
@@ -4411,41 +4499,35 @@ body:has(.room-shell) > .root-controls {
   background: var(--surface-subtle);
 }
 
-/* Tier 1 — the one thing this tile is for. Watch keeps the cobalt fill; so
-   does Stop watching, because leaving a watch is the same decision reversed
-   and must be as findable as entering it. */
-.room-mosaic__actions > button.room-mosaic__watch {
+/* The primary Watch action overlays the still Preview. Stop watching keeps the
+   same treatment in the footer because it reverses that decision. */
+.room-mosaic__watch {
   border-color: var(--action);
   background: var(--action);
   color: var(--action-ink);
   font-weight: 600;
 }
 
-.room-mosaic__actions > button.room-mosaic__watch:hover {
+.room-mosaic__watch:hover {
   border-color: var(--action-hover);
   background: var(--action-hover);
 }
 
-/* Tier 3 — safety and moderation stay permanently visible and never hover-only
-   (ADR 0101), but they are not what a viewer came to the tile to do. */
-.room-mosaic__actions .room-member-actions__trigger {
-  border-color: transparent;
-  background: transparent;
-  color: var(--ink-muted);
-  font-weight: 500;
+.room-mosaic__watch--overlay {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  left: 50%;
+  box-shadow: 0 0.25rem 0.75rem var(--media-scrim);
+  transform: translate(-50%, -50%);
 }
 
-.room-mosaic__actions .room-member-actions__trigger:hover {
-  border-color: var(--border-strong);
-  background: var(--surface-subtle);
-  color: var(--ink);
-}
 
 /* Blocked, not gone: `aria-disabled` keeps the button focusable so its reason
    is reachable, so it must also read as unavailable without dropping below the
    contrast the rest of the surface holds. */
-.room-mosaic__actions > button.room-mosaic__watch[data-blocked],
-.room-mosaic__actions > button.room-mosaic__watch[data-blocked]:hover {
+.room-mosaic__watch[data-blocked],
+.room-mosaic__watch[data-blocked]:hover {
   border-color: var(--border-strong);
   background: var(--surface-subtle);
   color: var(--ink-muted);
@@ -4522,12 +4604,41 @@ body:has(.room-shell) > .root-controls {
   background: var(--rail);
   box-shadow: inset 0 0 0 1px var(--border-strong);
   padding: 0.75rem;
-  transition: width 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transform: translateX(0);
+  transition: transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .room-dock__desktop-controls {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.room-dock__heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.375rem;
+  font-weight: 600;
+}
+
+.room-dock__presence {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--host);
+  box-shadow: 0 0 0 0.1875rem color-mix(in srgb, var(--host) 14%, transparent);
+}
+
+.room-dock__here {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warning) 12%, var(--surface));
+  color: var(--warning);
+  font-size: var(--text-meta);
+  font-weight: 600;
+  padding: 0.125rem 0.375rem;
+  white-space: nowrap;
 }
 
 .room-dock__wide-label {
@@ -4535,7 +4646,10 @@ body:has(.room-shell) > .root-controls {
 }
 
 .room-dock__collapse {
-  min-height: 2.25rem;
+  display: flex;
+  min-height: 2.75rem;
+  align-items: center;
+  gap: 0.375rem;
 }
 
 .room-dock__tabs {
@@ -4573,6 +4687,18 @@ body:has(.room-shell) > .root-controls {
   gap: 0.5rem;
 }
 
+.room-dock__sheet-controls {
+  align-items: center;
+}
+
+.room-dock__sheet-controls button {
+  padding-inline: 0.625rem;
+}
+
+.room-dock__sheet-controls .room-dock__heading {
+  margin-inline-end: auto;
+}
+
 .room-chat__log,
 .room-people,
 .room-activity {
@@ -4589,11 +4715,38 @@ body:has(.room-shell) > .root-controls {
 .room-chat__failure,
 .room-chat__typing,
 .room-chat__count,
+.room-chat__guidance,
 .room-people__state,
 .room-activity__empty {
   margin: 0;
   color: var(--ink-muted);
   font-size: var(--text-meta);
+}
+
+.room-chat__empty {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.625rem;
+  border: 1px solid color-mix(in srgb, var(--warning) 24%, var(--border));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--warning) 8%, var(--surface));
+  color: var(--ink-secondary);
+  padding: 0.75rem;
+}
+
+.room-chat__empty-icon {
+  color: var(--warning);
+}
+
+.room-chat__empty-copy {
+  display: grid;
+  gap: 0.125rem;
+}
+
+.room-chat__empty strong {
+  color: var(--ink);
+  font-weight: 600;
 }
 
 .room-chat__body {
@@ -4602,7 +4755,10 @@ body:has(.room-shell) > .root-controls {
 }
 
 .room-chat__message[data-message-state="pending"] {
-  opacity: 0.65;
+  border-radius: var(--radius-control);
+  background: var(--action-soft);
+  box-shadow: inset 0 0 0 1px var(--action-line);
+  padding: 0.5rem;
 }
 
 .room-chat__message[data-message-state="failed"] .room-chat__body {
@@ -4611,9 +4767,57 @@ body:has(.room-shell) > .root-controls {
 
 .room-people__member {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
+  align-items: center;
   gap: 0.75rem;
+}
+
+.room-people__avatar {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: 0 0 auto;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--action-line);
+  border-radius: 50%;
+  background: var(--action-soft);
+  color: var(--action);
+  font-weight: 700;
+}
+
+.room-people__avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.room-people__identity {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+}
+
+.room-people__name {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room-people__state [data-state-tone="host"] {
+  color: var(--action);
+}
+
+.room-people__state [data-state-tone="live"] {
+  color: var(--live);
+}
+
+.room-people__state [data-state-tone="warning"] {
+  color: var(--warning);
+}
+
+.room-people__state [data-state-tone="danger"] {
+  color: var(--danger);
 }
 
 /* The same actions the tiles carry, always visible rather than on hover
@@ -4664,6 +4868,19 @@ body:has(.room-shell) > .root-controls {
 .room-activity__cue {
   align-self: center;
   margin-top: 0.5rem;
+}
+
+.room-activity__entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.room-activity__time {
+  color: var(--ink-muted);
+  font-size: var(--text-meta);
+  white-space: nowrap;
 }
 
 /* Only the one-minute warning is loud (ADR 0103). */
@@ -4804,12 +5021,6 @@ body:has(.room-shell) > .root-controls {
   padding-inline: 0.375rem;
 }
 
-.room-mobile-bar button[data-disabled-reason="Desktop only"] {
-  opacity: 1;
-  color: var(--ink-muted);
-  font-size: var(--text-meta);
-}
-
 @media (max-width: 47.999rem) {
   /* ADR 0103: the admitted room replaces the global bottom navigation with one
      room control bar. Only the admitted state — pre-admission and the Past
@@ -4824,7 +5035,9 @@ body:has(.room-shell) > .root-controls {
   }
 
   .room-boundary--admitted {
-    padding-bottom: 5rem;
+    --room-mobile-bar-height: calc(3.8125rem + env(safe-area-inset-bottom));
+
+    padding-bottom: var(--room-mobile-bar-height);
   }
 
   .room-dock[data-sheet="docked"] {
@@ -4840,7 +5053,7 @@ body:has(.room-shell) > .root-controls {
     inset: auto 0 0;
     border-radius: 0.625rem 0.625rem 0 0;
     box-sizing: border-box;
-    padding-bottom: calc(4rem + env(safe-area-inset-bottom));
+    padding-bottom: calc(0.75rem + var(--room-mobile-bar-height));
   }
 
   .room-dock[data-sheet="open"] {
@@ -4851,11 +5064,10 @@ body:has(.room-shell) > .root-controls {
     height: 90dvh;
   }
 
-@media (prefers-reduced-motion: reduce) {
-  .room-dock {
-    transition: none;
+  .room-dock[data-stage="mobile"] .room-dock__panel {
+    min-height: 0;
   }
-}
+
 
   /* Mobile without a watch is the accepted two-column overview. Once a watch
      is live, the watched tile is a viewport-width stage and every remaining
@@ -4890,6 +5102,11 @@ body:has(.room-shell) > .root-controls {
     width: calc(100vw - 2rem);
     grid-column: 1;
     grid-row: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .room-dock {
+    transition: none;
   }
 }
 
@@ -5138,33 +5355,55 @@ body:has(.room-shell) > .root-controls {
 }
 
 /* Issue #12: admitted Room identity and lifetime chrome. The desktop header is
-   exactly two bounded rows; compact/mobile Details is a separate surface. */
+   exactly two bounded rows; compact/mobile Details is a separate surface.
+   Operate surface: the room name is fixed and already known, so it yields to
+   the two facts that actually move — live/capacity state and the lifetime. */
 .room-live-header {
   display: grid;
   min-width: 0;
+  /* One explicit full-width track. An `auto` track sizes to the widest row's
+     max-content and leaves the remainder unused, which stranded ~200px on the
+     right of both rows at 1600px. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto auto;
   align-items: center;
   gap: 0.625rem;
+  /* The workspace below is the midnight media canvas in both themes; without
+     an edge the identity chrome floats on it. */
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.75rem;
 }
 
 .room-live-header__primary {
-  display: grid;
+  /* Flex, not a fixed track list: the row's child count changes with Host
+     rights and breakpoint, and a five-track grid was only ever correct by
+     coincidence. */
+  display: flex;
   min-width: 0;
-  grid-template-columns: auto minmax(6rem, 1fr) auto auto auto;
   align-items: center;
   gap: 0.625rem;
 }
 
 .room-live-header__primary h1 {
-  min-width: 0;
+  min-width: 6rem;
+  flex: 1 1 auto;
   overflow: hidden;
+  font-size: var(--text-section);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.room-live-header__state {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0.375rem;
 }
 
 .room-live-header__back {
   display: inline-flex;
   min-height: 2.75rem;
+  flex: none;
   box-sizing: border-box;
   align-items: center;
   border: 1px solid var(--border-strong);
@@ -5180,27 +5419,16 @@ body:has(.room-shell) > .root-controls {
   display: none;
 }
 
-.room-live-header__privacy,
-.room-live-header__live-state {
-  display: inline-flex;
-  min-height: 1.75rem;
-  align-items: center;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--ink-muted);
-  font-size: var(--text-label);
-  padding-inline: 0.625rem;
-  white-space: nowrap;
-}
-
-.room-live-header__live-state {
-  border-color: color-mix(in srgb, var(--live) 38%, var(--border));
-  color: var(--live);
+.room-live-header__state .room-chip {
+  height: 1.75rem;
+  flex: none;
 }
 
 .room-live-header__secondary {
   display: grid;
   min-width: 0;
+  /* Explicit tracks, and the metadata slot is always rendered, so the lifetime
+     keeps the same position whether or not the room carries a description. */
   grid-template-columns: minmax(0, 1fr) auto auto auto auto;
   align-items: center;
   gap: 0.875rem;
@@ -5217,9 +5445,14 @@ body:has(.room-shell) > .root-controls {
   white-space: nowrap;
 }
 
+/* Description, category and tags are one left-anchored metadata group. None of
+   them grows: the row's slack belongs in the middle, between metadata and the
+   right-hand state group, so a long title or description is what fills it. The
+   description yields first when space runs out — it ellipses, the taxonomy
+   does not. */
 .room-live-header__description {
-  min-width: 2rem;
-  flex: 1 1 auto;
+  min-width: 4rem;
+  flex: 0 8 auto;
   overflow: hidden;
   color: var(--ink-faint);
   text-overflow: ellipsis;
@@ -5238,28 +5471,44 @@ body:has(.room-shell) > .root-controls {
   text-overflow: ellipsis;
 }
 
-
 .room-live-header__tags {
   display: flex;
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   gap: 0.25rem;
   overflow: hidden;
+  /* The fade lands on this padding while the tags fit, so it is invisible; once
+     the row squeezes them, chips run under it and dissolve instead of being
+     sliced through a glyph. */
+  padding-right: 1.5rem;
+  mask-image: linear-gradient(to right, #000 calc(100% - 1.5rem), transparent);
 }
 
 .room-live-header__tags .room-chip {
   min-width: 0;
   max-width: 7rem;
-  flex: 1 1 auto;
+  /* Content-sized: `1 1 auto` made a chip's width a function of how many
+     siblings it had. */
+  flex: none;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.room-live-header__fact,
-.room-live-header__countdown {
+.room-live-header__fact {
   color: var(--ink-muted);
   font-size: var(--text-label);
   font-variant-numeric: tabular-nums;
+}
+
+/* The lifetime is the one fact here no conferencing product has, and it sits
+   next to three counts that look exactly like it. Separate it, then rank it. */
+.room-live-header__countdown {
+  border-left: 1px solid var(--border);
+  color: var(--ink-secondary);
+  padding-left: 0.875rem;
+  font-size: var(--text-meta);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
 }
 
 .room-live-header__host {
@@ -5291,25 +5540,38 @@ body:has(.room-shell) > .root-controls {
   white-space: nowrap;
 }
 
-.room-live-header__countdown[data-countdown-state="thirty-minute"] {
-  color: var(--ink);
-  font-weight: 600;
+.room-live-header__host-absent {
+  color: var(--warning);
 }
 
-.room-live-header__countdown[data-countdown-state="ten-minute"] {
-  color: var(--host);
+/* ADR 0103 warning ladder. It stays inside one family and escalates by
+   prominence — the previous ten-minute rung used the Host/success green, which
+   reassures at the moment the room is about to end. */
+.room-live-header__countdown[data-countdown-state="thirty-minute"] {
+  color: var(--ink);
   font-weight: 650;
 }
 
-.room-live-header__countdown[data-countdown-state="one-minute"] {
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--warning) 14%, transparent);
+.room-live-header__countdown[data-countdown-state="ten-minute"] {
   color: var(--warning);
-  font-weight: 750;
-  padding: 0.375rem 0.5rem;
+  font-weight: 700;
 }
 
-.room-details {
+.room-live-header__countdown[data-countdown-state="one-minute"] {
+  /* Prominence comes from the ring and the weight, not the fill: warning ink
+     over a heavier wash drops below 4.5:1 on the porcelain ground. */
+  border-left: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warning) 6%, transparent);
+  justify-self: end;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning) 45%, transparent);
+  color: var(--warning);
+  padding: 0.25rem 0.625rem;
+  font-weight: 750;
+}
+
+.room-details,
+.room-details__backdrop {
   display: none;
 }
 
@@ -5319,19 +5581,25 @@ body:has(.room-shell) > .root-controls {
   }
 
   .room-live-header__primary {
-    grid-template-columns: auto minmax(0, 1fr) auto auto auto;
     gap: 0.375rem;
   }
 
   .room-live-header__back {
-    min-height: 2.5rem;
+    /* 44px, like every other control on this row. */
+    min-height: 2.75rem;
     padding-inline: 0.625rem;
   }
 
   .room-live-header__back-wide,
-  .room-live-header__live-state,
   .room-live-header__settings,
   .room-live-header__secondary {
+    display: none;
+  }
+
+  /* ADR 0103: the compact header carries Back, name, privacy and lifetime.
+     Live/Full stay on the desktop row and inside Details. */
+  .room-live-header__state .room-chip--live,
+  .room-live-header__state .room-chip--full {
     display: none;
   }
 
@@ -5341,8 +5609,8 @@ body:has(.room-shell) > .root-controls {
     display: inline-flex;
   }
 
-  .room-live-header__privacy {
-    min-height: 1.5rem;
+  .room-live-header__state .room-chip {
+    height: 1.5rem;
     padding-inline: 0.5rem;
   }
 
@@ -5351,18 +5619,41 @@ body:has(.room-shell) > .root-controls {
   }
 
   .room-live-header__details-trigger {
-    min-height: 2.5rem;
     align-items: center;
     padding-inline: 0.625rem;
   }
 
   .room-live-header__primary h1 {
-    font-size: 1.125rem;
+    /* The row carries four controls beside the title at 390px; the title is
+       the only thing that may give. */
+    min-width: 0;
+    font-size: var(--text-card);
+  }
+
+  .room-live-header__mobile-countdown .room-live-header__countdown {
+    border-left: 0;
+    padding-left: 0;
+  }
+
+  /* Out-specifies `.room-boundary button`, which fills every room button with
+     cobalt. This one is an invisible dismissal target. */
+  .room-boundary .room-details__backdrop {
+    position: fixed;
+    z-index: 15;
+    display: block;
+    min-height: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    inset: 0;
+    padding: 0;
   }
 
   .room-details {
     position: fixed;
-    z-index: 18;
+    /* Under the room bar (z-17), like the companion sheet at z-16. The bar is
+       the only mobile surface carrying Leave; a sheet must never cover it. */
+    z-index: 16;
     display: flex;
     width: 100%;
     max-height: calc(100dvh - env(safe-area-inset-top));
@@ -5374,7 +5665,10 @@ body:has(.room-shell) > .root-controls {
     box-shadow: var(--feature-shadow);
     box-sizing: border-box;
     color: var(--ink);
-    padding-bottom: calc(4rem + env(safe-area-inset-bottom));
+    /* Shared token, not a hardcoded 4rem: this has to match the bar it now
+       sits under. */
+    padding-bottom: calc(0.75rem + var(--room-mobile-bar-height));
+    transition: height var(--transition-duration-layout) var(--ease-clubhouse);
   }
 
   .room-details[data-height="55"] {
@@ -5388,10 +5682,22 @@ body:has(.room-shell) > .root-controls {
   .room-details__controls {
     display: flex;
     flex: none;
+    align-items: center;
     justify-content: space-between;
     gap: 0.5rem;
     border-bottom: 1px solid var(--border);
     padding: 0.75rem;
+  }
+
+  .room-details__controls h2 {
+    margin: 0;
+    font-size: var(--text-card);
+  }
+
+  .room-details__buttons {
+    display: flex;
+    flex: none;
+    gap: 0.5rem;
   }
 
   .room-details__content {
@@ -5402,18 +5708,14 @@ body:has(.room-shell) > .root-controls {
     overflow-wrap: anywhere;
   }
 
-  .room-details__content h2,
   .room-details__content p,
   .room-details__facts {
     margin: 0;
   }
 
-  .room-details__eyebrow {
+  .room-details__empty {
     color: var(--ink-muted);
-    font-size: var(--text-label);
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
+    font-size: var(--text-meta);
   }
 
   .room-details__metadata,
@@ -5422,6 +5724,9 @@ body:has(.room-shell) > .root-controls {
     flex-wrap: wrap;
     gap: 0.5rem;
     overflow: visible;
+    /* The sheet wraps its tags instead of clipping them, so the header's
+       overflow fade would only hide a chip that is fully visible. */
+    mask-image: none;
     white-space: normal;
   }
   .room-details__metadata .room-live-header__tags,
@@ -5451,6 +5756,12 @@ body:has(.room-shell) > .root-controls {
   .room-details__facts dd {
     min-width: 0;
     margin: 0.375rem 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .room-details {
+    transition: none;
   }
 }
 
@@ -5661,6 +5972,7 @@ body:has(.room-shell) > .root-controls {
 }
 
 .room-chat__composer {
+  grid-auto-flow: dense;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
 }
@@ -5670,6 +5982,16 @@ body:has(.room-shell) > .root-controls {
 .room-chat__status,
 .room-chat__availability {
   grid-column: 1 / -1;
+}
+
+.room-chat__guidance,
+.room-chat__count {
+  grid-column: 1;
+}
+
+.room-chat__composer button[type="submit"] {
+  grid-column: 2;
+  grid-row: span 2;
 }
 
 .room-chat__status,
@@ -5696,5 +6018,21 @@ body:has(.room-shell) > .root-controls {
 
   .room-chat__composer textarea {
     min-height: 4.5rem;
+  }
+}
+
+@media (max-width: 47.999rem) and (max-height: 40rem) {
+  .room-chat__composer textarea {
+    grid-column: 1;
+  }
+
+  .room-chat__guidance {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 }

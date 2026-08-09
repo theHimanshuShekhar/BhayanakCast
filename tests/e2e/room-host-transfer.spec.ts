@@ -102,7 +102,13 @@ test('Host transfer names the authority consequence and immediately preserves ad
       [subscriptionId, membershipId(originalHostId), streamId],
     )
 
-    const memberMenuTrigger = newHostPage.getByRole('button', {
+    await Promise.all([
+      originalHostPage.getByRole('tab', { name: /People/ }).click(),
+      newHostPage.getByRole('tab', { name: /People/ }).click(),
+    ])
+    const originalHostPeople = originalHostPage.getByRole('tabpanel', { name: 'People' })
+    const newHostPeople = newHostPage.getByRole('tabpanel', { name: 'People' })
+    const memberMenuTrigger = newHostPeople.getByRole('button', {
       name: 'Actions for Original Host',
     })
     await memberMenuTrigger.press('ArrowDown')
@@ -112,7 +118,7 @@ test('Host transfer names the authority consequence and immediately preserves ad
         .getByRole('menuitem', { name: 'Transfer Host…' }),
     ).toHaveCount(0)
 
-    const hostMenuTrigger = originalHostPage.getByRole('button', {
+    const hostMenuTrigger = originalHostPeople.getByRole('button', {
       name: 'Actions for New Host',
     })
     await hostMenuTrigger.press('ArrowDown')
@@ -157,7 +163,7 @@ test('Host transfer names the authority consequence and immediately preserves ad
       newHostPage.getByRole('button', { name: 'Settings', exact: true }),
     ).toBeVisible()
 
-    await newHostPage
+    await newHostPeople
       .getByRole('button', { name: 'Actions for Original Host' })
       .press('ArrowDown')
     await expect(

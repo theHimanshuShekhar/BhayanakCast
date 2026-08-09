@@ -6,7 +6,7 @@ This runbook operates the accepted one-node topology. It does not add a second a
 
 - `cloudflared` and `app` share only the `edge` network. The tunnel sends the one public hostname to `http://app:3000`; the same Node listener owns HTTP and `/socket.io/` upgrades.
 - `app`, `postgres`, and `valkey` share the internal `data` network. PostgreSQL and Valkey publish no host ports in `compose.yml`.
-- PostHog runs from its official pinned hobby Compose release. `ops/posthog.compose.override.yml` disables its Caddy service, binds its operator UI to host loopback, and attaches only PostHog `web` and `app` to the internal external network named `bhayanakcast-analytics`. PostHog's ClickHouse, Kafka, Redis, PostgreSQL, and object-storage services stay on PostHog's own default network.
+- PostHog runs from its official pinned hobby Compose release. Its operator-managed configuration disables Caddy, binds the operator UI to host loopback, and attaches only PostHog `web` and `app` to the internal external network named `bhayanakcast-analytics`. PostHog's ClickHouse, Kafka, Redis, PostgreSQL, and object-storage services stay on PostHog's own default network.
 - PostHog is non-critical: an analytics outage must not change application readiness or block product requests. Valkey is disposable, but mutations whose abuse limits require it fail closed; durable reads and PostgreSQL data remain available. PostgreSQL unavailability makes application readiness fail.
 
 The production Compose file publishes no ports. `compose.dev.yml` is only for local dependency development and binds PostgreSQL and Valkey to loopback.
@@ -118,33 +118,21 @@ sudo chmod 0640 /etc/bhayanakcast/backup.key
 
 Create `/etc/bhayanakcast/backup.env` (mode `0640`, group `bhayanakcast`) containing `BACKUP_NAS_MOUNT`, `BACKUP_DIRECTORY`, `BACKUP_KEY_FILE`, `RECOVERY_EVIDENCE_DIRECTORY`, `POSTGRES_DB`, and `POSTGRES_USER`. Keep the encryption key in the host secret store and a separate operator-controlled recovery copy; never place it on the NAS beside the backups.
 
-Install the supplied systemd units and enable the persistent daily timer:
+Schedule `scripts/backup-postgres.sh` with the host scheduler as the `bhayanakcast` user.
+Run it daily at 03:15 with persistent missed-run handling, a randomized delay of up to 15
+minutes, `/opt/bhayanakcast` as the working directory, and
+`/etc/bhayanakcast/backup.env` loaded into the environment.
 
-```sh
-sudo install -m 0644 ops/systemd/bhayanakcast-backup.service /etc/systemd/system/
-sudo install -m 0644 ops/systemd/bhayanakcast-backup.timer /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now bhayanakcast-backup.timer
-sudo systemctl start bhayanakcast-backup.service
-sudo systemctl status bhayanakcast-backup.service
-```
-
-The script creates a custom-format dump, encrypts it with AES-256-CBC/PBKDF2 before its atomic final name appears, writes an encrypted-file checksum, and deletes backup/checksum files older than 30 days only after a new non-empty backup succeeds. The timer's `Persistent=true` runs a missed daily job after the host returns. Alert on a failed unit and on the absence of a backup newer than 26 hours.
+The script creates a custom-format dump, encrypts it with AES-256-CBC/PBKDF2 before its atomic final name appears, writes an encrypted-file checksum, and deletes backup/checksum files older than 30 days only after a new non-empty backup succeeds. Alert on a failed run and on the absence of a backup newer than 26 hours.
 
 ## Daily data retention
 
-Install and enable the retention timer after the application is healthy:
-
-```sh
-sudo install -m 0644 ops/systemd/bhayanakcast-retention.service /etc/systemd/system/
-sudo install -m 0644 ops/systemd/bhayanakcast-retention.timer /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now bhayanakcast-retention.timer
-sudo systemctl start bhayanakcast-retention.service
-sudo systemctl status bhayanakcast-retention.service
-```
-
-The oneshot executes the bundled retention command inside the running application container, so it uses the same private PostgreSQL connection and schema as the application. `Persistent=true` runs a missed daily job after host recovery. Alert on a failed unit or the absence of a `retention_run_completed` journal entry for more than 26 hours.
+Schedule `docker compose exec -T app node scripts/run-retention.mjs` with the host scheduler
+as the `bhayanakcast` user. Run it daily at 04:00 with persistent missed-run handling, a
+randomized delay of up to 15 minutes, and `/opt/bhayanakcast` as the working directory.
+The command runs inside the application container, so it uses the same private PostgreSQL
+connection and schema as the application. Alert on a failed run or the absence of a
+`retention_run_completed` journal entry for more than 26 hours.
 
 
 ## Monthly clean restore drill

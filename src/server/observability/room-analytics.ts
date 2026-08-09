@@ -96,7 +96,7 @@ export type RoomAnalyticsEvent =
     }
   | {
       readonly name: 'room_details_closed'
-      readonly properties: { readonly reason: 'control' | 'escape' }
+      readonly properties: { readonly reason: 'control' | 'escape' | 'backdrop' }
     }
   | {
       readonly name: 'room_details_resized'
@@ -411,7 +411,13 @@ function validateEvent(name: string, properties: unknown): RoomAnalyticsEvent {
     }
     case 'room_details_closed': {
       const source = exactObject(properties, ['reason'])
-      if (source.reason !== 'control' && source.reason !== 'escape') invalidProperties()
+      if (
+        source.reason !== 'control' &&
+        source.reason !== 'escape' &&
+        source.reason !== 'backdrop'
+      ) {
+        invalidProperties()
+      }
       return { name, properties: { reason: source.reason } }
     }
     case 'room_details_resized': {

@@ -157,7 +157,7 @@ BhayanakCast is a public discovery platform for small social screen-sharing room
 : Chat-default desktop tabs for Chat, People, and Activity. The dock may collapse while preserving room-session draft/tab/scroll state. People orders Host, You, active streamers, then continuous join order. Tile/member menus duplicate Report and authorized Host actions; Header Settings manages Metadata, Privacy, and Bans.
 
 **Mobile admitted room**
-: Replaces global bottom navigation with a safe-area room bar for Stream, Chat, People, Activity, and Leave/More. The compact header shows Back/name/privacy/countdown and opens Details. Without a watch, the mosaic is two columns; a watched Stream becomes the stage above a horizontal member strip. Companions use explicit 55%/90% sheets. Stream remains visibly disabled as `Desktop only`.
+: Replaces global bottom navigation with a safe-area room bar for Chat, People, Activity, and Leave/More. The compact header shows Back/name/privacy/countdown and opens Details. Without a watch, the mosaic is two columns; a watched Stream becomes the stage above a horizontal member strip. Companions use explicit 55%/90% sheets. The bar carries no Stream control, because mobile cannot create a Stream (ADR 0103, amended 2026-08-09).
 
 **Media boundary**
 : V1 carries media directly between browsers with native `RTCPeerConnection` and public STUN. Authenticated Socket.IO carries application realtime plus authorized WebRTC offers, answers, and ICE candidates, but never captured audio/video. There is no shared voice channel or TURN relay fallback at launch.

@@ -233,10 +233,10 @@ test('a phone gets one bottom bar in an admitted room and the global one elsewhe
     await expect(roomBar).toBeVisible()
     await expect(hostPage.getByTestId('home-bottom-navigation')).toBeHidden()
     expect(await bottomEdgeFixedCount(hostPage)).toBe(1)
-    const desktopOnly = roomBar.getByRole('button', { name: 'Desktop only' })
-    await expect(desktopOnly).toBeVisible()
-    await expect(desktopOnly).toBeDisabled()
-    await expect(desktopOnly).toHaveAttribute('aria-describedby', 'mobile-stream-guidance')
+    // ADR 0103 (amended): mobile cannot create a Stream, so the bar carries
+    // only the four controls it can actually run.
+    await expect(roomBar.getByRole('button', { name: 'Stream', exact: true })).toHaveCount(0)
+    await expect(roomBar.getByRole('button')).toHaveCount(4)
     // The identity fix has to survive the suppressed navigation.
     await expect(
       hostPage.getByRole('button', { name: 'Shell Host account' }),
@@ -326,7 +326,7 @@ test('the desktop workspace is fixed while the phone keeps document scroll', asy
         if (!node) throw new Error(`${selector} is missing`)
         return node.getBoundingClientRect()
       }
-      const header = box('.room-header')
+      const header = box('.room-live-header')
       const shelf = box('.room-shelf')
       const canvasNode = document.querySelector('.room-stage__canvas')
       if (!canvasNode) throw new Error('.room-stage__canvas is missing')
@@ -440,6 +440,7 @@ test('wide companions keep a 360px collapsible dock and preserve room-session st
 
     const dock = page.locator('.room-dock')
     await expect(dock).toHaveCSS('width', '360px')
+    await expect(dock).toHaveCSS('transition-property', 'transform')
     const tabs = dock.getByRole('tab')
     await expect(tabs).toHaveCount(3)
     await expect(tabs.nth(0)).toHaveAttribute('aria-controls', /.+/)
@@ -467,11 +468,18 @@ test('wide companions keep a 360px collapsible dock and preserve room-session st
     await tabs.getByText('People', { exact: true }).click()
     const firstTile = page.locator('.room-mosaic__tile').first()
     await firstTile.evaluate((node) => node.setAttribute('data-companion-continuity', 'kept'))
-    await dock.getByRole('button', { name: 'Collapse dock' }).click()
+    const collapse = dock.getByRole('button', { name: 'Collapse dock' })
+    await expect(collapse).toHaveAttribute('aria-expanded', 'true')
+    await collapse.click()
     await expect(dock).toHaveCSS('width', '56px')
+    const expand = dock.getByRole('button', { name: 'Expand dock' })
+    await expect(expand).toBeVisible()
+    await expect(expand).toHaveAttribute('aria-expanded', 'false')
     await expect(tabs.filter({ hasText: /^People/ })).toHaveAttribute('aria-selected', 'true')
-    await tabs.getByText('People', { exact: true }).click()
+    await expect(tabs.nth(1)).toHaveAttribute('data-tooltip', 'People')
+    await expand.click()
     await expect(dock).toHaveCSS('width', '360px')
+    await expect(collapse).toHaveAttribute('aria-expanded', 'true')
     await expect(firstTile).toHaveAttribute('data-companion-continuity', 'kept')
   } finally {
     await dropRoom(authSessions, roomId)
@@ -488,6 +496,8 @@ test('hidden Chat retains unread state until the viewer returns', async ({
     await hostPage.setViewportSize({ width: 1440, height: 900 })
     const dock = hostPage.locator('.room-dock')
     await dock.getByRole('button', { name: 'Collapse dock' }).click()
+    await expect(hostPage.getByLabel('Message')).toBeHidden()
+    await expect(dock.getByRole('button', { name: 'Send', exact: true })).toBeHidden()
 
     const visitor = await authSessions.createBrowserContext(VISITOR_PROFILE)
     const visitorPage = await visitor.context.newPage()
@@ -503,6 +513,10 @@ test('hidden Chat retains unread state until the viewer returns', async ({
     await chatTab.click()
     await expect(hostPage.getByText('A canonical unread message')).toBeVisible()
     await expect(chatTab.locator('.room-dock__badge')).toHaveCount(0)
+
+    await dock.getByRole('tab', { name: /Activity/ }).click()
+    await expect(dock.getByText('Shell Visitor joined.')).toBeVisible()
+    await expect(dock.locator('.room-activity__time')).toHaveAttribute('datetime', /T/)
   } finally {
     await dropRoom(authSessions, roomId)
   }
@@ -554,26 +568,67 @@ test('mobile companion sheets expose 55% and 90% heights and return focus', asyn
   try {
     await page.setViewportSize({ width: 390, height: 844 })
     const roomBar = page.getByRole('navigation', { name: 'Room controls' })
+    await expect(roomBar.getByRole('button', { name: 'Stream', exact: true })).toHaveCount(0)
+    await expect(page.locator('#mobile-stream-guidance')).toHaveCount(0)
     const chatControl = roomBar.getByRole('button', { name: 'Chat' })
     await chatControl.click()
-    const dock = page.locator('.room-dock[data-sheet="open"]')
-    await expect(dock).toBeVisible()
+    const dock = page.locator('.room-dock')
+    await expect(dock).toHaveAttribute('data-sheet', 'open')
     expect((await dock.boundingBox())?.height).toBeCloseTo(844 * 0.55, 0)
 
-    await page.getByLabel('Message').fill('Mobile draft stays here')
+    const composer = page.locator('#room-chat-input')
+    const send = dock.getByRole('button', { name: 'Send', exact: true })
+    const composerClearance = () =>
+      page.evaluate(() => {
+        const textarea = document.querySelector<HTMLElement>('#room-chat-input')
+        const submit = document.querySelector<HTMLElement>('.room-chat__composer button[type="submit"]')
+        const bar = document.querySelector<HTMLElement>('.room-mobile-bar')
+        if (!textarea || !submit || !bar) return null
+        const barTop = bar.getBoundingClientRect().top
+        return {
+          textarea: barTop - textarea.getBoundingClientRect().bottom,
+          submit: barTop - submit.getBoundingClientRect().bottom,
+        }
+      })
+    await expect.poll(async () => (await composerClearance())?.textarea).toBeGreaterThanOrEqual(0)
+    await expect.poll(async () => (await composerClearance())?.submit).toBeGreaterThanOrEqual(0)
+
+    await page.setViewportSize({ width: 320, height: 568 })
+    await expect.poll(async () => (await composerClearance())?.textarea).toBeGreaterThanOrEqual(0)
+    await expect.poll(async () => (await composerClearance())?.submit).toBeGreaterThanOrEqual(0)
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(dock.getByText('No messages yet')).toBeVisible()
+    await expect(dock.getByText('Say hello when you’re ready.')).toBeVisible()
+    await expect(dock.getByText('Enter to send · Shift+Enter for a new line')).toBeVisible()
+
+    await composer.focus()
+    await expect(dock).toHaveAttribute('data-sheet', 'expanded')
+    await expect(page.getByLabel('Message the room')).toBeFocused()
+    expect((await dock.boundingBox())?.height).toBeCloseTo(844 * 0.9, 0)
+    await expect(send).toBeInViewport()
+    await composer.fill('x'.repeat(450))
+    const counter = dock.locator('.room-chat__count')
+    await expect(counter).toBeVisible()
+    const [counterBox, sendBox] = await Promise.all([counter.boundingBox(), send.boundingBox()])
+    expect(Math.abs((counterBox?.y ?? 0) + (counterBox?.height ?? 0) - ((sendBox?.y ?? 0) + (sendBox?.height ?? 0)))).toBeLessThan(2)
+    await composer.fill('Mobile draft stays here')
     await roomBar.getByRole('button', { name: 'People' }).click()
     await expect(page.locator('.room-dock').getByRole('tab', { name: /People/ })).toHaveAttribute(
       'aria-selected',
       'true',
     )
+    await expect(page.locator('.room-people__avatar')).toHaveCount(1)
     await chatControl.click()
-    await expect(page.getByLabel('Message')).toHaveValue('Mobile draft stays here')
+    await expect(composer).toHaveValue('Mobile draft stays here')
 
+    await page
+      .getByRole('button', { name: 'Collapse companion sheet to 55%' })
+      .click()
+    expect((await dock.boundingBox())?.height).toBeCloseTo(844 * 0.55, 0)
     await page
       .getByRole('button', { name: 'Expand companion sheet to 90%' })
       .click()
-    const expanded = page.locator('.room-dock[data-sheet="expanded"]')
-    expect((await expanded.boundingBox())?.height).toBeCloseTo(844 * 0.9, 0)
+    expect((await dock.boundingBox())?.height).toBeCloseTo(844 * 0.9, 0)
     await page
       .getByRole('button', { name: 'Collapse companion sheet to 55%' })
       .click()
@@ -649,6 +704,32 @@ test('the member mosaic exposes responsive emphasis, presence, watcher, media, a
       ),
     ).toBeVisible()
     await expect(page.locator('.room-mosaic__preview')).toHaveCSS('object-fit', 'contain')
+    const streamTile = tiles.filter({ hasText: 'Filler 1' })
+    const tileSurfaceGaps = await tiles.evaluateAll((nodes) =>
+      nodes.map((node) => {
+        const tile = node.getBoundingClientRect()
+        const footer = node.querySelector<HTMLElement>('.room-mosaic__footer')
+        if (!footer) throw new Error('Mosaic tile footer is missing')
+        return Math.round(tile.bottom - footer.getBoundingClientRect().bottom)
+      }),
+    )
+    expect(tileSurfaceGaps).toEqual(tileSurfaceGaps.map(() => 0))
+    const watchOverlayOffset = await streamTile.evaluate((node) => {
+      const presence = node.querySelector<HTMLElement>('.room-mosaic__presence')
+      const watch = node.querySelector<HTMLElement>('.room-mosaic__watch')
+      if (!presence || !watch) throw new Error('Watch overlay is incomplete')
+      const presenceBox = presence.getBoundingClientRect()
+      const watchBox = watch.getBoundingClientRect()
+      return {
+        x: Math.round(watchBox.left + watchBox.width / 2 - (presenceBox.left + presenceBox.width / 2)),
+        y: Math.round(watchBox.top + watchBox.height / 2 - (presenceBox.top + presenceBox.height / 2)),
+      }
+    })
+    expect(watchOverlayOffset).toEqual({ x: 0, y: 0 })
+    await expect(
+      page.locator('.room-mosaic').getByRole('button', { name: 'Actions', exact: true }),
+    ).toHaveCount(0)
+
 
     // The no-watch phone overview has exactly two columns.
     await page.setViewportSize({ width: 390, height: 844 })
@@ -662,7 +743,6 @@ test('the member mosaic exposes responsive emphasis, presence, watcher, media, a
     expect(new Set(overview.map(({ y }) => y)).size).toBe(2)
 
     // Exercise the two accepted final watch layouts against the real cascade.
-    const streamTile = tiles.filter({ hasText: 'Filler 1' })
     await page.setViewportSize({ width: 1024, height: 768 })
     const mediumWatchLayout = await page.locator('.room-mosaic').evaluate((mosaic) => {
       const all = [...mosaic.querySelectorAll<HTMLElement>('.room-mosaic__tile')]
@@ -735,11 +815,15 @@ test('the member mosaic exposes responsive emphasis, presence, watcher, media, a
     // A publisher-free seeded Stream deterministically exhausts the watch and
     // returns to Preview/Retry without creating a hidden fallback watch.
     await streamTile.evaluate((node) => node.setAttribute('data-member-watched', 'false'))
-    await streamTile.getByRole('button', { name: 'Watch', exact: true }).click()
+    const watch = streamTile.getByRole('button', { name: "Watch Filler 1's screen" })
+    await watch.scrollIntoViewIfNeeded()
+    await watch.click()
     await expect(streamTile.getByText('Could not connect to this stream.')).toBeVisible({
       timeout: 12_000,
     })
-    await expect(streamTile.getByRole('button', { name: 'Retry', exact: true })).toBeVisible()
+    await expect(
+      streamTile.getByRole('button', { name: "Retry watching Filler 1's screen" }),
+    ).toBeVisible()
     await expect(streamTile).toHaveAttribute('data-member-watched', 'false')
     await expect
       .poll(async () => {
@@ -768,6 +852,10 @@ test('a failed compatibility gate can be re-probed without readmission', async (
   try {
     const retry = page.getByRole('button', { name: 'Retry compatibility' })
     await expect(retry).toBeVisible()
+    await page.getByRole('tab', { name: /People/ }).click()
+    const self = page.locator('.room-people__member', { hasText: 'Shell Host' })
+    await expect(self.locator('.room-people__avatar')).toHaveCount(1)
+    await expect(self.locator('.room-people__state')).toContainText('Chat only')
     await page.evaluate(() => {
       ;(window as typeof window & { failCompatibilityProbe?: boolean })
         .failCompatibilityProbe = false
@@ -798,6 +886,13 @@ test('watch recovery exhausts once, cancels explicitly, and stays stopped after 
       [streamId, roomId, memberships[0]!.id],
     )
 
+    await hostPage.reload()
+    await expect(hostPage.locator('[data-room-state="admitted"]')).toBeVisible()
+    await hostPage.getByRole('tab', { name: /People/ }).click()
+    const hostSelf = hostPage.locator('.room-people__member', { hasText: 'Shell Host' })
+    await expect(hostSelf.locator('.room-people__state')).toContainText('Screen stopped')
+    await expect(hostSelf.locator('.room-people__state')).not.toContainText('Live')
+
     const viewer = await authSessions.createBrowserContext(VISITOR_PROFILE)
     await installWebRtcProbe(viewer.context, 'pass')
     const page = await viewer.context.newPage()
@@ -818,6 +913,9 @@ test('watch recovery exhausts once, cancels explicitly, and stays stopped after 
 
     await viewer.context.setOffline(true)
     await expect(page.getByText(/Reconnecting… 45s remaining/)).toBeVisible()
+    await page.getByRole('tab', { name: /People/ }).click()
+    const self = page.locator('.room-people__member', { hasText: 'Shell Visitor' })
+    await expect(self.locator('.room-people__state')).toContainText('Reconnecting')
     await viewer.context.setOffline(false)
     await expect(page.getByRole('button', { name: 'Watch' })).toBeEnabled()
     await expect(page.getByRole('button', { name: 'Start Stream' })).toBeEnabled()

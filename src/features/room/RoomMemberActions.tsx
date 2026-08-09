@@ -2,11 +2,8 @@ import { useEffect, useId, useRef, useState } from 'react'
 import type { RoomRosterMember } from '../../server/rooms/room-roster'
 import { observeRoom } from './room-observability'
 
-export type RoomMemberActionSurface = 'tile' | 'people'
-
 interface RoomMemberActionsProps {
   readonly member: RoomRosterMember
-  readonly surface: RoomMemberActionSurface
   readonly onReport: (member: RoomRosterMember) => void
   readonly onBan?: (member: RoomRosterMember) => void
   readonly onKick?: (member: RoomRosterMember) => void
@@ -14,12 +11,11 @@ interface RoomMemberActionsProps {
   readonly onStopStream?: (member: RoomRosterMember) => void
 }
 
-/** One persistent, keyboard-operable safety menu shared by tiles and People.
+/** One persistent, keyboard-operable safety menu for a People row.
     Host authority is represented by the presence of Host callbacks;
     unauthorized actions are not rendered into the DOM. */
 export function RoomMemberActions({
   member,
-  surface,
   onReport,
   onBan,
   onKick,
@@ -49,7 +45,7 @@ export function RoomMemberActions({
 
   const openMenu = () => {
     setOpen(true)
-    observeRoom({ name: 'room_member_menu_opened', properties: { surface } })
+    observeRoom({ name: 'room_member_menu_opened', properties: { surface: 'people' } })
   }
 
   return (
@@ -85,6 +81,7 @@ export function RoomMemberActions({
             const current = items.indexOf(document.activeElement as HTMLButtonElement)
             if (event.key === 'Escape') {
               event.preventDefault()
+              event.stopPropagation()
               close(true)
             } else if (event.key === 'Tab') {
               close()
@@ -105,7 +102,7 @@ export function RoomMemberActions({
               close(true)
               observeRoom({
                 name: 'room_member_action_selected',
-                properties: { surface, action: 'report' },
+                properties: { surface: 'people', action: 'report' },
               })
               onReport(member)
             }}
@@ -120,7 +117,7 @@ export function RoomMemberActions({
                 close(true)
                 observeRoom({
                   name: 'room_member_action_selected',
-                  properties: { surface, action: 'host_transfer' },
+                  properties: { surface: 'people', action: 'host_transfer' },
                 })
                 onTransfer(member)
               }}
@@ -136,7 +133,7 @@ export function RoomMemberActions({
                 close(true)
                 observeRoom({
                   name: 'room_member_action_selected',
-                  properties: { surface, action: 'host_stream_stop' },
+                  properties: { surface: 'people', action: 'host_stream_stop' },
                 })
                 onStopStream(member)
               }}
@@ -152,7 +149,7 @@ export function RoomMemberActions({
                 close(true)
                 observeRoom({
                   name: 'room_member_action_selected',
-                  properties: { surface, action: 'kick' },
+                  properties: { surface: 'people', action: 'kick' },
                 })
                 onKick(member)
               }}
@@ -168,7 +165,7 @@ export function RoomMemberActions({
                 close(true)
                 observeRoom({
                   name: 'room_member_action_selected',
-                  properties: { surface, action: 'room_ban' },
+                  properties: { surface: 'people', action: 'room_ban' },
                 })
                 onBan(member)
               }}

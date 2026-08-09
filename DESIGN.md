@@ -99,7 +99,7 @@ Home and other non-room small screens use the labeled Home/Create/Profile bottom
 
 ## Mobile live room
 
-The mobile header shows Back, truncated name, privacy, and countdown; Details opens Host/category/tags/count/settings. With no watch, use a two-column overview. A watched Stream becomes the primary stage while remaining tiles use a horizontal strip. Chat/People/Activity/Details open at explicit 55% and 90% sheet heights with labeled Expand/Collapse and focus return. Mobile Stream creation remains visibly disabled as `Desktop only`.
+The mobile header shows Back, truncated name, privacy, and countdown; Details opens Host/category/tags/count/settings. With no watch, use a two-column overview. A watched Stream becomes the primary stage while remaining tiles use a horizontal strip. Chat/People/Activity/Details open at explicit 55% and 90% sheet heights with labeled Expand/Collapse and focus return. The mobile room bar carries no Stream control: mobile cannot create a Stream, and a permanently disabled slot spends a fifth of the only mobile action surface on a control that explains nothing.
 
 Compatibility failure uses an inline chat-only banner, not a blocking modal. Reconnect grace closes media and requires explicit Watch/Start again. Forced departure replaces the admitted shell with same-URL pre-admission; room end transitions in place to the Past Stream summary.
 

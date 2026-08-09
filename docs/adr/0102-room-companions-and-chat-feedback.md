@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-11
+- **Amended:** 2026-08-09 — member and Host actions consolidate in People, while initial Watch moves onto each still Stream Preview.
 
 ## Context
 
@@ -31,9 +32,9 @@ Show a named ephemeral indicator above the composer: up to two Discord display n
 
 ### Contextual actions
 
-Every Stream Preview has a persistent footer with an explicit Watch button; its thumbnail and surrounding tile are not media actions. The same footer shows Streamer identity, Live/preview freshness, watcher stack/count, and a compact menu for Report and authorized Host actions. A watched tile's persistent footer exposes Stop Watching, Mute/Unmute, Fullscreen, connection/retry state, and the informational watcher stack/count. A non-streaming presence tile exposes the same Report/authorized-Host menu beside real identity and capability state. People rows expose the same member/Host actions so safety never depends on hover or a particular panel.
+Every Stream Preview carries one persistent Watch button centered over the still image; the thumbnail and surrounding tile are not media actions. The footer below shows Streamer identity, Live/preview freshness, and watcher stack/count. A watched tile's persistent footer exposes Stop Watching, Mute/Unmute, Fullscreen, connection/retry state, and the informational watcher stack/count. Non-streaming presence tiles keep real identity and capability state. Report and authorized Host actions exist in People rows, so safety remains explicit without duplicating an Actions menu across every mosaic tile.
 
-Own Stream start/stop remains only in the control shelf. Host actions remain scoped: stop another current Stream from its tile/People menu; kick, ban, or transfer Host from People/member menus with the documented confirmations. Header Settings opens a centered desktop dialog or full-screen mobile dialog with Metadata, Privacy, and Bans sections.
+Own Stream start/stop remains only in the control shelf. Host actions remain scoped: stop another current Stream, kick, ban, or transfer Host from People with the documented confirmations. Header Settings opens a centered desktop dialog or full-screen mobile dialog with Metadata, Privacy, and Bans sections.
 
 A report opens a responsive structured-report dialog while preserving the room. Submitting a report about the currently watched Stream stops only the reporter's local subscription and returns that tile to its current Preview with confirmation; the Stream continues for others pending moderation. Reporting another target does not imply mute, kick, ban, or departure.
 
@@ -41,5 +42,5 @@ A report opens a responsive structured-report dialog while preserving the room. 
 
 - Chat feels immediate without claiming an unpersisted message is canonical.
 - Typing presence adds ephemeral traffic but no retained content; Pacer and server expiry bound stale/chattery signals.
-- Social and moderation actions are reachable from both media and People without flooding every tile with buttons.
+- Social and moderation actions are reachable from People without flooding every tile with duplicate menus.
 - Companion tests must cover unread anchoring, draft/scroll preservation, pending canonicalization, retry de-duplication, typing expiry/mute, Activity separation, and report-driven local watch stop.

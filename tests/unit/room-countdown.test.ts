@@ -31,10 +31,15 @@ describe('Room lifetime countdown', () => {
   })
 
   it('presents a bounded visible label and a complete accessible label', () => {
-    expect(roomCountdownLabel(expiresIn(91), NOW)).toBe('1h 31m left')
-    expect(roomCountdownLabel(expiresIn(10), NOW)).toBe('10m left')
+    expect(roomCountdownLabel(expiresIn(91), NOW)).toBe('Ends in 1h 31m')
+    expect(roomCountdownLabel(expiresIn(120), NOW)).toBe('Ends in 2h')
+    expect(roomCountdownLabel(expiresIn(10), NOW)).toBe('Ends in 10m')
+    expect(roomCountdownLabel(expiresIn(0), NOW)).toBe('Ending now')
+    expect(roomCountdownLabel(expiresIn(91), NOW, true)).toBe(
+      'Room ends in 1 hour 31 minutes',
+    )
     expect(roomCountdownLabel(expiresIn(1), NOW, true)).toBe(
-      'Room expires in 1 minute',
+      'Room ends in 1 minute',
     )
     expect(roomCountdownLabel(expiresIn(0), NOW, true)).toBe(
       'Room is ending now',

@@ -21,7 +21,7 @@ The five known disagreements resolve as follows.
 
 **Tile footers.** 4a's tiles carry name and status only. `0101` and `0102` require every tile to carry a persistent footer *below* the media—not overlaid—with Streamer identity and Live/preview freshness, watcher stack and count, connection/retry state, Watch or Mute/Unmute plus Stop Watching plus native Fullscreen once watched, and the compact Report / authorized-Host menu. These are safety and control surfaces: they are never behind hover, never in a More overflow, and never horizontally scrolled. At narrow widths they wrap to two rows per `0101`. The mockup's tile chrome styles this footer; it does not reduce it.
 
-**Compatibility state.** 4a shows none. `0103` requires a persistent compact inline banner above the control shelf or room bar for a member who fails the Compatibility Gate, with Retry and recovery guidance, and requires the mobile Stream control to remain visible but disabled as `Desktop only` with a help affordance. Build both, styled with the design's tokens; the banner is not a toast, not a modal, and not dismissible.
+**Compatibility state.** 4a shows none. `0103` requires a persistent compact inline banner above the control shelf or room bar for a member who fails the Compatibility Gate, with Retry and recovery guidance. Build it, styled with the design's tokens; the banner is not a toast, not a modal, and not dismissible. The mobile room bar carries no Stream control to disable (ADR 0103, amended 2026-08-09).
 
 **Hide non-streaming participants.** 4a has no such control. `0101` requires a viewer-local checkbox that removes presence tiles from that viewer's mosaic for the current room session only. Build it, in overview and strip alike per `0103`.
 

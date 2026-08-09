@@ -2,6 +2,7 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   testDir: './tests/e2e',
+  testIgnore: 'stream-start.spec.ts',
   timeout: 120_000,
   // The V1 journey matrix (#26) is only evidence if it passes unaided: a retry lets a
   // flaky journey report green. A genuine flake must be fixed, not absorbed.

@@ -176,10 +176,11 @@ function Count({
 
 function Metric({ label, value }: Readonly<{ label: string; value: number | undefined }>) {
   return (
-    // Value renders above the label; the DOM keeps dt-then-dd because a dl
-    // group is only valid in that order.
+    // Label leads in DOM order, which a dl group requires anyway. The stacked
+    // stages flip the pair visually; the rail reads label, leader, then value.
     <div className="home-statistics__cell">
       <dt>{label}</dt>
+      <span className="home-statistics__leader" aria-hidden="true" />
       <dd className="tabular-nums">{value ?? '—'}</dd>
     </div>
   )

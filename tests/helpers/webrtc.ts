@@ -3,13 +3,18 @@ import type { BrowserContext } from '@playwright/test'
 export async function installWebRtcProbe(
   context: BrowserContext,
   firstProbe: 'pass' | 'fail',
+  capture: 'cancel' | 'success' = 'cancel',
 ) {
-  await context.addInitScript(({ firstProbe }) => {
+  await context.addInitScript(({ firstProbe, capture }) => {
     let watchAttempts = 0
     const mediaDevices = navigator.mediaDevices ?? {}
     Object.defineProperty(mediaDevices, 'getDisplayMedia', {
       configurable: true,
       value: async () => {
+        if (capture === 'success') {
+          const canvas = document.createElement('canvas')
+          return canvas.captureStream()
+        }
         throw new DOMException('Browser picker cancelled', 'NotAllowedError')
       },
     })
@@ -60,5 +65,5 @@ export async function installWebRtcProbe(
       configurable: true,
       value: FakePeerConnection,
     })
-  }, { firstProbe })
+  }, { firstProbe, capture })
 }

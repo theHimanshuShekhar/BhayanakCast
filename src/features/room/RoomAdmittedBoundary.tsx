@@ -149,12 +149,7 @@ export function RoomAdmittedBoundary({
           >
             <h2 className="visually-hidden">Streams and members</h2>
             <RoomMemberMosaic
-              hostActions={hostActions}
               media={media}
-              onKickMember={onKickMember}
-              onReport={reportMember}
-              onStopStream={onStopStream}
-              onTransferHost={onTransferHost}
               roster={room.roster}
               selfMembershipId={self.id}
               visibility={room.visibility}
@@ -181,6 +176,7 @@ export function RoomAdmittedBoundary({
           canChat={room.canChat}
           hostActions={hostActions}
           memberCount={room.memberCount}
+          media={media}
           onDismissSheet={dismissCompanionSheet}
           onReport={reportMember}
           onReportMessage={(message) =>
@@ -199,20 +195,10 @@ export function RoomAdmittedBoundary({
           sheet={sheet}
         />
 
-        {/* Below 768px this is the only room control surface (ADR 0103). */}
+        {/* Below 768px this is the only room control surface (ADR 0103). It
+            carries no Stream slot: mobile cannot create one, and a permanently
+            dead control spent a fifth of the bar without explaining itself. */}
         <nav aria-label="Room controls" className="room-mobile-bar">
-          <button
-            aria-describedby="mobile-stream-guidance"
-            data-disabled-reason="Desktop only"
-            disabled
-            type="button"
-          >
-            Desktop only
-          </button>
-          <span className="visually-hidden" id="mobile-stream-guidance">
-            Sharing a screen requires a Chromium-family browser on a desktop
-            computer. Watching remains available after the media check passes.
-          </span>
           {(['chat', 'people', 'activity'] as const).map((tab) => (
             <button
               aria-controls="room-companions"

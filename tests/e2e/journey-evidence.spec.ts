@@ -14,7 +14,7 @@ import type { ViewportStage } from '../../scripts/journey-matrix-lib'
     routes at the three accepted stages and records a screenshot plus an axe scan for each
     pair, so the artifact carries real visual and a11y evidence rather than a claim. */
 
-const CAPTURE_DIRECTORY = 'ops/evidence/journey-matrix/screenshots'
+const CAPTURE_DIRECTORY = 'test-results/journey-matrix/screenshots'
 
 const STAGES: readonly { readonly stage: ViewportStage; readonly width: number; readonly height: number }[] = [
   { stage: '390', width: 390, height: 844 },

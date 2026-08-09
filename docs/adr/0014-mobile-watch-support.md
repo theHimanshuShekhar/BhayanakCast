@@ -9,7 +9,7 @@ V1 stream creation remains limited to Chromium-family desktop browsers, but the 
 
 ## Decision
 
-The compatibility-supported watch population includes the inherited major desktop browsers plus current and previous major iOS Safari and Chrome on Android. Mobile Accounts may explicitly watch one remote Stream at a time and use room chat but do not create Streams. The room bar keeps a disabled `Desktop only` Stream control with an explanation rather than exposing a failing capture action.
+The compatibility-supported watch population includes the inherited major desktop browsers plus current and previous major iOS Safari and Chrome on Android. Mobile Accounts may explicitly watch one remote Stream at a time and use room chat but do not create Streams. The mobile room bar carries no Stream control at all. **(Amended 2026-08-09 with ADR 0103: the original disabled `Desktop only` control with an explanation is withdrawn. It could never enable, and its explanation was unreachable to sighted and keyboard users, so it cost a fifth of the only mobile action surface and taught nothing.)**
 
 ## Consequences
 
