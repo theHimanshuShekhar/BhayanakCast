@@ -44,6 +44,7 @@ services:
       - "${APP_PORT:-3000}:3000"
     networks:
       - data
+      - edge
     healthcheck:
       <<: *service-health
       test:
@@ -81,6 +82,7 @@ services:
 networks:
   data:
     internal: true
+  edge:
 
 volumes:
   postgres-data:

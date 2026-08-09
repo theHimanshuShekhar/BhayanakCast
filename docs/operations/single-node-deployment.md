@@ -4,12 +4,12 @@ This runbook operates the accepted one-node topology. It does not add a second a
 
 ## Topology and failure boundaries
 
-- `cloudflared` and `app` share only the `edge` network. The tunnel sends the one public hostname to `http://app:3000`; the same Node listener owns HTTP and `/socket.io/` upgrades.
-- `app`, `postgres`, and `valkey` share the internal `data` network. PostgreSQL and Valkey publish no host ports in `compose.yml`.
+- `app` joins the host-facing `edge` network and the internal `data` network. The `APP_PORT` host port publishes to the app's container port 3000. PostgreSQL and Valkey publish no host ports.
+- `cloudflared`, when operated as a separate tunnel, should join `edge` and send the public hostname to `http://app:3000`; the same Node listener owns HTTP and `/socket.io/` upgrades.
 - PostHog runs separately from this stack. The application sends analytics to the configured `POSTHOG_HOST` URL and does not join a PostHog Docker network.
 - PostHog is non-critical: an analytics outage must not change application readiness or block product requests. Valkey is disposable, but mutations whose abuse limits require it fail closed; durable reads and PostgreSQL data remain available. PostgreSQL unavailability makes application readiness fail.
 
-The production Compose file publishes no ports. `compose.dev.yml` is only for local dependency development and binds PostgreSQL and Valkey to loopback.
+The production Compose file publishes only the application host port. `compose.dev.yml` is only for local dependency development and binds PostgreSQL and Valkey to loopback.
 
 ## Host prerequisites
 

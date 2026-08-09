@@ -26,14 +26,18 @@ if ((services.app.ports ?? []).length !== 1) {
 for (const name of ['postgres', 'valkey']) {
   if ((services[name].ports ?? []).length !== 0) throw new Error(`${name} publishes a host port`)
 }
-for (const name of ['app', 'postgres', 'valkey']) {
+for (const name of ['postgres', 'valkey']) {
   if (!joins(services[name], 'data')) throw new Error(`${name} is missing the private data network`)
   if (Object.keys(services[name].networks).length !== 1) {
     throw new Error(`${name} can reach a network other than data`)
   }
 }
+if (!joins(services.app, 'data') || !joins(services.app, 'edge')) {
+  throw new Error('app must bridge the private data network and host-facing edge network')
+}
 if (Object.values(configured.networks ?? {}).some((network) => network.external === true)) {
   throw new Error('production topology depends on an external Docker network')
 }
 if (configured.networks?.data?.internal !== true) throw new Error('data network is not internal')
+if (configured.networks?.edge?.internal === true) throw new Error('edge network must allow host-facing traffic')
 console.log(JSON.stringify({ checked_at: new Date().toISOString(), exposure: 'private' }))
