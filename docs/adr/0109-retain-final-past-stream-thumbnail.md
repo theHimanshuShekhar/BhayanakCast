@@ -2,7 +2,6 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-09
-- **Amends:** ADR `0085` and ADR `0035`
 
 ## Context
 

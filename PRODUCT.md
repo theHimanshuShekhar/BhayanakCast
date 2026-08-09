@@ -113,7 +113,7 @@ BhayanakCast is a public community clubhouse for small social screen-sharing roo
 
 ## Data lifecycle and privacy
 
-- Past Stream metadata, aggregate facts, and any archived public thumbnail remain until account deletion. The thumbnail lives as long as the Past Stream record; approved deletion of the originating Account is its only removal path. Past Streams never contain replay media; their stable noindex room URLs show a public-metadata/end-state summary with no Join control or public transcript.
+- Past Stream metadata, aggregate facts, and any archived public thumbnail remain until account deletion. Once a Room becomes a Past Stream, its thumbnail lives as long as the record; approved deletion of the originating Account is its only removal path. Past Streams never contain replay media; their stable noindex room URLs show a public-metadata/end-state summary with no Join control or public transcript.
 - Reports and frozen preview snapshots remain for one year after report resolution/dismissal. Unresolved reports remain until resolved.
 - Sanctions and room bans remain enforcement audit history under their lifecycle rules.
 - A signed-in Account can submit a confirmed deletion request. Submission immediately hides its public profile/activity and limits it to read-only discovery/profile browsing.

@@ -64,7 +64,10 @@ BhayanakCast is a public discovery platform for small social screen-sharing room
 : A Live Room card is one accessible link to the room's pre-admission page; its chips are descriptive, not nested controls. Pre-admission exposes only permitted summary/state and explicit Join, completing all auth/admission checks before the admitted room layout, chat, media, membership, or peer state appears.
 
 **Past Streams presentation**
-: The ten most recently ended Past Streams appear as a compact two-column metadata list on desktop and one column on mobile, ordered newest first. Items show name, end time, visibility, optional category/tags, participation/Stream summary, and Open summary action; they have no image, fake thumbnail, carousel, pagination, or table treatment.
+: The ten most recently ended Past Streams appear as a compact two-column metadata list on desktop and one column on mobile, ordered newest first. Items show name, end time, visibility, optional category/tags, participation/Stream summary, and Open summary action. A public Past Stream with a retained capture shows its Past Stream thumbnail; a private Past Stream that had Streams shows a CSS-only blurred placeholder; otherwise it has no media block. They have no fake thumbnail, carousel, pagination, or table treatment.
+
+**Past Stream thumbnail**
+: The one durable, non-replayable still image a public Room may retain from its freshest Stream Preview capture. It is archived at capture time in PostgreSQL and may be served only after the Room ends. A private capture is never archived, and changing a public Room to private removes any archive before the Room can end. Once the Room is a Past Stream, the thumbnail lives as long as that record unless approved Account deletion removes content produced by the originating Stream owner.
 
 **Empty Live Rooms invitation**
 : With no live rooms outside search/filter results, the center shows “The clubhouse is quiet,” concise public/private-room context, and Create Room without illustration or onboarding. Past Streams remain below when available; without history, the invitation adds one short first-community cue. Anonymous activation signs in and returns Home with a blank Create dialog reopened; it never auto-creates.
@@ -187,19 +190,19 @@ BhayanakCast is a public discovery platform for small social screen-sharing room
 : V1 runs the TanStack Start app and Socket.IO on one custom Node HTTP server with PostgreSQL and Valkey on one Docker Compose host in the operator's homelab. Only the app origin is exposed through a Cloudflare Tunnel; backing services are internal to the Compose network.
 
 **Recovery boundary**
-: PostgreSQL is backed up daily to encrypted same-site NAS storage for 30 days, with a documented restore exercised monthly. V1 accepts up to 24 hours of persisted-data loss and no recovery guarantee for home/site-wide loss; live-only realtime/media state is not recoverable.
+: PostgreSQL is backed up daily to encrypted same-site NAS storage for 30 days, with a documented restore exercised monthly. V1 accepts up to 24 hours of persisted-data loss and no recovery guarantee for home/site-wide loss; live-only realtime/media state and live Stream Preview bytes are not recoverable, while archived Past Stream thumbnails are inside the PostgreSQL recovery boundary.
 
 **Launch criteria**
 : The core room journey must work unaided, proven by the browser journey matrix and operator walkthrough rather than a measured cohort rate; ADR 0013 withdrew the 90% cohort threshold as a V1 gate on 2026-08-05, and the study protocol is retained as post-V1. At the tested 25-room capacity, 99% of compatibility-supported watch attempts on consumer Wi-Fi/residential broadband or normal cellular must establish direct P2P media without a manual retry — measured post-launch from PostHog per ADR 0013 and the #27 rescope, not pre-launch. Restrictive enterprise, school, and captive networks use the compatibility/recovery path and are outside that reliability measure. Engagement is observed qualitatively, not as a numeric launch gate.
 
 **Past Stream**
-: A non-replayable historical room record. Its metadata remains until account deletion; it never contains stream media. Its stable, noindex room URL renders a summary with public metadata and an end state, never a Join control, public transcript, or replay.
+: A non-replayable historical room record. Its metadata and eligible public Past Stream thumbnail remain until account deletion; it never contains replay media. Its stable, noindex room URL renders a summary with public metadata and an end state, never a Join control, public transcript, or replay.
 
 **Room Transcript**
 : Retained room chat visible after room end to every historical Host and Platform Admins. It is retained for 30 days after the end and redacted when an Account is deleted.
 
 **Account deletion**
-: A self-service request with irreversible confirmation that immediately hides the Account's public profile/activity and restricts it to read-only browsing. A Platform Admin manually verifies it on a best-effort basis with no processing-time commitment; the pending Account can cancel it, and cancellation or rejection restores normal visibility/participation. Approval removes credentials, anonymizes public history, and redacts chat. A later sign-in by the same Discord identity creates a fresh Account and restores no deleted profile, history, or attribution. Deletion retains only a non-public one-way Discord-identity enforcement key, and only while an active sanction must remain enforceable; the fresh Account receives that sanction without otherwise linking to the deleted Account.
+: A self-service request with irreversible confirmation that immediately hides the Account's public profile/activity and restricts it to read-only browsing. A Platform Admin manually verifies it on a best-effort basis with no processing-time commitment; the pending Account can cancel it, and cancellation or rejection restores normal visibility/participation. Approval removes credentials and Past Stream thumbnails produced by the Account's Streams, anonymizes public history, and redacts chat. A later sign-in by the same Discord identity creates a fresh Account and restores no deleted profile, history, thumbnail, or attribution. Deletion retains only a non-public one-way Discord-identity enforcement key, and only while an active sanction must remain enforceable; the fresh Account receives that sanction without otherwise linking to the deleted Account.
 
 **Host**
 : The current room owner. A Host can stop active streams, ban or clear bans, kick a Room Member without a persistent ban, and—after confirming the selected current member—transfer authority immediately; a Host cannot end a populated room. Kicked members may immediately rejoin if normal admission gates allow it and receive a generic system message; Hosts cannot attach kick reasons. When a Host permanently leaves, the longest continuously present remaining Room Member becomes Host.
@@ -372,3 +375,4 @@ BhayanakCast is a public discovery platform for small social screen-sharing room
 - [`docs/adr/0106-layered-testing-and-release-evidence.md`](docs/adr/0106-layered-testing-and-release-evidence.md) — separates deterministic domain/integration coverage, representative multi-user browser tests, and production qualification evidence.
 - [`docs/adr/0107-room-visual-language.md`](docs/adr/0107-room-visual-language.md) — adopts the 4a room design as visual language only, subordinate to the room structure ADRs.
 - [`docs/adr/0108-anonymous-visitors-in-home-presence.md`](docs/adr/0108-anonymous-visitors-in-home-presence.md) — blends anonymous visitors into the Home count over listener-free anonymous sockets.
+- [`docs/adr/0109-retain-final-past-stream-thumbnail.md`](docs/adr/0109-retain-final-past-stream-thumbnail.md) — retains one final public Stream Preview as a durable Past Stream thumbnail.

@@ -375,7 +375,7 @@ Prove member count descending, Stream count descending, activity tie-break, rank
 
 Wide: feature on the left spanning ranks 2–3; medium: full-width feature then two columns; small: one rank-ordered column. Preserve DOM rank order even when CSS placement changes. A card is one accessible link to `/rooms/$roomId`; chips are descriptive, never nested controls.
 
-Rooms without Streams show actual presence/state metadata. Past Streams use a compact two-column desktop list and one mobile column with no image, replay, carousel, pagination, or fake thumbnail.
+Rooms without Streams show actual presence/state metadata. Past Streams use a compact two-column desktop list and one mobile column. A public Past Stream with an archived capture shows its last thumbnail; a private Past Stream that had Streams shows a CSS-only blurred placeholder; otherwise it has no media block. They have no replay, carousel, pagination, or fake thumbnail.
 
 **Step 3: Implement the empty invitation**
 
