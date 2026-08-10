@@ -75,12 +75,12 @@ function PresenceCard({ presence }: Readonly<{ presence: ConnectedPresence | und
         <span aria-hidden="true" className="home-pulse-dot" />
         Right now
       </p>
-      <h1 className="home-rail-presence__value">
+      <h2 className="home-rail-presence__value">
         <span className="tabular-nums">{connected ?? '—'}</span>{' '}
         <span className="home-rail-presence__unit">
           {connected === 1 ? 'person in the clubhouse' : 'people in the clubhouse'}
         </span>
-      </h1>
+      </h2>
     </section>
   )
 }

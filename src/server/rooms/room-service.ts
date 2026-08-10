@@ -263,6 +263,10 @@ export class RoomService {
   private readonly membershipService: MembershipService
   private readonly lifecycle?: RoomLifecycle
   private readonly initialization: Promise<void>
+  private readonly lastPublishedMembership = new Map<
+    string,
+    { readonly memberCount: number; readonly streamCount: number }
+  >()
 
   constructor(private readonly configuration: RoomServiceConfiguration) {
     this.repository = new RoomRepository(configuration.pool)
@@ -1654,14 +1658,26 @@ export class RoomService {
       const row = result.rows[0]
       if (!row) return
       if (row.endedAt) {
+        this.lastPublishedMembership.delete(roomId)
         this.emitHomeEvent({ type: 'room-ended', roomId })
         return
       }
+      const previous = this.lastPublishedMembership.get(roomId)
+      this.lastPublishedMembership.set(roomId, {
+        memberCount: row.memberCount,
+        streamCount: row.streamCount,
+      })
       this.emitHomeEvent({
         type: 'room-membership',
         roomId,
         memberCount: row.memberCount,
         streamCount: row.streamCount,
+        ...(previous
+          ? {
+              memberCountDelta: row.memberCount - previous.memberCount,
+              streamCountDelta: row.streamCount - previous.streamCount,
+            }
+          : {}),
         state: row.memberCount >= ROOM_CAPACITY ? 'full' : 'live',
       })
     } catch {

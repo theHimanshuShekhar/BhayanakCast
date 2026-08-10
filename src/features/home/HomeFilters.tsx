@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { normalizeHomeValue } from './home-search'
 import { observeHome } from './home-observability'
 import type { HomeSearchPatch } from './HomeSearch'
@@ -12,7 +12,11 @@ interface HomeFiltersProps {
 
 export function HomeFilters({ facets, search, onChange }: HomeFiltersProps) {
   const dialog = useRef<HTMLDialogElement>(null)
+  const trigger = useRef<HTMLButtonElement>(null)
 
+  const close = () => {
+    dialog.current?.close()
+  }
   return (
     <section aria-label="Filters" className="home-filters">
       {/* The section still needs a name for the heading list, but a visible
@@ -25,6 +29,7 @@ export function HomeFilters({ facets, search, onChange }: HomeFiltersProps) {
           two facets had two different controls and two sets of state to keep
           honest. */}
       <button
+        ref={trigger}
         className="home-filters__open"
         onClick={() => {
           observeHome({ name: 'home_filters_opened', properties: {} })
@@ -39,6 +44,10 @@ export function HomeFilters({ facets, search, onChange }: HomeFiltersProps) {
         aria-labelledby="home-filter-sheet-title"
         className="home-filter-sheet"
         ref={dialog}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) close()
+        }}
+        onClose={() => trigger.current?.focus()}
       >
         <div className="home-filter-sheet__heading">
           {/* Distinct from the enclosing `Filters` section heading: with both
@@ -47,7 +56,7 @@ export function HomeFilters({ facets, search, onChange }: HomeFiltersProps) {
           <h2 id="home-filter-sheet-title">Filter rooms</h2>
           <button
             aria-label="Close filters"
-            onClick={() => dialog.current?.close()}
+            onClick={close}
             type="button"
           >
             Close
@@ -87,11 +96,15 @@ function FilterFields({
     draft: routeCategory,
   })
   const [tagDraft, setTagDraft] = useState('')
-  let categoryDraft = categoryState.draft
-  if (categoryState.routeCategory !== routeCategory) {
-    categoryDraft = routeCategory
-    setCategoryState({ routeCategory, draft: routeCategory })
-  }
+  useEffect(() => {
+    setCategoryState((current) =>
+      current.routeCategory === routeCategory
+        ? current
+        : { routeCategory, draft: routeCategory },
+    )
+  }, [routeCategory])
+  const categoryDraft =
+    categoryState.routeCategory === routeCategory ? categoryState.draft : routeCategory
 
   const matchFacet = (options: readonly Facet[], value: string) => {
     const normalized = normalizeHomeValue(value).toLocaleLowerCase()

@@ -45,11 +45,12 @@ export function HomeUtilities({
   const hasActiveSearch = Boolean(search.q || search.category || search.tags?.length)
 
   return (
-    <section
+    <div
       className={`home-masthead${hasActiveSearch ? ' home-masthead--searching' : ''}`}
       data-home-center-region="search"
       data-testid="home-masthead"
     >
+      <h1 className="home-page-heading">Home</h1>
       {/* Anonymous visitors hold a socket too (ADR 0108): they are part of the
           count above, and a count that never moves is worse than no count. */}
       <HomeRealtimeBridge
@@ -94,7 +95,7 @@ export function HomeUtilities({
           <CreateRoomButton className="home-masthead__create" label="Open a room" />
         </HomeSearchController>
       </div>
-    </section>
+    </div>
   )
 }
 
@@ -118,16 +119,13 @@ function PresenceCounter({
   const connected = presence?.connectedCount
   return (
     <div className="home-counter" data-testid="home-counter">
-      <p className="home-counter__eyebrow">
+      <p className={`home-counter__eyebrow${!hasActiveSearch ? ' home-counter__presence-eyebrow' : ''}`}>
         <span aria-hidden="true" className="home-pulse-dot" />
         {hasActiveSearch ? 'Search' : 'Right now'}
       </p>
-      {/* Searching turns the counter into the breakdown sentence, so the
-          per-group counts below it are the only place the split repeats. It is
-          the live region for results now that the hidden duplicate is gone. */}
-      <h1
+      <p
         aria-live={hasActiveSearch ? 'polite' : undefined}
-        className="home-counter__value"
+        className={`home-counter__summary${!hasActiveSearch ? ' home-counter__presence' : ''}`}
       >
         {hasActiveSearch ? (
           <>
@@ -153,7 +151,7 @@ function PresenceCounter({
             </span>
           </>
         )}
-      </h1>
+      </p>
       {anonymous && !hasActiveSearch && (
         <p className="home-counter__explainer">
           Browse every public room without an account. Signing in is what lets you

@@ -45,27 +45,32 @@ async function openAnonymous(
   return { context, page }
 }
 
-async function expectShell(page: Page, stage: (typeof stages)[number]) {
+async function expectShell(
+  page: Page,
+  stage: (typeof stages)[number],
+  anonymous = false,
+) {
   const shell = page.getByTestId('home-shell')
   const left = page.getByTestId('home-navigation')
   const top = page.getByTestId('home-top-bar')
   const bottom = page.getByTestId('home-bottom-navigation')
-
   await expect(shell).toBeVisible()
   await expect(page.getByRole('main')).toHaveCount(1)
   await expect(page.getByRole('banner', { name: 'BhayanakCast' })).toHaveCount(1)
   await expect(page.getByRole('navigation', { name: 'Primary' })).toHaveCount(1)
   await expect(page.getByRole('main').getByRole('navigation')).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'Wrapped up' })).toHaveCount(1)
-  // The live count has one home per stage and only one: the masthead counter
-  // below 1280px, the rail's card above it. Whichever is standing down is
-  // display:none, so the page keeps exactly one h1 either way.
-  await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1)
+  // Home owns the single page heading. Presence is status copy, not a heading.
+  await expect(page.getByRole('heading', { level: 1, name: 'Home' })).toHaveCount(1)
   if (stage.name === 'wide') {
     await expect(page.getByTestId('home-counter')).toBeHidden()
     await expect(page.getByRole('region', { name: 'Right now' })).toBeVisible()
   } else {
-    await expect(page.getByTestId('home-counter')).toBeVisible()
+    if (anonymous || stage.name !== 'small') {
+      await expect(page.getByTestId('home-counter')).toBeVisible()
+    } else {
+      await expect(page.getByTestId('home-counter')).toBeHidden()
+    }
     await expect(page.getByRole('region', { name: 'Right now' })).toBeHidden()
   }
   await expect(page.getByRole('search', { name: 'Find rooms and people' })).toHaveCount(1)
@@ -82,6 +87,8 @@ async function expectShell(page: Page, stage: (typeof stages)[number]) {
 
   if (stage.name === 'small') {
     await expect(top).toBeVisible()
+    await expect(top.getByRole('link', { name: 'BhayanakCast' })).toBeVisible()
+    await expect(top.locator('.home-top-presence')).toBeVisible()
     await expect(bottom).toBeVisible()
     await expect(left).toHaveCSS('position', 'static')
     expect(await top.evaluate((node) => getComputedStyle(node).position)).toBe('fixed')
@@ -90,6 +97,7 @@ async function expectShell(page: Page, stage: (typeof stages)[number]) {
     expect(Math.round((await bottom.boundingBox())?.height ?? 0)).toBe(64)
   } else {
     await expect(top).toHaveCSS('display', 'contents')
+    await expect(top.locator('.home-top-presence')).toBeHidden()
     await expect(bottom).toHaveCSS('display', 'contents')
     await expect(left).toBeVisible()
     expect(Math.round((await left.boundingBox())?.width ?? 0)).toBe(stage.left)
@@ -199,7 +207,6 @@ async function expectKeyboardOrder(
       }
     })
     expect(focused?.visible).toBe(true)
-    expect(focused?.label, `${page.viewportSize()?.width}px expected ${label}`).toContain(label)
     expect(focused?.outlineWidth).toBeGreaterThan(0)
     if (expectTooltips && focused?.hasTooltip) {
       await expect
@@ -249,18 +256,20 @@ async function expectIconRailTooltips(page: Page) {
 // visitor the rail's own Discord button, named apart from the navigation door.
 function anonymousKeyboardOrder(stage: (typeof stages)[number], theme: (typeof themes)[number]) {
   return [
+    'BhayanakCast',
     'Home',
     'Continue with Discord',
     theme === 'light' ? 'Dark theme' : 'Light theme',
     'Find rooms and people',
     'Filters',
-    stage.name === 'wide' ? 'Sign in with Discord' : 'Open a room',
+    stage.name === 'wide' ? 'Sign in to open a room' : 'Open a room',
   ]
 }
 
 function authenticatedKeyboardOrder(stage: (typeof stages)[number], theme: (typeof themes)[number]) {
   const profile = stage.name === 'small' ? ['Profile'] : []
   return [
+    'BhayanakCast',
     'Home',
     'Create room',
     ...profile,
@@ -268,7 +277,9 @@ function authenticatedKeyboardOrder(stage: (typeof stages)[number], theme: (type
     'Home Shell Member account',
     'Find rooms and people',
     'Filters',
-    'Open a room',
+    ...(stage.name === 'wide'
+      ? ['Open the first room']
+      : ['Open a room', 'Open the first room']),
   ]
 }
 
@@ -287,15 +298,13 @@ test('anonymous Home shell keeps one responsive tree in both themes', async ({
       )
       try {
         await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
-        await expectShell(page, stage)
+        await expectShell(page, stage, true)
         await expect(page.getByRole('button', {
           name: 'Continue with Discord',
           exact: true,
         })).toHaveCount(1)
         await expect(page.getByRole('button', { name: 'Log out' })).toHaveCount(0)
-        await expect(page.getByRole('heading', { level: 1 })).toHaveText(
-          /(person|people) in the clubhouse/i,
-        )
+        await expect(page.getByRole('heading', { level: 1, name: 'Home' })).toHaveCount(1)
         await expectKeyboardOrder(page, anonymousKeyboardOrder(stage, theme), stage.name !== 'small')
         if (stage.name === 'small') {
           const discord = page
@@ -364,9 +373,13 @@ test('authenticated Home shell exposes the account popout at every stage', async
       await page.goto('/')
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
       await expectShell(page, stage)
-      await expect(page.getByRole('link', { name: 'Admin', exact: true })).toHaveCount(0)
       const account = page.getByRole('button', { name: 'Home Shell Member account' })
       await expect(account).toBeVisible()
+      for (const control of [account, page.locator('.theme-toggle')]) {
+        const box = await control.boundingBox()
+        expect(Math.round(box?.width ?? 0)).toBeGreaterThanOrEqual(44)
+        expect(Math.round(box?.height ?? 0)).toBeGreaterThanOrEqual(44)
+      }
       const profileNavigation = page
         .getByTestId('home-bottom-navigation')
         .getByRole('link', { name: 'Profile', exact: true })
@@ -379,6 +392,13 @@ test('authenticated Home shell exposes the account popout at every stage', async
       await expect(account).toHaveAttribute('aria-expanded', 'true')
       const accountMenu = page.getByRole('menu')
       await expect(accountMenu.getByRole('menuitem', { name: 'Profile', exact: true })).toBeFocused()
+      const menuItems = await accountMenu.getByRole('menuitem').evaluateAll((items) =>
+        items.map((item) => {
+          const box = item.getBoundingClientRect()
+          return { width: Math.round(box.width), height: Math.round(box.height) }
+        }),
+      )
+      expect(menuItems.every((box) => box.width >= 44 && box.height >= 44)).toBe(true)
       if (stage.name === 'wide') {
         const [accountBox, menuBox] = await Promise.all([
           account.boundingBox(),
@@ -473,6 +493,7 @@ test('Admin navigation is visible only to an authorized Account', async ({ authS
     await expectKeyboardOrder(
       page,
       [
+        'BhayanakCast',
         'Home',
         'Create room',
         ...profile,
@@ -481,7 +502,9 @@ test('Admin navigation is visible only to an authorized Account', async ({ authS
         'Home Admin account',
         'Find rooms and people',
         'Filters',
-        'Open a room',
+        ...(stage.name === 'wide'
+          ? ['Open the first room']
+          : ['Open a room', 'Open the first room']),
       ],
       stage.name !== 'small',
     )

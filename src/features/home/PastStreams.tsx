@@ -39,6 +39,7 @@ export function PastStreams({ streams }: PastStreamsProps) {
         {streams.map((stream) => (
           <li className="past-stream-item" key={stream.roomId}>
             <a
+              aria-describedby={`past-stream-description-${encodeURIComponent(stream.roomId)}`}
               aria-label={`Open summary for ${stream.name}`}
               href={`/rooms/${encodeURIComponent(stream.roomId)}`}
               onClick={() => observeHome({
@@ -46,6 +47,16 @@ export function PastStreams({ streams }: PastStreamsProps) {
                 properties: {},
               })}
             >
+              <span
+                className="visually-hidden"
+                id={`past-stream-description-${encodeURIComponent(stream.roomId)}`}
+              >
+                {stream.visibility === 'private' ? 'Private room. ' : 'Public room. '}
+                {stream.category ? `${stream.category}. ` : ''}
+                {stream.tags.length > 0 ? `Tags: ${stream.tags.join(', ')}. ` : ''}
+                {stream.memberCount} {stream.memberCount === 1 ? 'member' : 'members'} and{' '}
+                {stream.streamCount} {stream.streamCount === 1 ? 'screen' : 'screens'} shared.
+              </span>
               <PastStreamMedia
                 roomId={stream.roomId}
                 streamCount={stream.streamCount}

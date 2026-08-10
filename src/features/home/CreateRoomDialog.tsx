@@ -18,9 +18,11 @@ interface CreateRoomDialogProps {
 }
 
 type Visibility = 'public' | 'private'
+type CreateRoomField = 'name' | 'category' | 'description' | 'tags' | 'password'
 
 export function CreateRoomDialog({ session }: CreateRoomDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null)
+  const formRef = useRef<HTMLFormElement>(null)
   const firstFieldRef = useRef<HTMLInputElement>(null)
   const errorRef = useRef<HTMLParagraphElement>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
@@ -31,14 +33,23 @@ export function CreateRoomDialog({ session }: CreateRoomDialogProps) {
   const [visibility, setVisibility] = useState<Visibility>('public')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [errorField, setErrorField] = useState<CreateRoomField | null>(null)
   const [pending, setPending] = useState(false)
   const [oauthPending, setOauthPending] = useState(false)
   const [oauthError, setOauthError] = useState<string | null>(null)
   const [confirmation, setConfirmation] = useState<MembershipConfirmation | null>(null)
+
+  const setInputError = (caught: unknown) => {
+    const code = caught instanceof Error ? caught.message : ''
+    setError(createInputError(code))
+    setErrorField(createRoomErrorField(code))
+  }
+
   const close = () => {
     if (dialogRef.current?.open) dialogRef.current.close()
     setConfirmation(null)
     setError(null)
+    setErrorField(null)
     returnFocusRef.current?.focus()
   }
 
@@ -47,6 +58,7 @@ export function CreateRoomDialog({ session }: CreateRoomDialogProps) {
     if (!dialog || dialog.open) return
     returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     setError(null)
+    setErrorField(null)
     setOauthError(null)
     setConfirmation(null)
     setName('')
@@ -137,13 +149,19 @@ export function CreateRoomDialog({ session }: CreateRoomDialogProps) {
   }, [])
 
   useEffect(() => {
-    if (error) errorRef.current?.focus()
-  }, [error])
+    if (errorField) {
+      const field = formRef.current?.elements.namedItem(errorField)
+      if (field instanceof HTMLElement) field.focus()
+      return
+    }
+    errorRef.current?.focus()
+  }, [error, errorField])
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setPending(true)
     setError(null)
+    setErrorField(null)
     try {
       const input = validateCreateRoomInput({
         name,
@@ -179,7 +197,7 @@ export function CreateRoomDialog({ session }: CreateRoomDialogProps) {
         setError(createRoomError(result.status))
       }
     } catch (caught) {
-      setError(caught instanceof Error ? createInputError(caught.message) : 'Unable to create room')
+      setInputError(caught)
     } finally {
       setPending(false)
     }
@@ -188,6 +206,7 @@ export function CreateRoomDialog({ session }: CreateRoomDialogProps) {
   const confirmCreate = async (token: MembershipConfirmation) => {
     setPending(true)
     setError(null)
+    setErrorField(null)
     try {
       const input = validateCreateRoomInput({
         name,
@@ -226,7 +245,7 @@ export function CreateRoomDialog({ session }: CreateRoomDialogProps) {
       }
     } catch (caught) {
       setConfirmation(null)
-      setError(caught instanceof Error ? createInputError(caught.message) : 'Unable to create room')
+      setInputError(caught)
     } finally {
       setPending(false)
     }
@@ -235,7 +254,7 @@ export function CreateRoomDialog({ session }: CreateRoomDialogProps) {
   return (
     <>
       {(oauthPending || oauthError) && (
-        <p className="form-error" role="alert" aria-live="polite">
+        <p className="form-error" role="alert">
           {oauthPending ? 'Opening Discord…' : oauthError}
         </p>
       )}
@@ -251,16 +270,17 @@ export function CreateRoomDialog({ session }: CreateRoomDialogProps) {
           if (event.target === event.currentTarget) close()
         }}
       >
-        <form className="create-room-dialog__panel" noValidate onSubmit={submit}>
+        <form ref={formRef} className="create-room-dialog__panel" noValidate onSubmit={submit}>
           <h2 id="create-room-title">Create Room</h2>
           <p>Set the canonical room details before you invite people.</p>
           <label>
-            Name
+            Name <span className="form-hint">Required</span>
             <input
               ref={firstFieldRef}
-              aria-describedby={error ? 'create-room-error' : undefined}
-              aria-invalid={Boolean(error)}
+              aria-describedby={errorField === 'name' ? 'create-room-error' : undefined}
+              aria-invalid={errorField === 'name' || undefined}
               maxLength={80}
+              name="name"
               required
               value={name}
               onChange={(event) => setName(event.target.value)}
@@ -268,19 +288,36 @@ export function CreateRoomDialog({ session }: CreateRoomDialogProps) {
           </label>
           <label>
             Category <span className="form-hint">Optional</span>
-            <input maxLength={32} value={category} onChange={(event) => setCategory(event.target.value)} />
+            <input
+              aria-describedby={errorField === 'category' ? 'create-room-error' : undefined}
+              aria-invalid={errorField === 'category' || undefined}
+              maxLength={32}
+              name="category"
+              value={category}
+              onChange={(event) => setCategory(event.target.value)}
+            />
           </label>
           <label>
             Description <span className="form-hint">Optional, up to 140 characters</span>
             <input
+              aria-describedby={errorField === 'description' ? 'create-room-error' : undefined}
+              aria-invalid={errorField === 'description' || undefined}
               maxLength={140}
+              name="description"
               value={description}
               onChange={(event) => setDescription(event.target.value)}
             />
           </label>
           <label>
             Tags <span className="form-hint">Optional, comma separated</span>
-            <input maxLength={128} value={tags} onChange={(event) => setTags(event.target.value)} />
+            <input
+              aria-describedby={errorField === 'tags' ? 'create-room-error' : undefined}
+              aria-invalid={errorField === 'tags' || undefined}
+              maxLength={128}
+              name="tags"
+              value={tags}
+              onChange={(event) => setTags(event.target.value)}
+            />
           </label>
           <fieldset>
             <legend>Visibility</legend>
@@ -289,10 +326,13 @@ export function CreateRoomDialog({ session }: CreateRoomDialogProps) {
           </fieldset>
           {visibility === 'private' && (
             <label>
-              Password <span className="form-hint">At least 8 characters</span>
+              Password <span className="form-hint">Required, at least 8 characters</span>
               <input
+                aria-describedby={errorField === 'password' ? 'create-room-error' : undefined}
+                aria-invalid={errorField === 'password' || undefined}
                 autoComplete="new-password"
                 minLength={8}
+                name="password"
                 required
                 type="password"
                 value={password}
@@ -300,10 +340,22 @@ export function CreateRoomDialog({ session }: CreateRoomDialogProps) {
               />
             </label>
           )}
-          {error && <p ref={errorRef} tabIndex={-1} id="create-room-error" className="form-error" role="alert">{error}</p>}
+          {error && (
+            <p
+              ref={errorRef}
+              tabIndex={-1}
+              id="create-room-error"
+              className="form-error"
+              role="alert"
+            >
+              {error}
+            </p>
+          )}
           <div className="create-room-dialog__actions">
             <button disabled={pending} type="button" onClick={close}>Cancel</button>
-            <button aria-busy={pending} disabled={pending} type="submit">{pending ? 'Creating…' : 'Create Room'}</button>
+            <button aria-busy={pending} disabled={pending} type="submit">
+              {pending ? 'Creating…' : 'Create Room'}
+            </button>
           </div>
         </form>
       </dialog>
@@ -340,4 +392,12 @@ function createRoomError(status: string) {
     'rate-limit-unavailable': 'Room creation is temporarily unavailable.',
   }
   return labels[status] ?? 'Unable to create room.'
+}
+function createRoomErrorField(code: string): CreateRoomField | null {
+  if (code === 'ROOM_NAME_LENGTH') return 'name'
+  if (code === 'ROOM_CATEGORY_LENGTH') return 'category'
+  if (code === 'ROOM_DESCRIPTION_LENGTH') return 'description'
+  if (code === 'ROOM_TAG_COUNT' || code === 'ROOM_TAG_LENGTH') return 'tags'
+  if (code === 'ROOM_PASSWORD_LENGTH') return 'password'
+  return null
 }

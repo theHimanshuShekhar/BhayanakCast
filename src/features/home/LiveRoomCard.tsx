@@ -1,6 +1,10 @@
+import { memo, useId } from 'react'
 import { observeHome } from './home-observability'
 import { MemberPresence, PreviewMosaic } from './PreviewMosaic'
-import type { ActiveRoomSummary } from './home-types'
+import {
+  accessibleActiveRoomDescription,
+  type ActiveRoomSummary,
+} from './home-types'
 
 interface LiveRoomCardProps {
   readonly room: ActiveRoomSummary
@@ -10,7 +14,12 @@ interface LiveRoomCardProps {
   readonly canJoin: boolean
 }
 
-export function LiveRoomCard({ room, featured, canJoin }: LiveRoomCardProps) {
+export const LiveRoomCard = memo(function LiveRoomCard({
+  room,
+  featured,
+  canJoin,
+}: LiveRoomCardProps) {
+  const accessibleDescriptionId = useId()
   return (
     <li
       className={`live-room-card${featured ? ' live-room-card--featured' : ''}`}
@@ -18,6 +27,7 @@ export function LiveRoomCard({ room, featured, canJoin }: LiveRoomCardProps) {
       data-room-id={room.id}
     >
       <a
+        aria-describedby={accessibleDescriptionId}
         aria-label={`Open ${room.name} room`}
         href={`/rooms/${encodeURIComponent(room.id)}`}
         onClick={() => observeHome({
@@ -25,6 +35,9 @@ export function LiveRoomCard({ room, featured, canJoin }: LiveRoomCardProps) {
           properties: { collection: 'live_rooms' },
         })}
       >
+        <span className="visually-hidden" id={accessibleDescriptionId}>
+          {accessibleActiveRoomDescription(room)}
+        </span>
         <PreviewMosaic room={room} />
         <div className="live-room-card__body">
           <h3 data-room-name>{room.name}</h3>
@@ -91,7 +104,7 @@ export function LiveRoomCard({ room, featured, canJoin }: LiveRoomCardProps) {
       </a>
     </li>
   )
-}
+})
 
 function HostIcon({ known }: Readonly<{ known: boolean }>) {
   return (

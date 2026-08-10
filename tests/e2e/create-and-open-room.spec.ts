@@ -41,6 +41,27 @@ async function openCreateRoomDialog(page: Page) {
   }).toPass({ timeout: 15_000 })
   return dialog
 }
+test('create-room validation identifies the field that failed', async ({ authSessions }) => {
+  const signedIn = await authSessions.createBrowserContext(PROFILE)
+  const page = await signedIn.context.newPage()
+  await gotoHydrated(page, '/')
+  const dialog = await openCreateRoomDialog(page)
+  await dialog.getByLabel('Name').fill('Validation room')
+  await dialog.getByLabel('Private').check()
+  await dialog.getByLabel('Password').fill('short')
+  await dialog.getByRole('button', { name: 'Create Room' }).click()
+  await expect(dialog.getByRole('alert')).toHaveText('Private passwords must be at least 8 characters.')
+  await expect(dialog.getByLabel('Password')).toHaveAttribute('aria-invalid', 'true')
+  await expect(dialog.getByLabel('Password')).toHaveAttribute('aria-describedby', 'create-room-error')
+
+  await dialog.getByLabel('Password').fill('long-enough-password')
+  await dialog.getByLabel('Tags').fill('one,two,three,four,five,six')
+  await dialog.getByRole('button', { name: 'Create Room' }).click()
+  await expect(dialog.getByRole('alert')).toHaveText('Use no more than 5 tags.')
+  await expect(dialog.getByLabel('Tags')).toHaveAttribute('aria-invalid', 'true')
+  await expect(dialog.getByLabel('Tags')).toHaveAttribute('aria-describedby', 'create-room-error')
+})
+
 
 test('creates a room and enters the creator as Host', async ({ authSessions }) => {
   const signedIn = await authSessions.createBrowserContext(PROFILE)

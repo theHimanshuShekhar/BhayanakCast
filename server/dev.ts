@@ -1,4 +1,5 @@
 import { createServer } from 'node:http'
+import { Readable } from 'node:stream'
 import { createRsbuild } from '@rsbuild/core'
 import rsbuildConfig from '../rsbuild.config'
 import {
@@ -8,6 +9,7 @@ import {
   parseTrustedProxyIps,
   resolveTrustedClientIp,
 } from '../src/server'
+import { handleStreamPreviewRequest } from '../src/server/streams/preview-http'
 
 const rsbuild = await createRsbuild({ config: rsbuildConfig })
 const dev = await rsbuild.createDevServer()
@@ -17,10 +19,10 @@ const runtime = createServerRuntime(process.env)
 await runtime.migrate()
 const trustedProxyIps = parseTrustedProxyIps(process.env.TRUSTED_PROXY_IPS)
 
-const server = createServer((request, response) => {
+const server = createServer(async (request, response) => {
   const headers = new Headers()
   for (let index = 0; index < request.rawHeaders.length; index += 2) {
-    headers.append(request.rawHeaders[index], request.rawHeaders[index + 1])
+    headers.append(request.rawHeaders[index]!, request.rawHeaders[index + 1]!)
   }
   const clientIp = resolveTrustedClientIp(
     { directIp: request.socket.remoteAddress, headers },
@@ -28,6 +30,38 @@ const server = createServer((request, response) => {
   )
   delete request.headers['x-bhayanakcast-client-ip']
   if (clientIp) request.headers['x-bhayanakcast-client-ip'] = clientIp
+
+  const requestUrl = new URL(
+    request.url ?? '/',
+    `http://${request.headers.host ?? `${host}:${port}`}`,
+  )
+  // The dev bundle can load its own copy of the route module. Handle preview
+  // traffic on this serving instance so it uses the runtime bound below.
+  if (
+    requestUrl.pathname === '/api/stream-previews' ||
+    requestUrl.pathname.startsWith('/api/stream-previews/') ||
+    requestUrl.pathname === '/api/past-stream-previews' ||
+    requestUrl.pathname.startsWith('/api/past-stream-previews/')
+  ) {
+    const previewRequestInit: RequestInit & { duplex?: 'half' } = {
+      method: request.method ?? 'GET',
+      headers,
+    }
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      previewRequestInit.body = Readable.toWeb(request) as ReadableStream<Uint8Array>
+      previewRequestInit.duplex = 'half'
+    }
+    const previewResponse = await handleStreamPreviewRequest(
+      new Request(requestUrl, previewRequestInit),
+    )
+    if (previewResponse) {
+      const responseHeaders = Object.fromEntries(previewResponse.headers.entries())
+      response.writeHead(previewResponse.status, responseHeaders)
+      response.end(Buffer.from(await previewResponse.arrayBuffer()))
+      return
+    }
+  }
+
   dev.middlewares(request, response, (error?: unknown) => {
     if (error) {
       console.error(error)

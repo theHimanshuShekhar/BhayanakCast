@@ -50,6 +50,7 @@ body[data-hydrated="false"] :is(button, input, select, textarea) {
   --color-private: var(--private);
 
   --spacing: 0.25rem;
+  --radius-chip: 0.3125rem;
   --radius-control: 0.5rem;
   --radius-card: 0.75rem;
   --radius-pill: 9999px;
@@ -176,8 +177,8 @@ body[data-hydrated="false"] :is(button, input, select, textarea) {
 }
 
 html {
-  min-width: 20rem;
   min-height: 100%;
+  overflow-x: clip;
   background: var(--canvas);
   color: var(--ink);
   font-family: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
@@ -251,9 +252,9 @@ a {
 
 .theme-toggle {
   display: inline-flex;
-  min-height: 2.5rem;
-  align-items: center;
-  gap: 0.5rem;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  height: auto;
   border: 1px solid var(--border);
   border-radius: 0.5rem;
   background: var(--surface);
@@ -265,10 +266,10 @@ a {
   font-weight: 650;
   line-height: 1;
   transition:
-    border-color 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    background-color 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    color 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    transform 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    border-color var(--transition-duration-control) var(--ease-clubhouse),
+    background-color var(--transition-duration-control) var(--ease-clubhouse),
+    color var(--transition-duration-control) var(--ease-clubhouse),
+    transform var(--transition-duration-control) var(--ease-clubhouse);
 }
 
 .theme-toggle:hover {
@@ -300,8 +301,8 @@ a {
   stroke-linejoin: round;
   stroke-width: 1.8;
   transition:
-    opacity 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    transform 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    opacity var(--transition-duration-control) var(--ease-clubhouse),
+    transform var(--transition-duration-control) var(--ease-clubhouse);
 }
 
 .theme-toggle__moon {
@@ -325,7 +326,7 @@ a {
 
 .motion-transform {
   transform: translateX(0.25rem);
-  transition: transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: transform var(--transition-duration-layout) var(--ease-clubhouse);
 }
 
 .tabular-nums {
@@ -342,8 +343,7 @@ a {
   position: relative;
 }
 
-.sign-in-button,
-.empty-discovery__create {
+.sign-in-button {
   min-height: 2.75rem;
   border: 0;
   border-radius: var(--radius-control);
@@ -359,19 +359,16 @@ a {
     transform var(--transition-duration-control) var(--ease-clubhouse);
 }
 
-.sign-in-button:hover,
-.empty-discovery__create:hover {
+.sign-in-button:hover {
   background: var(--action-hover);
   transform: translateY(-1px);
 }
 
-.sign-in-button:active,
-.empty-discovery__create:active {
+.sign-in-button:active {
   transform: translateY(0);
 }
 
-.sign-in-button:disabled,
-.empty-discovery__create:disabled {
+.sign-in-button:disabled {
   cursor: wait;
   opacity: 0.6;
 }
@@ -384,7 +381,10 @@ a {
 }
 
 .home-shell {
+  min-width: 0;
+  max-width: 100%;
   min-height: 100vh;
+  overflow-x: clip;
   padding:
     calc(3.5rem + var(--safe-area-top) + 1rem)
     max(1rem, var(--safe-area-right))
@@ -407,7 +407,8 @@ a {
   right: 0;
   left: 0;
   display: flex;
-  height: calc(3.5rem + var(--safe-area-top));
+  min-height: calc(3.5rem + var(--safe-area-top));
+  height: auto;
   align-items: center;
   gap: 0.75rem;
   border-bottom: 1px solid var(--border);
@@ -442,6 +443,28 @@ a {
   color: var(--ink-secondary);
   font-size: var(--text-label);
   font-weight: 650;
+}
+
+.home-top-presence {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--ink-secondary);
+  font-size: var(--text-label);
+  font-weight: 650;
+  line-height: 1;
+}
+
+.home-top-presence svg {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  fill: none;
+  stroke: var(--host);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
 }
 
 .home-presence h2 {
@@ -480,8 +503,7 @@ a {
 .home-navigation > .theme-toggle {
   right: max(0.5rem, var(--safe-area-right));
   width: 2.75rem;
-  height: 2.5rem;
-  min-height: 2.5rem;
+  min-height: 2.75rem;
   justify-content: center;
   padding: 0.5rem;
   box-shadow: none;
@@ -498,8 +520,8 @@ a {
 
 .account-menu__trigger {
   display: flex;
-  min-width: 2.5rem;
-  min-height: 2.5rem;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
   align-items: center;
   gap: 0.5rem;
   border: 1px solid var(--border);
@@ -555,7 +577,9 @@ a {
 .account-menu__popover button {
   display: flex;
   width: 100%;
-  min-height: 2.5rem;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  height: auto;
   align-items: center;
   border: 0;
   border-radius: var(--radius-control);
@@ -565,6 +589,7 @@ a {
   padding: 0.5rem 0.75rem;
   text-align: left;
   text-decoration: none;
+  line-height: 1.25;
 }
 
 .account-menu__popover a:hover,
@@ -583,8 +608,9 @@ a {
   bottom: 0;
   left: 0;
   display: grid;
-  height: calc(4rem + var(--safe-area-bottom));
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  min-height: calc(4rem + var(--safe-area-bottom));
+  height: auto;
   border-top: 1px solid var(--border);
   background: var(--surface);
   padding:
@@ -731,6 +757,11 @@ a {
   border-color: var(--action);
 }
 
+.home-search__field:has(input:focus-visible) {
+  outline: 3px solid color-mix(in srgb, var(--action) 72%, transparent);
+  outline-offset: 3px;
+}
+
 .home-search__field svg {
   width: 1.0625rem;
   height: 1.0625rem;
@@ -822,9 +853,10 @@ p.home-filters__facets {
 
 .home-filters__open,
 .home-filter-sheet__heading button,
-.home-filters__clear,
-.home-filter-chip {
+.home-filters__clear {
+  min-width: 2.75rem;
   min-height: 2.75rem;
+  height: auto;
   font-size: var(--text-meta);
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
@@ -833,6 +865,7 @@ p.home-filters__facets {
   cursor: pointer;
   padding: 0.5rem 0.75rem;
   font-weight: 650;
+  line-height: 1.25;
 }
 
 .home-filters__open {
@@ -908,21 +941,30 @@ p.home-filters__facets {
 }
 
 .home-filter-chip {
-  min-height: 2.25rem;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  height: auto;
+  border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   background: var(--action-soft);
   color: var(--action);
+  cursor: pointer;
   padding: var(--spacing) calc(var(--spacing) * 2);
   font-size: var(--text-label);
+  font-weight: 650;
+  line-height: 1.25;
 }
 
 .home-filters__clear {
-  min-height: 2.25rem;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  height: auto;
   border-color: transparent;
   background: transparent;
   color: var(--action);
-  padding-block: var(--spacing);
+  padding-block: 0.5rem;
   font-size: var(--text-label);
+  line-height: 1.25;
 }
 
 .visually-hidden {
@@ -981,96 +1023,20 @@ p.home-filters__facets {
   font-size: var(--text-meta);
 }
 
-.live-rooms-grid,
-.past-streams-list {
-  display: grid;
-  gap: calc(var(--spacing) * 4);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
 
-.live-room-card {
-  min-width: 0;
-}
 
-.live-room-card > a {
-  display: grid;
-  height: 100%;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  background: var(--surface);
-  color: var(--ink);
-  text-decoration: none;
-  transition:
-    border-color var(--transition-duration-control) var(--ease-clubhouse),
-    background-color var(--transition-duration-control) var(--ease-clubhouse);
-}
 
-.live-room-card > a:hover {
-  border-color: var(--border-strong);
-  background: var(--surface-raised);
-}
 
-.preview-mosaic,
 .room-presence-panel {
   position: relative;
+  display: flex;
   overflow: hidden;
   aspect-ratio: 16 / 9;
-  background: var(--surface-subtle);
-}
-
-.preview-mosaic {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1px;
-}
-
-.preview-mosaic--1 {
-  grid-template-columns: 1fr;
-}
-
-.preview-mosaic--3 .preview-mosaic__tile:first-child {
-  grid-row: span 2;
-}
-
-.preview-mosaic__tile {
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  background: var(--surface-subtle);
-}
-
-.preview-mosaic img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.preview-mosaic--private img {
-  filter: blur(calc(var(--spacing) * 3));
-}
-
-.preview-mosaic__summary {
-  position: absolute;
-  right: calc(var(--spacing) * 3);
-  bottom: calc(var(--spacing) * 3);
-  border-radius: var(--radius-pill);
-  background: var(--surface);
-  color: var(--ink);
-  padding: var(--spacing) calc(var(--spacing) * 2);
-  font-size: var(--text-label);
-  font-weight: 750;
-}
-
-.room-presence-panel {
-  display: flex;
   flex-direction: column;
   align-items: flex-start;
   justify-content: center;
   gap: calc(var(--spacing) * 2);
+  background: var(--surface-subtle);
   padding: calc(var(--spacing) * 5);
 }
 
@@ -1084,13 +1050,6 @@ p.home-filters__facets {
   font-size: var(--text-meta);
 }
 
-.live-room-card__body {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: calc(var(--spacing) * 3);
-  padding: calc(var(--spacing) * 4);
-}
 
 .live-room-card__title-row {
   display: flex;
@@ -1123,31 +1082,9 @@ p.home-filters__facets {
   gap: calc(var(--spacing) * 2);
 }
 
-.room-chip,
-.past-stream-item__topics span {
-  border-radius: var(--radius-pill);
-  background: var(--surface-subtle);
-  color: var(--ink-secondary);
-  padding: var(--spacing) calc(var(--spacing) * 2);
-  font-size: var(--text-label);
-  font-weight: 650;
-  line-height: 1.25;
-}
 
-.room-chip--live {
-  background: color-mix(in srgb, var(--live) 12%, var(--surface));
-  color: var(--live);
-}
 
-.room-chip--full {
-  background: color-mix(in srgb, var(--warning) 13%, var(--surface));
-  color: var(--warning);
-}
 
-.room-chip--private {
-  background: color-mix(in srgb, var(--private) 12%, var(--surface));
-  color: var(--private);
-}
 
 .live-room-card__metadata {
   display: grid;
@@ -1182,20 +1119,7 @@ p.home-filters__facets {
   font-size: var(--text-meta);
 }
 
-.room-avatar-stack {
-  display: flex;
-  padding-left: calc(var(--spacing) * 2);
-}
 
-.room-avatar-stack img {
-  width: calc(var(--spacing) * 7);
-  height: calc(var(--spacing) * 7);
-  margin-left: calc(var(--spacing) * -2);
-  border: 2px solid var(--surface);
-  border-radius: var(--radius-pill);
-  background: var(--surface-subtle);
-  object-fit: cover;
-}
 
 .live-room-card__open-cue,
 .past-stream-item__open {
@@ -1231,17 +1155,6 @@ p.home-filters__facets {
   color: var(--ink-secondary);
 }
 
-.empty-discovery__first-cue {
-  color: var(--ink) !important;
-  font-weight: 650;
-}
-
-.empty-discovery__create {
-  display: inline-flex;
-  align-items: center;
-  gap: calc(var(--spacing) * 2);
-  margin-top: calc(var(--spacing) * 5);
-}
 
 .empty-discovery__create svg {
   width: calc(var(--spacing) * 5);
@@ -1580,6 +1493,9 @@ p.home-filters__facets {
 }
 
 @media (min-width: 48rem) {
+  .home-top-presence {
+    display: none;
+  }
   .profile-navigation .home-navigation {
     display: none;
   }
@@ -2176,26 +2092,7 @@ p.home-filters__facets {
    counter-first header, so the page never changes shape between states.
    ───────────────────────────────────────────────────────────────────────── */
 
-@keyframes home-pulse {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.45;
-    transform: scale(0.82);
-  }
-}
 
-@keyframes home-sweep {
-  from {
-    transform: translateX(-100%);
-  }
-  to {
-    transform: translateX(100%);
-  }
-}
 
 @keyframes home-shimmer {
   from {
@@ -2210,6 +2107,9 @@ p.home-filters__facets {
   display: block;
   background: var(--canvas);
 }
+
+/* Home selectors stay in one authoritative block; keep responsive overrides
+   below the base rules rather than restoring a second style era. */
 
 /* The shell already clears the fixed top bar and bottom nav on small screens,
    so main only owns rhythm here, not insets. */
@@ -2265,15 +2165,24 @@ p.home-filters__facets {
   flex: none;
   border-radius: var(--radius-pill);
   background: var(--live);
-  animation: home-pulse 2.4s var(--ease-clubhouse) infinite;
+  animation: var(--animate-live-pulse);
 }
 
+.home-page-heading,
 .home-counter__value {
   margin: 0;
   font-size: var(--text-page);
   font-weight: 500;
   letter-spacing: -0.035em;
   line-height: 0.92;
+  text-wrap: balance;
+}
+
+.home-counter__summary {
+  margin: 0.625rem 0 0;
+  color: var(--ink-secondary);
+  font-size: var(--text-feature);
+  line-height: 1.1;
   text-wrap: balance;
 }
 
@@ -2325,7 +2234,7 @@ p.home-filters__facets {
 
 .home-masthead__create {
   display: inline-flex;
-  height: 2.75rem;
+  min-height: 2.75rem;
   align-self: flex-start;
   align-items: center;
   gap: 0.5rem;
@@ -2493,15 +2402,17 @@ p.home-filters__facets {
 .past-streams-list {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 1rem;
+  gap: calc(var(--spacing) * 4);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
 .live-room-card {
+  min-width: 0;
   margin: 0;
   animation: none;
+
 }
 
 .live-room-card > a {
@@ -2509,7 +2420,7 @@ p.home-filters__facets {
   height: 100%;
   flex-direction: column;
   border: 0;
-  border-radius: 0.625rem;
+  border-radius: var(--radius-card);
   background: var(--surface);
   box-shadow: var(--card-shadow);
   color: inherit;
@@ -2522,7 +2433,10 @@ p.home-filters__facets {
 
 .live-room-card > a:hover,
 .live-room-card > a:focus-visible {
+  border-color: var(--border-strong);
+  background: var(--surface-raised);
   box-shadow: var(--card-shadow-hover);
+
 }
 
 .live-room-card--featured > a {
@@ -2599,13 +2513,6 @@ p.home-filters__facets {
   stroke: var(--ink-faint);
 }
 
-.live-room-card__chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3125rem;
-  margin: 0;
-}
-
 .live-room-card__note {
   margin: 0;
   color: var(--ink-secondary);
@@ -2619,7 +2526,7 @@ p.home-filters__facets {
   height: 1.625rem;
   align-items: center;
   border: 0;
-  border-radius: 0.3125rem;
+  border-radius: var(--radius-chip);
   background: transparent;
   box-shadow: inset 0 0 0 1px var(--border-strong);
   color: var(--ink-muted);
@@ -2630,12 +2537,11 @@ p.home-filters__facets {
 }
 
 .room-chip--public {
-  background: var(--action-soft);
-  box-shadow: none;
-  color: var(--action);
-  font-weight: 500;
+  background: var(--surface-subtle);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  color: var(--ink-secondary);
+  font-weight: 400;
 }
-
 .room-chip--private {
   background: color-mix(in srgb, var(--private) 14%, transparent);
   box-shadow: none;
@@ -2655,6 +2561,10 @@ p.home-filters__facets {
   box-shadow: none;
   color: var(--live);
   font-weight: 500;
+}
+
+html[data-theme="light"] .room-chip--full {
+  color: color-mix(in srgb, var(--warning) 80%, var(--ink));
 }
 
 /* DESIGN.md asks for three control weights inside the room. `.room-boundary
@@ -2702,13 +2612,17 @@ p.home-filters__facets {
 
 .room-avatar-stack {
   display: flex;
+  padding-left: 0.5rem;
+
 }
 
 .room-avatar-stack img {
   width: 1.5rem;
   height: 1.5rem;
+  margin-left: -0.5rem;
   border: 0;
   border-radius: var(--radius-pill);
+  background: var(--surface-subtle);
   box-shadow: 0 0 0 2px var(--surface);
   object-fit: cover;
 }
@@ -2736,8 +2650,6 @@ p.home-filters__facets {
   font-weight: 500;
 }
 
-/* ── preview mosaic ── */
-
 .preview-mosaic {
   position: relative;
   display: grid;
@@ -2747,9 +2659,10 @@ p.home-filters__facets {
   gap: 2px;
   border: 0;
   border-radius: 0;
+  overflow: hidden;
   background: radial-gradient(
     130% 110% at 18% 0%,
-    var(--action-soft),
+    var(--surface-raised),
     var(--rail) 68%
   );
   padding: 2px;
@@ -2768,9 +2681,9 @@ p.home-filters__facets {
 .preview-mosaic--3 .preview-mosaic__tile:first-child {
   grid-row: span 2;
 }
-
 .preview-mosaic__tile {
   min-width: 0;
+  min-height: 0;
   background: linear-gradient(160deg, var(--surface-raised), var(--rail));
   overflow: hidden;
 }
@@ -2806,7 +2719,7 @@ p.home-filters__facets {
   display: inline-flex;
   height: 1.75rem;
   align-items: center;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-chip);
   background: var(--media-scrim);
   color: var(--on-media-private);
   padding: 0 0.625rem;
@@ -2822,7 +2735,7 @@ p.home-filters__facets {
   height: 1.75rem;
   align-items: center;
   border: 0;
-  border-radius: 0.3125rem;
+  border-radius: var(--radius-chip);
   background: var(--media-scrim);
   padding: 0 0.5625rem;
   font-size: var(--text-label);
@@ -2860,9 +2773,6 @@ p.home-filters__facets {
 /* History is quieter than the live grid above it: same card geometry, but the
    subtle surface and hairline keep it from competing with rooms someone can
    still walk into. */
-.past-streams-list {
-  gap: 0.75rem;
-}
 
 .past-stream-item {
   min-width: 0;
@@ -3041,15 +2951,17 @@ p.home-filters__facets {
 
 .empty-discovery__first-cue {
   margin: 0;
-  color: var(--ink-faint);
+  color: var(--ink) !important;
   font-size: var(--text-meta);
+  font-weight: 650;
 }
 
 .empty-discovery__create {
   display: inline-flex;
-  height: 2.75rem;
+  min-height: 2.75rem;
   align-items: center;
   gap: 0.5rem;
+  margin-top: calc(var(--spacing) * 5);
   border: 1px solid var(--action);
   border-radius: var(--radius-control);
   background: transparent;
@@ -3059,11 +2971,25 @@ p.home-filters__facets {
   padding: 0 1.125rem;
   font-size: var(--text-meta);
   font-weight: 500;
+  line-height: 1.25;
+  transition:
+    background-color var(--transition-duration-control) var(--ease-clubhouse),
+    transform var(--transition-duration-control) var(--ease-clubhouse);
 }
 
 .empty-discovery__create:hover {
   background: var(--action-soft);
   box-shadow: none;
+  transform: translateY(-1px);
+}
+
+.empty-discovery__create:active {
+  transform: translateY(0);
+}
+
+.empty-discovery__create:disabled {
+  cursor: wait;
+  opacity: 0.6;
 }
 
 /* ── connection bar: colour and motion only, never displacement ── */
@@ -3089,32 +3015,25 @@ p.home-filters__facets {
 }
 
 .home-connection-status[data-state="reconnecting"] .home-connection-status__bar {
-  position: relative;
-  background: color-mix(in srgb, var(--action) 24%, transparent);
-  overflow: hidden;
+  background: color-mix(in srgb, var(--warning) 24%, transparent);
 }
 
-.home-connection-status[data-state="reconnecting"]
-  .home-connection-status__bar::after {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, transparent, var(--action), transparent);
-  animation: home-sweep 1.4s var(--ease-clubhouse) infinite;
-  content: "";
-}
+/* Reconnecting remains a warning tint at rest; a one-shot sweep would leave a
+   persistent state looking like a frozen animation frame. */
 
 .home-connection-status[data-state="error"] .home-connection-status__bar {
-  background: var(--warning);
+  background: var(--danger);
 }
 
 .home-connection-status[data-state="recovered"] .home-connection-status__bar {
-  background: var(--host);
+  background: var(--ink-secondary);
 }
 
 .home-connection-status__label {
   color: var(--ink);
   font-weight: 500;
 }
+
 
 /* Pushed to the far end so the sentence stays the thing that is read first. */
 .home-connection-status__attempt {
@@ -3125,6 +3044,8 @@ p.home-filters__facets {
 
 .home-connection-status__note {
   display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
   align-items: center;
   gap: 0.5rem;
   margin: 0;
@@ -3138,16 +3059,19 @@ p.home-filters__facets {
 }
 
 .home-connection-retry {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  height: auto;
   border: 1px solid var(--action);
   border-radius: var(--radius-control);
   background: transparent;
   color: var(--action);
   cursor: pointer;
-  padding: 0.1875rem 0.625rem;
+  padding: 0.5rem 0.625rem;
   font-size: var(--text-label);
   font-weight: 500;
+  line-height: 1.25;
 }
-
 .home-connection-retry:hover {
   background: var(--action-soft);
 }
@@ -3162,7 +3086,7 @@ p.home-filters__facets {
       var(--surface-subtle) 75%
     )
     0 0 / 200% 100%;
-  animation: home-shimmer 1.6s linear infinite;
+  animation: home-shimmer var(--transition-duration-layout) var(--ease-clubhouse) 1;
 }
 
 .home-rooms-skeleton {
@@ -3171,9 +3095,10 @@ p.home-filters__facets {
   gap: 1rem;
 }
 
+
 .home-rooms-skeleton i {
   aspect-ratio: 16 / 9;
-  border-radius: 0.625rem;
+  border-radius: var(--radius-card);
 }
 
 .home-metrics-skeleton {
@@ -3211,6 +3136,10 @@ p.home-filters__facets {
      .home-main and takes `order`, but it is no longer a child selector match. */
   .home-main [data-home-section="Statistics"] {
     order: 1;
+  }
+  .home-counter__presence-eyebrow,
+  .home-counter__presence {
+    display: none;
   }
 
   .home-main .home-center-section[data-home-center-region="past-streams"] {
@@ -3452,6 +3381,8 @@ p.home-filters__facets {
     [data-home-section="Connected presence"]:has(.home-counter) {
     margin-block-end: -1.25rem;
   }
+  /* The page heading stays in the masthead at every width. The wide rail
+     carries the secondary Right now count without creating a second h1. */
 
   .home-rail-presence__value {
     margin: 0;
@@ -3460,15 +3391,6 @@ p.home-filters__facets {
     letter-spacing: -0.035em;
     line-height: 0.95;
     text-wrap: balance;
-  }
-
-  .home-rail-presence__unit {
-    display: block;
-    margin-top: 0.5rem;
-    color: var(--ink-faint);
-    font-size: var(--text-meta);
-    letter-spacing: 0;
-    line-height: 1.35;
   }
 
   .home-rail-cta h2 {
@@ -3490,7 +3412,8 @@ p.home-filters__facets {
   .home-rail-cta__action {
     display: inline-flex;
     width: 100%;
-    height: 2.75rem;
+    min-height: 2.75rem;
+    height: auto;
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
@@ -3635,9 +3558,7 @@ p.home-filters__facets {
 
 @media (prefers-reduced-motion: reduce) {
   .home-pulse-dot,
-  .home-section-skeleton i,
-  .home-connection-status[data-state="reconnecting"]
-    .home-connection-status__bar::after {
+  .home-section-skeleton i {
     animation: none;
   }
 }
@@ -3975,7 +3896,7 @@ body:has(.room-shell) > .root-controls {
   position: absolute;
   left: 0.5rem;
   top: 0.5rem;
-  border-radius: 0.3125rem;
+  border-radius: var(--radius-chip);
   padding: 0.125rem 0.4375rem;
   background: var(--media-scrim);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, currentcolor 42%, transparent);
@@ -4605,7 +4526,7 @@ body:has(.room-shell) > .root-controls {
   box-shadow: inset 0 0 0 1px var(--border-strong);
   padding: 0.75rem;
   transform: translateX(0);
-  transition: transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: transform var(--transition-duration-layout) var(--ease-clubhouse);
 }
 
 .room-dock__desktop-controls {

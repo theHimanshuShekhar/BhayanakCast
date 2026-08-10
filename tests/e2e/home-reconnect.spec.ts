@@ -51,6 +51,7 @@ test('retries a failed canonical Home refresh while the socket stays connected',
     verified: true,
   })
   const page = await signedIn.context.newPage()
+  await page.setViewportSize({ width: 320, height: 800 })
   const socketHandshake = page.waitForResponse(
     (response) =>
       response.url().includes('/socket.io/') &&
@@ -78,7 +79,9 @@ test('retries a failed canonical Home refresh while the socket stays connected',
     "You're seeing rooms as they were",
   )
   await expect(page.getByTestId('home-connection-retry')).toBeEnabled()
-
+  const retryBox = await page.getByTestId('home-connection-retry').boundingBox()
+  expect(Math.round(retryBox?.width ?? 0)).toBeGreaterThanOrEqual(44)
+  expect(Math.round(retryBox?.height ?? 0)).toBeGreaterThanOrEqual(44)
   shouldFail = false
   await page.getByTestId('home-connection-retry').click()
   await expect(page.getByTestId('home-connection-status')).toHaveCount(0)

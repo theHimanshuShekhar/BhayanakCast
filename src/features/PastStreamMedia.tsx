@@ -24,8 +24,12 @@ export function PastStreamMedia({
         <img
           alt=""
           decoding="async"
+          height={360}
           loading="lazy"
+          sizes="(min-width: 48rem) 20rem, 100vw"
           src={`/api/past-stream-previews/${encodeURIComponent(roomId)}?capturedAt=${encodeURIComponent(capturedAt)}`}
+          srcSet={`/api/past-stream-previews/${encodeURIComponent(roomId)}?capturedAt=${encodeURIComponent(capturedAt)} 640w`}
+          width={640}
         />
       </span>
     )

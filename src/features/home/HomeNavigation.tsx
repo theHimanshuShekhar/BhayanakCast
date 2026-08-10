@@ -1,11 +1,12 @@
 import { useState } from 'react'
+import { observeHome } from './home-observability'
 import { SiDiscord } from '@icons-pack/react-simple-icons'
-import { House, Plus, ShieldCheck, UserRound } from 'lucide-react'
+import { House, Plus, ShieldCheck, UserRound, UsersRound } from 'lucide-react'
 import { AccountMenu } from '../auth/AccountMenu'
 import { SignInButton } from '../auth/SignInButton'
 import type { SessionProjection } from '../auth/auth-client'
 import { ThemeToggle } from '../theme/ThemeToggle'
-import { observeHome } from './home-observability'
+import type { ConnectedPresence } from './home-types'
 
 export const CREATE_ROOM_EVENT = 'bhayanakcast:create-room'
 
@@ -20,11 +21,13 @@ export interface CreateRoomEventDetail {
 
 interface HomeNavigationProps {
   readonly session: SessionProjection | null
+  readonly presence?: ConnectedPresence
   readonly currentPage?: 'home' | 'profile'
 }
 
 export function HomeNavigation({
   session,
+  presence,
   currentPage = 'home',
 }: HomeNavigationProps) {
   return (
@@ -34,7 +37,14 @@ export function HomeNavigation({
       data-testid="home-navigation"
     >
       <div className="home-top-bar" data-testid="home-top-bar">
-        <span aria-label="BhayanakCast" className="home-brand-mark">BC</span>
+        <a aria-label="BhayanakCast" className="home-brand-mark" href="/">
+          B
+        </a>
+        <span className="home-top-presence">
+          <UsersRound aria-hidden="true" />
+          <span className="tabular-nums">{presence?.connectedCount ?? '—'}</span>
+          <span className="visually-hidden">people connected</span>
+        </span>
       </div>
 
       <nav

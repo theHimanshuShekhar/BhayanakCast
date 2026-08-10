@@ -32,7 +32,7 @@ export function HomeSearchResults({
 
   return (
     <>
-      <section
+      <div
         className="home-center-section home-search-results"
         data-home-center-region="live-rooms"
       >
@@ -65,10 +65,10 @@ export function HomeSearchResults({
             )}
           </section>
         </HomeSectionBoundary>
-      </section>
+      </div>
 
       {query && (
-        <section
+        <div
           className="home-center-section home-search-results"
           data-home-center-region="profiles"
         >
@@ -87,16 +87,11 @@ export function HomeSearchResults({
                   {profileCount} {profileCount === 1 ? 'result' : 'results'}
                 </p>
               </div>
-              {profiles.updating && (
-                <p role="status">Updating public profile results.</p>
-              )}
+              {profiles.updating && <p role="status">Updating public profile results.</p>}
               {profileCount > 0 ? (
                 <ol className="profile-search-results-list">
                   {profiles.data?.map((profile) => (
-                    <ProfileSearchResult
-                      key={profile.accountId}
-                      profile={profile}
-                    />
+                    <ProfileSearchResult key={profile.accountId} profile={profile} />
                   ))}
                 </ol>
               ) : (
@@ -106,7 +101,7 @@ export function HomeSearchResults({
               )}
             </section>
           </HomeSectionBoundary>
-        </section>
+        </div>
       )}
     </>
   )

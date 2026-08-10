@@ -53,7 +53,7 @@ export function HomePage({ search, session }: HomePageProps) {
 
   return (
     <div className="home-shell" data-testid="home-shell">
-      <HomeNavigation session={session} />
+      <HomeNavigation presence={presence.data} session={session} />
       <main className="home-main">
         <HomeUtilities
           facets={facets.data}
@@ -69,15 +69,6 @@ export function HomePage({ search, session }: HomePageProps) {
           search={search}
           session={session}
           onCanonicalRefresh={onCanonicalRefresh}
-        />
-        <HomeRail
-          hasActiveSearch={hasActiveSearch}
-          presence={presence.data}
-          session={session}
-          statistics={statistics.data}
-          statisticsFailed={statistics.isError}
-          statisticsPending={statistics.isPending}
-          statisticsQueryKey={statisticsOptions.queryKey}
         />
         {/* The centre column, wrapped so the rail beside it has something to be
             beside. Below 1280px the wrapper is display:contents and both it and
@@ -109,6 +100,15 @@ export function HomePage({ search, session }: HomePageProps) {
             realtimeRefreshVersion={realtimeRefreshVersion}
           />
         </div>
+        <HomeRail
+          hasActiveSearch={hasActiveSearch}
+          presence={presence.data}
+          session={session}
+          statistics={statistics.data}
+          statisticsFailed={statistics.isError}
+          statisticsPending={statistics.isPending}
+          statisticsQueryKey={statisticsOptions.queryKey}
+        />
         <CreateRoomDialog session={session} />
       </main>
     </div>

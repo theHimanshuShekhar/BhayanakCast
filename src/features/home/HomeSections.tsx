@@ -59,7 +59,7 @@ export function HomeSections({
     pastStreams.data === undefined || pastStreams.data.length > 0
   return (
     <>
-      <section className="home-center-section" data-home-center-region="live-rooms">
+      <div className="home-center-section" data-home-center-region="live-rooms">
         {rooms.updating && <p role="status">Updating room results.</p>}
         <HomeSectionBoundary
           analyticsSection="live_rooms"
@@ -78,10 +78,10 @@ export function HomeSections({
             snapshotKey={snapshotKey}
           />
         </HomeSectionBoundary>
-      </section>
+      </div>
 
       {showPastStreams ? (
-        <section className="home-center-section" data-home-center-region="past-streams">
+        <div className="home-center-section" data-home-center-region="past-streams">
           <HomeSectionBoundary
             analyticsSection="past_streams"
             failed={pastStreams.failed}
@@ -92,7 +92,7 @@ export function HomeSections({
           >
             <PastStreams streams={pastStreams.data ?? []} />
           </HomeSectionBoundary>
-        </section>
+        </div>
       ) : null}
     </>
   )

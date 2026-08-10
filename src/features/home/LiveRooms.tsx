@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { EmptyDiscovery } from './EmptyDiscovery'
 import { LiveRoomCard } from './LiveRoomCard'
 import type { ActiveRoomSummary } from './home-types'
@@ -76,28 +76,37 @@ export function LiveRooms({
   isPlaceholderData,
   canJoin,
 }: LiveRoomsProps) {
-  const [state, setState] = useState<RoomPresentationState>(() => {
+  const presentationRef = useRef<RoomPresentationState | null>(null)
+  if (presentationRef.current === null) {
     const initialRooms = isPlaceholderData ? EMPTY_ROOMS : rooms
-    return {
+    presentationRef.current = {
       snapshotKey: isPlaceholderData ? null : snapshotKey,
       sourceRooms: initialRooms,
       presentation: createRoomPresentation(initialRooms),
     }
-  })
-  let presentation = state.presentation
-
-  if (
-    !isPlaceholderData &&
-    (state.snapshotKey !== snapshotKey || state.sourceRooms !== rooms)
-  ) {
-    presentation = transitionRoomPresentation(
-      state.presentation,
+  }
+  const presentation = useMemo(() => {
+    const previous = presentationRef.current!
+    if (isPlaceholderData) return previous.presentation
+    return transitionRoomPresentation(
+      previous.presentation,
       rooms,
-      state.snapshotKey !== snapshotKey,
+      previous.snapshotKey !== snapshotKey,
       false,
     )
-    setState({ snapshotKey, sourceRooms: rooms, presentation })
-  }
+  }, [isPlaceholderData, rooms, snapshotKey])
+
+  useEffect(() => {
+    if (isPlaceholderData) return
+    const current = presentationRef.current!
+    if (current.snapshotKey === snapshotKey && current.sourceRooms === rooms) return
+    presentationRef.current = {
+      snapshotKey,
+      sourceRooms: rooms,
+      presentation,
+    }
+  }, [isPlaceholderData, presentation, rooms, snapshotKey])
+
   const featured =
     presentation.rooms.find(({ id }) => id === presentation.featuredId) ?? null
   const rest = featured

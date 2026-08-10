@@ -272,24 +272,36 @@ describe('Home realtime event contract', () => {
     expect(client.getQueryData<readonly ActiveRoomSummary[]>(key)?.[0]?.previews).toEqual([])
   })
 
-  test('targets membership invalidation to affected Home families', () => {
+  test('patches membership in affected Home families without invalidation', () => {
     const client = new QueryClient()
     const roomsKey = ['home', 'rooms', { q: '' }] as const
     const statsKey = ['home', 'statistics', { operatorDay: '2026-01-01' }] as const
     const profilesKey = ['home', 'profiles', { query: 'a' }] as const
     client.setQueryData(roomsKey, [room('first')])
-    client.setQueryData(statsKey, { activeRoomCount: 1 })
+    client.setQueryData(statsKey, {
+      activeRoomCount: 1,
+      activeStreamCount: 1,
+      currentMembershipCount: 2,
+    })
     client.setQueryData(profilesKey, [])
 
     applyHomeRealtimeEvent(client, {
       type: 'room-membership',
       roomId: 'first',
-      memberCount: 2,
-      streamCount: 1,
+      memberCount: 4,
+      streamCount: 2,
     })
 
-    expect(client.getQueryState(roomsKey)?.isInvalidated).toBe(true)
-    expect(client.getQueryState(statsKey)?.isInvalidated).toBe(true)
+    expect(client.getQueryState(roomsKey)?.isInvalidated).toBe(false)
+    expect(client.getQueryData<readonly ActiveRoomSummary[]>(roomsKey)?.[0]).toMatchObject({
+      memberCount: 4,
+      streamCount: 2,
+    })
+    expect(client.getQueryState(statsKey)?.isInvalidated).toBe(false)
+    expect(client.getQueryData(statsKey)).toMatchObject({
+      activeStreamCount: 2,
+      currentMembershipCount: 4,
+    })
     expect(client.getQueryState(profilesKey)?.isInvalidated).toBe(false)
   })
 

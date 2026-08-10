@@ -23,18 +23,23 @@ export function PreviewMosaic({ room }: PreviewMosaicProps) {
       }
     >
       {previews.length > 0 &&
-        previews.map((preview) => (
-          <span className="preview-mosaic__tile" key={preview.previewKey}>
-            {/* A private room still shows its tiles — blurred past reading, with
-                the lock badge over them — so the card keeps its live texture. */}
-            <img
-              alt=""
-              decoding="async"
-              loading="lazy"
-              src={`/api/stream-previews/${encodeURIComponent(preview.previewKey)}`}
-            />
-          </span>
-        ))}
+        previews.map((preview) => {
+          const previewUrl = `/api/stream-previews/${encodeURIComponent(preview.previewKey)}`
+          const previewWidth = hidden ? 64 : 640
+          return (
+            <span className="preview-mosaic__tile" key={preview.previewKey}>
+              <img
+                alt=""
+                height={Math.round(previewWidth * 9 / 16)}
+                loading="lazy"
+                sizes="(min-width: 48rem) 32rem, 100vw"
+                src={previewUrl}
+                srcSet={`${previewUrl} ${previewWidth}w`}
+                width={previewWidth}
+              />
+            </span>
+          )
+        })}
 
       {previews.length === 0 && (
         <span className="preview-mosaic__quiet">Talking, no screens up</span>
@@ -84,7 +89,13 @@ export function MemberPresence({
       {avatars.length > 0 && (
         <span aria-hidden="true" className="room-avatar-stack">
           {avatars.slice(0, 4).map((avatar, index) => (
-            <img alt="" key={`${avatar}-${index}`} src={avatar} />
+            <img
+              alt=""
+              decoding="async"
+              key={`${avatar}-${index}`}
+              loading="lazy"
+              src={avatar}
+            />
           ))}
         </span>
       )}

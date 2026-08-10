@@ -2,9 +2,9 @@ import type { QueryClient, QueryKey } from '@tanstack/react-query'
 import type {
   ActiveRoomSummary,
   ConnectedPresence,
+  HomeStatistics,
   StreamPreview,
 } from '../../features/home/home-types'
-
 export const HOME_SOCKET_EVENT = 'home:event' as const
 export const HOME_ACCOUNT_REVOKED_EVENT = 'home:account-revoked' as const
 export const HOME_ACCOUNT_REPLACED_EVENT = 'home:account-replaced' as const
@@ -33,6 +33,8 @@ export interface HomeRoomMembershipEvent {
   readonly roomId: string
   readonly memberCount: number
   readonly streamCount: number
+  readonly memberCountDelta?: number
+  readonly streamCountDelta?: number
   readonly state?: ActiveRoomSummary['state']
 }
 
@@ -41,12 +43,12 @@ export interface HomeRoomEndedEvent {
   readonly roomId: string
 }
 
-
 export interface HomeRoomWarningEvent {
   readonly type: 'room-warning'
   readonly roomId: string
   readonly minutes: 30 | 10 | 1
 }
+
 export interface HomeRoomDiscoveryEvent {
   readonly type: 'room-discovery'
   readonly roomId: string
@@ -114,13 +116,23 @@ export function normalizeHomeRealtimeEvent(value: unknown): HomeRealtimeEvent | 
   if (value.type === 'room-membership') {
     const memberCount = boundedCount(value.memberCount)
     const streamCount = boundedCount(value.streamCount)
-    if (memberCount === null || streamCount === null) return null
+    const memberCountDelta = optionalDelta(value.memberCountDelta)
+    const streamCountDelta = optionalDelta(value.streamCountDelta)
+    if (
+      memberCount === null ||
+      streamCount === null ||
+      memberCountDelta === invalid ||
+      streamCountDelta === invalid
+    ) return null
     const state = boundedState(value.state)
-    return state ? { type: value.type, roomId, memberCount, streamCount, state } : {
+    return {
       type: value.type,
       roomId,
       memberCount,
       streamCount,
+      ...(memberCountDelta !== undefined ? { memberCountDelta } : {}),
+      ...(streamCountDelta !== undefined ? { streamCountDelta } : {}),
+      ...(state ? { state } : {}),
     }
   }
 
@@ -158,10 +170,55 @@ export function applyHomeRealtimeEvent(
     return
   }
   if (event.type === 'room-value' || event.type === 'room-membership') {
+    const cachedRooms = queryClient.getQueriesData<readonly ActiveRoomSummary[]>({
+      queryKey: HOME_ROOMS_PREFIX,
+    })
+    const canonicalRooms = cachedRooms.find(([queryKey]) => {
+      const search = queryKey[2]
+      return (
+        search &&
+        typeof search === 'object' &&
+        !Array.isArray(search) &&
+        Object.keys(search).length === 0
+      )
+    })?.[1]
+    const cachedRoom = (canonicalRooms ?? cachedRooms[0]?.[1])?.find(
+      (room) => room.id === event.roomId,
+    )
+    const membershipDelta =
+      event.type === 'room-membership'
+        ? event.memberCountDelta ?? (cachedRoom ? event.memberCount - cachedRoom.memberCount : undefined)
+        : undefined
+    const streamDelta =
+      event.type === 'room-membership'
+        ? event.streamCountDelta ?? (cachedRoom ? event.streamCount - cachedRoom.streamCount : undefined)
+        : undefined
+    const canPatchStatistics = membershipDelta !== undefined || streamDelta !== undefined
     queryClient.setQueriesData<readonly ActiveRoomSummary[]>(
       { queryKey: HOME_ROOMS_PREFIX },
       (rooms) => patchRoom(rooms, event),
     )
+    if (event.type === 'room-membership' && canPatchStatistics) {
+      queryClient.setQueriesData<HomeStatistics>(
+        { queryKey: HOME_STATISTICS_PREFIX },
+        (statistics) =>
+          statistics
+            ? {
+                ...statistics,
+                currentMembershipCount: Math.max(
+                  0,
+                  statistics.currentMembershipCount + (membershipDelta ?? 0),
+                ),
+                activeStreamCount: Math.max(
+                  0,
+                  statistics.activeStreamCount + (streamDelta ?? 0),
+                ),
+              }
+            : undefined,
+      )
+    } else if (event.type === 'room-membership') {
+      invalidate(queryClient, HOME_STATISTICS_PREFIX)
+    }
   }
 
   if (event.type === 'room-value') return
@@ -178,11 +235,7 @@ export function applyHomeRealtimeEvent(
     return
   }
 
-  if (event.type === 'room-membership') {
-    invalidate(queryClient, HOME_ROOMS_PREFIX)
-    invalidate(queryClient, HOME_STATISTICS_PREFIX)
-    return
-  }
+  if (event.type === 'room-membership') return
 
   invalidate(queryClient, HOME_ROOMS_PREFIX)
   invalidate(queryClient, HOME_FACETS_KEY)
@@ -194,6 +247,7 @@ function patchRoom(
   event: HomeRoomValuePatch | HomeRoomMembershipEvent,
 ): readonly ActiveRoomSummary[] | undefined {
   if (!rooms) return undefined
+  if (!rooms.some((room) => room.id === event.roomId)) return rooms
   return rooms.map((room) => {
     if (room.id !== event.roomId) return room
     const previewPatch =
@@ -243,7 +297,12 @@ function optionalCount(value: unknown): number | undefined | typeof invalid {
   const count = boundedCount(value)
   return count === null ? invalid : count
 }
-
+function optionalDelta(value: unknown): number | undefined | typeof invalid {
+  if (value === undefined) return undefined
+  return Number.isInteger(value) && Number(value) >= -MAX_ROOM_COUNT && Number(value) <= MAX_ROOM_COUNT
+    ? Number(value)
+    : invalid
+}
 function boundedState(value: unknown): ActiveRoomSummary['state'] | null {
   return value === 'live' || value === 'full' ? value : null
 }

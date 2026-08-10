@@ -226,6 +226,12 @@ test('renders ranked live rooms with private previews and one canonical link per
     'Open Quiet Table room',
     'Open Indie Watch Party room',
   ])
+  await expect(cards.first().getByRole('link')).toHaveAccessibleDescription(
+    /Public room.*Hosted by Host hidden.*6 of 10 seats occupied/,
+  )
+  await expect(cards.nth(1).getByRole('link')).toHaveAccessibleDescription(
+    /Private room.*Host hidden.*4 of 10 seats occupied/,
+  )
 
   // ADR 0084: five active Streams show the four freshest previews, and the
   // overflow is carried by the total Stream count rather than a mosaic cell.
@@ -240,11 +246,30 @@ test('renders ranked live rooms with private previews and one canonical link per
   expect(await privatePreview.evaluate((image) => getComputedStyle(image).filter)).toContain('blur')
   expect(await privatePreview.getAttribute('alt')).toBe('')
 
+
   await expect(cards.nth(2).locator('img')).toHaveCount(3)
   await expect(cards.nth(2).getByText('Talking, no screens up')).toBeVisible()
   await expect(page.locator('[data-placeholder]')).toHaveCount(0)
   expect(await page.locator('body').innerHTML()).not.toContain(privateAccountId)
   await expect(page.getByText('Secret member 1')).toHaveCount(0)
+})
+
+test('announces a full room state in its card description', async ({ authSessions, page }) => {
+  await addRoom(authSessions, {
+    id: '10000000-0000-4000-8000-000000000010',
+    name: 'Full House',
+    visibility: 'public',
+    memberCount: 10,
+    previewCount: 0,
+    category: 'Games',
+    tags: ['busy'],
+  })
+  await page.goto(authSessions.origin)
+  const link = page.locator('.live-room-card').getByRole('link')
+  await expect(link).toHaveAccessibleName('Open Full House room')
+  await expect(link).toHaveAccessibleDescription(
+    /Public room.*Full.*Host hidden.*10 of 10 seats occupied/,
+  )
 })
 
 test('places the frozen feature responsively while preserving DOM rank order', async ({
@@ -333,6 +358,11 @@ test('renders public and private Past Stream media inside unchanged card links',
   await expect(image).toHaveAttribute('alt', '')
   await expect(image).toHaveAttribute('loading', 'lazy')
   await expect(image).toHaveAttribute('decoding', 'async')
+  await expect(image).toHaveAttribute('sizes', '(min-width: 48rem) 20rem, 100vw')
+  await expect(image).toHaveAttribute(
+    'srcset',
+    /\/api\/past-stream-previews\/20000000-0000-4000-8000-000000000001\?capturedAt=.* 640w/,
+  )
   await expect(image).toHaveAttribute(
     'src',
     /\/api\/past-stream-previews\/20000000-0000-4000-8000-000000000001\?capturedAt=/,

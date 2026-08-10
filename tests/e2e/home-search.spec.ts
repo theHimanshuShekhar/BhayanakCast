@@ -36,11 +36,11 @@ test('debounces text into replace-history URLs and Enter flushes immediately', a
   await page.goto(authSessions.origin)
   const input = page.getByRole('searchbox', { name: 'Find rooms and people' })
   const initialHistoryLength = await page.evaluate(() => history.length)
-
   await input.fill('Atlas')
-  await page.waitForTimeout(125)
+  await expect(page.getByRole('status', { name: 'Search pending' })).toHaveText(
+    'Waiting to search…',
+  )
   expect(searchParams(page).get('q')).toBeNull()
-  await expect(page.getByRole('status', { name: 'Search pending' })).toBeVisible()
 
   await input.press('Enter')
   await expect.poll(() => searchParams(page).get('q')).toBe('Atlas')
@@ -115,7 +115,31 @@ test('applies filters immediately and clears canonical search state', async ({
   await expect(page.getByRole('button', { name: 'Remove tag 2026' })).toBeVisible()
   await page.reload()
   await expect(page.getByRole('button', { name: 'Remove tag 2026' })).toBeVisible()
-
+  for (const width of [320, 375, 390]) {
+    await page.setViewportSize({ width, height: 800 })
+    const overflow = await page.evaluate(() => {
+      const shell = document.querySelector<HTMLElement>('.home-shell')
+      return {
+        client: document.documentElement.clientWidth,
+        scroll: document.documentElement.scrollWidth,
+        shellClient: shell?.clientWidth ?? 0,
+        shellScroll: shell?.scrollWidth ?? 0,
+      }
+    })
+    expect(overflow.scroll).toBeLessThanOrEqual(overflow.client)
+    expect(overflow.shellScroll).toBeLessThanOrEqual(overflow.shellClient)
+    for (const control of [
+      page.getByRole('button', { name: 'Filters' }),
+      page.getByRole('button', { name: 'Remove category Art' }),
+      page.getByRole('button', { name: 'Remove tag drawing' }),
+      page.getByRole('button', { name: 'Clear all' }),
+      page.locator('.theme-toggle'),
+    ]) {
+      const box = await control.boundingBox()
+      expect(Math.round(box?.width ?? 0)).toBeGreaterThanOrEqual(44)
+      expect(Math.round(box?.height ?? 0)).toBeGreaterThanOrEqual(44)
+    }
+  }
   await page.getByRole('button', { name: 'Clear all' }).click()
   await expect.poll(() => new URL(page.url()).search).toBe('')
   await expect(utilities).toHaveCSS('position', 'relative')
@@ -132,6 +156,14 @@ test('renders compact bounded result groups and a native mobile filter sheet', a
   const rooms = page.locator('.room-search-result')
   const profiles = page.locator('.profile-search-result')
   await expect(rooms).toHaveCount(1)
+  await expect(rooms.getByRole('link')).toHaveAccessibleName('Open Atlas Studio room')
+  await expect(rooms.getByRole('link')).toHaveAccessibleDescription(
+    /Public room.*1 of 10 seats occupied/,
+  )
+  await expect(profiles.getByRole('link')).toHaveAccessibleName('Open Atlas Member public profile')
+  await expect(profiles.getByRole('link')).toHaveAccessibleDescription(
+    /0 rooms hosted.*0 screens shared/,
+  )
   await expect(profiles).toHaveCount(1)
   await expect(rooms.getByRole('link')).toHaveAttribute('href', `/rooms/${roomId}`)
   await expect(rooms.locator('button')).toHaveCount(0)

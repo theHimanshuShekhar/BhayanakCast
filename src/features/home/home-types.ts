@@ -30,6 +30,13 @@ export interface ActiveRoomSummary {
   readonly previews: readonly StreamPreview[]
   readonly memberAvatars: readonly string[]
 }
+export function accessibleActiveRoomDescription(room: ActiveRoomSummary): string {
+  return `${room.description ? `${room.description}. ` : ''}${
+    room.visibility === 'private' ? 'Private room. ' : 'Public room. '
+  }${room.state === 'full' ? 'Full. ' : ''}Hosted by ${
+    room.hostName ?? 'Host hidden'
+  }. ${room.memberCount} of ${room.capacity} seats occupied.`
+}
 
 export interface PastStreamSummary {
   readonly roomId: string

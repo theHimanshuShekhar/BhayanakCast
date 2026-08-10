@@ -1,11 +1,16 @@
+import { useId } from 'react'
 import { observeHome } from './home-observability'
 import { MemberPresence, PreviewMosaic } from './PreviewMosaic'
-import type { ActiveRoomSummary } from './home-types'
-
+import {
+  accessibleActiveRoomDescription,
+  type ActiveRoomSummary,
+} from './home-types'
 export function RoomSearchResult({ room }: Readonly<{ room: ActiveRoomSummary }>) {
+  const accessibleDescriptionId = useId()
   return (
     <li className="room-search-result">
       <a
+        aria-describedby={accessibleDescriptionId}
         aria-label={`Open ${room.name} room`}
         href={`/rooms/${encodeURIComponent(room.id)}`}
         onClick={() => observeHome({
@@ -13,6 +18,9 @@ export function RoomSearchResult({ room }: Readonly<{ room: ActiveRoomSummary }>
           properties: { collection: 'search_results' },
         })}
       >
+        <span className="visually-hidden" id={accessibleDescriptionId}>
+          {accessibleActiveRoomDescription(room)}
+        </span>
         <PreviewMosaic room={room} />
         <div className="room-search-result__body">
           <div className="live-room-card__title-row">
