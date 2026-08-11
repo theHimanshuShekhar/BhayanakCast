@@ -268,7 +268,7 @@ BhayanakCast is a public discovery platform for small social screen-sharing room
 : V1 provides intentional light and dark themes, each with the same state clarity, accessible contrast, focus treatment, and reduced-motion behavior.
 
 **Visual system**
-: Source Sans 3 uses a fixed 13/14/16/18/24/30/36px scale. Porcelain light (`#F6F8FC` canvas, `#2457D6` cobalt) and midnight dark (`#0D1422` canvas, `#82A5FF` cobalt) themes use distinct live, host, warning, danger, and private semantics. Cards/panels use 12px radii, controls 8px, pills only for tags/status. Motion uses 120/180/240ms eased tokens and becomes immediate under reduced motion. Wide Home centers within 1600px using 216px/640–1040px/280px columns; medium uses a 72px icon rail; small uses 16px gutters and labeled 56px/64px fixed bars.
+: Source Sans 3 uses a fixed 13/14/16/18/24/30/36px scale. Porcelain light (`#F6F8FC` canvas, `#2457D6` cobalt) and midnight dark (`#0D1422` canvas, `#82A5FF` cobalt) themes use distinct live, host, warning, danger, and private semantics. Cards/panels use 12px radii, controls 8px, pills only for tags/status. Motion uses 120/180/240ms eased tokens and becomes immediate under reduced motion. Wide Home centers its content frame within 1600px beside a 72px icon rail, using a fluid centre column, a 280px right rail, and 40px gutters; medium uses the same 72px icon rail; small uses 16px gutters and labeled 56px/64px fixed bars.
 
 ## Decision records
 

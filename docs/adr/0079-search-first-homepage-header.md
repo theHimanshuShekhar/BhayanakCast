@@ -16,5 +16,5 @@ Search results visibly separate Active Rooms from public profiles. Clearing sear
 ## Consequences
 
 - Desktop and mobile preserve the same control order even when the toolbar wraps or stacks.
-- Create Room remains prominent in the persistent left sidebar and signed-in right-rail action section without displacing discovery content.
+- Create Room remains prominent in the persistent left icon rail and the signed-in right-rail action section without displacing discovery content.
 - Anonymous visitors can search and browse; participation actions still route through Discord sign-in and explicit admission.
