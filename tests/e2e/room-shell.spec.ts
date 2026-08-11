@@ -890,7 +890,14 @@ test('watch recovery exhausts once, cancels explicitly, and stays stopped after 
     await expect(hostPage.locator('[data-room-state="admitted"]')).toBeVisible()
     await hostPage.getByRole('tab', { name: /People/ }).click()
     const hostSelf = hostPage.locator('.room-people__member', { hasText: 'Shell Host' })
-    await expect(hostSelf.locator('.room-people__state')).toContainText('Screen stopped')
+    // The projection query holds a 5s `staleTime` (room-queries.ts), so a
+    // hydration that lands before this seeded Stream is visible cannot refetch
+    // until that window expires. The contract is that the Host's own tile stops
+    // claiming media once capture is gone, not that it does so inside 5s, so the
+    // assertion has to outlast the cache rather than race it.
+    await expect(hostSelf.locator('.room-people__state')).toContainText('Screen stopped', {
+      timeout: 15_000,
+    })
     await expect(hostSelf.locator('.room-people__state')).not.toContainText('Live')
 
     const viewer = await authSessions.createBrowserContext(VISITOR_PROFILE)
