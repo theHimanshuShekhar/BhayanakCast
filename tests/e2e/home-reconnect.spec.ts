@@ -1,4 +1,4 @@
-import { expect, test } from './fixtures'
+import { expect, test, gotoHydrated } from './fixtures'
 
 test('keeps Home usable while an authenticated realtime connection recovers', async ({
   authSessions,
@@ -18,23 +18,65 @@ test('keeps Home usable while an authenticated realtime connection recovers', as
       response.url().includes('transport=polling') &&
       response.status() === 200,
   )
-  await page.goto('/')
+  await gotoHydrated(page, '/')
   await socketHandshake
   await expect(page.getByTestId('home-shell')).toBeVisible()
   const search = page.getByRole('searchbox', { name: 'Find rooms and people' })
   await search.fill('room')
   await expect(search).toHaveValue('room')
+  await search.press('Enter')
+  await expect(page.getByTestId('home-counter')).toContainText(
+    /\d+ rooms? and \d+ (?:person|people) match “room”/,
+  )
 
   await signedIn.context.setOffline(true)
   const strip = page.getByTestId('home-connection-status')
-  await expect(strip).toContainText('Counts are paused — last seen')
-  await expect(strip).toContainText(/attempt \d+/)
+  await expect(strip).toContainText(
+    /Counts are paused — last seen.*attempt \d+/,
+  )
   await expect(page.getByTestId('home-shell')).toBeVisible()
   await expect(search).toHaveValue('room')
-
+  await page.evaluate(() => {
+    const testWindow = window as typeof window & {
+      __HOME_RECOVERY_OBSERVER__?: MutationObserver
+      __HOME_RECOVERY_SEEN__?: boolean
+    }
+    testWindow.__HOME_RECOVERY_SEEN__ = false
+    const observer = new MutationObserver(() => {
+      if (
+        document
+          .querySelector('[data-testid="home-connection-status"]')
+          ?.textContent?.includes('Rooms are current again.')
+      ) {
+        testWindow.__HOME_RECOVERY_SEEN__ = true
+      }
+    })
+    observer.observe(document.body, {
+      characterData: true,
+      childList: true,
+      subtree: true,
+    })
+    testWindow.__HOME_RECOVERY_OBSERVER__ = observer
+  })
   await signedIn.context.setOffline(false)
   // Recovery is announced, then retires itself without a click.
-  await expect(strip).toContainText('Rooms are current again.')
+  try {
+    await page.waitForFunction(
+      () =>
+        (window as typeof window & { __HOME_RECOVERY_SEEN__?: boolean })
+          .__HOME_RECOVERY_SEEN__ === true,
+      undefined,
+      { timeout: 15_000 },
+    )
+  } finally {
+    await page.evaluate(() => {
+      const testWindow = window as typeof window & {
+        __HOME_RECOVERY_OBSERVER__?: MutationObserver
+      }
+      testWindow.__HOME_RECOVERY_OBSERVER__?.disconnect()
+      delete testWindow.__HOME_RECOVERY_OBSERVER__
+    })
+  }
   await expect(strip).toHaveCount(0)
   await expect(search).toHaveValue('room')
 })
@@ -58,7 +100,7 @@ test('retries a failed canonical Home refresh while the socket stays connected',
       response.url().includes('transport=polling') &&
       response.status() === 200,
   )
-  await page.goto('/')
+  await gotoHydrated(page, '/')
   await socketHandshake
   await expect(page.getByTestId('home-shell')).toBeVisible()
 

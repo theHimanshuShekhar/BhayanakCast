@@ -376,6 +376,10 @@ export function attachSocketServer(server: HttpServer, databasePool?: Pool) {
     let activated = false
     let handledDisconnect = false
     let unsubscribe: () => void = () => {}
+    let resolveActivation!: () => void
+    const activation = new Promise<void>((resolve) => {
+      resolveActivation = resolve
+    })
     const removePresence = () => {
       const disconnectedFromRoom = typeof socket.data.roomId === 'string'
       if (handledDisconnect) return
@@ -434,6 +438,12 @@ export function attachSocketServer(server: HttpServer, databasePool?: Pool) {
     socket.on(ROOM_JOIN_COMMAND, async (value: unknown, ack?: (result: unknown) => void) => {
       const roomId = typeof value === 'string' ? value : null
       if (!roomId || !roomService) return ack?.({ status: 'rejected' })
+      // Socket.IO announces `connect` before this handler's account operation
+      // has reclaimed a disconnect grace. Authorize the room only after that
+      // serialized activation, or an immediate join can observe the stale
+      // reconnect reservation and reject a valid member.
+      await activation
+      if (!activated || !socket.connected) return ack?.({ status: 'rejected' })
       const projection = await roomService.inspectRouteProjection(roomId, accountId)
       if (projection?.kind !== 'admitted') return ack?.({ status: 'rejected' })
       const self = projection.room.roster.find(
@@ -589,7 +599,13 @@ export function attachSocketServer(server: HttpServer, databasePool?: Pool) {
       }
       await roomService?.reclaimMembership(accountId)
       publishPresence()
-    }).catch(() => socket.disconnect(true))
+    }).then(
+      () => resolveActivation(),
+      () => {
+        resolveActivation()
+        socket.disconnect(true)
+      },
+    )
   })
   return sockets
 }

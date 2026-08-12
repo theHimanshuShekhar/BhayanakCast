@@ -181,7 +181,7 @@ describe('account connection displacement', () => {
 })
 
 describe('production account connection lifecycle', () => {
-  test('reconnect reclaim is serialized with the prior socket disconnect', async () => {
+  test('reconnect room join waits for the prior socket reclaim', async () => {
     const fixture = await productionRoom()
     try {
       const first = await openProductionSocket(fixture.cookie, fixture.context.server.origin)
@@ -209,6 +209,7 @@ describe('production account connection lifecycle', () => {
       })
       first.disconnect()
       const second = await secondPromise
+      await joinProductionRoom(second, fixture.roomId)
       await reclaimed
       const result = await fixture.pool.query<{
         leftAt: Date | null

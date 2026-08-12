@@ -879,21 +879,6 @@ test('watch recovery exhausts once, cancels explicitly, and stays stopped after 
       'INSERT INTO stream (id, room_id, membership_id, started_at) VALUES ($1, $2, $3, now())',
       [streamId, roomId, memberships[0]!.id],
     )
-
-    await hostPage.reload()
-    await expect(hostPage.locator('[data-room-state="admitted"]')).toBeVisible()
-    await hostPage.getByRole('tab', { name: /People/ }).click()
-    const hostSelf = hostPage.locator('.room-people__member', { hasText: 'Shell Host' })
-    // The projection query holds a 5s `staleTime` (room-queries.ts), so a
-    // hydration that lands before this seeded Stream is visible cannot refetch
-    // until that window expires. The contract is that the Host's own tile stops
-    // claiming media once capture is gone, not that it does so inside 5s, so the
-    // assertion has to outlast the cache rather than race it.
-    await expect(hostSelf.locator('.room-people__state')).toContainText('Screen stopped', {
-      timeout: 15_000,
-    })
-    await expect(hostSelf.locator('.room-people__state')).not.toContainText('Live')
-
     const viewer = await authSessions.createBrowserContext(VISITOR_PROFILE)
     await installWebRtcProbe(viewer.context, 'pass')
     const page = await viewer.context.newPage()
@@ -901,6 +886,15 @@ test('watch recovery exhausts once, cancels explicitly, and stays stopped after 
     await page.getByRole('button', { name: 'Join' }).click()
 
     await expect(page.locator('[data-room-state="admitted"]')).toBeVisible()
+
+    // Admission publishes a membership change, which invalidates the Host's
+    // room projection and makes the directly seeded Stream observable without
+    // disconnecting the Host or depending on query-cache staleness.
+    await hostPage.getByRole('tab', { name: /People/ }).click()
+    const hostSelf = hostPage.locator('.room-people__member', { hasText: 'Shell Host' })
+    await expect(hostSelf.locator('.room-people__state')).toContainText('Screen stopped')
+    await expect(hostSelf.locator('.room-people__state')).not.toContainText('Live')
+
     await expect(page.getByRole('button', { name: 'Watch' })).toBeEnabled()
     await page.getByRole('button', { name: 'Watch' }).click()
     await expect(page.getByText('Connecting… attempt 1 of 4')).toBeVisible()

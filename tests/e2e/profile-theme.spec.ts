@@ -1,3 +1,4 @@
+import type { Locator } from '@playwright/test'
 import { expect, test, gotoHydrated } from './fixtures'
 
 const ACCOUNT = {
@@ -16,6 +17,26 @@ const OTHER_ACCOUNT = {
   avatar: null,
   email: 'other-theme-member@example.test',
   verified: true,
+}
+async function waitForChangeHandler(preference: Locator) {
+  await expect
+    .poll(
+      () =>
+        preference.evaluate((node) =>
+          Object.keys(node).some((key) => {
+            if (!key.startsWith('__reactProps$')) return false
+            const props = (node as unknown as Record<string, unknown>)[key]
+            return (
+              typeof props === 'object' &&
+              props !== null &&
+              'onChange' in props &&
+              typeof props.onChange === 'function'
+            )
+          }),
+        ),
+      { timeout: 15_000 },
+    )
+    .toBe(true)
 }
 
 test('anonymous theme uses local override and device fallback', async ({ page }) => {
@@ -41,6 +62,7 @@ test('account preference updates immediately, persists, and stays isolated', asy
 
   const preference = page.getByRole('combobox', { name: 'Theme preference' })
   await expect(preference).toHaveValue('system')
+  await waitForChangeHandler(preference)
   await preference.selectOption('dark')
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
 
@@ -67,7 +89,9 @@ test('sign out returns to anonymous local theme behavior', async ({ authSessions
   const page = await signedIn.context.newPage()
   await page.emulateMedia({ colorScheme: 'dark' })
   await gotoHydrated(page, `${authSessions.origin}/profile`)
-  await page.getByRole('combobox', { name: 'Theme preference' }).selectOption('dark')
+  const preference = page.getByRole('combobox', { name: 'Theme preference' })
+  await waitForChangeHandler(preference)
+  await preference.selectOption('dark')
   await gotoHydrated(page, `${authSessions.origin}/`)
   const accountButton = page.getByRole('button', { name: 'Theme member account' })
   await expect(accountButton).toBeVisible()
@@ -119,14 +143,15 @@ test('failed account update restores the previous effective theme', async ({ aut
 
   const preference = page.getByRole('combobox', { name: 'Theme preference' })
   await expect(preference).toHaveValue('system')
-  // Programmatic select events can precede selective route hydration under load.
-  // The held request makes retrying safe: only the first handled change can mutate.
-  await expect(async () => {
-    await preference.selectOption('dark')
-    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark', {
-      timeout: 1_000,
-    })
-  }).toPass({ timeout: 15_000 })
+  await waitForChangeHandler(preference)
+  const requestStarted = page.waitForRequest(
+    (request) =>
+      request.method() === 'POST' && request.url().includes('/_serverFn/'),
+    { timeout: 15_000 },
+  )
+  await preference.selectOption('dark')
+  await requestStarted
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
   release()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
   await expect(preference).toHaveValue('system')
@@ -148,7 +173,15 @@ test('failed update still restores the theme after Profile unmounts', async ({
     await route.fulfill({ status: 500, body: 'preference unavailable' })
   })
   await gotoHydrated(page, `${authSessions.origin}/profile`)
-  await page.getByRole('combobox', { name: 'Theme preference' }).selectOption('dark')
+  const preference = page.getByRole('combobox', { name: 'Theme preference' })
+  await waitForChangeHandler(preference)
+  const requestStarted = page.waitForRequest(
+    (request) =>
+      request.method() === 'POST' && request.url().includes('/_serverFn/'),
+    { timeout: 15_000 },
+  )
+  await preference.selectOption('dark')
+  await requestStarted
   await authSessions.sql(
     `INSERT INTO account_preference (account_id, theme)
      VALUES ($1, 'dark')
@@ -186,6 +219,7 @@ test('theme controls disable while one account update is pending', async ({
   await gotoHydrated(page, `${authSessions.origin}/profile`)
 
   const preference = page.getByRole('combobox', { name: 'Theme preference' })
+  await waitForChangeHandler(preference)
   await preference.selectOption('dark')
   await expect(preference).toBeDisabled()
   await expect(page.getByRole('button', { name: /theme$/i })).toBeDisabled()
