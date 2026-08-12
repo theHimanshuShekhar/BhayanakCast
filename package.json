@@ -17,6 +17,7 @@
     "test:integration": "vitest run tests/integration",
     "test:smoke": "vitest run tests/smoke",
     "test:e2e": "playwright test",
+    "test:e2e:stream": "playwright test --config=playwright.stream.config.ts",
     "retention:run": "pnpm build && node --env-file-if-exists=.env scripts/run-retention.mjs",
     "qualify:capacity": "pnpm build && tsx --env-file-if-exists=.env scripts/qualify-capacity.ts",
     "qualify:journey": "tsx --env-file-if-exists=.env scripts/qualify-journey-matrix.ts"

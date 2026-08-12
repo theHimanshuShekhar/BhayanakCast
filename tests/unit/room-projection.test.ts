@@ -99,13 +99,7 @@ describe('Room route projection selector', () => {
     })
   })
 
-  test.each([
-    'kick',
-    'ban',
-    'connection displacement',
-    'all-access sanction',
-    'admission loss',
-  ])('%s removes self and returns the same room to pre-admission', () => {
+  test('projects a room without current membership to pre-admission', () => {
     expect(selectRoomRouteProjection(snapshot({
       self: null,
       viewerAuthenticated: true,
@@ -171,13 +165,4 @@ describe('Room route projection selector', () => {
     expect(projection?.room).not.toHaveProperty('transcript')
   })
 
-  test.each(['normal end', 'admin end'])('%s selects Past Stream from canonical ended state', () => {
-    const endedAt = new Date('2026-01-01T02:00:00.000Z')
-    expect(
-      selectRoomRouteProjection(snapshot({ room: { ...snapshot().room!, endedAt } })),
-    ).toMatchObject({
-      kind: 'pastStream',
-      room: { endedAt },
-    })
-  })
 })

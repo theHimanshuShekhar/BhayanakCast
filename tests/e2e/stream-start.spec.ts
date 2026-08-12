@@ -50,6 +50,7 @@ test('a room member can start a captured Stream', async ({ authSessions }) => {
     await expect(page.getByRole('button', { name: 'Stop Stream' })).toBeVisible()
     await expect(page.getByRole('alert')).toHaveCount(0)
   } finally {
+    await authSessions.sql('DELETE FROM past_stream_thumbnail WHERE room_id = $1', [roomId])
     await authSessions.sql('DELETE FROM stream_subscription WHERE stream_id IN (SELECT id FROM stream WHERE room_id = $1)', [roomId])
     await authSessions.sql('DELETE FROM stream WHERE room_id = $1', [roomId])
     await authSessions.sql('DELETE FROM room_membership WHERE room_id = $1', [roomId])

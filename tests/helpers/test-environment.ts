@@ -19,6 +19,34 @@ export interface TestEnvironment {
   cleanup(): Promise<void>
 }
 
+export function createOriginalResourcesCloser(
+  ...closeResources: Array<() => Promise<void>>
+) {
+  const resourcesClosed = closeResources.map(() => false)
+  let closePromise: Promise<void> | undefined
+  return () => {
+    if (resourcesClosed.every(Boolean)) return Promise.resolve()
+    closePromise ??= Promise.allSettled(
+      closeResources.map((closeResource, index) => {
+        if (resourcesClosed[index]) return Promise.resolve()
+        return Promise.resolve()
+          .then(closeResource)
+          .then(() => {
+            resourcesClosed[index] = true
+          })
+      }),
+    ).then((results) => {
+      closePromise = undefined
+      const errors = rejectedReasons(results)
+      if (errors.length === 1) throw errors[0]
+      if (errors.length > 1) {
+        throw new AggregateError(errors, 'Failed to close original resources')
+      }
+    })
+    return closePromise
+  }
+}
+
 export async function createTestEnvironment(
   workerId: string,
 ): Promise<TestEnvironment> {
@@ -65,15 +93,10 @@ export async function createTestEnvironment(
     )
   }
 
-  let originalResourcesClosed = false
-  const closeOriginalResources = async () => {
-    if (originalResourcesClosed) return
-    originalResourcesClosed = true
-    await allOrThrow(
-      [pool.end(), closeRedis(valkey)],
-      'Failed to close isolated test clients',
-    )
-  }
+  const closeOriginalResources = createOriginalResourcesCloser(
+    () => pool.end(),
+    () => closeRedis(valkey),
+  )
 
   let cleaned = false
   let cleanupPromise: Promise<void> | undefined
@@ -176,11 +199,6 @@ async function closeRedis(valkey: Redis) {
     return
   }
   await valkey.quit()
-}
-
-async function allOrThrow(promises: Promise<unknown>[], message: string) {
-  const errors = rejectedReasons(await Promise.allSettled(promises))
-  if (errors.length > 0) throw new AggregateError(errors, message)
 }
 
 function rejectedReasons(results: PromiseSettledResult<unknown>[]) {

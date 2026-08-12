@@ -12,9 +12,11 @@ export default defineConfig({
         ...devices['Desktop Chrome'],
         launchOptions: {
           headless: false,
+          // Chromium's fake-media UI bypass selects the synthetic `screen:0:0`,
+          // which Xvfb cannot open. Let the picker enumerate its real X11 screen,
+          // then have Chromium's test-only selector accept that source.
           args: [
-            '--use-fake-ui-for-media-stream',
-            '--auto-select-desktop-capture-source=Entire screen',
+            '--auto-select-screen-capture-source',
           ],
         },
       },

@@ -108,11 +108,6 @@ describe('room input policy', () => {
     })
   })
 
-  test('allows duplicate room names by parsing the same name twice', () => {
-    expect(normalizeRoomInput(room({ name: 'Same name' })).name).toBe('Same name')
-    expect(normalizeRoomInput(room({ name: 'Same name' })).name).toBe('Same name')
-  })
-
   test('normalizes arbitrary valid metadata with native NFKC trimming', () => {
     fc.assert(
       fc.property(

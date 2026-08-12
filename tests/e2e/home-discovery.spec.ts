@@ -189,7 +189,11 @@ async function interceptImages(page: Page) {
 }
 
 async function screenshot(page: Page, testInfo: TestInfo, name: string) {
-  await page.screenshot({ fullPage: true, path: testInfo.outputPath(name) })
+  await page.screenshot({
+    animations: 'disabled',
+    fullPage: true,
+    path: testInfo.outputPath(name),
+  })
 }
 
 test('renders ranked live rooms with private previews and one canonical link per card', async ({
@@ -406,12 +410,12 @@ test('renders public and private Past Stream media inside unchanged card links',
   expect(placeholderBox!.width / placeholderBox!.height).toBeGreaterThan(1.7)
   expect(placeholderBox!.width / placeholderBox!.height).toBeLessThan(1.85)
   await placeholder.scrollIntoViewIfNeeded()
-  await page.waitForTimeout(100)
-  expect(previewRequests).toHaveLength(1)
   await screenshot(page, testInfo, 'past-stream-thumbnail-desktop.png')
+  // Capturing the scrolled layout is a later rendering checkpoint. The
+  // private placeholder must not have started another preview request by it.
+  expect(previewRequests).toHaveLength(1)
   await page.getByRole('button', { name: 'Dark theme' }).click()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
-  await page.waitForTimeout(150)
   await screenshot(page, testInfo, 'past-stream-thumbnail-dark.png')
   await page.setViewportSize({ width: 390, height: 900 })
   const mobile = await items.evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().x))

@@ -121,12 +121,16 @@ describe('Home realtime canonical refresh callback', () => {
     retry?.()
     expect(onCanonicalRefresh).toHaveBeenCalledTimes(1)
   })
-  test('surfaces refresh failure when the transport drops during the refresh', async () => {
-    const failure = new Error('canonical refresh failed')
-    mocks.invalidateQueries.mockImplementation((filters: { refetchType?: string }) =>
-      filters.refetchType === 'none' ? Promise.resolve() : Promise.reject(failure),
-    )
-    renderBridge(vi.fn())
+  test('does not publish recovery when the transport drops during the refresh', async () => {
+    let finishRefresh: (() => void) | undefined
+    mocks.invalidateQueries.mockImplementation((filters: { refetchType?: string }) => {
+      if (filters.refetchType === 'none') return Promise.resolve()
+      return new Promise<void>((resolve) => {
+        finishRefresh = resolve
+      })
+    })
+    const onCanonicalRefresh = vi.fn()
+    renderBridge(onCanonicalRefresh)
     const cleanup = mocks.effect?.()
     const disconnect = mocks.handlers.get('disconnect')
     const connect = mocks.handlers.get('connect')
@@ -135,9 +139,11 @@ describe('Home realtime canonical refresh callback', () => {
     disconnect()
     connect()
     mocks.ioSocket.connected = false
+    finishRefresh?.()
     await flushMicrotasks()
 
-    expect(mocks.state.state).toBe('error')
+    expect(onCanonicalRefresh).not.toHaveBeenCalled()
+    expect(mocks.state.state).toBe('reconnecting')
     cleanup()
   })
 

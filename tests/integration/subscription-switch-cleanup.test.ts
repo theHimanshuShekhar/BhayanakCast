@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { setTimeout as wait } from 'node:timers/promises'
+import { setTimeout as delay } from 'node:timers/promises'
 import Redis from 'ioredis'
 import { Pool } from 'pg'
 import { afterEach, describe, expect, test } from 'vitest'
@@ -76,23 +76,37 @@ function created(result: Awaited<ReturnType<RoomService['createRoom']>>) {
   return result
 }
 
-async function waitForSubscriptionLockContention(
+async function waitForSubscriptionLockDepth(
   pool: Pool,
   blockerPid: number,
+  expectedDepth: number,
 ) {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const blocked = await pool.query<{ blocked: boolean }>(
-      `SELECT EXISTS (
-         SELECT 1
+  const deadline = Date.now() + 5_000
+  do {
+    const blocked = await pool.query<{ depth: number }>(
+      `WITH RECURSIVE blocked(pid, depth) AS (
+         SELECT activity.pid, 1
            FROM pg_stat_activity activity
           WHERE $1 = ANY(pg_blocking_pids(activity.pid))
-       ) AS blocked`,
-      [blockerPid],
+         UNION ALL
+         SELECT activity.pid, blocked.depth + 1
+           FROM blocked
+           JOIN pg_stat_activity activity
+             ON blocked.pid = ANY(pg_blocking_pids(activity.pid))
+          WHERE blocked.depth < $2
+       )
+       SELECT COALESCE(MAX(depth), 0)::integer AS depth
+         FROM blocked`,
+      [blockerPid, expectedDepth],
     )
-    if (blocked.rows[0]?.blocked) return
-    await wait(10)
-  }
-  throw new Error('Subscription did not reach the locked active subscription')
+    if ((blocked.rows[0]?.depth ?? 0) >= expectedDepth) return
+    // This delay only paces the PostgreSQL poll; lock depth, not elapsed time,
+    // decides success, and the wall-clock deadline bounds failure.
+    await delay(10)
+  } while (Date.now() < deadline)
+  throw new Error(
+    `Subscription race did not reach lock depth ${expectedDepth} within 5000ms`,
+  )
 }
 
 describe('canonical subscription cleanup during room switching', () => {
@@ -572,14 +586,19 @@ describe('canonical subscription cleanup during room switching', () => {
         viewer.membership.id,
         departingStream,
       )
-      await waitForSubscriptionLockContention(
+      await waitForSubscriptionLockDepth(
         fixture.pool,
         backend.rows[0]?.pid ?? -1,
+        1,
       )
       const departure = fixture.rooms.leave(publisherAccount, {
         confirmation: departureConfirmation.confirmation,
       })
-      await wait(50)
+      await waitForSubscriptionLockDepth(
+        fixture.pool,
+        backend.rows[0]?.pid ?? -1,
+        2,
+      )
       await blocker.query('COMMIT')
       await Promise.all([switching, departure])
     } finally {

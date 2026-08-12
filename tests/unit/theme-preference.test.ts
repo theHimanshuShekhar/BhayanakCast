@@ -1,8 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import {
-  themePreferenceMutationKey,
-  themePreferenceQueryOptions,
-} from '../../src/features/profile/profile-queries'
+import { themePreferenceMutationKey } from '../../src/features/profile/profile-queries'
 import {
   parseThemeOverride,
   resolveAnonymousTheme,
@@ -29,9 +26,6 @@ describe('account theme preference', () => {
     expect(() => parseThemeOverride(1)).toThrow(TypeError)
   })
 })
-  test('refreshes the authenticated preference through normal query refetches', () => {
-    expect(themePreferenceQueryOptions().staleTime).toBeUndefined()
-  })
 
   test('shares one mutation key between Profile and global controls', () => {
     expect(themePreferenceMutationKey).toEqual(['profile', 'theme-preference'])

@@ -15,12 +15,15 @@ describe('theme preference', () => {
   })
 
   test('uses a valid persisted override instead of the system preference', () => {
-    expect(resolveTheme('light', true)).toBe('light')
-    expect(resolveTheme('dark', false)).toBe('dark')
+    const lightStorage = new MemoryStorage([[THEME_STORAGE_KEY, 'light']])
+    const darkStorage = new MemoryStorage([[THEME_STORAGE_KEY, 'dark']])
+
+    expect(resolveTheme(readThemeOverride(lightStorage), true)).toBe('light')
+    expect(resolveTheme(readThemeOverride(darkStorage), false)).toBe('dark')
   })
 
   test('ignores invalid persisted values', () => {
-    const storage = new MemoryStorage([['bhayanakcast.theme', 'sepia']])
+    const storage = new MemoryStorage([[THEME_STORAGE_KEY, 'sepia']])
 
     expect(readThemeOverride(storage)).toBeNull()
     expect(resolveTheme(readThemeOverride(storage), true)).toBe('dark')

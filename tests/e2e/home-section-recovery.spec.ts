@@ -111,6 +111,39 @@ async function refetchHomeQuery(page: Page, queryKey: readonly string[]) {
   }, queryKey)
 }
 
+async function waitForHomeQueryQueueFlush(page: Page) {
+  await page.waitForFunction(() => {
+    const roots = (window as TestWindow).__HOME_TEST_REACT_ROOTS__ ?? []
+    const pending = roots.map((root) => root.current)
+    const seen = new Set<unknown>()
+    while (pending.length > 0) {
+      const fiber = pending.pop() as
+        | {
+            child?: unknown
+            sibling?: unknown
+            memoizedProps?: {
+              client?: {
+                getQueryCache?: unknown
+                isFetching?: () => number
+              }
+            }
+          }
+        | undefined
+      if (!fiber || seen.has(fiber)) continue
+      seen.add(fiber)
+      const client = fiber.memoizedProps?.client
+      if (
+        typeof client?.getQueryCache === 'function' &&
+        typeof client.isFetching === 'function'
+      ) {
+        return client.isFetching() === 0
+      }
+      pending.push(fiber.child, fiber.sibling)
+    }
+    return false
+  })
+}
+
 async function navigateHome(page: Page, q: string, waitForCompletion = true) {
   const navigation = page.evaluate(
     async ({ query, wait }) => {
@@ -175,6 +208,14 @@ for (const [index, section] of recoverableSections.entries()) {
     let failRequests = true
     const failedUrls: string[] = []
     const recoveredUrls: string[] = []
+    let releaseRecovery!: () => void
+    const recoveryMayComplete = new Promise<void>((resolve) => {
+      releaseRecovery = resolve
+    })
+    let markRecoveryStarted!: () => void
+    const recoveryStarted = new Promise<void>((resolve) => {
+      markRecoveryStarted = resolve
+    })
     await page.route('**/*', async (route) => {
       const request = route.request()
       if (!['fetch', 'xhr'].includes(request.resourceType()) || request.method() !== 'GET') {
@@ -191,7 +232,8 @@ for (const [index, section] of recoverableSections.entries()) {
         return
       }
       recoveredUrls.push(request.url())
-      await new Promise((resolve) => setTimeout(resolve, 150))
+      markRecoveryStarted()
+      await recoveryMayComplete
       await route.continue()
     })
 
@@ -209,15 +251,18 @@ for (const [index, section] of recoverableSections.entries()) {
     const scrollBefore = await page.evaluate(() => window.scrollY)
     failRequests = false
     await retry.click()
+    await recoveryStarted
     await expect(retry).toBeFocused()
     await expect(page.getByText(`${section.label} is updating.`)).toBeVisible()
     await expect(
       page.getByText(`${section.label} is unavailable.`),
     ).toBeHidden()
+    releaseRecovery()
     await expect(
       page.getByRole('group', { name: `${section.label} section` }),
     ).toBeFocused()
     expect(await page.evaluate(() => window.scrollY)).toBe(scrollBefore)
+    await expect(page.getByText(`${section.label} is updating.`)).toBeHidden()
     expect(failedUrls.length).toBeGreaterThan(0)
     // Retry refetches sections that failed and never reaches for anything new.
     // Asserting one single fetch made this a race instead: presence and
@@ -268,8 +313,7 @@ test('Home hydrates critical SSR sections without duplicate browser fetches', as
       requests.push(request.url())
     }
   })
-  const page = await signedIn.context.newPage()
-  await page.goto('/')
+  const page = await pageWithQueryHarness(signedIn.context)
   await expect(page.getByRole('region', { name: 'Live Rooms' })).toBeVisible()
   await expect(page.getByRole('region', { name: 'Past Streams' })).toBeVisible()
   // The skeletons the server sent must resolve into their real sections once hydrated, and
@@ -279,7 +323,7 @@ test('Home hydrates critical SSR sections without duplicate browser fetches', as
   // counter is display:none, while its boundary still owns the pending and failed states.
   await expect(page.getByTestId('home-counter')).toBeAttached()
   await expect(page.locator('.home-section-skeleton')).toHaveCount(0)
-  await page.waitForTimeout(250)
+  await waitForHomeQueryQueueFlush(page)
   expect(requests.filter((url) => !url.includes('/socket.io/'))).toHaveLength(1)
 })
 

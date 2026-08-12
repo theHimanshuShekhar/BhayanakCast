@@ -108,7 +108,15 @@ Layered per ADR `0106`:
 - `pnpm test:unit`
 - `pnpm test:integration`
 - `pnpm test:smoke`
-- `pnpm test:e2e`
+- `pnpm test:e2e` (headless; deliberately excludes `stream-start.spec.ts`)
+- `pnpm test:e2e:stream` (headed Chromium; runs only `stream-start.spec.ts`)
+
+The Stream journey captures the real enumerated X11 screen and therefore needs a display;
+it does not use Playwright's fake media device or Chromium's fake media UI. Run it locally
+from a graphical Linux session, or provide a 24-bit X11 display with
+`xvfb-run -a --server-args="-screen 0 1280x800x24" pnpm test:e2e:stream`.
+CI installs Xvfb and runs that same wrapper rather than invoking the headed command
+without a display.
 
 `tests/helpers/test-environment.ts` provisions a per-worker PostgreSQL schema and Valkey
 prefix. Hydration-sensitive Home interactions use `gotoHydrated` from

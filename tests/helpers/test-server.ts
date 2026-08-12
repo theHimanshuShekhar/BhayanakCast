@@ -3,11 +3,13 @@ import {
   type ChildProcess,
 } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { once } from 'node:events'
 import type { RuntimeBindings } from '../../src/server/runtime'
 import type { TestEnvironment } from './test-environment'
 
 const LISTENING = /BhayanakCast listening on http:\/\/127\.0\.0\.1:(\d+)/
+const READINESS_TIMEOUT_MS = 10_000
+const RUNTIME_TIMEOUT_MS = 10_000
+const SHUTDOWN_GRACE_MS = 5_000
 
 export interface TestAuthConfiguration {
   readonly secret: string
@@ -36,6 +38,7 @@ export interface TestServer {
 
 export async function startTestServer(
   environment: TestEnvironment,
+  cwd = process.cwd(),
 ): Promise<TestServer> {
   const auth: TestAuthConfiguration = {
     secret: `${randomUUID()}${randomUUID()}`,
@@ -43,7 +46,7 @@ export async function startTestServer(
     discordClientSecret: `test-client-secret-${randomUUID()}`,
   }
   const child = spawn(process.execPath, ['server/index.mjs'], {
-    cwd: process.cwd(),
+    cwd,
     env: {
       ...process.env,
       NODE_ENV: 'test',
@@ -71,66 +74,24 @@ export async function startTestServer(
     ready = await waitForReady(child)
   } catch (error) {
     if (child.exitCode === null && child.signalCode === null) {
-      child.kill('SIGTERM')
-      await once(child, 'exit').catch(() => undefined)
+      try {
+        await stopChild(child)
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          'test server startup failed and its child could not be stopped cleanly',
+        )
+      }
     }
     throw error
   }
 
   const { port, bindings } = ready
   let stopPromise: Promise<void> | undefined
-  const callRuntime = <T>(
+  const invokeRuntime = <T>(
     operation: string,
     payload: Record<string, unknown>,
-  ) =>
-    new Promise<T>((resolve, reject) => {
-      if (!child.connected || child.exitCode !== null || child.signalCode) {
-        reject(new Error('test server is not available'))
-        return
-      }
-
-      const id = randomUUID()
-      const cleanup = () => {
-        child.off('message', onMessage)
-        child.off('error', onError)
-        child.off('exit', onExit)
-        child.off('disconnect', onDisconnect)
-      }
-      const fail = (error: Error) => {
-        cleanup()
-        reject(error)
-      }
-      const onMessage = (message: unknown) => {
-        if (!isRuntimeResult(message) || message.id !== id) return
-        cleanup()
-        if (message.error) reject(new Error(message.error))
-        else resolve(message.result as T)
-      }
-      const onError = (error: Error) => fail(error)
-      const onExit = (code: number | null, signal: NodeJS.Signals | null) =>
-        fail(
-          new Error(
-            `test server exited during ${operation} (code ${code}, signal ${signal})`,
-          ),
-        )
-      const onDisconnect = () =>
-        fail(new Error(`test server IPC disconnected during ${operation}`))
-
-      child.on('message', onMessage)
-      child.once('error', onError)
-      child.once('exit', onExit)
-      child.once('disconnect', onDisconnect)
-      try {
-        child.send(
-          { type: 'runtime-command', id, operation, ...payload },
-          (error) => {
-            if (error) fail(error)
-          },
-        )
-      } catch (error) {
-        fail(error instanceof Error ? error : new Error(String(error)))
-      }
-    })
+  ) => callRuntime<T>(child, operation, payload)
 
   return {
     pid: child.pid ?? (() => {
@@ -140,11 +101,11 @@ export async function startTestServer(
     origin: `http://127.0.0.1:${port}`,
     bindings,
     auth,
-    sql: (text, values) => callRuntime('sql', { text, values }),
-    set: (key, value) => callRuntime('set', { key, value }),
-    get: (key) => callRuntime('get', { key }),
-    advanceClock: (instant) => callRuntime('advance-clock', { instant }),
-    metrics: () => callRuntime('metrics', {}),
+    sql: (text, values) => invokeRuntime('sql', { text, values }),
+    set: (key, value) => invokeRuntime('set', { key, value }),
+    get: (key) => invokeRuntime('get', { key }),
+    advanceClock: (instant) => invokeRuntime('advance-clock', { instant }),
+    metrics: () => invokeRuntime('metrics', {}),
     stop() {
       stopPromise ??= stopChild(child)
       return stopPromise
@@ -152,21 +113,145 @@ export async function startTestServer(
   }
 }
 
-async function stopChild(child: ChildProcess) {
+export async function stopChild(
+  child: ChildProcess,
+  graceMs = SHUTDOWN_GRACE_MS,
+) {
   if (child.exitCode !== null || child.signalCode !== null) {
     assertCleanExit(child.exitCode, child.signalCode)
     return
   }
 
-  const exited = once(child, 'exit') as Promise<[
-    number | null,
-    NodeJS.Signals | null,
-  ]>
-  if (!child.kill('SIGTERM')) {
-    throw new Error('failed to signal test server shutdown')
+  const terminated = await signalAndWait(child, 'SIGTERM', graceMs)
+  if (terminated) {
+    assertCleanExit(child.exitCode, child.signalCode)
+    return
   }
-  const [code, signal] = await exited
-  assertCleanExit(code, signal)
+
+  const killed = await signalAndWait(child, 'SIGKILL', graceMs)
+  if (!killed) {
+    throw new Error(
+      `test server did not exit after SIGKILL within ${graceMs}ms`,
+    )
+  }
+  if (child.signalCode === 'SIGKILL') {
+    throw new Error(
+      `test server ignored SIGTERM for ${graceMs}ms grace period and was killed with SIGKILL`,
+    )
+  }
+  assertCleanExit(child.exitCode, child.signalCode)
+}
+
+function signalAndWait(
+  child: ChildProcess,
+  signal: NodeJS.Signals,
+  timeoutMs: number,
+) {
+  return new Promise<boolean>((resolve, reject) => {
+    let timer: NodeJS.Timeout | undefined
+    let settled = false
+    const cleanup = () => {
+      clearTimeout(timer)
+      child.off('error', onError)
+      child.off('exit', onExit)
+    }
+    const settle = (result: boolean) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve(result)
+    }
+    const onError = (error: Error) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(error)
+    }
+    const onExit = () => settle(true)
+
+    child.once('error', onError)
+    child.once('exit', onExit)
+    timer = setTimeout(() => settle(false), timeoutMs)
+    try {
+      if (!child.kill(signal)) {
+        if (child.exitCode !== null || child.signalCode !== null) settle(true)
+        else onError(new Error(`failed to send ${signal} to test server`))
+      }
+    } catch (error) {
+      onError(error instanceof Error ? error : new Error(String(error)))
+    }
+  })
+}
+
+export function callRuntime<T>(
+  child: ChildProcess,
+  operation: string,
+  payload: Record<string, unknown>,
+  timeoutMs = RUNTIME_TIMEOUT_MS,
+) {
+  return new Promise<T>((resolve, reject) => {
+    if (!child.connected || child.exitCode !== null || child.signalCode) {
+      reject(new Error('test server is not available'))
+      return
+    }
+
+    const id = randomUUID()
+    let timer: NodeJS.Timeout | undefined
+    let settled = false
+    const cleanup = () => {
+      clearTimeout(timer)
+      child.off('message', onMessage)
+      child.off('error', onError)
+      child.off('exit', onExit)
+      child.off('disconnect', onDisconnect)
+    }
+    const fail = (error: Error) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(error)
+    }
+    const onMessage = (message: unknown) => {
+      if (!isRuntimeResult(message) || message.id !== id || settled) return
+      settled = true
+      cleanup()
+      if (message.error) reject(new Error(message.error))
+      else resolve(message.result as T)
+    }
+    const onError = (error: Error) => fail(error)
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) =>
+      fail(
+        new Error(
+          `test server exited during ${operation} (code ${code}, signal ${signal})`,
+        ),
+      )
+    const onDisconnect = () =>
+      fail(new Error(`test server IPC disconnected during ${operation}`))
+
+    child.on('message', onMessage)
+    child.once('error', onError)
+    child.once('exit', onExit)
+    child.once('disconnect', onDisconnect)
+    timer = setTimeout(
+      () =>
+        fail(
+          new Error(
+            `test server runtime operation ${operation} timed out after ${timeoutMs}ms`,
+          ),
+        ),
+      timeoutMs,
+    )
+    try {
+      child.send(
+        { type: 'runtime-command', id, operation, ...payload },
+        (error) => {
+          if (error) fail(error)
+        },
+      )
+    } catch (error) {
+      fail(error instanceof Error ? error : new Error(String(error)))
+    }
+  })
 }
 
 function assertCleanExit(
@@ -178,7 +263,10 @@ function assertCleanExit(
   }
 }
 
-function waitForReady(child: ChildProcess) {
+export function waitForReady(
+  child: ChildProcess,
+  timeoutMs = READINESS_TIMEOUT_MS,
+) {
   return new Promise<{ port: number; bindings: RuntimeBindings }>(
     (resolve, reject) => {
       const stdout = child.stdout
@@ -191,15 +279,25 @@ function waitForReady(child: ChildProcess) {
       let output = ''
       let port: number | undefined
       let bindings: RuntimeBindings | undefined
+      let timer: NodeJS.Timeout | undefined
+      let settled = false
       const cleanup = () => {
+        clearTimeout(timer)
         stdout.off('data', onData)
         stderr.off('data', onData)
         child.off('message', onMessage)
         child.off('error', onError)
         child.off('exit', onExit)
       }
+      const fail = (error: Error) => {
+        if (settled) return
+        settled = true
+        cleanup()
+        reject(error)
+      }
       const finish = () => {
-        if (port === undefined || bindings === undefined) return
+        if (port === undefined || bindings === undefined || settled) return
+        settled = true
         cleanup()
         resolve({ port, bindings })
       }
@@ -214,24 +312,28 @@ function waitForReady(child: ChildProcess) {
         bindings = message.bindings
         finish()
       }
-      const onError = (error: Error) => {
-        cleanup()
-        reject(error)
-      }
-      const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
-        cleanup()
-        reject(
+      const onError = (error: Error) => fail(error)
+      const onExit = (code: number | null, signal: NodeJS.Signals | null) =>
+        fail(
           new Error(
             `server exited with ${code}/${signal} before readiness:\n${output}`,
           ),
         )
-      }
 
       stdout.on('data', onData)
       stderr.on('data', onData)
       child.on('message', onMessage)
       child.once('error', onError)
       child.once('exit', onExit)
+      timer = setTimeout(
+        () =>
+          fail(
+            new Error(
+              `test server readiness timed out after ${timeoutMs}ms:\n${output}`,
+            ),
+          ),
+        timeoutMs,
+      )
     },
   )
 }

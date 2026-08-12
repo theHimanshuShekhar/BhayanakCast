@@ -32,6 +32,7 @@ test('debounces text into replace-history URLs and Enter flushes immediately', a
   authSessions,
   page,
 }) => {
+  await page.clock.install()
   await seedSearch(authSessions)
   await page.goto(authSessions.origin)
   const input = page.getByRole('searchbox', { name: 'Find rooms and people' })
@@ -53,7 +54,10 @@ test('debounces text into replace-history URLs and Enter flushes immediately', a
   await expect(input).toHaveValue('Atlas Member')
   await input.fill('Late query')
   await page.getByRole('button', { name: 'Clear all' }).click()
-  await page.waitForTimeout(300)
+  await expect.poll(() => new URL(page.url()).search).toBe('')
+  // Flush the cancelled debounce deadline under virtual time; a stale callback
+  // would now restore the late query without making the test outwait it.
+  await page.clock.runFor(250)
   expect(new URL(page.url()).search).toBe('')
   await expect(input).toHaveValue('')
 })

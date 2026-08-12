@@ -219,11 +219,17 @@ describe('room roster projection', () => {
     fixture.clock.advanceTo(fixture.clock.now() + 60_000)
     expect((await fixture.rooms.admit(joiner, room.room.id)).status).toBe('joined')
 
-    expect(
-      fixture.homeEvents.filter(
-        (event) => event.type === 'room-membership' && event.roomId === room.room.id,
-      ),
-    ).not.toHaveLength(0)
+    expect(fixture.homeEvents.filter((event) => event.type === 'room-membership')).toEqual([
+      {
+        type: 'room-membership',
+        roomId: room.room.id,
+        memberCount: 2,
+        streamCount: 0,
+        memberCountDelta: 1,
+        streamCountDelta: 0,
+        state: 'live',
+      },
+    ])
     expect(
       (await admitted(fixture.rooms, host, room.room.id)).room.roster.map(
         (member) => member.displayName,
@@ -234,11 +240,17 @@ describe('room roster projection', () => {
     const departure = await fixture.rooms.terminalDeparture(joiner, 'displacement')
     expect(departure.status).not.toBe('not-member')
 
-    expect(
-      fixture.homeEvents.filter(
-        (event) => event.type === 'room-membership' && event.roomId === room.room.id,
-      ),
-    ).not.toHaveLength(0)
+    expect(fixture.homeEvents.filter((event) => event.type === 'room-membership')).toEqual([
+      {
+        type: 'room-membership',
+        roomId: room.room.id,
+        memberCount: 1,
+        streamCount: 0,
+        memberCountDelta: -1,
+        streamCountDelta: 0,
+        state: 'live',
+      },
+    ])
     expect(
       (await admitted(fixture.rooms, host, room.room.id)).room.roster.map(
         (member) => member.displayName,

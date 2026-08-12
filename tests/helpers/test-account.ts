@@ -380,39 +380,66 @@ async function requestFormValue(
   return null
 }
 
-interface ControlledDate {
+export interface ControlledDate {
   now(): number
   advanceBy(duration: number): number
   restore(): void
 }
 
-function installControlledDate(initialTime: number): ControlledDate {
+interface ControlledDateReplacement {
+  readonly previous: DateConstructor
+  restoreRequested: boolean
+}
+
+const controlledDateReplacements = new WeakMap<
+  object,
+  ControlledDateReplacement
+>()
+
+export function installControlledDate(initialTime: number): ControlledDate {
   const NativeDate = Date
   let instant = initialTime
-  const replacement = function (
-    this: unknown,
-    ...arguments_: unknown[]
-  ) {
-    if (!new.target) return new NativeDate(instant).toString()
-    return Reflect.construct(
-      NativeDate,
-      arguments_.length === 0 ? [instant] : arguments_,
-      new.target,
-    )
+  const now = () => instant
+  const replacement = new Proxy(NativeDate, {
+    apply() {
+      return new NativeDate(instant).toString()
+    },
+    construct(target, arguments_, newTarget) {
+      return Reflect.construct(
+        target,
+        arguments_.length === 0 ? [instant] : arguments_,
+        newTarget,
+      )
+    },
+    get(target, property, receiver) {
+      if (property === 'now') return now
+      return Reflect.get(target, property, receiver)
+    },
+  })
+  const metadata: ControlledDateReplacement = {
+    previous: NativeDate,
+    restoreRequested: false,
   }
-  Object.setPrototypeOf(replacement, NativeDate)
-  replacement.prototype = NativeDate.prototype
-  Object.defineProperty(replacement, 'now', { value: () => instant })
-  globalThis.Date = replacement as unknown as DateConstructor
+  controlledDateReplacements.set(replacement, metadata)
+  globalThis.Date = replacement
 
   return {
-    now: () => instant,
+    now,
     advanceBy(duration) {
       instant += duration
       return instant
     },
     restore() {
-      if (globalThis.Date === replacement) globalThis.Date = NativeDate
+      metadata.restoreRequested = true
+      if (globalThis.Date !== replacement) return
+
+      let restoredDate = metadata.previous
+      let restoredMetadata = controlledDateReplacements.get(restoredDate)
+      while (restoredMetadata?.restoreRequested) {
+        restoredDate = restoredMetadata.previous
+        restoredMetadata = controlledDateReplacements.get(restoredDate)
+      }
+      globalThis.Date = restoredDate
     },
   }
 }

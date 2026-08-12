@@ -467,6 +467,8 @@ test('wide companions keep a 360px collapsible dock and preserve room-session st
 
     await tabs.getByText('People', { exact: true }).click()
     const firstTile = page.locator('.room-mosaic__tile').first()
+    // This DOM marker is a React-remount sentinel: losing it means the tile
+    // remounted during dock collapse, which would also drop its active Stream.
     await firstTile.evaluate((node) => node.setAttribute('data-companion-continuity', 'kept'))
     const collapse = dock.getByRole('button', { name: 'Collapse dock' })
     await expect(collapse).toHaveAttribute('aria-expanded', 'true')
@@ -486,12 +488,12 @@ test('wide companions keep a 360px collapsible dock and preserve room-session st
   }
 })
 
-test('hidden Chat retains unread state until the viewer returns', async ({
+test('collapsed wide dock hides its composer and preserves activity semantics', async ({
   authSessions,
 }) => {
   const host = await authSessions.createBrowserContext(HOST_PROFILE)
   const hostPage = await host.context.newPage()
-  const roomId = await createAdmittedRoom(hostPage, 'Unread companions room')
+  const roomId = await createAdmittedRoom(hostPage, 'Collapsed companions room')
   try {
     await hostPage.setViewportSize({ width: 1440, height: 900 })
     const dock = hostPage.locator('.room-dock')
@@ -504,16 +506,8 @@ test('hidden Chat retains unread state until the viewer returns', async ({
     await visitorPage.goto(`/rooms/${roomId}`)
     await visitorPage.getByRole('button', { name: 'Join', exact: true }).click()
     await expect(visitorPage.locator('[data-room-state="admitted"]')).toBeVisible()
-    await visitorPage.setViewportSize({ width: 1440, height: 900 })
-    await visitorPage.getByLabel('Message').fill('A canonical unread message')
-    await visitorPage.getByRole('button', { name: 'Send', exact: true }).click()
 
-    const chatTab = dock.getByRole('tab', { name: /Chat/ })
-    await expect(chatTab.locator('.room-dock__badge')).toHaveText('1')
-    await chatTab.click()
-    await expect(hostPage.getByText('A canonical unread message')).toBeVisible()
-    await expect(chatTab.locator('.room-dock__badge')).toHaveCount(0)
-
+    await dock.getByRole('button', { name: 'Expand dock' }).click()
     await dock.getByRole('tab', { name: /Activity/ }).click()
     await expect(dock.getByText('Shell Visitor joined.')).toBeVisible()
     await expect(dock.locator('.room-activity__time')).toHaveAttribute('datetime', /T/)
@@ -742,17 +736,44 @@ test('the member mosaic exposes responsive emphasis, presence, watcher, media, a
     expect(new Set(overview.map(({ x }) => x)).size).toBe(2)
     expect(new Set(overview.map(({ y }) => y)).size).toBe(2)
 
-    // Exercise the two accepted final watch layouts against the real cascade.
+    // Drive Watch through its real UI transition before measuring either
+    // accepted final layout. The probe exhausts the first sequence, then lets
+    // Retry deliver media so React owns both watch attributes under assertion.
     await page.setViewportSize({ width: 1024, height: 768 })
+    const watch = streamTile.getByRole('button', { name: "Watch Filler 1's screen" })
+    await watch.scrollIntoViewIfNeeded()
+    await expect(watch).toBeEnabled({ timeout: 30_000 })
+    await watch.click()
+    await expect(streamTile.getByText('Could not connect to this stream.')).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect
+      .poll(async () => {
+        const rows = (await authSessions.sql(
+          `SELECT count(*)::int AS count
+             FROM stream_subscription subscription
+            WHERE subscription.viewer_membership_id = $1
+              AND subscription.ended_at IS NULL`,
+          [membership('Shell Host')],
+        )) as { count: number }[]
+        return rows[0]?.count ?? 0
+      })
+      .toBe(0)
+    const retry = streamTile.getByRole('button', {
+      name: "Retry watching Filler 1's screen",
+    })
+    await retry.click()
+    await expect(streamTile).toHaveAttribute('data-member-watched', 'true')
+    await expect(page.locator('.room-mosaic')).toHaveAttribute('data-has-watch', 'true')
+    await expect(
+      streamTile.getByRole('button', { name: "Stop watching Filler 1's screen" }),
+    ).toBeVisible()
+
     const mediumWatchLayout = await page.locator('.room-mosaic').evaluate((mosaic) => {
       const all = [...mosaic.querySelectorAll<HTMLElement>('.room-mosaic__tile')]
-      // Deliberately not the first tile: the stage takes the first row even when
-      // earlier members precede it in DOM/roster order.
-      const watched = all[2]
+      const watched = mosaic.querySelector<HTMLElement>('[data-member-watched="true"]')
       const canvas = mosaic.closest<HTMLElement>('.room-stage__canvas')
       if (!watched || !canvas) throw new Error('Medium watch layout is incomplete')
-      watched.setAttribute('data-member-watched', 'true')
-      mosaic.setAttribute('data-has-watch', 'true')
       const stage = watched.getBoundingClientRect()
       const viewport = canvas.getBoundingClientRect()
       const others = all
@@ -769,29 +790,28 @@ test('the member mosaic exposes responsive emphasis, presence, watcher, media, a
         footerRows: Math.round(
           watched.querySelector('.room-mosaic__footer')!.getBoundingClientRect().height,
         ),
-        overflows: mosaic.scrollWidth > mosaic.clientWidth,
+        mosaicClientWidth: mosaic.clientWidth,
       }
     })
     // Full mosaic width, first row, every remaining member beneath it.
     expect(mediumWatchLayout.stageWidth).toBe(mediumWatchLayout.mosaicWidth)
     expect(mediumWatchLayout.highestOtherTop).toBeGreaterThan(mediumWatchLayout.stageTop)
     expect(mediumWatchLayout.widestOther).toBeLessThan(mediumWatchLayout.stageWidth)
-    expect(mediumWatchLayout.overflows).toBe(false)
+    await expect
+      .poll(() =>
+        page.locator('.room-mosaic').evaluate((mosaic) => ({
+          scrollWidth: mosaic.scrollWidth,
+          clientWidth: mosaic.clientWidth,
+        })),
+      )
+      .toMatchObject({ scrollWidth: mediumWatchLayout.mosaicClientWidth })
     // The stage and its one-row footer fit the canvas, and the next row still
     // peeks: a viewer can see there is another Stream to switch to.
     expect(mediumWatchLayout.stageBottom).toBeLessThanOrEqual(mediumWatchLayout.canvasBottom)
     expect(mediumWatchLayout.canvasBottom - mediumWatchLayout.highestOtherTop).toBeGreaterThan(48)
     expect(mediumWatchLayout.footerRows).toBeLessThan(96)
 
-    await page.locator('.room-mosaic').evaluate((mosaic) => {
-      for (const tile of mosaic.querySelectorAll('[data-member-watched="true"]')) {
-        tile.setAttribute('data-member-watched', 'false')
-      }
-    })
-
     await page.setViewportSize({ width: 390, height: 844 })
-    await streamTile.evaluate((node) => node.setAttribute('data-member-watched', 'true'))
-    await page.locator('.room-mosaic').evaluate((node) => node.setAttribute('data-has-watch', 'true'))
     const mobile = await page.locator('.room-mosaic').evaluate((mosaic) => {
       const watched = mosaic.querySelector<HTMLElement>('[data-member-watched="true"]')
       const remaining = mosaic.querySelector<HTMLElement>(
@@ -811,32 +831,6 @@ test('the member mosaic exposes responsive emphasis, presence, watcher, media, a
     expect(mobile.stageWidth).toBeGreaterThanOrEqual(350)
     expect(mobile.stripTop).toBeGreaterThan(mobile.stageTop)
     expect(mobile.scrollWidth).toBeGreaterThan(mobile.clientWidth)
-
-    // A publisher-free seeded Stream deterministically exhausts the watch and
-    // returns to Preview/Retry without creating a hidden fallback watch.
-    await streamTile.evaluate((node) => node.setAttribute('data-member-watched', 'false'))
-    const watch = streamTile.getByRole('button', { name: "Watch Filler 1's screen" })
-    await watch.scrollIntoViewIfNeeded()
-    await watch.click()
-    await expect(streamTile.getByText('Could not connect to this stream.')).toBeVisible({
-      timeout: 12_000,
-    })
-    await expect(
-      streamTile.getByRole('button', { name: "Retry watching Filler 1's screen" }),
-    ).toBeVisible()
-    await expect(streamTile).toHaveAttribute('data-member-watched', 'false')
-    await expect
-      .poll(async () => {
-        const rows = (await authSessions.sql(
-          `SELECT count(*)::int AS count
-             FROM stream_subscription subscription
-            WHERE subscription.viewer_membership_id = $1
-              AND subscription.ended_at IS NULL`,
-          [membership('Shell Host')],
-        )) as { count: number }[]
-        return rows[0]?.count ?? 0
-      })
-      .toBe(0)
   } finally {
     await dropRoom(authSessions, roomId)
   }

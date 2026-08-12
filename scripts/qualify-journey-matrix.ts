@@ -10,15 +10,17 @@ import {
 
 /** Produces the retained V1 journey-matrix artifact for #26.
 
-    Runs the full Playwright matrix with retries disabled, then aggregates the per-test
-    records the fixture recorder wrote. The verdict comes from `evaluateJourneyMatrix`, so
-    the acceptance claim is computed from observations rather than read off a summary line.
+    By default this runs the full Playwright matrix with retries disabled, then aggregates
+    the per-test records the fixture recorder wrote. CI can pass `--records` to evaluate
+    records produced by an earlier e2e job without running the browser suite twice. The
+    verdict comes from `evaluateJourneyMatrix`, so the acceptance claim is computed from
+    observations rather than read off a summary line.
 
-    Usage: pnpm qualify:journey [--output PATH] */
+    Usage: pnpm qualify:journey [--records PATH] [--output PATH] */
 
 /** Per-run and outside the working tree, so a concurrent git operation in another session
     cannot delete this run's records while the suite is still writing them. */
-const RECORD_DIRECTORY = join(tmpdir(), `journey-records-${process.pid}`)
+const DEFAULT_RECORD_DIRECTORY = join(tmpdir(), `journey-records-${process.pid}`)
 
 /** The canonical V1 journey from ADR 0013: discovery, a live room, and a public profile.
     A matrix that never reaches one of these is not the V1 contract, whatever it reports. */
@@ -59,41 +61,66 @@ const EXPECTATIONS: JourneyExpectations = {
 }
 
 let output = resolve('test-results/v1-journey-matrix.json')
-for (let index = 0; index < process.argv.length - 2; index += 1) {
-  const argument = process.argv[index + 2]
-  if (argument === '--output') output = resolve(process.argv[index + 3] ?? '')
-  else if (argument.startsWith('--')) throw new Error(`Unknown option: ${argument}`)
+let recordDirectory: string | undefined
+const arguments_ = process.argv.slice(2)
+for (let index = 0; index < arguments_.length; index += 1) {
+  const argument = arguments_[index]
+  if (argument === '--output' || argument === '--records') {
+    const value = arguments_[index + 1]
+    if (!value || value.startsWith('--')) {
+      throw new Error(`${argument} requires a path`)
+    }
+    if (argument === '--output') output = resolve(value)
+    else recordDirectory = resolve(value)
+    index += 1
+  } else if (argument.startsWith('--')) {
+    throw new Error(`Unknown option: ${argument}`)
+  }
 }
 
-// A stale record from an earlier run would be counted as this run's evidence.
-await rm(RECORD_DIRECTORY, { recursive: true, force: true })
-await mkdir(RECORD_DIRECTORY, { recursive: true })
+const recordsWereProvided = recordDirectory !== undefined
+recordDirectory ??= DEFAULT_RECORD_DIRECTORY
+if (!recordsWereProvided) {
+  // A stale record from an earlier run would be counted as this run's evidence.
+  await rm(recordDirectory, { recursive: true, force: true })
+  await mkdir(recordDirectory, { recursive: true })
+}
 
-const startedAt = new Date().toISOString()
-const exitCode = await new Promise<number>((resolvePromise, reject) => {
-  const child = spawn(
-    'pnpm',
-    ['test:e2e', '--', '--retries=0', '--reporter=list'],
-    { stdio: 'inherit', env: { ...process.env, JOURNEY_RECORD_DIR: RECORD_DIRECTORY } },
-  )
-  child.on('error', reject)
-  child.on('close', (code) => resolvePromise(code ?? 1))
-})
+const startedAt = recordsWereProvided ? null : new Date().toISOString()
+const exitCode = recordsWereProvided
+  ? null
+  : await new Promise<number>((resolvePromise, reject) => {
+      const child = spawn(
+        'pnpm',
+        ['test:e2e', '--', '--retries=0', '--reporter=list'],
+        {
+          stdio: 'inherit',
+          env: { ...process.env, JOURNEY_RECORD_DIR: recordDirectory },
+        },
+      )
+      child.on('error', reject)
+      child.on('close', (code) => resolvePromise(code ?? 1))
+    })
 
-const files = await readdir(RECORD_DIRECTORY)
+const files = await readdir(recordDirectory)
 const records: JourneyRecord[] = await Promise.all(
   files
     .filter((file) => file.endsWith('.json'))
-    .map(async (file) => JSON.parse(await readFile(join(RECORD_DIRECTORY, file), 'utf8'))),
+    .map(async (file) => JSON.parse(await readFile(join(recordDirectory, file), 'utf8'))),
 )
 if (records.length === 0) throw new Error('The matrix produced no journey records')
 
 const evaluated = evaluateJourneyMatrix(records, EXPECTATIONS)
 const artifact = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   startedAt,
   completedAt: new Date().toISOString(),
-  runner: { command: 'pnpm test:e2e -- --retries=0', playwrightExitCode: exitCode },
+  runner: {
+    command: recordsWereProvided
+      ? 'pnpm test:e2e (records supplied by producer job)'
+      : 'pnpm test:e2e -- --retries=0',
+    playwrightExitCode: exitCode,
+  },
   expectations: EXPECTATIONS,
   verdict: evaluated.verdict,
   checks: evaluated.checks,
@@ -113,7 +140,9 @@ console.log(
   ),
 )
 
-if (exitCode !== 0) throw new Error(`Playwright exited ${exitCode}; the matrix did not pass`)
+if (exitCode !== null && exitCode !== 0) {
+  throw new Error(`Playwright exited ${exitCode}; the matrix did not pass`)
+}
 if (evaluated.verdict !== 'pass') {
   const failed = Object.entries(evaluated.checks)
     .filter(([, value]) => !value)

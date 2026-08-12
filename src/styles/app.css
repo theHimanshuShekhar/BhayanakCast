@@ -2557,7 +2557,7 @@ p.home-filters__facets {
 }
 
 .room-chip--live {
-  background: color-mix(in srgb, var(--live) 12%, transparent);
+  background: color-mix(in srgb, var(--live) 6%, transparent);
   box-shadow: none;
   color: var(--live);
   font-weight: 500;
@@ -5047,6 +5047,7 @@ body:has(.room-shell) > .root-controls {
     grid-column: 1 / -1;
     grid-row: 1;
   }
+
 
   /* A full-width stage is the definition of "space permits", so its footer
      collapses to the one row ADR 0101 allows instead of the four stacked rows

@@ -103,14 +103,36 @@ describe('direct-watch retry policy', () => {
     expect(subject.wasExhausted()).toBe(false)
   })
 
-  it('exposes an abort signal so a peer attempt can be cancelled', async () => {
-    const retryer = new AsyncRetryer(async (_streamId: string) => {}, WATCH_RETRY_OPTIONS)
-    let observed: AbortSignal | null = null
-    retryer.fn = async (_streamId: string) => {
-      observed = retryer.getAbortSignal()
-    }
-    await retryer.execute('stream-1')
-    expect(observed).toBeInstanceOf(AbortSignal)
+  it('aborts an in-flight peer attempt through its abort signal', async () => {
+    let completed = false
+    let cancelled = false
+    const retryer = new AsyncRetryer(async (_streamId: string) => {
+      const signal = retryer.getAbortSignal()
+      if (!signal) throw new Error('Expected an active abort signal')
+      await new Promise<void>((resolve, reject) => {
+        const completion = setTimeout(() => {
+          completed = true
+          resolve()
+        }, 1_000)
+        signal.addEventListener(
+          'abort',
+          () => {
+            clearTimeout(completion)
+            cancelled = true
+            reject(new DOMException('Peer attempt cancelled', 'AbortError'))
+          },
+          { once: true },
+        )
+      })
+    }, WATCH_RETRY_OPTIONS)
+
+    const run = retryer.execute('stream-1')
+    retryer.abort()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await run
+
+    expect(cancelled).toBe(true)
+    expect(completed).toBe(false)
   })
 
   it('never adds jitter to the documented waits', () => {

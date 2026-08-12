@@ -23,5 +23,5 @@ describe('create and admission boundary', () => {
       validateCreateRoomInput({ name: 'valid', tags: ['a', 'b', 'c', 'd', 'e', 'f'] }),
     ).toThrow('ROOM_TAG_COUNT')
   })
-
 })
+

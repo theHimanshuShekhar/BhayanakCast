@@ -1,6 +1,8 @@
-import { describe, expect, test } from 'vitest'
+import type { Pool } from 'pg'
+import { describe, expect, test, vi } from 'vitest'
 import {
   REPORT_REASONS,
+  ReportService,
   submitReport,
   type ReportInput,
 } from '../../src/server/moderation/report-service'
@@ -19,8 +21,6 @@ function report(overrides: Partial<ReportInput> = {}): ReportInput {
 }
 
 describe('submitReport', () => {
-  // The rejections below are decided before any database work, so no pool is
-  // bound here — reaching the insert would throw and fail the test.
   test('requires details only for `other`', async () => {
     await expect(submitReport('account-1', report())).resolves.toEqual({
       status: 'details-required',
@@ -28,6 +28,17 @@ describe('submitReport', () => {
     await expect(
       submitReport('account-1', report({ reason: 'other', details: '   ' })),
     ).resolves.toEqual({ status: 'details-required' })
+
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [{ previewKey: null }] })
+      .mockResolvedValueOnce({ rows: [] })
+    const service = new ReportService({ query } as unknown as Pool, {
+      operationalLog: () => undefined,
+    })
+    await expect(
+      service.submit('account-1', report({ reason: 'spam', details: null })),
+    ).resolves.toEqual({ status: 'received' })
   })
 
   test('rejects details past the stored limit', async () => {

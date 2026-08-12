@@ -68,7 +68,7 @@ async function openSocket(cookie: string, origin: string) {
     only to collapse this visitor's own tabs. `userAgent` moves the socket into
     its own connection-cap bucket, since the cap keys on IP and User-Agent and
     every socket here shares one address. */
-async function openAnonymousSocket(
+function createAnonymousSocket(
   origin: string,
   options: { visitorId?: string; userAgent?: string; reconnection?: boolean } = {},
 ) {
@@ -81,6 +81,14 @@ async function openAnonymousSocket(
   })
 
   sockets.push(socket)
+  return socket
+}
+
+async function openAnonymousSocket(
+  origin: string,
+  options: { visitorId?: string; userAgent?: string; reconnection?: boolean } = {},
+) {
+  const socket = createAnonymousSocket(origin, options)
   await waitForSocketEvent(socket, 'connect')
   return socket
 }
@@ -348,25 +356,47 @@ describe('Home realtime event contract', () => {
 
   test('anonymous visitor holds no room channel', async () => {
     const context = await getIntegrationContext()
+    const userAgent = `anonymous-stream-${randomUUID()}`
+    const observer = await openAnonymousSocket(context.server.origin, {
+      visitorId: `observer-${randomUUID()}`,
+      userAgent,
+    })
+    const admitted = waitForHomeEvent(
+      observer,
+      (event) => event.type === 'presence' && event.connectedCount === 2,
+    )
     const anonymous = await openAnonymousSocket(context.server.origin, {
       visitorId: `visitor-${randomUUID()}`,
-      userAgent: `anonymous-stream-${randomUUID()}`,
+      userAgent,
     })
+    await admitted
 
-    // No room listener is registered for an anonymous socket at all, so the
-    // command is not rejected — it is never heard, and the ack never fires.
-    const joined = await new Promise<unknown>((resolve) => {
-      anonymous.emit(ROOM_JOIN_COMMAND, 'any-room', resolve)
-      setTimeout(() => resolve('no-acknowledgement'), 500)
+    // Disconnect is queued after the command on the same transport. Observing
+    // the resulting presence event proves the server passed the command
+    // checkpoint without invoking its acknowledgement.
+    let acknowledged = false
+    const departed = waitForHomeEvent(
+      observer,
+      (event) => event.type === 'presence' && event.connectedCount === 1,
+    )
+    anonymous.emit(ROOM_JOIN_COMMAND, 'any-room', () => {
+      acknowledged = true
     })
-    expect(joined).toBe('no-acknowledgement')
+    anonymous.disconnect()
+    await departed
+    expect(acknowledged).toBe(false)
   })
 
   test('anonymous connections are capped per client', async () => {
     const context = await getIntegrationContext()
     const userAgent = `anonymous-cap-${randomUUID()}`
-    const opened: Socket[] = []
-    for (let index = 0; index < 8; index += 1) {
+    const opened: Socket[] = [
+      await openAnonymousSocket(context.server.origin, {
+        visitorId: `visitor-${randomUUID()}`,
+        userAgent,
+      }),
+    ]
+    for (let index = 1; index < 7; index += 1) {
       opened.push(
         await openAnonymousSocket(context.server.origin, {
           visitorId: `visitor-${randomUUID()}`,
@@ -374,19 +404,36 @@ describe('Home realtime event contract', () => {
         }),
       )
     }
+    const capFilled = waitForHomeEvent(
+      opened[0]!,
+      (event) => event.type === 'presence' && event.connectedCount === 8,
+    )
+    opened.push(
+      await openAnonymousSocket(context.server.origin, {
+        visitorId: `visitor-${randomUUID()}`,
+        userAgent,
+      }),
+    )
+    await capFilled
     expect(opened.every((socket) => socket.connected)).toBe(true)
 
-    const ninth = await openAnonymousSocket(context.server.origin, {
+    const ninth = createAnonymousSocket(context.server.origin, {
       visitorId: `visitor-${randomUUID()}`,
       userAgent,
     })
-    await waitForSocketEvent(ninth, 'disconnect')
+    const rejected = waitForSocketEvent(ninth, 'disconnect')
+    await waitForSocketEvent(ninth, 'connect')
+    await rejected
     expect(ninth.connected).toBe(false)
 
-    // The slot returns when a socket leaves, so the cap throttles rather than
-    // permanently locking a client out.
+    // The presence transition is published after the slot is released, so it
+    // is the barrier for opening a replacement rather than a scheduler delay.
+    const slotReleased = waitForHomeEvent(
+      opened[1]!,
+      (event) => event.type === 'presence' && event.connectedCount === 7,
+    )
     opened[0]!.disconnect()
-    await new Promise((resolve) => setTimeout(resolve, 100))
+    await slotReleased
     const replacement = await openAnonymousSocket(context.server.origin, {
       visitorId: `visitor-${randomUUID()}`,
       userAgent,
