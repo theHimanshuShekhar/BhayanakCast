@@ -10,6 +10,13 @@ const LISTENING = /BhayanakCast listening on http:\/\/127\.0\.0\.1:(\d+)/
 const READINESS_TIMEOUT_MS = 10_000
 const RUNTIME_TIMEOUT_MS = 10_000
 const SHUTDOWN_GRACE_MS = 5_000
+const MAX_CAPTURED_OUTPUT_LENGTH = 16_384
+
+interface ChildOutputCapture {
+  output: string
+}
+
+const childOutputCaptures = new WeakMap<ChildProcess, ChildOutputCapture>()
 
 export interface TestAuthConfiguration {
   readonly secret: string
@@ -39,6 +46,7 @@ export interface TestServer {
 export async function startTestServer(
   environment: TestEnvironment,
   cwd = process.cwd(),
+  readinessTimeoutMs = READINESS_TIMEOUT_MS,
 ): Promise<TestServer> {
   const auth: TestAuthConfiguration = {
     secret: `${randomUUID()}${randomUUID()}`,
@@ -68,20 +76,14 @@ export async function startTestServer(
     },
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
   })
+  captureChildOutput(child)
 
   let ready: { port: number; bindings: RuntimeBindings }
   try {
-    ready = await waitForReady(child)
+    ready = await waitForReady(child, readinessTimeoutMs)
   } catch (error) {
     if (child.exitCode === null && child.signalCode === null) {
-      try {
-        await stopChild(child)
-      } catch (cleanupError) {
-        throw new AggregateError(
-          [error, cleanupError],
-          'test server startup failed and its child could not be stopped cleanly',
-        )
-      }
+      await stopChild(child).catch(() => undefined)
     }
     throw error
   }
@@ -117,29 +119,39 @@ export async function stopChild(
   child: ChildProcess,
   graceMs = SHUTDOWN_GRACE_MS,
 ) {
-  if (child.exitCode !== null || child.signalCode !== null) {
-    assertCleanExit(child.exitCode, child.signalCode)
-    return
-  }
+  captureChildOutput(child)
+  try {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      assertCleanExit(child.exitCode, child.signalCode)
+      return
+    }
 
-  const terminated = await signalAndWait(child, 'SIGTERM', graceMs)
-  if (terminated) {
-    assertCleanExit(child.exitCode, child.signalCode)
-    return
-  }
+    const terminated = await signalAndWait(child, 'SIGTERM', graceMs)
+    if (terminated) {
+      assertCleanExit(child.exitCode, child.signalCode)
+      return
+    }
 
-  const killed = await signalAndWait(child, 'SIGKILL', graceMs)
-  if (!killed) {
-    throw new Error(
-      `test server did not exit after SIGKILL within ${graceMs}ms`,
+    const killed = await signalAndWait(child, 'SIGKILL', graceMs)
+    if (!killed) {
+      throw new Error(
+        `did not exit after SIGKILL within ${graceMs}ms`,
+      )
+    }
+    if (child.signalCode === 'SIGKILL') {
+      throw new Error(
+        `ignored SIGTERM for ${graceMs}ms grace period and was killed with SIGKILL`,
+      )
+    }
+    assertCleanExit(child.exitCode, child.signalCode)
+  } catch (error) {
+    throw lifecycleError(
+      'stop',
+      error instanceof Error ? error.message : String(error),
+      child,
+      error,
     )
   }
-  if (child.signalCode === 'SIGKILL') {
-    throw new Error(
-      `test server ignored SIGTERM for ${graceMs}ms grace period and was killed with SIGKILL`,
-    )
-  }
-  assertCleanExit(child.exitCode, child.signalCode)
 }
 
 function signalAndWait(
@@ -190,8 +202,11 @@ export function callRuntime<T>(
   timeoutMs = RUNTIME_TIMEOUT_MS,
 ) {
   return new Promise<T>((resolve, reject) => {
+    captureChildOutput(child)
+    const operationError = (message: string, cause?: unknown) =>
+      lifecycleError(`runtime operation ${operation}`, message, child, cause)
     if (!child.connected || child.exitCode !== null || child.signalCode) {
-      reject(new Error('test server is not available'))
+      reject(operationError('is unavailable'))
       return
     }
 
@@ -215,18 +230,17 @@ export function callRuntime<T>(
       if (!isRuntimeResult(message) || message.id !== id || settled) return
       settled = true
       cleanup()
-      if (message.error) reject(new Error(message.error))
+      if (message.error) reject(operationError(message.error))
       else resolve(message.result as T)
     }
-    const onError = (error: Error) => fail(error)
+    const onError = (error: Error) =>
+      fail(operationError(error.message, error))
     const onExit = (code: number | null, signal: NodeJS.Signals | null) =>
       fail(
-        new Error(
-          `test server exited during ${operation} (code ${code}, signal ${signal})`,
-        ),
+        operationError(`exited (code ${code}, signal ${signal})`),
       )
     const onDisconnect = () =>
-      fail(new Error(`test server IPC disconnected during ${operation}`))
+      fail(operationError('lost its IPC connection'))
 
     child.on('message', onMessage)
     child.once('error', onError)
@@ -235,9 +249,7 @@ export function callRuntime<T>(
     timer = setTimeout(
       () =>
         fail(
-          new Error(
-            `test server runtime operation ${operation} timed out after ${timeoutMs}ms`,
-          ),
+          operationError(`timed out after ${timeoutMs}ms`),
         ),
       timeoutMs,
     )
@@ -245,11 +257,18 @@ export function callRuntime<T>(
       child.send(
         { type: 'runtime-command', id, operation, ...payload },
         (error) => {
-          if (error) fail(error)
+          if (error) {
+            fail(operationError(`could not be sent: ${error.message}`, error))
+          }
         },
       )
     } catch (error) {
-      fail(error instanceof Error ? error : new Error(String(error)))
+      fail(
+        operationError(
+          `could not be sent: ${error instanceof Error ? error.message : String(error)}`,
+          error,
+        ),
+      )
     }
   })
 }
@@ -276,7 +295,7 @@ export function waitForReady(
         return
       }
 
-      let output = ''
+      const capture = captureChildOutput(child)
       let port: number | undefined
       let bindings: RuntimeBindings | undefined
       let timer: NodeJS.Timeout | undefined
@@ -301,9 +320,8 @@ export function waitForReady(
         cleanup()
         resolve({ port, bindings })
       }
-      const onData = (chunk: Buffer) => {
-        output += chunk.toString()
-        const match = LISTENING.exec(output)
+      const onData = () => {
+        const match = LISTENING.exec(capture.output)
         if (match) port = Number(match[1])
         finish()
       }
@@ -316,7 +334,7 @@ export function waitForReady(
       const onExit = (code: number | null, signal: NodeJS.Signals | null) =>
         fail(
           new Error(
-            `server exited with ${code}/${signal} before readiness:\n${output}`,
+            `server exited with ${code}/${signal} before readiness:\n${capture.output}`,
           ),
         )
 
@@ -329,12 +347,49 @@ export function waitForReady(
         () =>
           fail(
             new Error(
-              `test server readiness timed out after ${timeoutMs}ms:\n${output}`,
+              `test server readiness timed out after ${timeoutMs}ms:\n${capture.output}`,
             ),
           ),
         timeoutMs,
       )
     },
+  )
+}
+
+function captureChildOutput(child: ChildProcess) {
+  const existing = childOutputCaptures.get(child)
+  if (existing) return existing
+
+  const capture: ChildOutputCapture = { output: '' }
+  const onData = (chunk: Buffer) => {
+    const output = capture.output + chunk.toString()
+    capture.output = output.length <= MAX_CAPTURED_OUTPUT_LENGTH
+      ? output
+      : output.slice(-MAX_CAPTURED_OUTPUT_LENGTH)
+  }
+  child.stdout?.on('data', onData)
+  child.stderr?.on('data', onData)
+  child.once('close', () => {
+    child.stdout?.off('data', onData)
+    child.stderr?.off('data', onData)
+  })
+  childOutputCaptures.set(child, capture)
+  return capture
+}
+
+function lifecycleError(
+  operation: string,
+  message: string,
+  child: ChildProcess,
+  cause?: unknown,
+) {
+  const output = captureChildOutput(child).output
+  const diagnostics = output
+    ? `\nCaptured child output:\n${output}`
+    : ''
+  return new Error(
+    `test server ${operation} failed: ${message}${diagnostics}`,
+    cause === undefined ? undefined : { cause },
   )
 }
 

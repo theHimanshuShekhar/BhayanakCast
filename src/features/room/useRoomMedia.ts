@@ -104,6 +104,26 @@ export const WATCH_RETRY_OPTIONS = {
   throwOnError: false,
 } as const
 
+interface WatchRetryCallbacks {
+  readonly onRetry?: () => void
+  readonly onLastError?: () => void
+}
+
+export function createWatchRetryer(
+  attempt: (streamId: string, signal: AbortSignal) => Promise<void>,
+  callbacks: WatchRetryCallbacks = {},
+) {
+  const retryer: AsyncRetryer<(streamId: string) => Promise<void>> = new AsyncRetryer(
+    (streamId) => {
+      const signal = retryer.getAbortSignal()
+      if (!signal) throw new Error('Watch attempt started without an AbortSignal')
+      return attempt(streamId, signal)
+    },
+    { ...WATCH_RETRY_OPTIONS, ...callbacks },
+  )
+  return retryer
+}
+
 const WATCH_CLEANUP_RETRY_OPTIONS = {
   ...WATCH_RETRY_OPTIONS,
   maxExecutionTime: 5_000,
@@ -607,17 +627,10 @@ export function useRoomMedia({
       setWatch(beginWatchSelection(watch, streamId).next)
       observeRoom(roomWatchEvent(action, 'started', sequence.attempt, sequence.id))
       let exhausted = false
-      const retryer: AsyncRetryer<(id: string) => Promise<void>> = new AsyncRetryer(
-        (id: string) =>
-          negotiate(
-            id,
-            retryer.getAbortSignal(),
-            action,
-            sequence.attempt,
-            sequence.id,
-          ),
+      const retryer = createWatchRetryer(
+        (id, signal) =>
+          negotiate(id, signal, action, sequence.attempt, sequence.id),
         {
-          ...WATCH_RETRY_OPTIONS,
           onRetry: () => {
             if (watchSequence.current?.id !== sequence.id) return
             closeInbound()
@@ -692,18 +705,18 @@ export function useRoomMedia({
       settles only when the publisher's media arrives (ADR 0104). */
   async function negotiate(
     streamId: string,
-    signal: AbortSignal | null,
+    signal: AbortSignal,
     action: 'watch' | 'retry',
     attempt: number,
     sequenceId: string,
   ) {
     const result = await watchStream({ data: { roomId, streamId } })
     if (result.status !== 'subscribed') throw new Error(result.status)
-    if (signal?.aborted) throw new Error('aborted')
+    if (signal.aborted) throw new Error('aborted')
     const peer = new RTCPeerConnection({ iceServers: ICE_SERVERS })
     inbound.current = { id: result.id, peer }
     await new Promise<void>((resolve, reject) => {
-      signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
+      signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
       peer.onicecandidate = (event) => {
         if (!event.candidate) return
         sendSignal(result.id, {

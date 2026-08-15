@@ -3,6 +3,7 @@ import { AsyncRetryer } from '@tanstack/pacer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   beginWatchSelection,
+  createWatchRetryer,
   WATCH_MAX_ATTEMPTS,
   WATCH_RETRY_OPTIONS,
   isDesktopCaptureClient,
@@ -106,28 +107,38 @@ describe('direct-watch retry policy', () => {
   it('aborts an in-flight peer attempt through its abort signal', async () => {
     let completed = false
     let cancelled = false
-    const retryer = new AsyncRetryer(async (_streamId: string) => {
-      const signal = retryer.getAbortSignal()
-      if (!signal) throw new Error('Expected an active abort signal')
+    let completeAttempt: () => void = () => {
+      throw new Error('Peer attempt did not start')
+    }
+    let markStarted = () => {}
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve
+    })
+    const retryer = createWatchRetryer(async (_streamId, signal) => {
       await new Promise<void>((resolve, reject) => {
-        const completion = setTimeout(() => {
+        let active = true
+        completeAttempt = () => {
+          if (!active) return
           completed = true
           resolve()
-        }, 1_000)
+        }
+        markStarted()
         signal.addEventListener(
           'abort',
           () => {
-            clearTimeout(completion)
+            active = false
             cancelled = true
             reject(new DOMException('Peer attempt cancelled', 'AbortError'))
           },
           { once: true },
         )
       })
-    }, WATCH_RETRY_OPTIONS)
+    })
 
     const run = retryer.execute('stream-1')
+    await started
     retryer.abort()
+    completeAttempt()
     await vi.advanceTimersByTimeAsync(1_000)
     await run
 

@@ -111,39 +111,6 @@ async function refetchHomeQuery(page: Page, queryKey: readonly string[]) {
   }, queryKey)
 }
 
-async function waitForHomeQueryQueueFlush(page: Page) {
-  await page.waitForFunction(() => {
-    const roots = (window as TestWindow).__HOME_TEST_REACT_ROOTS__ ?? []
-    const pending = roots.map((root) => root.current)
-    const seen = new Set<unknown>()
-    while (pending.length > 0) {
-      const fiber = pending.pop() as
-        | {
-            child?: unknown
-            sibling?: unknown
-            memoizedProps?: {
-              client?: {
-                getQueryCache?: unknown
-                isFetching?: () => number
-              }
-            }
-          }
-        | undefined
-      if (!fiber || seen.has(fiber)) continue
-      seen.add(fiber)
-      const client = fiber.memoizedProps?.client
-      if (
-        typeof client?.getQueryCache === 'function' &&
-        typeof client.isFetching === 'function'
-      ) {
-        return client.isFetching() === 0
-      }
-      pending.push(fiber.child, fiber.sibling)
-    }
-    return false
-  })
-}
-
 async function navigateHome(page: Page, q: string, waitForCompletion = true) {
   const navigation = page.evaluate(
     async ({ query, wait }) => {
@@ -323,8 +290,16 @@ test('Home hydrates critical SSR sections without duplicate browser fetches', as
   // counter is display:none, while its boundary still owns the pending and failed states.
   await expect(page.getByTestId('home-counter')).toBeAttached()
   await expect(page.locator('.home-section-skeleton')).toHaveCount(0)
-  await waitForHomeQueryQueueFlush(page)
-  expect(requests.filter((url) => !url.includes('/socket.io/'))).toHaveLength(1)
+  const barrierUrl = '/?hydration-request-barrier=1'
+  await page.evaluate(async (url) => {
+    const response = await fetch(url)
+    if (!response.ok) {
+      throw new Error(`Hydration request barrier failed with ${response.status}`)
+    }
+  }, barrierUrl)
+  const browserRequests = requests.filter((url) => !url.includes('/socket.io/'))
+  expect(browserRequests.filter((url) => !url.includes(barrierUrl))).toHaveLength(1)
+  expect(browserRequests.filter((url) => url.includes(barrierUrl))).toHaveLength(1)
 })
 
 test('independent SSR requests do not reuse another request cache', async ({

@@ -33,10 +33,16 @@ test('a room member can start a captured Stream', async ({ authSessions }) => {
       const getDisplayMedia = navigator.mediaDevices.getDisplayMedia.bind(navigator.mediaDevices)
       navigator.mediaDevices.getDisplayMedia = async (options) => {
         try {
-          return await getDisplayMedia({ video: true })
+          const stream = await getDisplayMedia(options)
+          const videoTrack = stream.getVideoTracks()[0]
+          if (!videoTrack) throw new Error('Display capture returned no video track')
+          document.body.dataset.captureTrackLive = String(videoTrack.readyState === 'live')
+          document.body.dataset.captureDisplaySurface =
+            videoTrack.getSettings().displaySurface ?? ''
+          return stream
         } catch (error) {
-          const failure = error as Error
-          document.body.dataset.captureFailure = `${failure.name}: ${failure.message}`
+          document.body.dataset.captureFailure =
+            error instanceof Error ? `${error.name}: ${error.message}` : String(error)
           throw error
         }
       }
@@ -46,6 +52,10 @@ test('a room member can start a captured Stream', async ({ authSessions }) => {
       page.getByRole('button', { name: 'Stop Stream' }).or(page.getByRole('alert')),
     ).toBeVisible()
     expect(await page.locator('body').getAttribute('data-capture-failure')).toBeNull()
+    expect(await page.locator('body').getAttribute('data-capture-track-live')).toBe('true')
+    expect(
+      await page.locator('body').getAttribute('data-capture-display-surface'),
+    ).toEqual(expect.stringMatching(/\S/))
 
     await expect(page.getByRole('button', { name: 'Stop Stream' })).toBeVisible()
     await expect(page.getByRole('alert')).toHaveCount(0)

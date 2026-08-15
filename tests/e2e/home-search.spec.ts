@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { Page } from '@playwright/test'
-import { expect, expectCenteredModal, test } from './fixtures'
+import { expect, expectCenteredModal, gotoHydrated, test } from './fixtures'
 import type { AuthSessionFixture } from './fixtures'
 
 async function seedSearch(authSessions: AuthSessionFixture) {
@@ -34,7 +34,7 @@ test('debounces text into replace-history URLs and Enter flushes immediately', a
 }) => {
   await page.clock.install()
   await seedSearch(authSessions)
-  await page.goto(authSessions.origin)
+  await gotoHydrated(page, authSessions.origin)
   const input = page.getByRole('searchbox', { name: 'Find rooms and people' })
   const initialHistoryLength = await page.evaluate(() => history.length)
   await input.fill('Atlas')
@@ -51,6 +51,7 @@ test('debounces text into replace-history URLs and Enter flushes immediately', a
   await expect.poll(() => searchParams(page).get('q')).toBe('Atlas Member')
   expect(await page.evaluate(() => history.length)).toBe(initialHistoryLength)
   await page.reload()
+  await expect(page.locator('body')).toHaveAttribute('data-hydrated', 'true')
   await expect(input).toHaveValue('Atlas Member')
   await input.fill('Late query')
   await page.getByRole('button', { name: 'Clear all' }).click()

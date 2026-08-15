@@ -243,11 +243,13 @@ test('a second startup against a current schema changes nothing', async () => {
   const first = subject.runtime()
   await first.migrate()
   await first.close()
-  const before = (await subject.tables()).sort()
+  const beforeTables = (await subject.tables()).sort()
+  const beforeSchema = await subject.applicationSchema()
 
   const second = subject.runtime()
   await second.migrate()
   await second.close()
 
-  expect((await subject.tables()).sort()).toEqual(before)
+  expect((await subject.tables()).sort()).toEqual(beforeTables)
+  expect(await subject.applicationSchema()).toEqual(beforeSchema)
 })

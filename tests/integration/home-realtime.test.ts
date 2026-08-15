@@ -361,41 +361,60 @@ describe('Home realtime event contract', () => {
       visitorId: `observer-${randomUUID()}`,
       userAgent,
     })
-    const admitted = waitForHomeEvent(
+    const observerAdmitted = await waitForHomeEvent(
       observer,
-      (event) => event.type === 'presence' && event.connectedCount === 2,
+      (event) => event.type === 'presence',
+    )
+    if (observerAdmitted.type !== 'presence') return
+    const baseline = observerAdmitted.connectedCount
+
+    const anonymousAdmitted = waitForHomeEvent(
+      observer,
+      (event) =>
+        event.type === 'presence' &&
+        event.connectedCount === baseline + 1,
     )
     const anonymous = await openAnonymousSocket(context.server.origin, {
       visitorId: `visitor-${randomUUID()}`,
       userAgent,
     })
-    await admitted
+    await anonymousAdmitted
 
-    // Disconnect is queued after the command on the same transport. Observing
-    // the resulting presence event proves the server passed the command
-    // checkpoint without invoking its acknowledgement.
+    // Keep the command socket connected, then observe a later presence
+    // broadcast on that same socket. A forbidden acknowledgement is delivered
+    // before this ordered checkpoint and therefore remains observable.
     let acknowledged = false
-    const departed = waitForHomeEvent(
-      observer,
-      (event) => event.type === 'presence' && event.connectedCount === 1,
+    const orderedCheckpoint = waitForHomeEvent(
+      anonymous,
+      (event) =>
+        event.type === 'presence' &&
+        event.connectedCount === baseline + 2,
     )
     anonymous.emit(ROOM_JOIN_COMMAND, 'any-room', () => {
       acknowledged = true
     })
-    anonymous.disconnect()
-    await departed
+    await openAnonymousSocket(context.server.origin, {
+      visitorId: `checkpoint-${randomUUID()}`,
+      userAgent,
+    })
+    await orderedCheckpoint
     expect(acknowledged).toBe(false)
   })
 
   test('anonymous connections are capped per client', async () => {
     const context = await getIntegrationContext()
     const userAgent = `anonymous-cap-${randomUUID()}`
-    const opened: Socket[] = [
-      await openAnonymousSocket(context.server.origin, {
-        visitorId: `visitor-${randomUUID()}`,
-        userAgent,
-      }),
-    ]
+    const first = await openAnonymousSocket(context.server.origin, {
+      visitorId: `visitor-${randomUUID()}`,
+      userAgent,
+    })
+    const firstAdmitted = await waitForHomeEvent(
+      first,
+      (event) => event.type === 'presence',
+    )
+    if (firstAdmitted.type !== 'presence') return
+    const baseline = firstAdmitted.connectedCount
+    const opened: Socket[] = [first]
     for (let index = 1; index < 7; index += 1) {
       opened.push(
         await openAnonymousSocket(context.server.origin, {
@@ -406,7 +425,9 @@ describe('Home realtime event contract', () => {
     }
     const capFilled = waitForHomeEvent(
       opened[0]!,
-      (event) => event.type === 'presence' && event.connectedCount === 8,
+      (event) =>
+        event.type === 'presence' &&
+        event.connectedCount === baseline + 7,
     )
     opened.push(
       await openAnonymousSocket(context.server.origin, {
@@ -430,7 +451,9 @@ describe('Home realtime event contract', () => {
     // is the barrier for opening a replacement rather than a scheduler delay.
     const slotReleased = waitForHomeEvent(
       opened[1]!,
-      (event) => event.type === 'presence' && event.connectedCount === 7,
+      (event) =>
+        event.type === 'presence' &&
+        event.connectedCount === baseline + 6,
     )
     opened[0]!.disconnect()
     await slotReleased
