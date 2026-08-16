@@ -1,12 +1,13 @@
 @import "tailwindcss";
-/* Homepage direction: clubhouse editorial — open media, lively room rhythm, and less card chrome. */
+/* Terminal club: JetBrains Mono everywhere, near-black slate grounds, violet
+   glaze, pill chrome. ADR 0111 supersedes 0096's type and colour tokens. */
 
 @font-face {
-  font-family: "Source Sans 3";
+  font-family: "JetBrains Mono";
   font-style: normal;
-  font-weight: 200 900;
+  font-weight: 100 800;
   font-display: swap;
-  src: url("../../public/fonts/source-sans-3-latin.woff2") format("woff2");
+  src: url("../../public/fonts/jetbrains-mono-latin.woff2") format("woff2");
 }
 
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
@@ -17,7 +18,8 @@ body[data-hydrated="false"] :is(button, input, select, textarea) {
 
 @theme inline {
   --*: initial;
-  --font-sans: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo,
+    Consolas, monospace;
 
   --text-label: 0.8125rem;
   --text-meta: 0.875rem;
@@ -85,60 +87,69 @@ body[data-hydrated="false"] :is(button, input, select, textarea) {
   --safe-area-left: env(safe-area-inset-left);
 }
 
-/* Porcelain and midnight tokens (ADR 0096). Cobalt carries identity,
-   navigation, selection, and action only; Live/Host/warning/danger/private
-   keep their own families. Light elevates with a soft ink shadow, dark with
-   borders and lightness. Neither end uses pure black. */
+/* Terminal-club tokens (ADR 0111). Violet carries identity, navigation,
+   selection, and action only; live, host, warning, danger, and private keep
+   their own families, spaced across the hue circle so no hue means two things:
+   violet 305, rose-red 357, coral-red 29, amber 84, green 152, cyan 211.
+   Dark is the canonical world; light is its daylight counterpart with the same
+   vocabulary. Both clear WCAG 2.2 AA on every surface they are used on, and
+   --border-strong clears the 3:1 non-text floor in both. Neither end uses pure
+   black or pure white for text. */
 :root {
-  color-scheme: light;
-  --canvas: #f6f8fc;
-  --surface: #ffffff;
-  --surface-subtle: #edf1f7;
-  --surface-raised: #ffffff;
-  --rail: #edf1f7;
-  --ink: #172033;
-  --ink-secondary: #536078;
-  /* ADR 0096 lists #6B778D for muted, but it only clears AA on pure white
-     (3.99:1 on --surface-subtle). The porcelain ground has room for exactly
-     two low-emphasis steps below --ink-secondary, so muted and faint share
-     the AA floor here; dark keeps them distinct. */
-  --ink-muted: #5f6b81;
-  --ink-faint: #5f6b81;
-  --border: #d7dee9;
-  --border-strong: #aab5c5;
-  --action: #2457d6;
-  --action-hover: #1946b8;
-  --action-soft: #e6edff;
-  --action-line: #2457d6;
-  --action-ink: #ffffff;
-  --live: #c52b69;
-  --host: #147a5a;
-  --warning: #946000;
-  --danger: #b83232;
-  --private: #6842b8;
-  --scrim: rgb(23 32 51 / 0.72);
-  /* Badges pinned over stream frames get no say in what is behind them, so
-     they keep the midnight treatment in both themes — ADR 0096 allows a dark
-     media surface either way. These six are deliberately not re-declared in
-     the dark block: against the porcelain theme's own semantic values a chip
-     on a bright frame measures 1.3:1. ADR 0100 puts the media canvas itself on
-     the same footing, so the ground and its radial edge join them. The values
-     are the midnight theme's own --canvas and --action-soft, so the media
-     surface is the one the theme-color contract already promises rather than a
-     third dark. Named --media-canvas, not --canvas: that token is the page
-     background, in both themes, and every page reads it. */
-  --media-canvas: #0d1422;
-  --media-canvas-edge: #1b3264;
-  --media-scrim: rgb(13 20 34 / 0.86);
-  --on-media-ink: #f4f7fc;
-  --on-media-live: #ff72a5;
-  --on-media-warning: #f2b84b;
-  --on-media-danger: #ff7b72;
-  --on-media-private: #b99aff;
-  --raised-shadow: 0 8px 24px rgb(23 32 51 / 0.08);
-  --card-shadow: 0 0 0 1px var(--border), 0 8px 24px rgb(23 32 51 / 0.08);
-  --card-shadow-hover: 0 0 0 1px var(--action-line), 0 12px 28px rgb(36 87 214 / 0.16);
-  --feature-shadow: 0 0 0 1px var(--border-strong), 0 16px 40px rgb(23 32 51 / 0.12);
+  color-scheme: dark;
+  --canvas: #0b0e14;
+  --surface: #141924;
+  --surface-subtle: #0f141d;
+  --surface-raised: #1b2130;
+  --rail: #0f141d;
+  --ink: #e6eaf3;
+  --ink-secondary: #a5b0c4;
+  --ink-muted: #8b96ab;
+  --ink-faint: #7e899b;
+  --border: #232b3a;
+  --border-strong: #5c6b8b;
+  --action: #c084fc;
+  --action-hover: #d9b3ff;
+  --action-soft: #2a1f47;
+  --action-line: #c084fc;
+  --action-ink: #150b26;
+  --live: #ff5f8f;
+  --host: #4ade80;
+  --warning: #fbbf24;
+  --danger: #ff7a63;
+  --private: #22d3ee;
+  --scrim: rgb(5 7 11 / 0.86);
+  /* Badges pinned over stream frames get no say in what is behind them, so they
+     keep the terminal treatment in both themes. These are deliberately not
+     re-declared in the light block: against a bright captured frame the light
+     theme's own semantic values measure near 1.3:1. Named --media-canvas, not
+     --canvas: that token is the page background, in both themes, and every page
+     reads it. */
+  --media-canvas: #05070b;
+  --media-canvas-edge: #2a1f47;
+  --media-scrim: rgb(5 7 11 / 0.88);
+  --on-media-ink: #e6eaf3;
+  --on-media-live: #ff5f8f;
+  --on-media-warning: #fbbf24;
+  --on-media-danger: #ff7a63;
+  --on-media-private: #22d3ee;
+  /* Account identity, not state. Six tints at OKLCH L=80% C=0.13, each at least
+     24° from every semantic family hue, so a green avatar never reads as Host
+     and a cyan one never reads as private. Theme-invariant like the media
+     tokens: they are light discs carrying dark ink in both themes. */
+  --avatar-tint-1: #7ac3ff;
+  --avatar-tint-2: #ed9ee5;
+  --avatar-tint-3: #fea668;
+  --avatar-tint-4: #b3ca65;
+  --avatar-tint-5: #37d8c9;
+  --avatar-tint-6: #a5b6ff;
+  --avatar-ink: #0b0e14;
+  /* Dark elevates with lightness and a tight near-black drop, not a soft cloud:
+     a terminal panel sits on the ground, it does not float over it. */
+  --raised-shadow: 0 6px 16px -8px rgb(0 0 0 / 0.72);
+  --card-shadow: 0 0 0 1px var(--border), 0 6px 16px -10px rgb(0 0 0 / 0.7);
+  --card-shadow-hover: 0 0 0 1px var(--action-line), 0 10px 22px -12px rgb(0 0 0 / 0.8);
+  --feature-shadow: 0 0 0 1px var(--border-strong), 0 14px 30px -14px rgb(0 0 0 / 0.85);
   --z-content: 0;
   --z-sticky: 20;
   --z-navigation: 30;
@@ -146,34 +157,37 @@ body[data-hydrated="false"] :is(button, input, select, textarea) {
   --z-dialog: 50;
 }
 
-[data-theme="dark"] {
-  color-scheme: dark;
-  --canvas: #0d1422;
-  --surface: #141d2d;
-  --surface-subtle: #1b2639;
-  --surface-raised: #202d43;
-  --rail: #141d2d;
-  --ink: #f4f7fc;
-  --ink-secondary: #bbc5d5;
-  --ink-muted: #94a0b3;
-  --ink-faint: #8894a8;
-  --border: #2b3950;
-  --border-strong: #43536d;
-  --action: #82a5ff;
-  --action-hover: #a1baff;
-  --action-soft: #1b3264;
-  --action-line: #82a5ff;
-  --action-ink: #0b1630;
-  --live: #ff72a5;
-  --host: #55d5a9;
-  --warning: #f2b84b;
-  --danger: #ff7b72;
-  --private: #b99aff;
-  --scrim: rgb(13 20 34 / 0.85);
-  --raised-shadow: 0 8px 20px -10px rgb(4 7 13 / 0.6);
-  --card-shadow: 0 0 0 1px var(--border), 0 8px 20px -10px rgb(4 7 13 / 0.6);
-  --card-shadow-hover: 0 0 0 1px var(--action-line), 0 12px 26px -10px rgb(4 7 13 / 0.7);
-  --feature-shadow: 0 0 0 1px var(--border-strong), 0 16px 36px -12px rgb(4 7 13 / 0.7);
+[data-theme="light"] {
+  color-scheme: light;
+  --canvas: #f2f4f8;
+  --surface: #ffffff;
+  --surface-subtle: #e9edf4;
+  --surface-raised: #ffffff;
+  --rail: #e9edf4;
+  --ink: #131722;
+  --ink-secondary: #4c586e;
+  /* Two low-emphasis steps is all the daylight ground has room for below
+     --ink-secondary, so muted and faint share the AA floor here; dark keeps
+     them distinct. */
+  --ink-muted: #59657c;
+  --ink-faint: #59657c;
+  --border: #dbe1ec;
+  --border-strong: #7b889f;
+  --action: #7326d9;
+  --action-hover: #5c17b8;
+  --action-soft: #eee6ff;
+  --action-line: #7326d9;
+  --action-ink: #ffffff;
+  --live: #c62a5e;
+  --host: #0d7a4f;
+  --warning: #8a5a00;
+  --danger: #bc422a;
+  --private: #0e7490;
+  --scrim: rgb(19 23 34 / 0.72);
+  --raised-shadow: 0 6px 16px rgb(19 23 34 / 0.08);
+  --card-shadow: 0 0 0 1px var(--border), 0 6px 16px rgb(19 23 34 / 0.07);
+  --card-shadow-hover: 0 0 0 1px var(--action-line), 0 10px 22px rgb(115 38 217 / 0.14);
+  --feature-shadow: 0 0 0 1px var(--border-strong), 0 14px 30px rgb(19 23 34 / 0.1);
 }
 
 html {
@@ -181,7 +195,7 @@ html {
   overflow-x: clip;
   background: var(--canvas);
   color: var(--ink);
-  font-family: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-mono);
   font-size: 100%;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -200,14 +214,63 @@ body {
   background: var(--canvas);
   color: var(--ink);
   font-size: 1rem;
+  /* 450 is the ladder's body step: at mono's stem widths 400 reads under-inked
+     on a near-black ground, and 500 reads like a label. */
+  font-weight: 450;
   line-height: 1.5;
 }
 
 /* Preflight zeroes margin on every element, including the auto margins the UA
    uses to centre an open dialog in its containing block. Without this every
-   modal opens pinned to the top-left corner. */
+   modal opens pinned to the top-left corner.
+   The panel treatment lives on the element as well as on each named dialog, so
+   a modal without a class of its own — the account-deletion confirmation — is
+   still a terminal panel and not a UA groove box. Every named dialog sets its
+   own padding, so none of them inherit the padding below. */
 dialog {
   margin: auto;
+  max-width: min(38rem, calc(100vw - 2rem));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-raised);
+  color: var(--ink);
+  padding: 1.5rem;
+}
+
+dialog::backdrop {
+  background: var(--scrim);
+}
+
+dialog:not([class]) form {
+  display: grid;
+  gap: 1rem;
+}
+
+/* The form's one wrapper div is its actions row, laid out like every other
+   dialog's: quiet weights first, the committing weight last. */
+dialog:not([class]) form > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+dialog:not([class]) h2 {
+  margin: 0;
+  font-size: var(--text-section);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+dialog:not([class]) p {
+  margin: 0;
+  color: var(--ink-secondary);
+}
+
+dialog:not([class]) [role="alert"] {
+  color: var(--danger);
+  font-weight: 600;
 }
 
 button,
@@ -238,6 +301,97 @@ a {
   outline-offset: 3px;
 }
 
+/* The settings, privacy and operator surfaces write plain <button> elements, so
+   the three control weights are attached to their roots rather than to a class
+   on every button. `:where()` on the roots keeps all of this at one element of
+   specificity, and the pseudo-classes are wrapped for the same reason: a button
+   that names its own weight — .button-primary, .button-danger,
+   .admin-danger-action — outranks the lot with a single class. */
+:where(.public-profile, .admin-shell, dialog:not([class])) button {
+  min-height: 2.75rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--ink);
+  cursor: pointer;
+  padding: 0.5rem 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition:
+    border-color var(--transition-duration-control) var(--ease-clubhouse),
+    background-color var(--transition-duration-control) var(--ease-clubhouse),
+    color var(--transition-duration-control) var(--ease-clubhouse);
+}
+
+:where(.public-profile, .admin-shell, dialog:not([class]))
+  button:where(:hover):where(:not(:disabled)) {
+  border-color: var(--action-line);
+  color: var(--action);
+}
+
+:where(.public-profile, .admin-shell, dialog:not([class])) button:where(:disabled) {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* The committing weight: one violet fill per surface, on the action a person
+   came to take. */
+.button-primary {
+  border-color: var(--action);
+  background: var(--action);
+  color: var(--action-ink);
+}
+
+.button-primary:hover:not(:disabled) {
+  border-color: var(--action-hover);
+  background: var(--action-hover);
+  color: var(--action-ink);
+}
+
+/* Destructive commits stay outlined: the fill is reserved for the safe path. */
+.button-danger {
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  background: transparent;
+  color: var(--danger);
+}
+
+.button-danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger);
+}
+
+/* Same recessed slot as the dialog fields, on the surfaces whose markup names
+   no field class. Radios and checkboxes keep their own box and take the violet
+   accent instead. */
+:where(.public-profile, .admin-shell) select,
+:where(.public-profile, .admin-shell)
+  input:where(:not([type="radio"], [type="checkbox"])),
+:where(.public-profile, .admin-shell) textarea {
+  min-height: 2.75rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-subtle);
+  color: var(--ink);
+  padding: 0.5rem 0.75rem;
+  /* A field's value is content, so it stays at the body step even when its label
+     is a 13px chrome label. */
+  font-size: var(--text-body);
+  font-weight: 450;
+  transition: border-color var(--transition-duration-control) var(--ease-clubhouse);
+}
+
+:where(.public-profile, .admin-shell) select:where(:focus-visible),
+:where(.public-profile, .admin-shell)
+  input:where(:not([type="radio"], [type="checkbox"])):where(:focus-visible),
+:where(.public-profile, .admin-shell) textarea:where(:focus-visible) {
+  border-color: var(--action);
+}
+
+:where(.public-profile, .admin-shell) input:where([type="radio"], [type="checkbox"]) {
+  accent-color: var(--action);
+}
+
 .root-controls {
   display: flex;
   min-height: 3.5rem;
@@ -250,21 +404,25 @@ a {
     max(1rem, var(--safe-area-left));
 }
 
+/* Hairline-quiet weight, matching the room's quiet control: a bordered panel
+   sitting on the ground rather than a raised chip. */
 .theme-toggle {
   display: inline-flex;
   min-width: 2.75rem;
   min-height: 2.75rem;
   height: auto;
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  background: var(--surface);
-  box-shadow: var(--raised-shadow);
-  color: var(--ink-secondary);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--ink);
   cursor: pointer;
   padding: 0.5rem 0.75rem;
   font-size: var(--text-meta);
-  font-weight: 650;
+  font-weight: 600;
   line-height: 1;
+  /* `Theme` is chrome, never user content, so it takes the lowercase voice the
+     rail and dock labels use. */
+  text-transform: lowercase;
   transition:
     border-color var(--transition-duration-control) var(--ease-clubhouse),
     background-color var(--transition-duration-control) var(--ease-clubhouse),
@@ -273,9 +431,8 @@ a {
 }
 
 .theme-toggle:hover {
-  border-color: var(--border-strong);
-  background: var(--surface-raised);
-  color: var(--ink);
+  border-color: var(--action-line);
+  color: var(--action);
   transform: translateY(-1px);
 }
 
@@ -343,24 +500,30 @@ a {
   position: relative;
 }
 
+/* Signing in is an invitation, not a commitment: violet outline, never a fill.
+   The accessible name stays `Continue with Discord`, set by the callers. */
 .sign-in-button {
   min-height: 2.75rem;
-  border: 0;
+  border: 1px solid var(--action);
   border-radius: var(--radius-control);
-  background: var(--action);
-  color: var(--action-ink);
+  background: transparent;
+  color: var(--action);
   cursor: pointer;
   padding: 0.5rem 0.75rem;
   font-size: var(--text-body);
-  font-weight: 700;
+  font-weight: 600;
   line-height: 1.25;
   transition:
+    border-color var(--transition-duration-control) var(--ease-clubhouse),
     background-color var(--transition-duration-control) var(--ease-clubhouse),
+    color var(--transition-duration-control) var(--ease-clubhouse),
     transform var(--transition-duration-control) var(--ease-clubhouse);
 }
 
 .sign-in-button:hover {
-  background: var(--action-hover);
+  border-color: var(--action-hover);
+  background: var(--action-soft);
+  color: var(--action-hover);
   transform: translateY(-1px);
 }
 
@@ -431,7 +594,7 @@ a {
   background: var(--surface-subtle);
   color: var(--ink);
   font-size: var(--text-section);
-  font-weight: 850;
+  font-weight: 800;
   line-height: 1;
 }
 
@@ -537,18 +700,21 @@ a {
   background: var(--surface-raised);
 }
 
-.account-menu__trigger img,
-.account-menu__fallback {
-  display: grid;
+.account-menu__trigger img {
+  display: block;
   width: 2.25rem;
   height: 2.25rem;
   flex: none;
-  place-items: center;
   border-radius: var(--radius-pill);
-  background: var(--action-soft);
-  color: var(--action);
+  background: var(--surface-subtle);
   object-fit: cover;
-  font-weight: 800;
+}
+
+/* Geometry only; the disc's tint and glyphs come from .avatar-fallback. */
+.account-menu__fallback {
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: none;
 }
 
 .account-menu__identity {
@@ -1216,6 +1382,7 @@ p.home-filters__facets {
 .profile-search-result h3,
 .profile-search-result h4 {
   margin: 0;
+  font-weight: 700;
   line-height: 1.25;
 }
 
@@ -1237,18 +1404,22 @@ p.home-filters__facets {
   gap: calc(var(--spacing) * 3);
 }
 
-.profile-search-result__identity img,
-.profile-search-result__avatar-fallback {
-  display: grid;
+.profile-search-result__identity img {
+  display: block;
   width: calc(var(--spacing) * 12);
   height: calc(var(--spacing) * 12);
   flex: none;
-  place-items: center;
   border-radius: var(--radius-pill);
   background: var(--surface-subtle);
   object-fit: cover;
-  font-size: var(--text-card);
-  font-weight: 800;
+}
+
+/* Geometry only: the disc's tint, glyphs and weight come from .avatar-fallback,
+   so one account reads the same colour on every surface. */
+.profile-search-result__avatar-fallback {
+  width: calc(var(--spacing) * 12);
+  height: calc(var(--spacing) * 12);
+  flex: none;
 }
 
 .profile-search-result__context {
@@ -1259,6 +1430,7 @@ p.home-filters__facets {
 .profile-search-result__context h4 {
   color: var(--ink-secondary);
   font-size: var(--text-meta);
+  font-weight: 700;
 }
 
 .profile-search-result__context ul {
@@ -1270,24 +1442,33 @@ p.home-filters__facets {
   list-style: none;
 }
 
+/* Descriptive chip, not a control: hairline outline, no fill, no hover. */
 .profile-search-result__context li {
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-pill);
-  background: var(--surface-subtle);
+  background: transparent;
+  color: var(--ink-muted);
   padding: var(--spacing) calc(var(--spacing) * 2);
   font-size: var(--text-label);
+  font-weight: 600;
 }
 
 .profile-search-result__co-users {
   display: flex;
 }
 
+/* The stack overlaps discs, so the ring is the surface behind them. Only the
+   image carries a placeholder fill; a fallback disc gets its own tint. */
 .profile-search-result__co-users img,
-.profile-search-result__co-users span {
+.profile-search-result__co-users .avatar-fallback {
   width: calc(var(--spacing) * 7);
   height: calc(var(--spacing) * 7);
   margin-right: calc(var(--spacing) * -2);
   border: 2px solid var(--surface);
   border-radius: var(--radius-pill);
+}
+
+.profile-search-result__co-users img {
   background: var(--surface-subtle);
   object-fit: cover;
 }
@@ -1299,7 +1480,7 @@ p.home-filters__facets {
   gap: calc(var(--spacing) * 3);
   color: var(--action);
   font-size: var(--text-meta);
-  font-weight: 750;
+  font-weight: 600;
 }
 
 .profile-desktop-account {
@@ -1327,7 +1508,7 @@ p.home-filters__facets {
   align-items: center;
   gap: calc(var(--spacing) * 2);
   color: var(--action);
-  font-weight: 700;
+  font-weight: 600;
   text-decoration: none;
 }
 
@@ -1336,8 +1517,23 @@ p.home-filters__facets {
   flex-direction: column;
   gap: calc(var(--spacing) * 6);
   margin: calc(var(--spacing) * 5) 0 calc(var(--spacing) * 8);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px dotted var(--border);
   padding-bottom: calc(var(--spacing) * 8);
+}
+
+/* `Profile` and `Sign in to see…` sit directly in the header; the identity's own
+   name heading is styled below. */
+.public-profile__header > h1 {
+  margin: 0;
+  font-size: var(--text-feature);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+}
+
+.public-profile__header > p {
+  margin: 0;
+  color: var(--ink-secondary);
 }
 
 .public-profile__identity {
@@ -1347,35 +1543,46 @@ p.home-filters__facets {
   gap: calc(var(--spacing) * 4);
 }
 
-.public-profile__identity img,
-.public-profile__avatar-fallback {
-  display: grid;
+.public-profile__identity img {
+  display: block;
   width: calc(var(--spacing) * 20);
   height: calc(var(--spacing) * 20);
   flex: none;
-  place-items: center;
   border-radius: var(--radius-pill);
-  background: var(--action-soft);
-  color: var(--action);
+  background: var(--surface-subtle);
   object-fit: cover;
+}
+
+/* Geometry only; the tint and glyphs come from .avatar-fallback. This disc is
+   5rem, so it takes the 24px step rather than the 13px one the 3rem discs use. */
+.public-profile__identity .avatar-fallback {
+  width: calc(var(--spacing) * 20);
+  height: calc(var(--spacing) * 20);
+  flex: none;
   font-size: var(--text-section);
-  font-weight: 800;
+  letter-spacing: -0.02em;
 }
 
 .public-profile__identity p,
-.public-profile__identity h2 {
+.public-profile__identity :is(h1, h2) {
   margin: 0;
 }
 
+/* Eyebrow above the name: the same uppercase 13px cue the room boundary uses. */
 .public-profile__identity p {
   color: var(--ink-secondary);
-  font-size: var(--text-meta);
+  font-size: var(--text-label);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
-.public-profile__identity h2 {
+.public-profile__identity :is(h1, h2) {
   min-width: 0;
   overflow-wrap: anywhere;
   font-size: var(--text-page);
+  font-weight: 700;
+  letter-spacing: -0.03em;
   text-wrap: balance;
 }
 
@@ -1396,14 +1603,16 @@ p.home-filters__facets {
 }
 
 .public-profile__metrics dt {
-  color: var(--ink-secondary);
-  font-size: var(--text-meta);
+  color: var(--ink-muted);
+  font-size: var(--text-label);
+  font-weight: 400;
 }
 
 .public-profile__metrics dd {
   margin: var(--spacing) 0 0;
   font-size: var(--text-card);
-  font-weight: 750;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 .public-profile .past-streams,
@@ -1433,16 +1642,43 @@ p.home-filters__facets {
   object-fit: cover;
 }
 
+/* Dotted, not solid: within one page the divide between sections is a status
+   rule, the same one the cards use internally. */
 .profile-preference,
 .profile-muted-accounts {
   margin-top: calc(var(--spacing) * 8);
-  border-top: 1px solid var(--border);
+  border-top: 1px dotted var(--border);
   padding-top: calc(var(--spacing) * 6);
+}
+
+/* Preflight zeroes every margin, so the settings sections carry their rhythm as
+   a gap. `justify-items: start` keeps a control at its own width instead of
+   stretching it across the page. */
+.profile-preference {
+  display: grid;
+  gap: calc(var(--spacing) * 3);
+  justify-items: start;
 }
 
 .profile-preference h2,
 .profile-muted-accounts h2 {
   margin: 0;
+  font-size: var(--text-card);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.profile-preference p {
+  margin: 0;
+  color: var(--ink-secondary);
+}
+
+.profile-preference label {
+  display: grid;
+  gap: 0.375rem;
+  color: var(--ink-secondary);
+  font-size: var(--text-label);
+  font-weight: 600;
 }
 
 .profile-muted-accounts__list {
@@ -1470,18 +1706,20 @@ p.home-filters__facets {
   gap: calc(var(--spacing) * 3);
 }
 
-.profile-muted-accounts__identity img,
-.profile-muted-accounts__avatar-fallback {
-  display: grid;
+.profile-muted-accounts__identity img {
+  display: block;
   width: calc(var(--spacing) * 12);
   height: calc(var(--spacing) * 12);
   flex: none;
-  place-items: center;
   border-radius: var(--radius-pill);
-  background: var(--action-soft);
-  color: var(--action);
+  background: var(--surface-subtle);
   object-fit: cover;
-  font-weight: 700;
+}
+
+.profile-muted-accounts__identity .avatar-fallback {
+  width: calc(var(--spacing) * 12);
+  height: calc(var(--spacing) * 12);
+  flex: none;
 }
 @media (max-width: 47.999rem) {
   .public-profile__home {
@@ -1865,6 +2103,7 @@ p.home-filters__facets {
 
   .live-pulse,
   .room-mosaic__state > span[data-tone='live']::before,
+  .room-mosaic__sharing[data-tone='live']::before,
   .room-mosaic__video {
     animation-name: none !important;
   }
@@ -1884,7 +2123,7 @@ p.home-filters__facets {
 
 .create-room-dialog::backdrop,
 .membership-consequences-dialog::backdrop {
-  background: rgb(9 14 26 / 0.66);
+  background: var(--scrim);
 }
 
 .create-room-dialog__panel,
@@ -1900,6 +2139,8 @@ p.home-filters__facets {
 .membership-consequences-dialog__panel h2 {
   margin: 0;
   font-size: var(--text-section);
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
 .create-room-dialog__panel > label,
@@ -1907,17 +2148,34 @@ p.home-filters__facets {
   display: grid;
   gap: 0.375rem;
   color: var(--ink-secondary);
-  font-weight: 650;
+  font-weight: 600;
 }
 
-.create-room-dialog input,
+/* The field is a recessed slot cut into the panel, not a raised chip on top of
+   it: one step down from --surface, edged at the 3:1 floor so the slot reads as
+   a boundary. Radios and checkboxes are not slots and keep their own box. */
+.create-room-dialog input:not([type="radio"], [type="checkbox"]),
 .room-boundary__password input {
   width: 100%;
   box-sizing: border-box;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-control);
-  background: var(--surface-raised);
+  background: var(--surface-subtle);
+  color: var(--ink);
   padding: 0.625rem 0.75rem;
+  /* The label above is 600; a typed value is content and stays at body weight. */
+  font-weight: 450;
+  transition: border-color var(--transition-duration-control) var(--ease-clubhouse);
+}
+
+.create-room-dialog input:not([type="radio"], [type="checkbox"]):focus-visible,
+.room-boundary__password input:focus-visible {
+  border-color: var(--action);
+}
+
+.create-room-dialog input[type="radio"],
+.create-room-dialog input[type="checkbox"] {
+  accent-color: var(--action);
 }
 
 .create-room-dialog fieldset {
@@ -1944,7 +2202,7 @@ p.home-filters__facets {
 .form-error {
   margin: 0;
   color: var(--danger);
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .create-room-dialog__actions,
@@ -1957,6 +2215,9 @@ p.home-filters__facets {
   justify-content: flex-end;
 }
 
+/* Two weights in every dialog: the last button commits and takes the violet
+   fill, everything before it is hairline-quiet — same vocabulary as the room's
+   quiet control. */
 .create-room-dialog button,
 .membership-consequences-dialog button,
 .room-boundary button,
@@ -1968,7 +2229,18 @@ p.home-filters__facets {
   color: var(--ink);
   cursor: pointer;
   padding: 0.5rem 0.875rem;
+  font-weight: 600;
   text-decoration: none;
+  transition:
+    border-color var(--transition-duration-control) var(--ease-clubhouse),
+    background-color var(--transition-duration-control) var(--ease-clubhouse),
+    color var(--transition-duration-control) var(--ease-clubhouse);
+}
+
+.create-room-dialog button:hover:not(:disabled),
+.membership-consequences-dialog button:hover:not(:disabled) {
+  border-color: var(--action-line);
+  color: var(--action);
 }
 
 .create-room-dialog button:last-child,
@@ -1976,6 +2248,13 @@ p.home-filters__facets {
 .room-boundary button {
   border-color: var(--action);
   background: var(--action);
+  color: var(--action-ink);
+}
+
+.create-room-dialog button:last-child:hover:not(:disabled),
+.membership-consequences-dialog button:last-child:hover:not(:disabled) {
+  border-color: var(--action-hover);
+  background: var(--action-hover);
   color: var(--action-ink);
 }
 
@@ -2007,7 +2286,7 @@ p.home-filters__facets {
   margin: 0 0 0.5rem;
   color: var(--ink-secondary);
   font-size: var(--text-label);
-  font-weight: 750;
+  font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -2154,7 +2433,7 @@ p.home-filters__facets {
   color: var(--live);
   font-size: var(--text-label);
   font-weight: 650;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.08em;
   line-height: 1;
   text-transform: uppercase;
 }
@@ -2172,8 +2451,8 @@ p.home-filters__facets {
 .home-counter__value {
   margin: 0;
   font-size: var(--text-page);
-  font-weight: 500;
-  letter-spacing: -0.035em;
+  font-weight: 700;
+  letter-spacing: -0.03em;
   line-height: 0.92;
   text-wrap: balance;
 }
@@ -2245,7 +2524,7 @@ p.home-filters__facets {
   cursor: pointer;
   padding: 0 1.125rem;
   font-size: var(--text-meta);
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1;
   transition: background-color var(--transition-duration-control)
     var(--ease-clubhouse);
@@ -2327,7 +2606,7 @@ p.home-filters__facets {
 .home-statistics dd {
   margin: 0;
   font-size: var(--text-section);
-  font-weight: 500;
+  font-weight: 700;
   line-height: 1;
 }
 
@@ -2384,7 +2663,7 @@ p.home-filters__facets {
   color: var(--ink-muted);
   font-size: var(--text-label);
   font-weight: 650;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.08em;
   line-height: 1;
   text-transform: uppercase;
 }
@@ -2454,8 +2733,9 @@ p.home-filters__facets {
 
 .live-room-card h3 {
   margin: 0;
+  overflow-wrap: anywhere;
   font-size: var(--text-card);
-  font-weight: 500;
+  font-weight: 700;
   letter-spacing: -0.01em;
   line-height: 1.25;
   text-wrap: pretty;
@@ -2521,74 +2801,133 @@ p.home-filters__facets {
   text-wrap: pretty;
 }
 
+/* Terminal-club chip anatomy (ADR 0111). Two shapes only, both pills.
+   The base is the neutral descriptive chip: a label, so it is a hairline
+   outline with muted ink and no fill, no hover, no focus. The semantic
+   variants are STATUS PILLS: a 45% hairline of their own family over a 10%
+   wash of it, the family colour on top, and the word always beside the hue. */
 .room-chip {
   display: inline-flex;
   height: 1.625rem;
   align-items: center;
-  border: 0;
-  border-radius: var(--radius-chip);
+  gap: 0.375rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
   background: transparent;
-  box-shadow: inset 0 0 0 1px var(--border-strong);
   color: var(--ink-muted);
-  padding: 0 0.5625rem;
+  padding: 0 0.625rem;
   font-size: var(--text-label);
-  font-weight: 400;
+  font-weight: 600;
+  letter-spacing: 0;
   line-height: 1;
 }
 
-.room-chip--public {
-  background: var(--surface-subtle);
-  box-shadow: inset 0 0 0 1px var(--border-strong);
-  color: var(--ink-secondary);
-  font-weight: 400;
-}
 .room-chip--private {
-  background: color-mix(in srgb, var(--private) 14%, transparent);
-  box-shadow: none;
+  border-color: color-mix(in srgb, var(--private) 45%, transparent);
+  background: color-mix(in srgb, var(--private) 10%, transparent);
   color: var(--private);
-  font-weight: 500;
+  font-weight: 700;
 }
 
 .room-chip--full {
-  background: color-mix(in srgb, var(--warning) 14%, transparent);
-  box-shadow: none;
+  border-color: color-mix(in srgb, var(--warning) 45%, transparent);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
   color: var(--warning);
-  font-weight: 500;
+  font-weight: 700;
 }
 
 .room-chip--live {
-  background: color-mix(in srgb, var(--live) 6%, transparent);
-  box-shadow: none;
+  border-color: color-mix(in srgb, var(--live) 45%, transparent);
+  background: color-mix(in srgb, var(--live) 10%, transparent);
   color: var(--live);
-  font-weight: 500;
+  font-weight: 700;
 }
 
-html[data-theme="light"] .room-chip--full {
-  color: color-mix(in srgb, var(--warning) 80%, var(--ink));
+/* The signature dot. It leads the word rather than replacing it. */
+.room-chip--live::before {
+  content: "";
+  width: 0.4375rem;
+  height: 0.4375rem;
+  flex: none;
+  border-radius: var(--radius-pill);
+  background: var(--live);
 }
 
-/* DESIGN.md asks for three control weights inside the room. `.room-boundary
-   button` fills every button with cobalt, which leaves disclosure and
-   configuration shouting as loudly as the action a member came for. This is
-   the quiet weight; it has to out-specify that rule to win. */
-.room-boundary .room-button--quiet {
+/* The 10% wash is calibrated on the dark ground, where every family has 5-11:1
+   of headroom. In the light theme the families are dark inks tuned to clear
+   4.5:1 on bare porcelain with nothing to spare, so their own wash pushes them
+   to 3.96-4.7:1 on --canvas, --rail and --surface-subtle. Light therefore
+   darkens the ink 15% toward --ink: the hue and the anatomy survive, and the
+   floor is met on every ground a room pill lands on (worst case 4.84:1). */
+[data-theme="light"] .room-chip--live {
+  color: color-mix(in srgb, var(--live) 85%, var(--ink));
+}
+
+[data-theme="light"] .room-chip--full {
+  color: color-mix(in srgb, var(--warning) 85%, var(--ink));
+}
+
+[data-theme="light"] .room-chip--private {
+  color: color-mix(in srgb, var(--private) 85%, var(--ink));
+}
+
+/* One of the room's four control weights (batch contract): the hairline-quiet
+   secondary. `.room-boundary button` fills every button with violet, which
+   leaves Cancel, a retry and a mute shouting as loudly as the action a member
+   came for — so the quiet weight has to out-specify that rule to win. Every
+   secondary in the room lands here rather than restating the same three
+   declarations per surface. */
+.room-boundary .room-button--quiet,
+.room-boundary .room-shelf__cancel,
+.room-boundary .room-shelf__compatibility button,
+.room-boundary .room-dock__collapse,
+.room-boundary .room-dock__sheet-controls button,
+/* Retry is the commit on a failed message and keeps the violet fill; Discard
+   beside it is the alternative, so it drops to the quiet weight. */
+.room-boundary .room-chat__failure button + button {
   border-color: var(--border-strong);
   background: var(--surface-raised);
   color: var(--ink);
+  font-weight: 600;
 }
 
-.room-boundary .room-button--quiet:hover {
+.room-boundary .room-button--quiet:hover,
+.room-boundary .room-shelf__cancel:hover,
+.room-boundary .room-shelf__compatibility button:hover,
+.room-boundary .room-dock__collapse:hover,
+.room-boundary .room-dock__sheet-controls button:hover,
+.room-boundary .room-chat__failure button + button:hover {
   border-color: var(--action-line);
   color: var(--action);
 }
 
+/* Menu triggers are the one control weight below quiet: a ghost. They repeat on
+   every row of People and Chat, and at the quiet weight a panel of eight rows
+   read as eight buttons with the content between them. */
+.room-boundary .room-member-actions__trigger,
+.room-boundary .room-message-actions__trigger {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-muted);
+  font-weight: 600;
+}
+
+.room-boundary .room-member-actions__trigger:hover,
+.room-boundary .room-message-actions__trigger:hover {
+  border-color: var(--border-strong);
+  color: var(--ink);
+}
+
+/* Terminal-club separator: the footer is a status line under the card body, so
+   it is divided by a dotted rule rather than a solid one or a surface step. */
 .live-room-card__footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
   margin-top: auto;
-  padding-top: 0.25rem;
+  border-top: 1px dotted var(--border);
+  padding-top: 0.625rem;
 }
 
 .room-member-presence {
@@ -2613,9 +2952,10 @@ html[data-theme="light"] .room-chip--full {
 .room-avatar-stack {
   display: flex;
   padding-left: 0.5rem;
-
 }
 
+/* The ring is the card surface, so overlapping avatars read as a stack of
+   discs rather than a smear. */
 .room-avatar-stack img {
   width: 1.5rem;
   height: 1.5rem;
@@ -2627,8 +2967,50 @@ html[data-theme="light"] .room-chip--full {
   object-fit: cover;
 }
 
+.live-room-card--featured .room-avatar-stack img {
+  box-shadow: 0 0 0 2px var(--surface-raised);
+}
+
 .room-avatar-stack img + img {
   margin-left: -0.4375rem;
+}
+
+/* One disc vocabulary for every account without a Discord picture: two mono
+   characters on a tint keyed to the account id. The tint is identity, not
+   state — the name always sits beside it. Surfaces keep their own geometry and
+   may override the size step for a larger disc. */
+.avatar-fallback {
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--avatar-tint-1);
+  color: var(--avatar-ink);
+  font-size: var(--text-label);
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.avatar-fallback[data-avatar-tint="2"] {
+  background: var(--avatar-tint-2);
+}
+
+.avatar-fallback[data-avatar-tint="3"] {
+  background: var(--avatar-tint-3);
+}
+
+.avatar-fallback[data-avatar-tint="4"] {
+  background: var(--avatar-tint-4);
+}
+
+.avatar-fallback[data-avatar-tint="5"] {
+  background: var(--avatar-tint-5);
+}
+
+.avatar-fallback[data-avatar-tint="6"] {
+  background: var(--avatar-tint-6);
 }
 
 .live-room-card__open-cue {
@@ -2740,7 +3122,7 @@ html[data-theme="light"] .room-chip--full {
   padding: 0 0.5625rem;
   font-size: var(--text-label);
   font-weight: 650;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   line-height: 1;
   text-transform: uppercase;
 }
@@ -2869,9 +3251,10 @@ html[data-theme="light"] .room-chip--full {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
+  overflow-wrap: anywhere;
   color: var(--ink);
   font-size: var(--text-body);
-  font-weight: 500;
+  font-weight: 600;
   letter-spacing: -0.01em;
   line-height: 1.3;
   text-wrap: pretty;
@@ -2970,7 +3353,7 @@ html[data-theme="light"] .room-chip--full {
   cursor: pointer;
   padding: 0 1.125rem;
   font-size: var(--text-meta);
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1.25;
   transition:
     background-color var(--transition-duration-control) var(--ease-clubhouse),
@@ -3078,11 +3461,15 @@ html[data-theme="light"] .room-chip--full {
 
 /* ── skeletons: shape-matched, so nothing shifts when data lands ── */
 
+/* Two grounds only: the slot is --surface-subtle and the band that crosses it is
+   the hairline colour, so a loading card reads as an empty frame of the card it
+   becomes rather than a glowing rectangle. */
 .home-section-skeleton i {
+  border: 1px solid var(--border);
   background: linear-gradient(
       90deg,
       var(--surface-subtle) 25%,
-      var(--surface-raised) 50%,
+      var(--border) 50%,
       var(--surface-subtle) 75%
     )
     0 0 / 200% 100%;
@@ -3387,8 +3774,8 @@ html[data-theme="light"] .room-chip--full {
   .home-rail-presence__value {
     margin: 0;
     font-size: var(--text-page);
-    font-weight: 500;
-    letter-spacing: -0.035em;
+    font-weight: 700;
+    letter-spacing: -0.03em;
     line-height: 0.95;
     text-wrap: balance;
   }
@@ -3396,7 +3783,7 @@ html[data-theme="light"] .room-chip--full {
   .home-rail-cta h2 {
     margin: 0;
     font-size: var(--text-section);
-    font-weight: 550;
+    font-weight: 700;
     letter-spacing: -0.01em;
     line-height: 1.2;
   }
@@ -3559,7 +3946,14 @@ html[data-theme="light"] .room-chip--full {
 @media (prefers-reduced-motion: reduce) {
   .home-pulse-dot,
   .home-section-skeleton i {
-    animation: none;
+    animation-name: none !important;
+  }
+
+  /* The shimmer is the only thing that moves in a skeleton and it is decorative:
+     with motion off the slot sits still on --surface-subtle rather than freezing
+     mid-gradient. */
+  .home-section-skeleton i {
+    background: var(--surface-subtle);
   }
 }
 
@@ -3621,8 +4015,8 @@ body:has(.room-shell) > .root-controls {
   margin: 0 0 0.5rem;
   color: var(--ink-muted);
   font-size: var(--text-label);
-  font-weight: 650;
-  letter-spacing: 0.14em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
   line-height: 1;
   text-transform: uppercase;
 }
@@ -3638,7 +4032,7 @@ body:has(.room-shell) > .root-controls {
 .room-boundary h1 {
   margin: 0;
   font-size: var(--text-page);
-  font-weight: 500;
+  font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.1;
   text-wrap: pretty;
@@ -3679,6 +4073,7 @@ body:has(.room-shell) > .root-controls {
   gap: 0.375rem;
   color: var(--ink-muted);
   font-size: var(--text-label);
+  font-weight: 400;
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
@@ -3711,7 +4106,7 @@ body:has(.room-shell) > .root-controls {
   align-content: end;
   gap: 0.5rem;
   border: 1px solid var(--border-strong);
-  border-radius: 0.75rem;
+  border-radius: var(--radius-card);
   background:
     radial-gradient(
       circle at 18% 12%,
@@ -3738,8 +4133,8 @@ body:has(.room-shell) > .root-controls {
   margin: 0;
   color: var(--ink);
   font-size: var(--text-section);
-  font-weight: 650;
-  letter-spacing: -0.01em;
+  font-weight: 700;
+  letter-spacing: -0.02em;
   text-wrap: balance;
 }
 
@@ -3767,11 +4162,13 @@ body:has(.room-shell) > .root-controls {
   min-height: 0;
   flex-direction: column;
   gap: 0.75rem;
-  border-radius: 0.625rem;
+  border-radius: var(--radius-card);
+  /* The violet is an edge on the media, not a wash over it: it glazes the top
+     corner and resolves to --media-canvas well before the first tile. */
   background: radial-gradient(
-    130% 110% at 18% 0%,
+    90% 70% at 12% 0%,
     var(--media-canvas-edge),
-    var(--media-canvas) 68%
+    var(--media-canvas) 40%
   );
   box-shadow: var(--feature-shadow);
   padding: 1rem;
@@ -3831,7 +4228,7 @@ body:has(.room-shell) > .root-controls {
 .room-mosaic__tile {
   display: flex;
   flex-direction: column;
-  border-radius: 0.625rem;
+  border-radius: var(--radius-card);
   background: var(--surface-subtle);
   box-shadow: inset 0 0 0 1px var(--border-strong);
   overflow: hidden;
@@ -3852,9 +4249,9 @@ body:has(.room-shell) > .root-controls {
   place-items: center;
   aspect-ratio: 16 / 9;
   background: radial-gradient(
-    130% 110% at 18% 0%,
+    90% 70% at 12% 0%,
     var(--media-canvas-edge),
-    var(--media-canvas) 68%
+    var(--media-canvas) 40%
   );
 }
 
@@ -3866,13 +4263,11 @@ body:has(.room-shell) > .root-controls {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--on-media-ink) 32%, transparent);
 }
 
+/* Geometry only: `.avatar-fallback` supplies the disc, the tint and the ink.
+   This disc is 3.5rem on the media, so it takes a larger size step than the
+   shared 13px default — two characters at 13px inside 56px reads as a typo. */
 .room-mosaic__avatar--empty {
-  display: grid;
-  place-items: center;
-  background: color-mix(in srgb, var(--on-media-ink) 14%, transparent);
-  color: var(--on-media-ink);
   font-size: var(--text-card);
-  font-weight: 600;
 }
 
 .room-mosaic__preview {
@@ -3888,24 +4283,40 @@ body:has(.room-shell) > .root-controls {
   filter: blur(9px);
 }
 
-/* Pinned on the media, so it takes Home's preview-mosaic treatment rather than
-   floating a porcelain chip on a midnight frame. Its colour follows the state
-   it names: one chip carried `Screen up`, `Connecting…` and `Could not
-   connect` in the Live pink, which painted a failure as a celebration. */
+/* The on-media STATUS PILL. Same anatomy as every other room pill — hairline of
+   its own family over a wash, the family colour, the word — but the wash is the
+   media scrim, because a badge pinned over a captured frame gets no say in what
+   is behind it. Its colour follows the state it names: one chip carried
+   `Screen up`, `Connecting…` and `Could not connect` in the Live pink, which
+   painted a failure as a celebration. */
 .room-mosaic__sharing {
   position: absolute;
   left: 0.5rem;
   top: 0.5rem;
-  border-radius: var(--radius-chip);
-  padding: 0.125rem 0.4375rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  border: 1px solid color-mix(in srgb, currentcolor 45%, transparent);
+  border-radius: var(--radius-pill);
+  padding: 0.1875rem 0.5rem;
   background: var(--media-scrim);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentcolor 42%, transparent);
   color: var(--on-media-live);
   font-size: var(--text-label);
-  font-weight: 600;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+/* `Screen up` is the media's Live state, so it carries the signature dot. The
+   warning and danger tones do not: a pulse on a failure reads as a heartbeat. */
+.room-mosaic__sharing[data-tone='live']::before {
+  content: '';
+  width: 0.4375rem;
+  height: 0.4375rem;
+  flex: none;
+  border-radius: var(--radius-pill);
+  background: currentcolor;
+  animation: var(--animate-live-pulse);
 }
 
 .room-mosaic__sharing[data-tone='warning'] {
@@ -3916,12 +4327,15 @@ body:has(.room-shell) > .root-controls {
   color: var(--on-media-danger);
 }
 
-/* Below the media region, never over it, and never revealed by hover. */
+/* Below the media region, never over it, and never revealed by hover. The
+   dotted rule is the terminal-club separator: the footer is a status line under
+   the frame, so it is divided rather than boxed off with a surface step. */
 .room-mosaic__footer {
   display: flex;
   flex-direction: column;
   flex: 1;
   gap: 0.125rem;
+  border-top: 1px dotted var(--border);
   padding: 0.5rem 0.625rem;
   background: var(--surface-subtle);
 }
@@ -3930,7 +4344,7 @@ body:has(.room-shell) > .root-controls {
   margin: 0;
   color: var(--ink);
   font-size: var(--text-meta);
-  font-weight: 600;
+  font-weight: 700;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3949,6 +4363,7 @@ body:has(.room-shell) > .root-controls {
   margin: 0;
   color: var(--ink-muted);
   font-size: var(--text-label);
+  font-weight: 400;
 }
 
 .room-mosaic__state-separator {
@@ -3958,15 +4373,17 @@ body:has(.room-shell) > .root-controls {
 
 .room-mosaic__state > span[data-tone='host'] {
   color: var(--host);
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .room-mosaic__state > span[data-tone='warning'] {
   color: var(--warning);
+  font-weight: 700;
 }
 
 .room-mosaic__state > span[data-tone='danger'] {
   color: var(--danger);
+  font-weight: 700;
 }
 
 /* Live is the product's signature state and had no colour at all. The dot is
@@ -3977,7 +4394,7 @@ body:has(.room-shell) > .root-controls {
   align-items: center;
   gap: 0.3125rem;
   color: var(--live);
-  font-weight: 600;
+  font-weight: 700;
 }
 
 /* The one pulse ADR 0096 permits, spent on the state it was defined for. */
@@ -4033,6 +4450,7 @@ body:has(.room-shell) > .root-controls {
   color: var(--ink-muted);
   padding: 0 0.875rem;
   font-size: var(--text-meta);
+  font-weight: 600;
   text-decoration: none;
 }
 
@@ -4051,7 +4469,7 @@ body:has(.room-shell) > .root-controls {
   cursor: pointer;
   padding: 0 1.125rem;
   font-size: var(--text-meta);
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1;
 }
 
@@ -4071,8 +4489,11 @@ body:has(.room-shell) > .root-controls {
   color: var(--danger);
 }
 
+/* The hover tint is mixed into --surface-raised rather than into the shelf's
+   own ground: over --rail, danger ink on its own 12% wash reads 3.84:1 in the
+   light theme, so the hover state alone would drop the button below AA. */
 .room-controls__leave:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface-raised));
 }
 
 .room-controls__join:disabled,
@@ -4365,17 +4786,23 @@ body:has(.room-shell) > .root-controls {
   display: flex;
 }
 
+/* Geometry, the overlap and the ring that separates one head from the next. The
+   fill belongs to the image or, when there is none, to `.avatar-fallback`'s
+   tint — a shared `--rail` fill here erased every disc's identity colour. */
 .room-mosaic__watcher-avatars > * {
   display: grid;
   width: 1.75rem;
   height: 1.75rem;
   place-items: center;
-  border-radius: 50%;
-  background: var(--rail);
+  border-radius: var(--radius-pill);
   box-shadow: 0 0 0 1px var(--border-strong);
   margin-inline-end: -0.375rem;
   font-size: var(--text-label);
   object-fit: cover;
+}
+
+.room-mosaic__watcher-avatars > img {
+  background: var(--rail);
 }
 
 /* The negative margin overlaps the avatars into a stack; the last one must not
@@ -4408,20 +4835,25 @@ body:has(.room-shell) > .root-controls {
   margin-top: 0.5rem;
 }
 
-/* Adjustments to a watch already running stay in the footer below live media. */
+/* Adjustments to a watch already running stay in the footer below live media,
+   and they are all secondary: Mute, Fullscreen, Cancel and Stop watching take
+   the hairline-quiet weight so the one violet commit on the tile stays the
+   Watch button over the preview. This rule out-specifies `.room-mosaic__watch`
+   on purpose — Stop watching reverses a decision, it does not make one. */
 .room-mosaic__actions > button {
   border-color: var(--border-strong);
   background: transparent;
   color: var(--ink);
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .room-mosaic__actions > button:hover {
+  border-color: var(--action-line);
   background: var(--surface-subtle);
+  color: var(--action);
 }
 
-/* The primary Watch action overlays the still Preview. Stop watching keeps the
-   same treatment in the footer because it reverses that decision. */
+/* The violet commit: the primary Watch action over the still preview. */
 .room-mosaic__watch {
   border-color: var(--action);
   background: var(--action);
@@ -4461,7 +4893,7 @@ body:has(.room-shell) > .root-controls {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.75rem;
-  border-radius: 0.625rem;
+  border-radius: var(--radius-card);
   background: var(--rail);
   box-shadow: inset 0 0 0 1px var(--border-strong);
   padding: 0.75rem 1rem;
@@ -4511,8 +4943,15 @@ body:has(.room-shell) > .root-controls {
   gap: 0.75rem;
 }
 
+/* While you are broadcasting, Stop Stream leaves the violet commit weight: the
+   room is already live and this control ends it. It takes the Live family as an
+   outline the way Leave takes danger — the word still says what it does, so the
+   hue is never the only signal. Live ink on the violet fill was the defect. */
 .room-shelf__stream[data-streaming="true"] {
+  border-color: var(--live);
+  background: transparent;
   color: var(--live);
+  font-weight: 600;
 }
 
 /* ADR 0102's companion dock. */
@@ -4521,7 +4960,7 @@ body:has(.room-shell) > .root-controls {
   min-height: 0;
   flex-direction: column;
   gap: 0.625rem;
-  border-radius: 0.625rem;
+  border-radius: var(--radius-card);
   background: var(--rail);
   box-shadow: inset 0 0 0 1px var(--border-strong);
   padding: 0.75rem;
@@ -4535,30 +4974,37 @@ body:has(.room-shell) > .root-controls {
   justify-content: space-between;
 }
 
+/* Dock chrome, so it takes the lowercase terminal voice. Nothing here can hold
+   user content — the label is fixed and the count beside it is a number. */
 .room-dock__heading {
   display: flex;
   min-width: 0;
   align-items: center;
   gap: 0.375rem;
   font-weight: 600;
+  text-transform: lowercase;
 }
 
 .room-dock__presence {
   width: 0.5rem;
   height: 0.5rem;
   flex: 0 0 auto;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   background: var(--host);
   box-shadow: 0 0 0 0.1875rem color-mix(in srgb, var(--host) 14%, transparent);
 }
 
+/* A count is not a caution: this is the neutral descriptive chip, and the green
+   presence dot beside it already carries the one signal in this group. */
 .room-dock__here {
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--warning) 12%, var(--surface));
-  color: var(--warning);
-  font-size: var(--text-meta);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: var(--text-label);
   font-weight: 600;
-  padding: 0.125rem 0.375rem;
+  font-variant-numeric: tabular-nums;
+  padding: 0.0625rem 0.4375rem;
   white-space: nowrap;
 }
 
@@ -4578,21 +5024,60 @@ body:has(.room-shell) > .root-controls {
   gap: 0.375rem;
 }
 
+/* `.room-boundary button` paints every button in the admitted shell violet, so
+   a tab strip has to reset the fill itself or three tabs read as three commits.
+   Inactive tabs are quiet muted labels with no chrome at all; exactly one tab
+   is raised. */
 .room-dock__tabs button {
   display: flex;
   align-items: center;
   gap: 0.375rem;
+  border-color: transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--ink-muted);
+  font-weight: 600;
 }
 
-/* `.room-boundary button` paints every button in the admitted shell cobalt, so overriding
-   only the colour here left the selected tab at #172033 on #2457d6 — 2.64:1, below the
-   4.5:1 the brief requires. Selection now uses the same soft-cobalt-on-tint pill as
-   `.home-nav-item--current`, which reads at AA and still distinguishes the active tab. */
+.room-dock__tabs button:hover {
+  color: var(--ink);
+}
+
+/* Dock tab labels are chrome, never user content, so they take the lowercase
+   voice. The badge beside them is a number and is unaffected. */
+.room-dock__tab-label {
+  text-transform: lowercase;
+}
+
+/* The one raised surface in the strip. Selection is a step up in elevation plus
+   violet ink rather than a violet fill: filled, the label sat at 2.64:1 on it. */
 .room-dock__tabs button[aria-selected="true"] {
-  border-color: var(--action-line);
-  background: var(--action-soft);
+  border-color: var(--border);
+  background: var(--surface-raised);
   color: var(--action);
   font-weight: 600;
+}
+
+/* Unread is the dock's own attention signal, so it takes violet; the People
+   count is descriptive and stays neutral. Both are STATUS PILL anatomy. */
+.room-dock__badge {
+  display: inline-grid;
+  min-width: 1.25rem;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  color: var(--ink-muted);
+  padding: 0 0.25rem;
+  font-size: var(--text-label);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+}
+
+.room-dock__badge[data-badge-tone="unread"] {
+  border-color: color-mix(in srgb, var(--action) 45%, transparent);
+  background: color-mix(in srgb, var(--action) 10%, transparent);
+  color: var(--action);
 }
 
 .room-dock__panel {
@@ -4644,32 +5129,40 @@ body:has(.room-shell) > .root-controls {
   font-size: var(--text-meta);
 }
 
+/* An empty Chat is a state, not a caution. Amber here spent the warning family
+   on `No messages yet` — the same hue the room uses for Reconnecting and the
+   ten-minute rung — so this is the neutral surface with a dotted divide between
+   the mark and the copy, the way every other quiet panel in the room reads. */
 .room-chat__empty {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 0.625rem;
-  border: 1px solid color-mix(in srgb, var(--warning) 24%, var(--border));
+  border: 1px solid var(--border);
   border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--warning) 8%, var(--surface));
+  background: var(--surface-subtle);
   color: var(--ink-secondary);
   padding: 0.75rem;
 }
 
 .room-chat__empty-icon {
-  color: var(--warning);
+  color: var(--ink-muted);
 }
 
 .room-chat__empty-copy {
   display: grid;
   gap: 0.125rem;
+  border-left: 1px dotted var(--border);
+  padding-left: 0.625rem;
 }
 
 .room-chat__empty strong {
   color: var(--ink);
-  font-weight: 600;
+  font-weight: 700;
 }
 
+/* The reading surface: the message keeps the document's own 16px/450 body step
+   while everything around it — author, time, pill, count — steps away from it. */
 .room-chat__body {
   margin: 0;
   overflow-wrap: anywhere;
@@ -4692,6 +5185,10 @@ body:has(.room-shell) > .root-controls {
   gap: 0.75rem;
 }
 
+/* Geometry and the frame only. When there is no Discord picture the same span
+   also carries `.avatar-fallback`, which supplies the disc's tint, ink and
+   13px/700 label — the violet tint that used to live here made every person in
+   the room look like a control. */
 .room-people__avatar {
   display: grid;
   width: 2.25rem;
@@ -4699,11 +5196,8 @@ body:has(.room-shell) > .root-controls {
   flex: 0 0 auto;
   place-items: center;
   overflow: hidden;
-  border: 1px solid var(--action-line);
-  border-radius: 50%;
-  background: var(--action-soft);
-  color: var(--action);
-  font-weight: 700;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
 }
 
 .room-people__avatar img {
@@ -4720,25 +5214,32 @@ body:has(.room-shell) > .root-controls {
 
 .room-people__name {
   overflow: hidden;
-  font-weight: 600;
+  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* Host is green, everywhere. Violet is identity, navigation, selection and
+   action only (ADR 0111), so a violet Host fragment claimed the role was a
+   control — and it collided with the room's own action colour. */
 .room-people__state [data-state-tone="host"] {
-  color: var(--action);
+  color: var(--host);
+  font-weight: 700;
 }
 
 .room-people__state [data-state-tone="live"] {
   color: var(--live);
+  font-weight: 700;
 }
 
 .room-people__state [data-state-tone="warning"] {
   color: var(--warning);
+  font-weight: 700;
 }
 
 .room-people__state [data-state-tone="danger"] {
   color: var(--danger);
+  font-weight: 700;
 }
 
 /* The same actions the tiles carry, always visible rather than on hover
@@ -4766,7 +5267,7 @@ body:has(.room-shell) > .root-controls {
   inset: calc(100% + 0.375rem) 0 auto auto;
   gap: 0.25rem;
   border: 1px solid var(--border-strong);
-  border-radius: 0.625rem;
+  border-radius: var(--radius-card);
   background: var(--surface);
   box-shadow: var(--feature-shadow);
   padding: 0.375rem;
@@ -4799,15 +5300,17 @@ body:has(.room-shell) > .root-controls {
 }
 
 .room-activity__time {
-  color: var(--ink-muted);
-  font-size: var(--text-meta);
+  color: var(--ink-faint);
+  font-size: var(--text-label);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
 /* Only the one-minute warning is loud (ADR 0103). */
 .room-activity__entry[data-activity-prominence="warning"] {
   color: var(--warning);
-  font-weight: 600;
+  font-weight: 700;
 }
 
 
@@ -4822,7 +5325,7 @@ body:has(.room-shell) > .root-controls {
   display: grid;
   inset: 0;
   place-items: center;
-  background: rgb(0 0 0 / 0.5);
+  background: var(--scrim);
   padding: 1rem;
 }
 
@@ -4831,7 +5334,7 @@ body:has(.room-shell) > .root-controls {
   width: min(32rem, 100%);
   max-height: 85vh;
   gap: 0.75rem;
-  border-radius: 0.625rem;
+  border-radius: var(--radius-card);
   background: var(--surface);
   box-shadow: var(--feature-shadow);
   padding: 1.25rem;
@@ -4856,7 +5359,7 @@ body:has(.room-shell) > .root-controls {
   width: min(34rem, calc(100vw - 2rem));
   max-width: 100%;
   border: 0;
-  border-radius: 0.75rem;
+  border-radius: var(--radius-card);
   background: var(--surface);
   color: var(--ink);
   box-shadow: var(--feature-shadow);
@@ -4864,7 +5367,7 @@ body:has(.room-shell) > .root-controls {
 }
 
 .room-ban-dialog::backdrop {
-  background: rgb(9 14 26 / 0.66);
+  background: var(--scrim);
 }
 
 .room-ban-dialog__panel {
@@ -4935,11 +5438,32 @@ body:has(.room-shell) > .root-controls {
   padding: 0.5rem 0.75rem calc(0.5rem + env(safe-area-inset-bottom));
 }
 
+/* Four violet fills is not a control bar. These are chrome labels in the
+   lowercase voice: quiet by default, one raised while its sheet is open, and
+   Leave — the only button here that is not a sheet toggle — in danger outline,
+   the same weight it has on the shelf. */
 .room-mobile-bar button {
   min-width: 0;
   min-height: 2.75rem;
   flex: 1 1 0;
+  border-color: transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--ink-muted);
   padding-inline: 0.375rem;
+  font-weight: 600;
+  text-transform: lowercase;
+}
+
+.room-mobile-bar button[aria-expanded="true"] {
+  border-color: var(--border);
+  background: var(--surface-raised);
+  color: var(--action);
+}
+
+.room-mobile-bar button:not([aria-controls]) {
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 @media (max-width: 47.999rem) {
@@ -4972,7 +5496,7 @@ body:has(.room-shell) > .root-controls {
     width: 100%;
     max-height: calc(100dvh - env(safe-area-inset-top));
     inset: auto 0 0;
-    border-radius: 0.625rem 0.625rem 0 0;
+    border-radius: var(--radius-card) var(--radius-card) 0 0;
     box-sizing: border-box;
     padding-bottom: calc(0.75rem + var(--room-mobile-bar-height));
   }
@@ -5128,6 +5652,8 @@ body:has(.room-shell) > .root-controls {
 .admin-header h1, .admin-detail-header h1 {
   margin: 0.125rem 0 0.375rem;
   font-size: clamp(1.875rem, 5vw, var(--text-page));
+  font-weight: 700;
+  letter-spacing: -0.03em;
   line-height: 1.08;
   overflow-wrap: anywhere;
 }
@@ -5136,19 +5662,25 @@ body:has(.room-shell) > .root-controls {
   margin: 0;
   color: var(--action) !important;
   font-size: var(--text-label);
-  font-weight: 750;
+  font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
-.admin-back-link { width: fit-content; color: var(--action); font-weight: 700; text-decoration: none; }
+.admin-back-link { width: fit-content; color: var(--action); font-weight: 600; text-decoration: none; }
 .admin-back-link:hover { text-decoration: underline; }
 .admin-tabs { display: flex; margin-bottom: 1rem; border-bottom: 1px solid var(--border); }
+/* The underline is a state marker, so only the current tab carries it. */
 .admin-tabs a {
   padding: 0.75rem 0.875rem;
-  border-bottom: 0.1875rem solid var(--action);
-  color: var(--ink);
-  font-weight: 750;
+  border-bottom: 0.1875rem solid transparent;
+  color: var(--ink-muted);
+  font-weight: 600;
   text-decoration: none;
+}
+.admin-tabs a[aria-current="page"] {
+  border-bottom-color: var(--action);
+  color: var(--ink);
+  font-weight: 700;
 }
 .admin-panel {
   min-width: 0;
@@ -5158,13 +5690,21 @@ body:has(.room-shell) > .root-controls {
   background: var(--surface);
   box-shadow: var(--raised-shadow);
 }
-.admin-panel h2 { margin: 0.125rem 0 0.75rem; font-size: var(--text-section); line-height: 1.2; }
+.admin-panel h2 {
+  margin: 0.125rem 0 0.75rem;
+  font-size: var(--text-section);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
 .admin-panel__heading, .admin-detail-header__title {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
 }
+/* Status pill anatomy: the family at 45% for the edge, 10% for the ground, the
+   family itself for the word — and the word always travels with the hue. */
 .admin-count, .admin-status {
   display: inline-flex;
   flex: none;
@@ -5173,18 +5713,26 @@ body:has(.room-shell) > .root-controls {
   padding: 0.25rem 0.625rem;
   border-radius: var(--radius-pill);
   font-size: var(--text-label);
-  font-weight: 750;
+  font-weight: 700;
 }
 .admin-count, .admin-status--pending {
-  background: color-mix(in srgb, var(--warning) 14%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
   color: var(--warning);
 }
 .admin-status--resolved {
-  background: color-mix(in srgb, var(--host) 14%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--host) 45%, transparent);
+  background: color-mix(in srgb, var(--host) 10%, transparent);
   color: var(--host);
 }
-.admin-status--dismissed { background: var(--surface-subtle); color: var(--ink-secondary); }
-.admin-privacy-note, .admin-report-card__meta { font-size: var(--text-meta); }
+/* Dismissed is the absence of a state rather than one of its own, so it takes
+   the neutral hairline instead of borrowing a semantic family. */
+.admin-status--dismissed {
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--ink-secondary);
+}
+.admin-privacy-note, .admin-report-card__meta { font-size: var(--text-meta); font-weight: 400; }
 .admin-report-list { display: grid; gap: 0.625rem; margin: 1.25rem 0 0; padding: 0; list-style: none; }
 .admin-report-card {
   display: grid;
@@ -5204,15 +5752,15 @@ body:has(.room-shell) > .root-controls {
 .admin-report-card__main span, .admin-report-card__meta { color: var(--ink-secondary); }
 .admin-report-card__main strong, .admin-report-card__main span { overflow-wrap: anywhere; }
 .admin-report-card__meta { text-align: right; }
-.admin-report-card__arrow { color: var(--action); font-size: 1.25rem; }
+.admin-report-card__arrow { color: var(--action); font-size: var(--text-card); font-weight: 600; }
 .admin-empty {
   margin-top: 1rem;
   padding: 2.5rem 1rem;
-  border: 1px dashed var(--border-strong);
+  border: 1px dotted var(--border-strong);
   border-radius: var(--radius-control);
   text-align: center;
 }
-.admin-empty h3 { margin: 0; }
+.admin-empty h3 { margin: 0; font-size: var(--text-card); font-weight: 700; letter-spacing: -0.01em; }
 .admin-review-panel { align-self: start; }
 .admin-facts {
   display: grid;
@@ -5222,9 +5770,10 @@ body:has(.room-shell) > .root-controls {
   border-radius: var(--radius-control);
   overflow: hidden;
 }
-.admin-facts > div { min-width: 0; padding: 0.75rem; border-bottom: 1px solid var(--border); }
-.admin-facts > div:nth-child(odd) { border-right: 1px solid var(--border); }
-.admin-facts dt { color: var(--ink-muted); font-size: var(--text-label); font-weight: 700; }
+/* Within-card divides, so dotted: the facts grid is one panel, not four. */
+.admin-facts > div { min-width: 0; padding: 0.75rem; border-bottom: 1px dotted var(--border); }
+.admin-facts > div:nth-child(odd) { border-right: 1px dotted var(--border); }
+.admin-facts dt { color: var(--ink-muted); font-size: var(--text-label); font-weight: 400; }
 .admin-facts dd { margin: 0.125rem 0 0; overflow-wrap: anywhere; }
 .admin-facts--stacked { grid-template-columns: 1fr; }
 .admin-facts--stacked > div:nth-child(odd) { border-right: 0; }
@@ -5235,7 +5784,12 @@ body:has(.room-shell) > .root-controls {
   background: var(--surface-subtle);
   overflow-wrap: anywhere;
 }
-.admin-report-details h3, .admin-confirmation h3 { margin: 0 0 0.375rem; font-size: var(--text-card); }
+.admin-report-details h3, .admin-confirmation h3 {
+  margin: 0 0 0.375rem;
+  font-size: var(--text-card);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
 .admin-report-details p, .admin-confirmation p { margin: 0; white-space: pre-wrap; }
 .admin-message-evidence { border-left: 0.25rem solid var(--action); color: var(--ink); white-space: pre-wrap; }
 .admin-evidence-frame {
@@ -5403,7 +5957,9 @@ body:has(.room-shell) > .root-controls {
      the row squeezes them, chips run under it and dissolve instead of being
      sliced through a glyph. */
   padding-right: 1.5rem;
-  mask-image: linear-gradient(to right, #000 calc(100% - 1.5rem), transparent);
+  /* Alpha is the only channel a mask reads, so the opaque stop takes the ink
+     already in scope rather than a colour of its own. */
+  mask-image: linear-gradient(to right, currentcolor calc(100% - 1.5rem), transparent);
 }
 
 .room-live-header__tags .room-chip {
@@ -5420,6 +5976,7 @@ body:has(.room-shell) > .root-controls {
   color: var(--ink-muted);
   font-size: var(--text-label);
   font-variant-numeric: tabular-nums;
+  font-weight: 400;
 }
 
 /* The lifetime is the one fact here no conferencing product has, and it sits
@@ -5430,7 +5987,7 @@ body:has(.room-shell) > .root-controls {
   padding-left: 0.875rem;
   font-size: var(--text-meta);
   font-variant-numeric: tabular-nums;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .room-live-header__host {
@@ -5438,6 +5995,13 @@ body:has(.room-shell) > .root-controls {
   min-width: 0;
   align-items: center;
   gap: 0.375rem;
+}
+
+/* One fragment per state, each in its own family: the role word is green here
+   for the same reason it is green on a tile and in a People row. */
+.room-live-header__host > span:first-child {
+  color: var(--host);
+  font-weight: 700;
 }
 
 .room-live-header__host-identity {
@@ -5452,7 +6016,7 @@ body:has(.room-shell) > .root-controls {
   width: 1.5rem;
   height: 1.5rem;
   flex: none;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   object-fit: cover;
 }
 
@@ -5464,6 +6028,7 @@ body:has(.room-shell) > .root-controls {
 
 .room-live-header__host-absent {
   color: var(--warning);
+  font-weight: 700;
 }
 
 /* ADR 0103 warning ladder. It stays inside one family and escalates by
@@ -5471,7 +6036,7 @@ body:has(.room-shell) > .root-controls {
    reassures at the moment the room is about to end. */
 .room-live-header__countdown[data-countdown-state="thirty-minute"] {
   color: var(--ink);
-  font-weight: 650;
+  font-weight: 700;
 }
 
 .room-live-header__countdown[data-countdown-state="ten-minute"] {
@@ -5479,17 +6044,19 @@ body:has(.room-shell) > .root-controls {
   font-weight: 700;
 }
 
+/* The last rung is the room's only countdown pill, and it takes the same STATUS
+   PILL anatomy as every other state in the room: a 45% hairline of its family
+   over a 10% wash, the family ink, weight 700. Prominence comes from the ring
+   and the weight, never from a heavy fill — warning ink over a heavier wash
+   drops below 4.5:1 on the porcelain ground. */
 .room-live-header__countdown[data-countdown-state="one-minute"] {
-  /* Prominence comes from the ring and the weight, not the fill: warning ink
-     over a heavier wash drops below 4.5:1 on the porcelain ground. */
-  border-left: 0;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--warning) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
   justify-self: end;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning) 45%, transparent);
   color: var(--warning);
   padding: 0.25rem 0.625rem;
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .room-details,
@@ -5582,7 +6149,7 @@ body:has(.room-shell) > .root-controls {
     flex-direction: column;
     inset: auto 0 0;
     border: 1px solid var(--border-strong);
-    border-radius: 0.75rem 0.75rem 0 0;
+    border-radius: var(--radius-card) var(--radius-card) 0 0;
     background: var(--surface);
     box-shadow: var(--feature-shadow);
     box-sizing: border-box;
@@ -5673,6 +6240,7 @@ body:has(.room-shell) > .root-controls {
   .room-details__facts dt {
     color: var(--ink-muted);
     font-size: var(--text-label);
+    font-weight: 700;
   }
 
   .room-details__facts dd {
@@ -5712,18 +6280,22 @@ body:has(.room-shell) > .root-controls {
   gap: 0.125rem;
 }
 .admin-room-item__summary strong { overflow-wrap: anywhere; }
-.admin-room-item__summary span { color: var(--ink-secondary); font-size: var(--text-meta); }
+.admin-room-item__summary span { color: var(--ink-secondary); font-size: var(--text-meta); font-weight: 400; }
 .admin-room-confirmation { grid-column: 1 / -1; }
 .admin-room-confirmation p { margin: 0 0 0.75rem; }
 .admin-room-actions { display: flex; flex-wrap: wrap; gap: 0.625rem; }
 .admin-room-actions button, .admin-room-item > button { min-height: 2.75rem; }
+/* Destructive outline, same anatomy as .button-danger: the fill is reserved for
+   the safe path. */
 .admin-danger-action {
-  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  background: transparent;
   color: var(--danger);
 }
 .admin-danger-action:hover:not(:disabled) {
   border-color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger);
 }
 .admin-room-feedback { margin: 1rem 0 0; font-weight: 700; }
 .admin-room-feedback--error { color: var(--danger) !important; }
@@ -5733,13 +6305,56 @@ body:has(.room-shell) > .root-controls {
   .admin-room-item > button { width: 100%; }
 }
 
+/* Account privacy review. Same row vocabulary as Room termination: one hairline
+   slot per request, the confirmation step taking the full width beneath it. */
+.deletion-review { margin-top: 1rem; }
+.deletion-review-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1.25rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+.deletion-review-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-subtle);
+}
+.deletion-review-item > div:first-child { display: grid; min-width: 0; gap: 0.125rem; }
+.deletion-review-item strong { overflow-wrap: anywhere; }
+.deletion-review-item p {
+  margin: 0;
+  color: var(--ink-secondary);
+  font-size: var(--text-meta);
+  font-weight: 400;
+}
+.deletion-review-actions { display: flex; flex-wrap: wrap; gap: 0.625rem; }
+.deletion-review-confirmation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  grid-column: 1 / -1;
+  gap: 0.625rem;
+}
+.deletion-review-confirmation p { flex-basis: 100%; }
+
+@media (max-width: 47.999rem) {
+  .deletion-review-item { grid-template-columns: 1fr; align-items: stretch; }
+  .deletion-review-actions button { flex: 1; }
+}
+
 /* Issue #23: capability-specific Platform Sanctions. */
 .admin-sanctions { margin-top: 1rem; }
 .admin-panel__eyebrow {
   margin: 0;
   color: var(--action) !important;
   font-size: var(--text-label);
-  font-weight: 750;
+  font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -5759,7 +6374,9 @@ body:has(.room-shell) > .root-controls {
   min-width: 0;
   gap: 0.375rem;
   margin: 0;
-  font-weight: 700;
+  color: var(--ink-secondary);
+  font-size: var(--text-label);
+  font-weight: 600;
 }
 .admin-sanctions__form select,
 .admin-sanctions__form input[type="datetime-local"] {
@@ -5774,7 +6391,9 @@ body:has(.room-shell) > .root-controls {
 }
 .admin-sanctions__form legend {
   margin-bottom: 0.5rem;
+  color: var(--ink-secondary);
   font-size: var(--text-label);
+  font-weight: 700;
 }
 .admin-sanctions__form fieldset label {
   display: flex;
@@ -5789,6 +6408,7 @@ body:has(.room-shell) > .root-controls {
   grid-column: 1 / -1;
   margin: 0;
   font-size: var(--text-meta);
+  font-weight: 400;
 }
 .admin-sanctions__form > button { width: fit-content; min-height: 2.75rem; }
 .admin-sanctions__notice { font-weight: 700; }
@@ -5804,7 +6424,12 @@ body:has(.room-shell) > .root-controls {
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
 }
-.admin-sanctions__list h3 { margin: 0 0 0.75rem; font-size: var(--text-card); }
+.admin-sanctions__list h3 {
+  margin: 0 0 0.75rem;
+  font-size: var(--text-card);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
 .admin-sanctions__list ol {
   display: grid;
   gap: 0.625rem;
@@ -5825,7 +6450,35 @@ body:has(.room-shell) > .root-controls {
 .admin-sanctions__list strong,
 .admin-sanctions__list span { overflow-wrap: anywhere; }
 .admin-sanctions__list span,
-.admin-sanctions__list small { color: var(--ink-secondary); }
+.admin-sanctions__list small { color: var(--ink-secondary); font-weight: 400; }
+
+/* A sanction's status is a state, so it reads as a pill rather than as another
+   line of grey metadata. Expired is the absence of a live restriction and keeps
+   the neutral hairline; active borrows warning, lifted borrows host. */
+.admin-sanctions__list .admin-sanction-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.75rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--ink-secondary);
+  padding: 0.125rem 0.5rem;
+  font-size: var(--text-label);
+  font-weight: 700;
+}
+
+.admin-sanctions__list .admin-sanction-status[data-sanction-status="active"] {
+  border-color: color-mix(in srgb, var(--warning) 45%, transparent);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  color: var(--warning);
+}
+
+.admin-sanctions__list .admin-sanction-status[data-sanction-status="lifted"] {
+  border-color: color-mix(in srgb, var(--host) 45%, transparent);
+  background: color-mix(in srgb, var(--host) 10%, transparent);
+  color: var(--host);
+}
 .admin-sanctions__confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem; }
 .admin-sanctions__confirm span { flex-basis: 100%; font-size: var(--text-label); font-weight: 700; }
 
@@ -5839,7 +6492,11 @@ body:has(.room-shell) > .root-controls {
   .admin-sanctions__list li > button { width: 100%; }
 }
 
-/* Issue #18: canonical Chat feedback and persistent personal safety controls. */
+/* Issue #18: canonical Chat feedback and persistent personal safety controls.
+   The row is the reference's terminal transcript line: a rounded-square avatar
+   in its own column, then identity over the message. Optimistic bubbles carry
+   no avatar and no timestamp — they have no canonical `createdAt` yet — so the
+   second column only exists when there is a disc to put in the first. */
 .room-chat__message {
   position: relative;
   display: grid;
@@ -5850,11 +6507,74 @@ body:has(.room-shell) > .root-controls {
   padding: 0.625rem 0.75rem;
 }
 
+.room-chat__message:has(.room-chat__avatar) {
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 0.625rem;
+}
+
+/* A square-shouldered disc, not a circle: chat is the one place the room stacks
+   many identities in a column, and the chip radius keeps that column reading as
+   rows of a transcript rather than a string of beads. */
+.room-chat__avatar {
+  width: 2rem;
+  height: 2rem;
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  overflow: hidden;
+  border-radius: var(--radius-chip);
+  object-fit: cover;
+}
+
+/* Identity, authority and time wrap together on a narrow dock; the menu is
+   taken out of that flow below, so the reserved space on the right is padding
+   rather than a flex item that jumps to a second line on the longest names. */
 .room-chat__message-heading {
   display: flex;
-  align-items: start;
-  justify-content: space-between;
-  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  padding-right: 2.25rem;
+}
+
+/* The row's own identity, so it takes the title weight and the full ink rather
+   than the muted metadata step it shared with `Sending…` and the char count. */
+.room-chat__author {
+  color: var(--ink);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+/* Authority, as a STATUS PILL in the host family, read from the roster. */
+.room-chat__host {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--host) 45%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--host) 10%, transparent);
+  color: var(--host);
+  padding: 0.0625rem 0.4375rem;
+  font-size: var(--text-label);
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+/* Metadata: the quietest step, and never the only carrier of anything — the
+   `<time>` element keeps the ISO value for anyone reading the machine value. */
+.room-chat__time {
+  flex: none;
+  color: var(--ink-faint);
+  font-size: var(--text-label);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The row's only control, pinned to the row's top corner. */
+.room-chat__message-heading .room-message-actions {
+  position: absolute;
+  top: 0.375rem;
+  right: 0.5rem;
 }
 
 .room-message-actions {

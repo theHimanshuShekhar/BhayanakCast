@@ -75,13 +75,13 @@ describe('theme preference', () => {
       style: { colorScheme: '' } as CSSStyleDeclaration,
     }
     const themeColor = {
-      content: '#F6F8FC',
-      dataset: { light: '#F6F8FC', dark: '#0D1422' },
+      content: '#F2F4F8',
+      dataset: { light: '#F2F4F8', dark: '#0B0E14' },
     }
 
     applyTheme('dark', root, themeColor)
 
-    expect(themeColor.content).toBe('#0D1422')
+    expect(themeColor.content).toBe('#0B0E14')
   })
 })
 

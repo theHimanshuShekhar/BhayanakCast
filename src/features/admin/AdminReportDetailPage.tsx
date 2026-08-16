@@ -31,7 +31,7 @@ export function AdminReportDetailPage({ initialReport }: Readonly<{ initialRepor
   return (
     <main className="admin-shell admin-shell--detail">
       <header className="admin-detail-header">
-        <a className="admin-back-link" href="/admin">← Report queue</a>
+        <a className="admin-back-link" href="/admin"><span aria-hidden="true">&lt;-</span> Report queue</a>
         <div className="admin-detail-header__title">
           <div><p className="admin-eyebrow">Private safety review</p><h1>{targetHeading(report.target)}</h1></div>
           <span className={`admin-status admin-status--${report.status}`}>{statusLabel(report.status)}</span>

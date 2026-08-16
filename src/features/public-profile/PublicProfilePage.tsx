@@ -1,4 +1,5 @@
 import { PastStreams } from '../home/PastStreams'
+import { avatarFallbackLabel, avatarTintIndex } from '../avatar-fallback'
 import type { PublicProfileSummary } from '../home/home-types'
 
 
@@ -11,7 +12,7 @@ export function PublicProfilePage({ profile }: PublicProfilePageProps) {
   return (
     <main aria-labelledby="public-profile-name" className="public-profile">
       <a className="public-profile__home" href="/">
-        <span aria-hidden="true">←</span> Home
+        <span aria-hidden="true">&lt;-</span> Home
       </a>
       <header className="public-profile__header">
         <div className="public-profile__identity">
@@ -23,8 +24,12 @@ export function PublicProfilePage({ profile }: PublicProfilePageProps) {
               width="96"
             />
           ) : (
-            <span aria-hidden="true" className="public-profile__avatar-fallback">
-              {profile.displayName.slice(0, 1).toLocaleUpperCase()}
+            <span
+              aria-hidden="true"
+              className="public-profile__avatar-fallback avatar-fallback"
+              data-avatar-tint={avatarTintIndex(profile.accountId)}
+            >
+              {avatarFallbackLabel(profile.displayName)}
             </span>
           )}
           <div>

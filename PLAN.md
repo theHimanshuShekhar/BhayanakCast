@@ -13,7 +13,7 @@ ADRs themselves.
    transport), plus the room-behaviour ADRs `0009`, `0019`, `0032`, `0035`, `0039`,
    `0047`, `0051`, `0055`–`0059`, `0063`, `0066`–`0072`, `0075`, `0077`.
 2. **`PRODUCT.md` / `DESIGN.md` / `CONTEXT.md`** — the same decisions in prose.
-   `DESIGN.md:76`–`98` is the room's normative description; `PRODUCT.md:80`, `:89`,
+   `DESIGN.md:297`–`315` is the room's normative description; `PRODUCT.md:80`, `:89`,
    `:108` are its behavioural clauses.
 3. **`docs/design/Home Uplift.dc.html`** — option **4a** (`:54`, admitted wide; `:200`,
    admitted 390px) and option **4b** (`:150`, pre-admission and Past Stream). Options
@@ -32,7 +32,7 @@ concept anywhere in `PRODUCT.md`. 4a's floating control pill is likewise rejecte
 `0100` ("structural surface, not floating conferencing pill") — take its button styling,
 not its placement.
 
-An assumption worth stating: `DESIGN.md:92`'s "the desktop room uses the 72px icon app
+An assumption worth stating: `DESIGN.md:319`'s "the desktop room uses the 72px icon app
 rail at all widths" means all *desktop* widths. Below 768px `0103` puts Back/Home in the
 room header and one room control bar at the bottom, and 4a's 390px mock (`:203`) draws no
 rail. Build no rail below 768px.
@@ -138,7 +138,7 @@ mockup or by a passing thought:
 - **Picture-in-Picture, playback mixer, multi-watch** — `0101`, `0039`.
 - **Host room-end control** — `0055`.
 - **Chat message deletion, timeouts, slow mode** — `0009`'s consequences.
-- **Inter** — `0096` fixes Source Sans 3, already vendored and verified.
+- **Inter** — `0111` fixes self-hosted JetBrains Mono as the single family, already vendored and verified.
 - **A room-scoped realtime channel beyond the existing union** — the room already has
   `ROOM_SOCKET_EVENT` carrying chat, activity, typing, signals and lifecycle. Add event
   *kinds* where a phase needs one (R4 step 6 may); do not add a second protocol.

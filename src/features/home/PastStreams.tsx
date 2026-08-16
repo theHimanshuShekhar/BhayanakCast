@@ -102,7 +102,7 @@ export function PastStreams({ streams }: PastStreamsProps) {
                 {/* The whole block is the link; this only names where it
                     goes, so it stays out of the accessible name. */}
                 <span aria-hidden="true" className="past-stream-item__open">
-                  Open <span>→</span>
+                  Open <span>{'->'}</span>
                 </span>
               </span>
             </a>

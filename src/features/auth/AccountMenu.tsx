@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { avatarFallbackLabel, avatarTintIndex } from '../avatar-fallback'
 import { authClient, type SessionProjection } from './auth-client'
 
 export interface AccountMenuProps {
@@ -93,8 +94,12 @@ export function AccountMenu({ session }: AccountMenuProps) {
             width="36"
           />
         ) : (
-          <span aria-hidden="true" className="account-menu__fallback">
-            {session.displayName.slice(0, 1).toUpperCase()}
+          <span
+            aria-hidden="true"
+            className="account-menu__fallback avatar-fallback"
+            data-avatar-tint={avatarTintIndex(session.id)}
+          >
+            {avatarFallbackLabel(session.displayName)}
           </span>
         )}
         <span className="account-menu__identity">

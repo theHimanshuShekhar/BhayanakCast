@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { avatarFallbackLabel, avatarTintIndex } from '../avatar-fallback'
 import {
   chatMuteMutationKey,
   chatMutesQueryKey,
@@ -78,8 +79,12 @@ export function MutedAccounts() {
                 {account.avatarUrl ? (
                   <img alt="" height="48" src={account.avatarUrl} width="48" />
                 ) : (
-                  <span aria-hidden="true" className="profile-muted-accounts__avatar-fallback">
-                    {account.displayName.slice(0, 1).toLocaleUpperCase()}
+                  <span
+                    aria-hidden="true"
+                    className="profile-muted-accounts__avatar-fallback avatar-fallback"
+                    data-avatar-tint={avatarTintIndex(account.accountId)}
+                  >
+                    {avatarFallbackLabel(account.displayName)}
                   </span>
                 )}
                 <span>{account.displayName}</span>

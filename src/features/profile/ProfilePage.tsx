@@ -20,7 +20,7 @@ export function ProfilePage({ profile, session }: ProfilePageProps) {
       ) : (
         <main aria-labelledby="profile-heading" className="public-profile">
           <a className="public-profile__home" href="/">
-            <span aria-hidden="true">←</span> Back to Home
+            <span aria-hidden="true">&lt;-</span> Back to Home
           </a>
           <header className="public-profile__header">
             <h1 id="profile-heading">Profile</h1>

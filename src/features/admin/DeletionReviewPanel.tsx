@@ -68,6 +68,9 @@ export function DeletionReviewPanel({
                         : 'Rejection restores normal access and public visibility.'}
                     </p>
                     <button
+                      className={
+                        confirmation.decision === 'approved' ? 'admin-danger-action' : 'button-primary'
+                      }
                       type="button"
                       disabled={busy}
                       onClick={() => void decide(request.accountId, confirmation.decision)}
@@ -103,7 +106,7 @@ export function DeletionReviewPanel({
           })}
         </ol>
       )}
-      {error ? <p role="alert">{error}</p> : null}
+      {error ? <p className="admin-error" role="alert">{error}</p> : null}
     </section>
   )
 }

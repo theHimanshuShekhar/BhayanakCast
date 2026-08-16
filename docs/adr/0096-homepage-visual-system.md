@@ -1,6 +1,6 @@
 # ADR 0096: Use a porcelain-and-midnight clubhouse visual system
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR 0111
 - **Date:** 2026-07-11
 
 ## Context

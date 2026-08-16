@@ -26,7 +26,7 @@ export function AdminPage({
   return (
     <main className="admin-shell">
       <header className="admin-header">
-        <a className="admin-back-link" href="/">← Home</a>
+        <a className="admin-back-link" href="/"><span aria-hidden="true">&lt;-</span> Home</a>
         <div>
           <p className="admin-eyebrow">Private operator workspace</p>
           <h1>Platform Admin</h1>
@@ -83,7 +83,7 @@ function ReportQueue({ reports }: Readonly<{ reports: readonly ReportQueueItem[]
               {report.evidenceAvailable && <span>Evidence captured</span>}
               <time dateTime={report.createdAt.toISOString()}>{formatDate(report.createdAt)}</time>
             </span>
-            <span aria-hidden="true" className="admin-report-card__arrow">→</span>
+            <span aria-hidden="true" className="admin-report-card__arrow">{'->'}</span>
           </a>
         </li>
       ))}

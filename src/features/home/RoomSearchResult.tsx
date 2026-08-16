@@ -55,7 +55,7 @@ export function RoomSearchResult({ room }: Readonly<{ room: ActiveRoomSummary }>
             />
           )}
           <span aria-hidden="true" className="live-room-card__open-cue">
-            Open room <span>→</span>
+            Open room <span>{'->'}</span>
           </span>
         </div>
       </a>

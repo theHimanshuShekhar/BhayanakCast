@@ -25,7 +25,7 @@ The five known disagreements resolve as follows.
 
 **Hide non-streaming participants.** 4a has no such control. `0101` requires a viewer-local checkbox that removes presence tiles from that viewer's mosaic for the current room session only. Build it, in overview and strip alike per `0103`.
 
-Where 4a specifies a typeface, ADR `0096` governs: self-hosted Source Sans 3, not the mockup's Inter.
+Where 4a specifies a typeface or theme token, ADR `0111` governs: self-hosted JetBrains Mono and the terminal-club palette, not the mockup's Inter or ADR `0096`'s superseded Source Sans 3 palette.
 
 ## Consequences
 

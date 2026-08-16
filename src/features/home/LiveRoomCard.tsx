@@ -97,7 +97,7 @@ export const LiveRoomCard = memo(function LiveRoomCard({
               </span>
             )}
             <span aria-hidden="true" className="live-room-card__open-cue">
-              {canJoin ? 'Open room' : 'Sign in to join'} <span>→</span>
+              {canJoin ? 'Open room' : 'Sign in to join'} <span>{'->'}</span>
             </span>
           </div>
         </div>

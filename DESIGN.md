@@ -1,111 +1,358 @@
-# BhayanakCast Design Brief
+---
+name: BhayanakCast
+description: A terminal-club community for discovering, joining, and watching small social screen-sharing rooms.
+colors:
+  canvas: "#0b0e14"
+  canvas-light: "#f2f4f8"
+  surface: "#141924"
+  surface-light: "#ffffff"
+  surface-subtle: "#0f141d"
+  surface-subtle-light: "#e9edf4"
+  surface-raised: "#1b2130"
+  surface-raised-light: "#ffffff"
+  rail: "#0f141d"
+  rail-light: "#e9edf4"
+  ink: "#e6eaf3"
+  ink-light: "#131722"
+  ink-secondary: "#a5b0c4"
+  ink-secondary-light: "#4c586e"
+  ink-muted: "#8b96ab"
+  ink-muted-light: "#59657c"
+  ink-faint: "#7e899b"
+  ink-faint-light: "#59657c"
+  border: "#232b3a"
+  border-light: "#dbe1ec"
+  border-strong: "#5c6b8b"
+  border-strong-light: "#7b889f"
+  action: "#c084fc"
+  action-light: "#7326d9"
+  action-hover: "#d9b3ff"
+  action-hover-light: "#5c17b8"
+  action-soft: "#2a1f47"
+  action-soft-light: "#eee6ff"
+  action-line: "#c084fc"
+  action-line-light: "#7326d9"
+  action-ink: "#150b26"
+  action-ink-light: "#ffffff"
+  live: "#ff5f8f"
+  live-light: "#c62a5e"
+  host: "#4ade80"
+  host-light: "#0d7a4f"
+  warning: "#fbbf24"
+  warning-light: "#8a5a00"
+  danger: "#ff7a63"
+  danger-light: "#bc422a"
+  private: "#22d3ee"
+  private-light: "#0e7490"
+  scrim: "rgb(5 7 11 / 0.86)"
+  scrim-light: "rgb(19 23 34 / 0.72)"
+  media-canvas: "#05070b"
+  media-canvas-edge: "#2a1f47"
+  media-scrim: "rgb(5 7 11 / 0.88)"
+  on-media-ink: "#e6eaf3"
+  on-media-live: "#ff5f8f"
+  on-media-warning: "#fbbf24"
+  on-media-danger: "#ff7a63"
+  on-media-private: "#22d3ee"
+  avatar-azure: "#7ac3ff"
+  avatar-orchid: "#ed9ee5"
+  avatar-gold: "#fea668"
+  avatar-lime: "#b3ca65"
+  avatar-teal: "#37d8c9"
+  avatar-periwinkle: "#a5b6ff"
+  avatar-ink: "#0b0e14"
+typography:
+  display:
+    fontFamily: "JetBrains Mono, ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace"
+    fontSize: "2.25rem"
+    fontWeight: 700
+    lineHeight: 1.08
+    letterSpacing: "-0.03em"
+  headline:
+    fontFamily: "JetBrains Mono, ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace"
+    fontSize: "1.875rem"
+    fontWeight: 700
+    lineHeight: 1.1
+    letterSpacing: "-0.03em"
+  title:
+    fontFamily: "JetBrains Mono, ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace"
+    fontSize: "1.5rem"
+    fontWeight: 700
+    lineHeight: 1.2
+    letterSpacing: "-0.02em"
+  card:
+    fontFamily: "JetBrains Mono, ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace"
+    fontSize: "1.125rem"
+    fontWeight: 700
+    lineHeight: 1.25
+    letterSpacing: "-0.01em"
+  body:
+    fontFamily: "JetBrains Mono, ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace"
+    fontSize: "1rem"
+    fontWeight: 450
+    lineHeight: 1.5
+    letterSpacing: "0"
+  meta:
+    fontFamily: "JetBrains Mono, ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace"
+    fontSize: "0.875rem"
+    fontWeight: 400
+    lineHeight: 1.5
+    letterSpacing: "0"
+  label:
+    fontFamily: "JetBrains Mono, ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace"
+    fontSize: "0.8125rem"
+    fontWeight: 600
+    lineHeight: 1
+    letterSpacing: "0"
+  eyebrow:
+    fontFamily: "JetBrains Mono, ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace"
+    fontSize: "0.8125rem"
+    fontWeight: 700
+    lineHeight: 1
+    letterSpacing: "0.08em"
+    textTransform: "uppercase"
+  count:
+    fontFamily: "JetBrains Mono, ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace"
+    fontSize: "1.125rem"
+    fontWeight: 700
+    lineHeight: 1
+    letterSpacing: "0"
+    fontFeature: "tabular-nums"
+rounded:
+  chip: "0.3125rem"
+  control: "0.5rem"
+  card: "0.75rem"
+  pill: "9999px"
+spacing:
+  hair: "0.25rem"
+  tight: "0.375rem"
+  snug: "0.5rem"
+  cozy: "0.625rem"
+  base: "0.75rem"
+  roomy: "1rem"
+  section: "1.5rem"
+  band: "2.125rem"
+  gutter: "2.5rem"
+components:
+  button-invite:
+    backgroundColor: "transparent"
+    textColor: "{colors.action}"
+    typography: "{typography.meta}"
+    rounded: "{rounded.control}"
+    padding: "0 1.125rem"
+    height: "2.75rem"
+  button-commit:
+    backgroundColor: "{colors.action}"
+    textColor: "{colors.action-ink}"
+    typography: "{typography.meta}"
+    rounded: "{rounded.control}"
+    padding: "0.5rem 0.875rem"
+    height: "2.75rem"
+  button-quiet:
+    backgroundColor: "{colors.surface-raised}"
+    textColor: "{colors.ink}"
+    typography: "{typography.meta}"
+    rounded: "{rounded.control}"
+    padding: "0.5rem 0.875rem"
+    height: "2.75rem"
+  button-leave:
+    backgroundColor: "transparent"
+    textColor: "{colors.danger}"
+    typography: "{typography.meta}"
+    rounded: "{rounded.control}"
+    padding: "0 1.125rem"
+    height: "2.5rem"
+  chip-state:
+    backgroundColor: "transparent"
+    textColor: "{colors.ink-muted}"
+    typography: "{typography.label}"
+    rounded: "{rounded.pill}"
+    padding: "0 0.5625rem"
+    height: "1.625rem"
+  chip-filter-active:
+    backgroundColor: "{colors.action-soft}"
+    textColor: "{colors.action}"
+    typography: "{typography.label}"
+    rounded: "{rounded.pill}"
+    padding: "0.25rem 0.5rem 0.25rem 0.75rem"
+    height: "2.25rem"
+  input-search:
+    backgroundColor: "{colors.canvas}"
+    textColor: "{colors.ink}"
+    typography: "{typography.body}"
+    rounded: "{rounded.control}"
+    padding: "0 0.75rem"
+    height: "2.75rem"
+  card-room:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
+    typography: "{typography.card}"
+    rounded: "{rounded.card}"
+    padding: "1rem 1rem 1.125rem"
+  card-room-featured:
+    backgroundColor: "{colors.surface-raised}"
+    textColor: "{colors.ink}"
+    typography: "{typography.headline}"
+    rounded: "{rounded.card}"
+    padding: "1rem 1rem 1.125rem"
+  nav-rail-item:
+    backgroundColor: "transparent"
+    textColor: "{colors.ink-secondary}"
+    typography: "{typography.label}"
+    rounded: "{rounded.control}"
+    padding: "0.375rem 0.5rem"
+    height: "3.5rem"
+    width: "4.5rem"
+---
 
-## North star
+# Design System: BhayanakCast
 
-BhayanakCast is a **community clubhouse**: people browse an active public community and move between social screen-sharing rooms. The product should feel welcoming, lively, and easy to scan—not like a broadcast studio or a dense operations console.
+## Overview
 
-Accepted ADRs define structure and behavior. Files under `docs/design/` are visual explorations only: reuse their visual language where it agrees with this brief, but do not inherit conflicting layout, typography, controls, or product concepts.
+**Creative North Star: "The Terminal Clubhouse"**
 
-## Functional interface invariants
+BhayanakCast is a public community clubhouse, not a broadcast studio or an operations console. Every surface frames something live: a room preview, a person sharing, a conversation, or a state changing now. The interface borrows the legibility and social shorthand of a terminal client—monospace text, hairline panels, compact status words, dotted dividers—without becoming nostalgic decoration.
 
-- Live room state, capacity, privacy, host authority, stream availability, and watch state must remain clear before decoration.
-- Public/private admission and moderator authority must be explicit and never hover-only.
-- Every dialog, menu, tab, room control, moderation control, and authentication action must be keyboard operable with visible focus.
-- Body and placeholder text must meet WCAG 2.2 AA contrast against actual surfaces.
-- Reduced motion must preserve state feedback while removing non-essential animation.
-- The room UI must support the defined mobile watch/chat clients.
+Dark is the canonical world: near-black slate grounds with one violet identity glaze. Light is an intentional daylight counterpart, not an inversion. Both preserve the same hierarchy, geometry, state vocabulary, and contrast. Violet means identity, navigation, selection, or action only. Rose-red means Live, green means Host or success, amber means warning, coral-red means danger, and cyan means private. Colour always accompanies a word, icon, or structural cue.
 
-## Theme
+Product truth outranks styling. Capacity, privacy, host authority, stream availability, watch state, pending/failed chat, and moderation capability remain explicit and keyboard reachable. User content is never uppercased, truncated into meaninglessness, or recoloured as state. Reduced motion removes transforms and pulses while preserving visible confirmation.
 
-V1 ships intentional light and dark themes. Both modes must preserve the same hierarchy, state clarity, contrast, focus treatment, and reduced-motion behavior. A context-specific dark media surface is permitted in either theme when it improves watching. The initial theme follows the device preference; a visible user control persists a light/dark override.
+**Key Characteristics:**
 
-## Color strategy
+- JetBrains Mono across display, UI, chat, counts, and metadata.
+- Dark-canonical slate and an intentional daylight counterpart.
+- One violet identity/action glaze plus five non-overlapping semantic families.
+- Pill status language, hairline object boundaries, and dotted internal dividers.
+- Real media and live social state supply the visual energy.
+- Accepted Home and Room geometry remains structurally unchanged.
 
-Use the exact porcelain/midnight tokens from ADR 0096. Light anchors: canvas `#F6F8FC`, surface `#FFFFFF`, text `#172033`, cobalt `#2457D6`. Dark anchors: canvas `#0D1422`, surface `#141D2D`, text `#F4F7FC`, cobalt `#82A5FF` with dark action text `#0B1630`. Secondary/muted/border and cobalt-soft/hover values are likewise fixed in ADR 0096.
+## Colors
 
-Semantic families remain distinct from cobalt and from each other: light/dark Live `#C52B69`/`#FF72A5`, Host/success `#147A5A`/`#55D5A9`, warning `#946000`/`#F2B84B`, danger `#B83232`/`#FF7B72`, and private `#6842B8`/`#B99AFF`. Never rely on hue without text/icon state.
+The palette has four surface depths, two hairlines, one violet glaze, and five semantic families. Frontmatter values are normative and map directly to `src/styles/app.css`: un-suffixed tokens are the dark `:root` values; `-light` tokens are `[data-theme="light"]` overrides.
+
+- **Canvas and rail:** Canvas is the page ground. Rail and subtle surface define navigation and recessed slots. Raised surface is reserved for selected controls, dialog panels, and hierarchy—not generic card decoration.
+- **Ink:** Primary ink carries headings and body. Secondary carries descriptions. Muted and faint carry metadata; light mode intentionally shares one AA-safe low-emphasis value for both.
+- **Boundaries:** `border` is a quiet structural hairline. `border-strong` is the required-control boundary and clears WCAG 2.2's 3:1 non-text contrast floor in both themes.
+- **Violet action:** Action, hover, soft wash, line, and action ink are one family. Never use violet to mean Live, Host, warning, danger, or private.
+- **Semantic families:** Live uses rose-red, Host/success green, warning amber, danger coral-red, and private cyan. A status word remains present; Live may add a same-family leading dot.
+- **Media:** Media canvas, scrim, and `on-media-*` values are theme-invariant because captured frames control the background. Never substitute daylight semantic values over media.
+- **Avatar identity:** Six light tints carry dark avatar ink in both themes. The tint is deterministically keyed to the account id and is decorative identity, never state.
+
+No gradients, glows, or ambient colour clouds. Warmth comes from live previews, people, and conversation—not ornamental effects.
+
+**The One Violet Rule.** Violet means identity, navigation, selection, or action—nothing else.
+
+**The Real State Rule.** Colour accompanies a word, icon, or structural cue and never carries state alone.
 
 ## Typography
 
-Self-host Source Sans 3 variable WOFF2 assets and use the family across display, UI, chat, statistics, and body copy, with tabular numerals for live counts. Fixed scale: 13px minimum labels, 14px metadata, 16px body/controls, 18px normal card titles, 24px section titles, 30px featured title, and 36px rare page headings.
+JetBrains Mono is self-hosted from `public/fonts/jetbrains-mono-latin.woff2` with a 100–800 variable axis and `font-display: swap`. It is the only family across display, UI, chat, counts, and metadata. Use the monospace fallback stack in frontmatter; never add a second display face.
 
-## Density
+The fixed size ladder is 13, 14, 16, 18, 24, 30, and 36px. There is no 20px or 32px exception.
 
-Use adaptive density by surface: discovery should feel welcoming and breathable, while live room people/chat/controls become compact enough to keep the social state visible.
+- **700:** page/section/card titles, eyebrows, status words, and changing counts.
+- **600:** buttons, interactive labels, tags, and compact chips.
+- **450:** body, room descriptions, and chat messages.
+- **400:** timestamps and muted metadata.
 
-## Home composition
+Tracking compensates for one fixed-width family: `-0.03em` at 36/30px, `-0.02em` at 24px, `-0.01em` at 18px, zero at 16/14px and ordinary 13px labels, and `+0.08em` only for uppercase 13px eyebrows. Use tabular numerals for live counts, capacities, timers, timestamps, and metrics. Lowercase is reserved for fixed chrome labels; never transform user-provided names or content.
 
-Home uses three composition stages while preserving center order. At 1280px above, show a persistent left icon rail, fluid center discovery column, right identity/utility rail. At 768–1279px, keep the same icon rail, remove right rail, collapse global statistics within search utilities. Below 768px, replace both rails with a compact top brand bar containing `B`, live connected-people count, and an avatar only when signed in; persistent bottom navigation shows Home, Create, and Profile for signed-in visitors or `Discord` for anonymous visitors. The anonymous `Discord` control visibly reads `Discord`, has the full accessible name `Continue with Discord`, and starts full-page Discord OAuth directly, returning Home. Fixed small-stage bars respect safe areas, visible focus, 44px targets, and content clearance.
+**The Fixed Ladder Rule.** All interface type uses 13, 14, 16, 18, 24, 30, or 36px.
 
-At wide widths, the content frame is capped at 1600px and centred: a 72px icon rail outside that frame, a fluid center column, a 280px right rail, and 40px gaps/padding. The rail is 72px at wide as well as medium, so the icon vocabulary never changes across the two desktop stages, and the surplus the narrower rail returns goes to the center measure rather than to margin. Medium uses the same 72px icon rail and least 16px center gutters; an anonymous dedicated Discord affordance may use the Discord mark alone only with accessible name and hover/focus tooltip `Continue with Discord`. Small uses 16px gutters, 56px top bar, 64px bottom navigation plus safe-area inset.
+## Layout
 
-The center strictly ordered: prominent search filters, Live Rooms including featured room, then quieter ten-item Past Streams section. Create Room lives outside center on wide/medium layouts; no title toolbar or promotional hero pushes discovery down. The wide left icon rail carries the `B` brand mark, Home, Create or the anonymous Discord door, Profile, and the theme toggle. The wide right rail carries the connected-people count, global statistics, and an always-available Create Room launch panel; for anonymous visitors it starts full-page Discord OAuth directly rather than being replaced by a separate authentication control. The account menu stays in the rail on wide and in the top bar on small.
+Preserve the accepted product geometry. The spacing base is 4px. Breakpoints are 48rem, 80rem, and 100rem.
 
-Every Home Create affordance opens one shared form. Wide/medium use a centered modal; small uses a full-screen safe-area- and keyboard-aware dialog. Both keep identical name, optional category, optional tags, optional single-line description, visibility, and conditional private-password fields, defaults, validation, Cancel/Create actions, focus trap/return, and dismiss behavior. Anonymous activation signs in first, carries only an opaque create intent, then reopens a blank dialog on Home; no draft/password crosses OAuth and creation is never automatic.
+Home has three stages:
 
-Use one normal document scroll. Wide rails—and the medium left rail—are sticky viewport-height companions without independent scroll regions; if their content cannot fit a short viewport, it rejoins document flow. Search/filters scroll normally during unfiltered discovery, but become sticky whenever a query/category/tag is active, below the small-stage top bar where applicable. Clearing all controls removes stickiness; bottom navigation remains fixed on small screens.
+- **Below 768px:** one document-flow column with 16px inline gutters, a compact top brand bar, and labeled Home/Create/Profile bottom navigation.
+- **768–1279px:** a 72px icon rail plus a fluid discovery column with 40px inline gutters.
+- **1280px and above:** the same rail, a fluid centre, and a 280px identity/utility rail; the centre is capped so wide viewports return surplus space as margin instead of stretching content.
 
-With a non-empty query, search/filters stay fixed while the featured Live Room, ranked Live Rooms, and Past Streams are replaced by separate uniform Active Rooms and Public Profiles result groups. Clearing the query restores the normal Home sections.
+Live Rooms keep rank order: rank one is featured, ranks two and three form the right stack on wide screens, and later rooms continue in a two-column grid. Medium screens use a full-width feature plus two columns; mobile uses one column. Past Streams are compact metadata blocks—one column on mobile, two on desktop—with real media only when a real archived capture exists.
 
-Wide and medium layouts expose searchable Category single-select and Tags multi-select comboboxes beside or below search. Small layouts use one Filters button and an accessible bottom sheet. Options are distinct values on current Active Rooms with counts; active filters remain removable chips with conditional Clear all. Category matches exactly after normalization and selected tags use AND semantics. Text results rank direct exact/prefix/substring matches before conservative fuzzy matches, which require at least three characters.
+The admitted desktop room is a fixed-viewport media workspace: 72px app rail, compact room header, dark media canvas, control shelf, and a 360px Chat/People/Activity dock at 1280px and above. At 768–1279px companions are a non-modal right drawer. Mobile uses a compact header, two-column overview when unwatched, a primary watched stage with a horizontal tile strip, and explicit 55%/90% companion sheets above the room bar.
 
-Search uses TanStack Pacer `useDebouncer`: trailing 250 ms, Enter flushes immediately, and unmount cancels pending navigation. Query/category/tags use canonical Home URL parameters so reload, sharing, and return navigation restore the view; intermediate edits replace rather than stack history entries. TanStack Router/Start owns loader cancellation and stale-result protection. Keep current results visible with localized progress and announce updated counts without moving focus.
+Density adapts by surface. Discovery stays breathable. Room people, chat, activity, and controls become compact enough to preserve live social state. Do not introduce nested discovery scroll regions or a rail that cannot fit beside the documented stage.
 
-Public Profile results are rich but bounded: Discord avatar/name, compact aggregate usage statistics, three most recent Past Streams, and top three co-users. The whole result is one link to the matched profile; its excerpts are non-interactive, missing rows collapse, and preview data is fetched in the grouped search projection rather than per-card requests.
+## Elevation & Depth
 
-TanStack Query owns all Home domain fetching and cache; Better Auth alone owns session state. The route blocks on and hydrates discovery/search plus visible Past Streams, while facets, statistics, and connected presence prefetch into shape-matched section skeletons. Search retains prior cached results with localized progress. Section Query failures show inline Retry without blocking unaffected content or rendering missing metrics as zero. Socket.IO patches value-only cached fields plus membership room/statistics counts in place when deltas are present, and targets invalidation when result membership may change. Realtime loss marks cached live values stale and shows “Reconnecting…”; successful reconnect invalidates/refetches active Home queries, then recomputes the grid once.
+Structure comes from hairlines, not shadows. Card interiors use dotted dividers. Controls use solid strong hairlines where their boundary must remain perceivable. A surface is never violet merely because it is important.
 
-The Home connection strip has no new colour family: reconnecting borrows warning, offline/error uses danger, and recovered uses the neutral ink-secondary treatment. Each state also carries text, so colour never carries the state alone.
+Dark elevation uses a tight near-black drop and surface lightness. Light elevation uses a restrained ink shadow. The canonical shadow strings live in `.impeccable/design.json` because frontmatter has no shadow token group. Hover may recolour a card's one-pixel ring to the action line; shadows never communicate semantic state.
 
-## Live Rooms layout
+Five z-layers are fixed: content `0`, sticky `20`, navigation `30`, overlay `40`, dialog `50`. Avoid arbitrary z-index values.
 
-At wide widths, the featured rank-1 room fills the left side and spans the height of ranks 2 and 3 stacked on the right; rank 4 onward continues below in an equal-size two-column card grid. Medium widths use a full-width featured card followed by a two-column grid. Small widths use one column in rank order. With only one or two rooms, occupied cards use available area without empty placeholders. Counts/state update live, but assignment/order remain stable until reload, return navigation, search/filter context change, explicit refresh, or successful canonical refresh after realtime reconnection; ended rooms close cells without promotion. Search results use a uniform list.
+Motion uses `cubic-bezier(0.2, 0.8, 0.2, 1)`: 120ms for control and colour feedback, 180ms for menus/popovers/sheets, and 240ms for layout/state transitions. The Live dot is the only looping animation, an opacity pulse at 1.8s. Reduced motion removes pulses and transforms and makes state changes immediate.
 
-During search, Active Rooms use one column of compact horizontal results with a small Preview mosaic and complete allowed room metadata/presence; small screens may stack mosaic above metadata. Direct matches precede fuzzy matches, then room ties use normal social rank. Public Profile ties use normalized display name then opaque ID, never usage popularity.
+**The Hairline Rule.** Solid hairlines bound controls; dotted hairlines divide card and row internals.
 
-Every Live Room card includes a one-to-four-tile Stream Preview mosaic. More than four Streams use the four freshest previews; public previews are unblurred and private previews blurred. The featured room gives this mosaic more area beside complete room metadata, presence, state, and action. Rooms without Streams use real presence/state/metadata rather than decorative placeholder imagery.
+## Shapes
 
-Each Live Room card is one accessible link target: clicking or activating anywhere navigates to that room's pre-admission page. Category, tag, and state chips inside it are descriptive rather than nested controls. The destination completes authentication/admission and an explicit Join before any admitted room layout, peer state, chat, or media is shown.
+Four radii, four roles:
 
-## Past Streams layout
+- **5px chip:** compact on-media labels where full pill geometry would waste space.
+- **8px control:** buttons, fields, rail items, fact blocks, and quiet actions.
+- **12px card:** room cards, substantial panels, dialogs, media tiles, and companion sheets.
+- **Full pill:** status words, neutral tags, counts, avatars, filter chips, and presence dots.
 
-The ten recent Past Streams use a compact grid of metadata blocks: one column on mobile and two on desktop. Each block shows name, visibility, optional category/tags, and a single baseline of participation/Stream summary, ended time, and an Open action linking to the summary. A public Past Stream with an archived capture uses its real thumbnail; a private Past Stream with a non-zero Stream count uses a CSS-only blurred placeholder; all other cases use no media block. The blocks use no fake thumbnail, carousel, pagination, or table styling.
+Cards and panels use 12px, not a fifth radius. Media clips to its card radius and letterboxes real frames into the media canvas rather than cropping them. Avatar fallbacks are two uppercase alphanumeric characters in a pill disc with a deterministic account tint. Borders are one pixel and either solid for an object boundary or dotted for an internal terminal-club separator.
 
-## Empty discovery
+## Components
 
-When no rooms are live outside search/filter results, replace the featured/list area with a generous but restrained text-led invitation: “The clubhouse is quiet,” one concise explanation of public versus private rooms, and a primary Create Room action. Use no illustration, fake room, onboarding steps, or decorative animation. Keep available Past Streams directly below; if none exist, add one short first-community cue.
+### Buttons
 
-## Admitted Stream Room shell
+Four weights express intent without changing layout:
 
-Desktop uses a fixed-viewport media workspace: a 72px icon application rail, compact two-line room header, dominant dark media canvas, integrated control shelf, and—at 1280px and above—a persistent 360px Chat/People/Activity dock. At 768–1279px, keep the app rail but open companions as a non-modal right workspace drawer: no dimmer, focus trap, media pause, or grid reflow. Give it explicit Close and Escape behavior with focus return; keep uncovered tile controls operable and scroll a keyboard-focused mosaic control clear of the drawer. Header and shelf stay reachable; the mosaic and each companion may scroll within bounded regions.
+- **Invite:** transparent with violet outline/ink; used for Create, Join, and sign-in invitations.
+- **Commit:** violet fill with action ink; used for Watch, confirm, Save, and the primary dialog action.
+- **Quiet:** raised surface, strong hairline, primary ink; used for Mute, Fullscreen, Settings, Cancel, and secondary navigation.
+- **Leave/danger:** transparent with danger outline/ink; used only for destructive actions.
 
-The header shows Back/Home, name, privacy/Full/live state, Host Settings, category/tags, current Host, member/Stream counts, and persistent lifetime countdown. The control shelf—not a floating conferencing pill—always owns the viewer's single stateful own-Stream slot, compatibility state, and Leave. That slot progresses Start Stream → `Starting…` with Cancel → Stop Stream; cancellation/failure returns to Start with inline guidance and no dialog. Mute/Unmute, Stop Watching, connection state, and Fullscreen always stay on the watched Streamer's tile. Host moderation remains contextual in People and tile menus.
+Buttons use 600 weight and visible focus. Hover changes family-appropriate fill or ink; disabled and busy semantics remain explicit. Do not make every room control violet.
 
-The media canvas uses the midnight surface in both themes while surrounding chrome honors the selected theme. Stream media is contained without cropping. Tile order is You, initial current Host when different, then continuous join order; new members append and state/Host changes do not reorder. Selecting Watch replaces that member's Preview with the single live subscription and gives that tile layout precedence. On desktop/medium, the watched tile becomes a full-width stage in the mosaic's first row and the uniform remaining tiles flow beneath it row-major in unchanged order. The stage never fills the canvas: cap its media so the stage, its one-row footer, and the top of the next tile row stay visible without scrolling—the viewer must be able to see there is another Stream to switch to—and letterbox the 16:9 media into the midnight ground rather than cropping it. Keep each normal cell at least 240px wide with a 16:9 visual region plus its footer, and scroll the bounded mosaic before shrinking further. Selecting another stops the former watch first. Every watch starts muted. A persistent footer sits below—not over—the watched media and keeps Streamer identity/status, connection/retry, Mute/Unmute, Stop Watching, and native Fullscreen visible to touch, keyboard, and pointer users. Use one row when it fits, which a full-width stage always does; at narrow widths, use two rows with identity/watcher/connection state above media actions—never horizontal scrolling or More-menu overflow.
+### Status pills and tags
 
-Before subscription, keep the thumbnail itself non-interactive and place Streamer identity, Live/preview freshness, watcher stack/count, explicit Watch, and compact Report/authorized-Host menu in a persistent footer below it. Own sharing appears as a muted browser-local Preview in the viewer's own tile, but own Start/Stop controls remain only in the shelf. Render each non-streamer as a real-avatar presence tile with name and Host/You/reconnecting/compatibility state plus the same contextual menu; never use a camera-off video treatment. Non-streamers remain visible by default; a room-session checkbox hides only their mosaic tiles for that viewer. With no Streams, retain member tiles plus a quiet `No one is sharing yet` prompt pointing compatible viewers to the bottom-bar Stream action.
+A status pill is a 1.625rem full pill with 13px/700 text, a 45% semantic-family hairline, and a 10% family wash. Live adds a leading dot. Neutral category/tag chips are transparent with `border-strong`, muted ink, and 13px/600 text. Filter chips are the genuinely interactive pill variant and may use the violet soft/action pair.
 
-The tile status line is one fragment per state, each in its own semantic family: Host in the host colour, Live and Watching in Live with a leading dot so hue is never the only carrier, Reconnecting and a stopped own capture in warning, a failed compatibility gate and an exhausted watch in danger, and identity plus preview freshness muted. A role never recolours the whole line. The on-media chip follows the same rule: Live for `Screen up`, warning while connecting, danger once the retries are spent.
+### Fields
 
-Tile controls use three weights, not one. Watch and Stop Watching carry the cobalt fill — entering and leaving a watch are the same decision and must be equally findable. Mute/Unmute and Fullscreen are quiet bordered controls. The Report/Host menu trigger is quieter still: permanently visible and never hover-only, but never competing with the action a viewer came to the tile for. A Watch that cannot run stays focusable with `aria-disabled` and prints the reason beneath it, because four different conditions block it and the grey alone cannot say which.
+Inputs, selects, and textareas are recessed slots on subtle surface with a strong hairline, 8px radius, 16px/450 values, and a violet focus boundary plus the shared visible focus ring. Placeholders use secondary ink at full opacity. Radio and checkbox controls use the action accent without inheriting text-field geometry.
 
-The mosaic announces the watch lifecycle in one polite live region: connecting with its bounded attempt count, connected and muted, exhausted with the recovery copy, and stopped. The promotion to stage is the surface's one authored moment — tiles translate from where they were and the promoted tile's media grows out of the preview's footprint, so the tile you picked is visibly the tile that grew. Reduced motion removes all of it and leaves the state change immediate.
+### Room card
 
-The right dock opens to Chat, can collapse to an icon rail, and preserves room-session tab/draft/scroll state. People orders Host, You, active streamers, then continuous join order. Activity remains distinct from Chat. Tile/member menus keep Report and authorized Host actions reachable without hover; Header Settings opens the responsive Metadata/Privacy/Bans dialog.
+A room card is a 12px terminal panel: one real preview when available, title at 18px/700 (30px/700 only for the featured card), neutral tags, semantic status pills, and a dotted separator before metadata/open cue. It does not become a floating glass tile. Long names and tags wrap rather than clip.
 
-Chat follows the latest only while already at the bottom; hidden/scrolled Chat preserves position and shows unread plus New messages. Local Pending bubbles canonicalize on server acknowledgement or remain failed with Retry/Discard. Named typing presence sits above the composer and never enters history. Activity follows the same anchored-new-event pattern but remains visually distinct. Stream reports stop only the reporter's current watch after submission.
+### Member tile and chat row
 
-## Navigation
+A member tile names the person and capability state before decoration. Its footer is divided by a dotted hairline. The avatar is a real image or the shared deterministic fallback. Chat rows use a 2rem avatar, 700 author name, optional 13px/400 canonical timestamp, body at 16px/450, and a Host status pill derived from existing roster authority. Pending/failed local messages do not invent canonical timestamps and retain Retry/Discard.
 
-Home and other non-room small screens use the labeled Home/Create/Profile bottom navigation. An admitted room instead uses a contextual safe-area room bar for Stream, Chat, People, Activity, and Leave/More, with Back/Home in the room header. The desktop room uses the 72px icon app rail at all widths. Platform Admin access remains explicit only for authorized Accounts.
+### Navigation
 
-## Mobile live room
+The current rail item is a raised 8px control with violet ink; inactive items remain transparent with secondary ink. The mobile bottom navigation is labeled and uses the same action family for current state. Theme and sign-in controls use quiet/invite geometry rather than icon-only novelty.
 
-The mobile header shows Back, truncated name, privacy, and countdown; Details opens Host/category/tags/count/settings. With no watch, use a two-column overview. A watched Stream becomes the primary stage while remaining tiles use a horizontal strip. Chat/People/Activity/Details open at explicit 55% and 90% sheet heights with labeled Expand/Collapse and focus return. The mobile room bar carries no Stream control: mobile cannot create a Stream, and a permanently disabled slot spends a fifth of the only mobile action surface on a control that explains nothing.
+## Do's and Don'ts
 
-Compatibility failure uses an inline chat-only banner, not a blocking modal. Reconnect grace closes media and requires explicit Watch/Start again. Forced departure replaces the admitted shell with same-URL pre-admission; room end transitions in place to the Past Stream summary.
+### Do
 
-## Motion
+- **Do** use one violet family for identity, navigation, selection, and action.
+- **Do** pair semantic colour with a word, icon, or structural cue.
+- **Do** keep dark and light intentional, equivalent, and AA-safe.
+- **Do** use JetBrains Mono everywhere and weight to create hierarchy.
+- **Do** keep all type on the 13/14/16/18/24/30/36px ladder.
+- **Do** use dotted hairlines inside cards and rows; solid hairlines around controls.
+- **Do** show real media when available and let it carry the visual energy.
+- **Do** keep focus, reduced motion, pending/failed states, and moderation actions explicit.
+- **Do** preserve Home and Room composition, responsive stages, and product copy.
 
-Use `cubic-bezier(0.2, 0.8, 0.2, 1)`: 120ms control/color feedback, 180ms menus/popovers/sheets, and 240ms layout/state transitions, with no bounce. Only the Live indicator may use a subtle opacity pulse. Reduced motion removes transforms/pulses and makes state changes immediate while preserving visible confirmation.
+### Don't
 
+- **Don't** reuse violet for Live, Host, warning, danger, or private.
+- **Don't** use colour alone to communicate state.
+- **Don't** add gradients, glows, glassmorphism, ambient blobs, or ornamental terminal glyphs.
+- **Don't** add a second font, off-ramp type size, or weight outside 400–700 for interface text.
+- **Don't** uppercase user names, room names, messages, categories, or tags.
+- **Don't** round cards into pills or invent a fifth radius.
+- **Don't** hide critical actions behind hover-only affordances.
+- **Don't** fabricate thumbnails, participants, timestamps, or social proof.
+- **Don't** change accepted layouts to make the visual system feel more dramatic.

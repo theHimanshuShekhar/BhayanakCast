@@ -11,7 +11,7 @@ export function createThemeBootstrapScript(
   preference: ThemeBootstrapPreference = { authenticated: false, theme: null },
 ) {
   const serialized = JSON.stringify(preference)
-  return `(()=>{const a=${serialized};let o=a.authenticated?a.theme:null;if(!a.authenticated){try{o=localStorage.getItem('${THEME_STORAGE_KEY}')}catch{}}if(o!=='light'&&o!=='dark')o=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';const r=document.documentElement;r.dataset.theme=o;r.style.colorScheme=o;let m=document.querySelector('meta[name="theme-color"]');if(!m){m=document.createElement('meta');m.name='theme-color';m.dataset.light='#F6F8FC';m.dataset.dark='#0D1422';document.head.append(m)}m.content=m.dataset[o]})()`
+  return `(()=>{const a=${serialized};let o=a.authenticated?a.theme:null;if(!a.authenticated){try{o=localStorage.getItem('${THEME_STORAGE_KEY}')}catch{}}if(o!=='light'&&o!=='dark')o=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';const r=document.documentElement;r.dataset.theme=o;r.style.colorScheme=o;let m=document.querySelector('meta[name="theme-color"]');if(!m){m=document.createElement('meta');m.name='theme-color';m.dataset.light='#F2F4F8';m.dataset.dark='#0B0E14';document.head.append(m)}m.content=m.dataset[o]})()`
 }
 
 export const THEME_BOOTSTRAP_SCRIPT = createThemeBootstrapScript()

@@ -11,6 +11,7 @@ import {
   type WatchState,
 } from './useRoomMedia'
 import { observeRoom } from './room-observability'
+import { avatarFallbackLabel, avatarTintIndex } from '../avatar-fallback'
 
 interface RoomMemberMosaicProps {
   readonly roster: readonly RoomRosterMember[]
@@ -497,8 +498,12 @@ function WatcherStack({
           watcher.avatarUrl ? (
             <img alt="" key={watcher.accountId} src={watcher.avatarUrl} />
           ) : (
-            <span key={watcher.accountId}>
-              {watcher.displayName.slice(0, 1).toUpperCase()}
+            <span
+              className="avatar-fallback"
+              data-avatar-tint={avatarTintIndex(watcher.accountId)}
+              key={watcher.accountId}
+            >
+              {avatarFallbackLabel(watcher.displayName)}
             </span>
           ),
         )}
@@ -600,8 +605,12 @@ function StreamSurface({
 function Avatar({ member }: Readonly<{ member: RoomRosterMember }>) {
   if (!member.avatarUrl) {
     return (
-      <span aria-hidden="true" className="room-mosaic__avatar room-mosaic__avatar--empty">
-        {member.displayName.slice(0, 1).toUpperCase()}
+      <span
+        aria-hidden="true"
+        className="room-mosaic__avatar room-mosaic__avatar--empty avatar-fallback"
+        data-avatar-tint={avatarTintIndex(member.accountId)}
+      >
+        {avatarFallbackLabel(member.displayName)}
       </span>
     )
   }

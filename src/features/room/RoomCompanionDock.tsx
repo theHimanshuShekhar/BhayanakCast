@@ -24,6 +24,7 @@ import type { RoomRealtime } from './useRoomRealtime'
 import { observeRoom } from './room-observability'
 import { RoomMemberActions } from './RoomMemberActions'
 import { RoomMessageActions } from './RoomMessageActions'
+import { avatarFallbackLabel, avatarTintIndex } from '../avatar-fallback'
 
 const ACTIVITY_TIME_FORMATTER = new Intl.DateTimeFormat('en', {
   hour: 'numeric',
@@ -113,6 +114,9 @@ export function RoomCompanionDock({
   const selfAccountId = roster.find(
     (member) => member.membershipId === selfMembershipId,
   )?.accountId
+  // The room's authority already lives on the roster, so the chat row reads it
+  // rather than re-deriving who may act as Host from the message stream.
+  const hostAccountId = roster.find((member) => member.role === 'host')?.accountId
   const visibleMessages = realtime.messages.filter(
     (message) => !mutedAccountIds.has(message.accountId),
   )
@@ -432,21 +436,51 @@ export function RoomCompanionDock({
                 </span>
               </li>
             )}
-            {visibleMessages.map((message) => (
-              <li className="room-chat__message" key={message.id}>
-                <div className="room-chat__message-heading">
-                  <p className="room-chat__author">{message.displayName}</p>
-                  {message.accountId !== selfAccountId && (
-                    <RoomMessageActions
-                      message={message}
-                      onMute={(target) => void muteChat(target)}
-                      onReport={onReportMessage}
+            {visibleMessages.map((message) => {
+              // Pending bubbles have no canonical `createdAt`, and a malformed
+              // one must not print `Invalid Date`: no label, no element.
+              const sentAt = formatActivityTime(message.createdAt)
+              return (
+                <li className="room-chat__message" key={message.id}>
+                  {message.avatarUrl ? (
+                    <img
+                      alt=""
+                      aria-hidden="true"
+                      className="room-chat__avatar"
+                      loading="lazy"
+                      src={message.avatarUrl}
                     />
+                  ) : (
+                    <span
+                      aria-hidden="true"
+                      className="room-chat__avatar avatar-fallback"
+                      data-avatar-tint={avatarTintIndex(message.accountId)}
+                    >
+                      {avatarFallbackLabel(message.displayName)}
+                    </span>
                   )}
-                </div>
-                <p className="room-chat__body">{message.body}</p>
-              </li>
-            ))}
+                  <div className="room-chat__message-heading">
+                    <p className="room-chat__author">{message.displayName}</p>
+                    {message.accountId === hostAccountId && (
+                      <span className="room-chat__host">Host</span>
+                    )}
+                    {sentAt && (
+                      <time className="room-chat__time" dateTime={message.createdAt}>
+                        {sentAt}
+                      </time>
+                    )}
+                    {message.accountId !== selfAccountId && (
+                      <RoomMessageActions
+                        message={message}
+                        onMute={(target) => void muteChat(target)}
+                        onReport={onReportMessage}
+                      />
+                    )}
+                  </div>
+                  <p className="room-chat__body">{message.body}</p>
+                </li>
+              )
+            })}
             {visiblePending.map((message) => (
               <li
                 className="room-chat__message"
@@ -476,13 +510,19 @@ export function RoomCompanionDock({
           <ul className="room-people">
             {orderRoomPeople(roster, selfMembershipId).map((member) => (
               <li className="room-people__member" key={member.membershipId}>
-                <span className="room-people__avatar" aria-hidden="true">
-                  {member.avatarUrl ? (
+                {member.avatarUrl ? (
+                  <span aria-hidden="true" className="room-people__avatar">
                     <img alt="" loading="lazy" src={member.avatarUrl} />
-                  ) : (
-                    member.displayName.slice(0, 1).toUpperCase()
-                  )}
-                </span>
+                  </span>
+                ) : (
+                  <span
+                    aria-hidden="true"
+                    className="room-people__avatar avatar-fallback"
+                    data-avatar-tint={avatarTintIndex(member.accountId)}
+                  >
+                    {avatarFallbackLabel(member.displayName)}
+                  </span>
+                )}
                 <span className="room-people__identity">
                   <span className="room-people__name">{member.displayName}</span>
                   <span className="room-people__state">

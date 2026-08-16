@@ -163,7 +163,12 @@ function SanctionList({
               <div>
                 <strong>{sanction.displayName}</strong>
                 <span>{CAPABILITY_LABELS[sanction.type]} · {expiryLabel(sanction.expiresAt)}</span>
-                <small>{sanction.status}{sanction.carriedForward ? ' · carried to fresh Account' : ''}</small>
+                <small>
+                  <span className="admin-sanction-status" data-sanction-status={sanction.status}>
+                    {sanction.status}
+                  </span>
+                  {sanction.carriedForward ? ' · carried to fresh Account' : ''}
+                </small>
               </div>
               {onRequestLift ? (
                 confirmLift === sanction.id ? (

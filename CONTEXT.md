@@ -268,7 +268,7 @@ BhayanakCast is a public discovery platform for small social screen-sharing room
 : V1 provides intentional light and dark themes, each with the same state clarity, accessible contrast, focus treatment, and reduced-motion behavior.
 
 **Visual system**
-: Source Sans 3 uses a fixed 13/14/16/18/24/30/36px scale. Porcelain light (`#F6F8FC` canvas, `#2457D6` cobalt) and midnight dark (`#0D1422` canvas, `#82A5FF` cobalt) themes use distinct live, host, warning, danger, and private semantics. Cards/panels use 12px radii, controls 8px, pills only for tags/status. Motion uses 120/180/240ms eased tokens and becomes immediate under reduced motion. Wide Home centers its content frame within 1600px beside a 72px icon rail, using a fluid centre column, a 280px right rail, and 40px gutters; medium uses the same 72px icon rail; small uses 16px gutters and labeled 56px/64px fixed bars.
+: ADR `0111` makes near-black slate dark the canonical terminal-club world and light its intentional daylight counterpart, selected from device preference plus a persisted override before paint. Self-hosted JetBrains Mono is the single family across display, UI, chat, statistics, and body on the fixed 13/14/16/18/24/30/36px scale, with a weight-led hierarchy and five-step tracking ladder. Dark uses `#0b0e14` canvas and `#c084fc` violet; light uses `#f2f4f8` canvas and `#7326d9` violet. Violet carries identity/navigation/selection/action, while rose-red Live, green Host/success, amber warning, coral-red danger, and cyan private remain distinct semantic families. Pill chrome, hairline boundaries, and dotted internal divides retain 12px cards/panels, 8px controls, 5px compact chips, and full-pill avatars/tags/status. Motion uses 120/180/240ms eased tokens and becomes immediate under reduced motion. Wide Home centers its content frame within 1600px beside a 72px icon rail, using a fluid centre column, a 280px right rail, and 40px gutters; medium uses the same 72px icon rail; small uses 16px gutters and labeled 56px/64px fixed bars. Both themes meet WCAG 2.2 AA with keyboard access, visible focus, semantic labels, and 3:1 strong boundaries.
 
 ## Decision records
 
@@ -365,7 +365,7 @@ BhayanakCast is a public discovery platform for small social screen-sharing room
 - [`docs/adr/0093-rich-profile-search-results.md`](docs/adr/0093-rich-profile-search-results.md) — makes profile search results rich, bounded, and single-action.
 - [`docs/adr/0094-compact-room-search-results.md`](docs/adr/0094-compact-room-search-results.md) — renders room matches as compact relevance-first rows.
 - [`docs/adr/0095-home-scroll-and-search-stickiness.md`](docs/adr/0095-home-scroll-and-search-stickiness.md) — uses one page scroll and pins search only while active.
-- [`docs/adr/0096-homepage-visual-system.md`](docs/adr/0096-homepage-visual-system.md) — fixes Home typography, themes, geometry, navigation, and motion.
+- [`docs/adr/0096-homepage-visual-system.md`](docs/adr/0096-homepage-visual-system.md) — preserves the superseded Source Sans 3 and porcelain-and-cobalt baseline that ADR 0111 replaced.
 - [`docs/adr/0097-responsive-create-room-dialog.md`](docs/adr/0097-responsive-create-room-dialog.md) — uses one responsive form and safely restores anonymous create intent.
 - [`docs/adr/0098-server-first-resilient-home.md`](docs/adr/0098-server-first-resilient-home.md) — keeps Home usable through section failures and realtime recovery.
 - [`docs/adr/0099-tanstack-query-home-data.md`](docs/adr/0099-tanstack-query-home-data.md) — makes Query the sole cached Home domain-data boundary with SSR and realtime synchronization.
@@ -380,3 +380,4 @@ BhayanakCast is a public discovery platform for small social screen-sharing room
 - [`docs/adr/0108-anonymous-visitors-in-home-presence.md`](docs/adr/0108-anonymous-visitors-in-home-presence.md) — blends anonymous visitors into the Home count over listener-free anonymous sockets.
 - [`docs/adr/0109-retain-final-past-stream-thumbnail.md`](docs/adr/0109-retain-final-past-stream-thumbnail.md) — retains one final public Stream Preview as a durable Past Stream thumbnail.
 - [`docs/adr/0110-framerate-preserving-stream-encoding.md`](docs/adr/0110-framerate-preserving-stream-encoding.md) — keeps Stream frame rate ahead of resolution under a fixed per-watcher ceiling.
+- [`docs/adr/0111-terminal-club-visual-system.md`](docs/adr/0111-terminal-club-visual-system.md) — adopts the JetBrains Mono, dark-canonical terminal-club visual system while preserving the established composition and interaction contract.

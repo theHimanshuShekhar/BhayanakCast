@@ -1,4 +1,5 @@
 import { useId } from 'react'
+import { avatarFallbackLabel, avatarTintIndex } from '../avatar-fallback'
 import { observeHome } from './home-observability'
 import type { PublicProfileSummary } from './home-types'
 
@@ -31,8 +32,12 @@ export function ProfileSearchResult({
           {profile.avatarUrl ? (
             <img alt="" decoding="async" loading="lazy" src={profile.avatarUrl} />
           ) : (
-            <span aria-hidden="true" className="profile-search-result__avatar-fallback">
-              {profile.displayName.slice(0, 1).toLocaleUpperCase()}
+            <span
+              aria-hidden="true"
+              className="profile-search-result__avatar-fallback avatar-fallback"
+              data-avatar-tint={avatarTintIndex(profile.accountId)}
+            >
+              {avatarFallbackLabel(profile.displayName)}
             </span>
           )}
           <div>
@@ -61,24 +66,26 @@ export function ProfileSearchResult({
               aria-label={`${profile.coUsers.length} frequent co-users`}
               className="profile-search-result__co-users"
             >
-              {profile.coUsers.slice(0, 3).map((coUser) =>
-                coUser.avatarUrl ? (
-                  <img
-                    alt=""
-                    decoding="async"
-                    key={coUser.accountId}
-                    loading="lazy"
-                    src={coUser.avatarUrl}
-                  />
-                ) : (
-                  <span aria-hidden="true" key={coUser.accountId} />
-                ),
-              )}
+              {profile.coUsers
+                .flatMap((coUser) =>
+                  coUser.avatarUrl === null
+                    ? []
+                    : [
+                        <img
+                          alt=""
+                          decoding="async"
+                          key={coUser.accountId}
+                          loading="lazy"
+                          src={coUser.avatarUrl}
+                        />,
+                      ],
+                )
+                .slice(0, 3)}
             </div>
           </div>
         )}
         <span aria-hidden="true" className="profile-search-result__open">
-          View profile <span>→</span>
+          View profile <span>{'->'}</span>
         </span>
       </a>
     </li>

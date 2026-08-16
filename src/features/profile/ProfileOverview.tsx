@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { avatarFallbackLabel, avatarTintIndex } from '../avatar-fallback'
 import { PastStreams } from '../home/PastStreams'
 import type { PublicProfileSummary } from '../home/home-types'
 import type { SessionProjection } from '../auth/auth-client'
@@ -21,7 +22,7 @@ export function ProfileOverview({ profile, session }: ProfileOverviewProps) {
   return (
     <main aria-labelledby="profile-heading" className="public-profile">
       <a className="public-profile__home" href="/">
-        <span aria-hidden="true">←</span> Home
+        <span aria-hidden="true">&lt;-</span> Home
       </a>
       <header className="public-profile__header">
         <h1 id="profile-heading">Profile</h1>
@@ -34,8 +35,12 @@ export function ProfileOverview({ profile, session }: ProfileOverviewProps) {
               width="96"
             />
           ) : (
-            <span aria-hidden="true" className="public-profile__avatar-fallback">
-              {session.displayName.slice(0, 1).toLocaleUpperCase()}
+            <span
+              aria-hidden="true"
+              className="public-profile__avatar-fallback avatar-fallback"
+              data-avatar-tint={avatarTintIndex(session.id)}
+            >
+              {avatarFallbackLabel(session.displayName)}
             </span>
           )}
           <div>

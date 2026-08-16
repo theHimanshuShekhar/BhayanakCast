@@ -18,7 +18,7 @@ test('follows the system theme and ignores an invalid override', async ({
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
   await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute(
     'content',
-    '#0D1422',
+    '#0B0E14',
   )
 })
 
@@ -34,7 +34,7 @@ test('a persisted light override wins over a dark system before readiness', asyn
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
   await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute(
     'content',
-    '#F6F8FC',
+    '#F2F4F8',
   )
 })
 
@@ -82,7 +82,7 @@ test('the visible toggle persists an anonymous override across reloads', async (
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
   await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute(
     'content',
-    '#0D1422',
+    '#0B0E14',
   )
   await expect
     .poll(() => page.evaluate((key) => localStorage.getItem(key), STORAGE_KEY))
@@ -132,8 +132,8 @@ test('publishes the root metadata contract', async ({ authSessions, page }) => {
   )
   const themeColor = page.locator('meta[name="theme-color"]')
   await expect(themeColor).toHaveCount(1)
-  await expect(themeColor).toHaveAttribute('data-light', '#F6F8FC')
-  await expect(themeColor).toHaveAttribute('data-dark', '#0D1422')
+  await expect(themeColor).toHaveAttribute('data-light', '#F2F4F8')
+  await expect(themeColor).toHaveAttribute('data-dark', '#0B0E14')
 })
 
 test('the root control reserves space instead of overlaying route content', async ({

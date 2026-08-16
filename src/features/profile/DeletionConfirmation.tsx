@@ -60,7 +60,7 @@ export function DeletionConfirmation({
           <button ref={keepRef} type="button" onClick={handleCancel} disabled={busy}>
             Keep my account
           </button>
-          <button type="button" onClick={onConfirm} disabled={busy}>
+          <button className="button-danger" type="button" onClick={onConfirm} disabled={busy}>
             {busy ? 'Submitting deletion request…' : 'Request deletion now'}
           </button>
         </div>
