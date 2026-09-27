@@ -153,9 +153,16 @@ describe("chat", () => {
     const a = await inRoom(ana);
     await chatter(a, 3);
 
-    // The room is dropped from memory once empty (#31 will keep it for 5 minutes, then end it).
+    // A return within the reconnect grace finds the room, and its history, still there.
     await a.close();
-    await h.settled();
+    await h.advance(20_000);
+    const again = await h.connectAs(ana);
+    expect((await again.join(roomId)).chat).toHaveLength(3);
+
+    // The room is dropped from memory once empty, after the grace (#31 will keep it for
+    // 5 minutes, then end it).
+    await again.close();
+    await h.advance(30_000);
     const b = await h.connectAs(bo);
     expect((await b.join(roomId)).chat).toEqual([]);
   });
