@@ -198,8 +198,7 @@ describe("listLiveRooms", () => {
       { roomId: id, userId: "member", startedAt: t(19), endedAt: t(18), lastSeenAt: t(18) },
     ]);
 
-    const [room] = await listLiveRooms(db, visitor);
-    expect(room).toMatchObject({
+    const peopleNow = {
       participantCount: 2,
       participants: [
         { id: "host", username: "host.discord" },
@@ -207,7 +206,11 @@ describe("listLiveRooms", () => {
       ],
       streamCount: 1,
       streamers: [{ id: "host", username: "host.discord" }],
-    });
+    };
+    const [room] = await listLiveRooms(db, visitor);
+    expect(room).toMatchObject(peopleNow);
+    // The room page opens the room with the same people.
+    expect(await getLiveRoom(db, member, id)).toMatchObject({ id, ...peopleNow });
   });
 
   it("returns an empty room with no participants or streams", async () => {

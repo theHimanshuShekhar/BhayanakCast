@@ -1,5 +1,6 @@
-import { expect, type Page, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { signIn } from "./auth";
+import { expect, test } from "./fixtures";
 import { createUser, uniqueUsername } from "./profiles";
 
 /** The "favorite" badge beside the profile's username (not the button). */

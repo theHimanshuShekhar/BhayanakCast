@@ -1,6 +1,7 @@
-import { type Browser, type BrowserContext, expect, type Page } from "@playwright/test";
+import type { Browser, BrowserContext, Page } from "@playwright/test";
 import type { SeedRoom } from "../src/lib/test-sign-in";
 import { postTestAuth, signIn } from "./auth";
+import { expect, hydrating, newPage } from "./fixtures";
 
 export type { SeedRoom };
 
@@ -73,7 +74,7 @@ export interface NewRoom {
 
 /** Create a room through the create dialog on `page` (signed in) and return its id. */
 export async function createRoomOnPage(page: Page, room: NewRoom): Promise<string> {
-  await page.goto("/");
+  await hydrating(page).goto("/");
   // The rail's button; an empty home has a second "Start a Room" button.
   await page.getByRole("button", { name: "Start a Room" }).first().click();
   const dialog = page.getByRole("dialog", { name: "start a hang" });
@@ -95,7 +96,7 @@ export async function createRoomAs(
   const context = await browser.newContext();
   try {
     await signIn(context, { username: hostUsername });
-    return await createRoomOnPage(await context.newPage(), room);
+    return await createRoomOnPage(await newPage(context), room);
   } finally {
     await context.close();
   }

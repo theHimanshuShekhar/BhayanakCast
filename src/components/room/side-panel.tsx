@@ -35,7 +35,7 @@ const ChatLine = ({
   onOpenProfile,
 }: {
   m: ChatMessage;
-  host: string;
+  host: string | null;
   onOpenProfile: (u: string) => void;
 }) => {
   if (m.system)
@@ -73,6 +73,10 @@ const ChatLine = ({
     </div>
   );
 };
+
+const EmptyNote = ({ children }: { children: ReactNode }) => (
+  <p className="m-0 py-6 text-center text-[11.5px] text-muted">{children}</p>
+);
 
 const GroupHead = ({ children, count }: { children: ReactNode; count: number }) => (
   <div className="flex items-center gap-2 mt-2.5 mb-1.5 mx-1 text-[10px] uppercase tracking-[0.12em] text-muted">
@@ -196,6 +200,7 @@ export const RoomSide = ({
 
         <Tabs.Panel value="chat" className="flex flex-col flex-1 min-h-0 outline-0">
           <div className={panelCls} ref={chatRef} aria-live="polite">
+            {chat.length === 0 && <EmptyNote>no messages yet. say hi!</EmptyNote>}
             {chat.map((m) => (
               <ChatLine key={m.id} m={m} host={room.host} onOpenProfile={onOpenProfile} />
             ))}
@@ -235,6 +240,7 @@ export const RoomSide = ({
         </Tabs.Panel>
 
         <Tabs.Panel value="activity" className={panelCls}>
+          {activity.length === 0 && <EmptyNote>nothing has happened yet.</EmptyNote>}
           {activity.map((a, i) => (
             <div
               // biome-ignore lint/suspicious/noArrayIndexKey: append-only feed

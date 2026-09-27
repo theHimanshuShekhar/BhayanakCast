@@ -1,3 +1,4 @@
+// Not ./fixtures: playwright.config.ts imports this module.
 import { type APIResponse, type BrowserContext, expect, test } from "@playwright/test";
 
 export interface FakeDiscordUser {

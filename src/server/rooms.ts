@@ -157,11 +157,8 @@ async function peopleIn(
   return byRoom;
 }
 
-/** Live rooms the caller may see, newest first. */
-export async function listLiveRooms(db: Db, caller: Caller): Promise<LiveRoomCard[]> {
-  const rows = await selectRooms(db)
-    .where(and(isNull(rooms.endedAt), roomVisibleTo(caller)))
-    .orderBy(desc(rooms.createdAt), asc(rooms.id));
+/** Live room rows with the people in them now (open presence and stream intervals). */
+async function withPeopleNow(db: Db, rows: RoomRow[]): Promise<LiveRoomCard[]> {
   const ids = rows.map((row) => row.id);
   const [present, streaming] = await Promise.all([
     peopleIn(db, presenceIntervals, ids, { openOnly: true }),
@@ -180,16 +177,28 @@ export async function listLiveRooms(db: Db, caller: Caller): Promise<LiveRoomCar
   });
 }
 
-/** A live room the caller may see, or null if it's unknown, ended or hidden from them. */
+/** Live rooms the caller may see, newest first. */
+export async function listLiveRooms(db: Db, caller: Caller): Promise<LiveRoomCard[]> {
+  const rows = await selectRooms(db)
+    .where(and(isNull(rooms.endedAt), roomVisibleTo(caller)))
+    .orderBy(desc(rooms.createdAt), asc(rooms.id));
+  return withPeopleNow(db, rows);
+}
+
+/**
+ * A live room the caller may see, with the people in it now, or null if it's unknown,
+ * ended or hidden from them.
+ */
 export async function getLiveRoom(
   db: Db,
   caller: Caller,
   roomId: string,
-): Promise<RoomSummary | null> {
-  const [row] = await selectRooms(db).where(
+): Promise<LiveRoomCard | null> {
+  const rows = await selectRooms(db).where(
     and(eq(rooms.id, roomId), isNull(rooms.endedAt), roomVisibleTo(caller)),
   );
-  return row ? toSummary(row) : null;
+  const [room] = await withPeopleNow(db, rows);
+  return room ?? null;
 }
 
 /** Rooms `userId` hosted (at any point) or was present in. */

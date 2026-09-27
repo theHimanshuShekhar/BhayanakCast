@@ -8,7 +8,7 @@ import {
   useRouter,
   useSearch,
 } from "@tanstack/react-router";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, Suspense, useEffect, useMemo, useState } from "react";
 import {
   CreateRoomDialog,
   ProfileMenu,
@@ -97,7 +97,9 @@ function AppShell() {
   const createRoom = useMutation({
     mutationFn: (input: CreateRoomInput) => createRoomFn({ data: input }),
     onSuccess: async ({ id }) => {
-      await queryClient.invalidateQueries({ queryKey: roomKeys.all });
+      // Mark every room read stale first, but don't wait for the lists to refetch: the new
+      // room's page loads its own data.
+      void queryClient.invalidateQueries({ queryKey: roomKeys.all });
       setCreateOpen(false);
       await navigate({ to: "/room/$roomId", params: { roomId: id } });
     },
@@ -138,6 +140,9 @@ function AppShell() {
           />
           <main className="overflow-hidden min-h-0 relative">
             <Outlet />
+            <Suspense>
+              <HydrationMarker />
+            </Suspense>
           </main>
         </div>
 
@@ -154,6 +159,20 @@ function AppShell() {
       </div>
     </AppActionsContext>
   );
+}
+
+/**
+ * Marks `<html data-hydrated>` once React has hydrated the server-rendered page, so e2e tests
+ * wait for it before interacting (e2e/fixtures.ts): clicks and typing that land on the bare SSR
+ * HTML are lost. The page's content sits in the Suspense boundary <Outlet /> renders, which
+ * React hydrates in a later pass than the shell; this marker's own boundary hydrates in that
+ * same pass, so its effect runs only once the page content is live too.
+ */
+function HydrationMarker() {
+  useEffect(() => {
+    document.documentElement.dataset.hydrated = "true";
+  }, []);
+  return null;
 }
 
 // The theme class and --accent-h come from the user's saved settings or, for a visitor, the

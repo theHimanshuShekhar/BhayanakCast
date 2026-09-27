@@ -1,5 +1,6 @@
-import { type Browser, expect, type Page, test } from "@playwright/test";
+import type { Browser, Page } from "@playwright/test";
 import { signIn } from "./auth";
+import { expect, test } from "./fixtures";
 import { createUsers, minutesAgo, seedRoom, uniqueRoomName } from "./rooms";
 
 /**

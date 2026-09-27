@@ -1,4 +1,5 @@
-import { expect, type Page, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { expect, test } from "./fixtures";
 import { createUser, uniqueUsername } from "./profiles";
 
 const HOUR = 3600;

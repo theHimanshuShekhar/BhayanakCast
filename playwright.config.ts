@@ -11,6 +11,10 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? "github" : "list",
+  // Parallel browsers on a loaded machine render slowly (Firefox especially), so a page can
+  // take longer than the 5s expect default and a multi-page test longer than 30s.
+  timeout: 60_000,
+  expect: { timeout: 10_000 },
   use: {
     baseURL,
     trace: "on-first-retry",
