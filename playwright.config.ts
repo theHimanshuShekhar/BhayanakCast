@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { E2E_ADMIN_DISCORD_ID } from "./e2e/auth";
 
 const PORT = Number(process.env.E2E_PORT ?? 3100);
 const baseURL = `http://localhost:${PORT}`;
@@ -37,11 +38,17 @@ export default defineConfig({
       },
     },
   ],
-  // The prod build against an in-memory PGlite, with the test-only sign-in enabled (e2e/serve.ts).
+  // The prod build against an in-memory PGlite, with the test-only sign-in enabled (e2e/serve.ts)
+  // and one fake Discord id bootstrapped as admin.
   webServer: {
     command: "pnpm build && node e2e/serve.ts",
     url: baseURL,
-    env: { PORT: String(PORT), BETTER_AUTH_URL: baseURL, E2E_AUTH: "1" },
+    env: {
+      PORT: String(PORT),
+      BETTER_AUTH_URL: baseURL,
+      E2E_AUTH: "1",
+      ADMIN_DISCORD_IDS: E2E_ADMIN_DISCORD_ID,
+    },
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
   },

@@ -7,7 +7,6 @@ import { SectionHead } from "~/components/section-head";
 import { Avatar, MonoCaps } from "~/components/ui";
 import {
   ALLTIME_ROOMS,
-  CURRENT_USER_ADMIN,
   ROOM_ACTIVITY,
   USER_GROWTH,
   USER_PROFILES,
@@ -17,9 +16,9 @@ import { useLiveRooms } from "~/lib/rooms-store";
 import type { AllTimeRoom, LiveRoom, UserStats } from "~/lib/types";
 
 export const Route = createFileRoute("/admin")({
-  // TODO(ADR 7): check the Better Auth session role server-side.
-  beforeLoad: () => {
-    if (!CURRENT_USER_ADMIN) throw redirect({ to: "/" });
+  // Visitors and non-admins go home. A UX guard only: admin server functions check the role themselves.
+  beforeLoad: ({ context }) => {
+    if (context.session.role !== "admin") throw redirect({ to: "/" });
   },
   component: AdminPage,
 });

@@ -5,6 +5,9 @@ export interface FakeDiscordUser {
   username: string;
 }
 
+/** The fake Discord id that playwright.config.ts lists in `ADMIN_DISCORD_IDS`. */
+export const E2E_ADMIN_DISCORD_ID = "900000000000000999";
+
 /**
  * Sign a fake Discord user into the browser context through the test-only
  * sign-in (needs `E2E_AUTH=1`, set by playwright.config.ts). The same Discord

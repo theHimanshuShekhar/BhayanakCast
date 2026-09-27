@@ -121,6 +121,15 @@ describe("test-only sign-in", () => {
     expect(await db.select().from(user)).toHaveLength(1);
   });
 
+  it("gives a fake user whose Discord id is in ADMIN_DISCORD_IDS the admin role", async () => {
+    const admin = await testSignInRequest("1000", "admin_jpg");
+    const regular = await testSignInRequest("4000", "kodama_jpg");
+    const roleIn = async (response: Response) =>
+      (await auth.api.getSession({ headers: cookiesFrom(response) }))?.user.role;
+    expect(await roleIn(admin)).toBe("admin");
+    expect(await roleIn(regular)).toBe("user");
+  });
+
   it.each([
     { NODE_ENV: "production" as const, E2E_AUTH: "1" },
     { NODE_ENV: "development" as const, E2E_AUTH: undefined },
