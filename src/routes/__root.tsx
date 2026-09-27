@@ -8,7 +8,7 @@ import {
 } from "~/components/overlays";
 import { SideNav } from "~/components/sidenav";
 import { AppActionsContext } from "~/lib/app-actions";
-import { CURRENT_USER, CURRENT_USER_ADMIN } from "~/lib/mock-data";
+import { CURRENT_USER, CURRENT_USER_ADMIN, userIdOf } from "~/lib/mock-data";
 import { createRoom, useLiveRooms } from "~/lib/rooms-store";
 import { SettingsProvider } from "~/lib/settings";
 import appCss from "~/styles/app.css?url";
@@ -62,7 +62,7 @@ function AppShell() {
             profileMenu={
               <ProfileMenu
                 onOpenProfile={() =>
-                  navigate({ to: "/profile/$username", params: { username: CURRENT_USER } })
+                  navigate({ to: "/profile/$userId", params: { userId: userIdOf(CURRENT_USER) } })
                 }
                 onSettings={() => setSettingsOpen(true)}
                 onSignOut={() => setSignedOut(true)}

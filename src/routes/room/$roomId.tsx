@@ -7,7 +7,7 @@ import { type ModAction, type Reaction, Tile } from "~/components/room/tile";
 import { Btn, Chip } from "~/components/ui";
 import { useAppActions } from "~/lib/app-actions";
 import { MAX_STREAMERS } from "~/lib/format";
-import { ACTIVITY, buildRoomDetail, CURRENT_USER } from "~/lib/mock-data";
+import { ACTIVITY, buildRoomDetail, CURRENT_USER, userIdOf } from "~/lib/mock-data";
 import { findRoom } from "~/lib/rooms-store";
 import { useSettings } from "~/lib/settings";
 import type { ActivityItem, ChatMessage, Participant, RoomDetail, RoomRole } from "~/lib/types";
@@ -180,7 +180,7 @@ function RoomPage({ detail }: { detail: RoomDetail }) {
 
   const leave = () => navigate({ to: "/" });
   const openProfile = (username: string) =>
-    navigate({ to: "/profile/$username", params: { username } });
+    navigate({ to: "/profile/$userId", params: { userId: userIdOf(username) } });
 
   return (
     <div

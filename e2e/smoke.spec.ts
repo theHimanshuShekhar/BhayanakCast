@@ -45,8 +45,15 @@ test("settings dialog changes theme", async ({ page }) => {
 });
 
 test("profile, recap and admin pages render", async ({ page }) => {
-  await page.goto("/profile/kodama_jpg");
+  await page.goto("/profile/usr_kodama_jpg");
   await expect(page.getByRole("heading", { level: 1, name: "kodama_jpg" })).toBeVisible();
+  // co-user links resolve by id, never by (renameable) username
+  await page
+    .getByRole("link", { name: /bitreverb/ })
+    .first()
+    .click();
+  await expect(page).toHaveURL(/\/profile\/usr_bitreverb$/);
+  await expect(page.getByRole("heading", { level: 1, name: "bitreverb" })).toBeVisible();
   await page.goto("/past/p3");
   await expect(page.getByRole("heading", { name: "who streamed" })).toBeVisible();
   await page.goto("/admin");

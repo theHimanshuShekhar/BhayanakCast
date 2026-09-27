@@ -69,6 +69,7 @@ export type UserStats = {
 };
 
 export type UserProfile = {
+  id: string;
   username: string;
   discord: string;
   joined: string;

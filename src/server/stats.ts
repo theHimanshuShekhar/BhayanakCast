@@ -86,9 +86,10 @@ const seconds = (expr: SQL) => sql`floor(sum(extract(epoch from ${expr})))::bigi
  * second call (or a concurrent one) is a no-op. Returns whether this call did
  * the roll-up. Rooms that haven't ended are left alone.
  *
- * - secondsWatched: time present in the room.
+ * - secondsWatched: time present in the room minus the user's own streaming time.
  * - secondsStreamed: time streaming in the room.
- * - roomsJoined: +1 for everyone with presence; roomsHosted: +1 for the creator.
+ * - roomsJoined: +1 for everyone with presence.
+ * - roomsHosted: +1 for everyone who held host (host_intervals); the creator if none were logged.
  * - peakViewers: most other users present at once during any of the user's streams.
  * - co-time: pairwise overlap of presence spans.
  */
@@ -108,11 +109,28 @@ export async function rollupEndedRoom(db: Db, roomId: string, now = new Date()):
     await tx.execute(sql`
       with ${mergedIntervals("p", "presence_intervals", roomId)},
       ${mergedIntervals("st", "stream_intervals", roomId)},
-      watched as (
+      present as (
         select user_id, ${seconds(sql`e - s`)} as secs from p group by user_id
       ),
       streamed as (
         select user_id, ${seconds(sql`e - s`)} as secs from st group by user_id
+      ),
+      -- Spans are merged per user, so own presence ∩ own stream never double counts.
+      self_streamed as (
+        select p.user_id, ${seconds(sql`least(p.e, st.e) - greatest(p.s, st.s)`)} as secs
+        from p join st on st.user_id = p.user_id and st.s < p.e and p.s < st.e
+        group by p.user_id
+      ),
+      watched as (
+        select pr.user_id, greatest(pr.secs - coalesce(ss.secs, 0), 0) as secs
+        from present pr left join self_streamed ss on ss.user_id = pr.user_id
+      ),
+      hosts as (
+        select distinct user_id from host_intervals where room_id = ${roomId}
+        union
+        select ${room.createdBy}::text
+        where ${room.createdBy}::text is not null
+          and not exists (select 1 from host_intervals where room_id = ${roomId})
       ),
       -- Max concurrency inside a stream span is reached at its start or at
       -- some other user's arrival within it, so only those points are checked.
@@ -138,7 +156,7 @@ export async function rollupEndedRoom(db: Db, roomId: string, now = new Date()):
         select s.user_id, s.secs, 0, 0, 0, coalesce(pk.viewers, 0)
         from streamed s left join peak pk on pk.user_id = s.user_id
         union all
-        select ${room.createdBy}::text, 0, 0, 1, 0, 0 where ${room.createdBy}::text is not null
+        select user_id, 0, 0, 1, 0, 0 from hosts
       )
       insert into user_stats
         (user_id, seconds_streamed, seconds_watched, rooms_hosted, rooms_joined, peak_viewers)

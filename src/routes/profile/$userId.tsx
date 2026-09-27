@@ -6,9 +6,9 @@ import { SectionHead } from "~/components/section-head";
 import { Avatar, Btn } from "~/components/ui";
 import { useAppActions } from "~/lib/app-actions";
 import { avatarFor, formatCotime } from "~/lib/format";
-import { CURRENT_USER, PAST_ROOMS, topCoUsers, USER_PROFILES } from "~/lib/mock-data";
+import { CURRENT_USER, PAST_ROOMS, profileById, topCoUsers, userIdOf } from "~/lib/mock-data";
 
-export const Route = createFileRoute("/profile/$username")({
+export const Route = createFileRoute("/profile/$userId")({
   component: ProfilePage,
 });
 
@@ -57,24 +57,21 @@ const StatCard = ({
   </div>
 );
 
-// TODO(ADR 19): favorites persist to the favorites table once server functions exist.
-const favorites = new Set(["kodama_jpg", "bitreverb"]);
+// TODO(ADR 19): favorites persist to the favorites table (keyed by user id) once server functions exist.
+const favorites = new Set([userIdOf("kodama_jpg"), userIdOf("bitreverb")]);
 
 function ProfilePage() {
-  const { username } = Route.useParams();
+  const { userId } = Route.useParams();
   const navigate = useNavigate();
   const { openSettings } = useAppActions();
-  const [isFavorite, setIsFavorite] = useState(() => favorites.has(username));
-  const profile = USER_PROFILES[username];
-  const isSelf = username === CURRENT_USER;
+  const [isFavorite, setIsFavorite] = useState(() => favorites.has(userId));
+  const profile = profileById(userId);
 
   if (!profile) {
     return (
       <div className="px-10 py-20 text-center">
         <h1 className="m-0 mb-2 text-lg">user not found</h1>
-        <p className="m-0 mb-4 text-muted text-[12.5px]">
-          no profile for <b>{username}</b>
-        </p>
+        <p className="m-0 mb-4 text-muted text-[12.5px]">no profile with this id</p>
         <Link to="/" className="text-primary">
           back
         </Link>
@@ -82,10 +79,12 @@ function ProfilePage() {
     );
   }
 
+  const { username } = profile;
+  const isSelf = username === CURRENT_USER;
   const toggleFavorite = () => {
-    if (favorites.has(username)) favorites.delete(username);
-    else favorites.add(username);
-    setIsFavorite(favorites.has(username));
+    if (favorites.has(userId)) favorites.delete(userId);
+    else favorites.add(userId);
+    setIsFavorite(favorites.has(userId));
   };
 
   const { stats } = profile;
@@ -220,8 +219,8 @@ function ProfilePage() {
               {coRaw.map((co, i) => (
                 <Link
                   key={co.username}
-                  to="/profile/$username"
-                  params={{ username: co.username }}
+                  to="/profile/$userId"
+                  params={{ userId: userIdOf(co.username) }}
                   className="group flex items-center gap-3 sm:gap-3.5 px-3 sm:px-4 py-3 border-b border-border-subtle text-left !text-fg transition-colors duration-[120ms] last:border-b-0 hover:bg-surface-2 hover:no-underline"
                 >
                   <span className="w-[22px] flex-shrink-0 text-[11px] font-bold text-subtle tracking-[0.06em] group-hover:text-primary transition-colors">

@@ -11,6 +11,7 @@ import {
   ROOM_ACTIVITY,
   USER_GROWTH,
   USER_PROFILES,
+  userIdOf,
 } from "~/lib/mock-data";
 import { useLiveRooms } from "~/lib/rooms-store";
 import type { AllTimeRoom, LiveRoom, UserStats } from "~/lib/types";
@@ -297,8 +298,8 @@ const TopUsersTable = ({
       {users.map((u, i) => (
         <Link
           key={u.username}
-          to="/profile/$username"
-          params={{ username: u.username }}
+          to="/profile/$userId"
+          params={{ userId: userIdOf(u.username) }}
           className="group grid grid-cols-[28px_28px_1fr_auto] grid-rows-[auto_auto] gap-x-3 items-center px-4 py-2.5 border-b border-border-subtle last:border-b-0 text-left !text-fg transition-colors hover:bg-surface-2 hover:no-underline"
         >
           <span className="row-span-2 text-[10.5px] font-bold text-subtle tracking-[0.05em] group-hover:text-primary">

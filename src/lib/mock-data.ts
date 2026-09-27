@@ -415,6 +415,8 @@ const profile = (
   joined: string,
   s: [number, number, number, number, number],
 ): UserProfile => ({
+  // stable id, independent of the (renameable) Discord username — ADR 13 addendum
+  id: `usr_${username.replace(/\W/g, "")}`,
   username,
   discord,
   joined,
@@ -443,6 +445,9 @@ export const USER_PROFILES: Record<string, UserProfile> = Object.fromEntries(
     profile("lowpoly.lina", "lina", "Feb 2024", [67.3, 201.8, 14, 119, 7]),
   ].map((p) => [p.username, p]),
 );
+
+export const userIdOf = (username: string) => USER_PROFILES[username]?.id ?? username;
+export const profileById = (id: string) => Object.values(USER_PROFILES).find((p) => p.id === id);
 
 // user_cotime.seconds_together — symmetric, stored one-way.
 const USER_COTIME: Record<string, number> = {

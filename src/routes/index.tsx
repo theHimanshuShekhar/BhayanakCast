@@ -4,7 +4,7 @@ import { Icon, type IconComponent } from "~/components/icons";
 import { LiveCard, PastCard, useSnapshots } from "~/components/room-cards";
 import { Avatar, Btn, Chip } from "~/components/ui";
 import { useAppActions } from "~/lib/app-actions";
-import { ONLINE_COUNT, PAST_ROOMS, USER_PROFILES } from "~/lib/mock-data";
+import { ONLINE_COUNT, PAST_ROOMS, USER_PROFILES, userIdOf } from "~/lib/mock-data";
 import { useLiveRooms } from "~/lib/rooms-store";
 import type { LiveRoom, PastRoom, UserProfile } from "~/lib/types";
 
@@ -183,7 +183,7 @@ function HomePage() {
   const openRoom = (r: LiveRoom) => navigate({ to: "/room/$roomId", params: { roomId: r.id } });
   const openPast = (r: PastRoom) => navigate({ to: "/past/$roomId", params: { roomId: r.id } });
   const openProfile = (username: string) =>
-    navigate({ to: "/profile/$username", params: { username } });
+    navigate({ to: "/profile/$userId", params: { userId: userIdOf(username) } });
 
   const sidebar = useMemo(() => {
     const P = Object.values(USER_PROFILES);

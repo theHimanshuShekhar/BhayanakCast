@@ -135,6 +135,35 @@ export const streamIntervals = pgTable(
   ],
 );
 
+/**
+ * Who held the host role and when (ADR 11 stat definitions, ADR 14 transfers). Written by the
+ * realtime server on room creation and every host change; at most one open interval per room.
+ */
+export const hostIntervals = pgTable(
+  "host_intervals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    roomId: text("room_id")
+      .notNull()
+      .references(() => rooms.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("host_intervals_room_idx").on(table.roomId, table.startedAt),
+    uniqueIndex("host_intervals_one_open_idx")
+      .on(table.roomId)
+      .where(sql`${table.endedAt} is null`),
+    check(
+      "host_intervals_order",
+      sql`${table.endedAt} is null or ${table.endedAt} >= ${table.startedAt}`,
+    ),
+  ],
+);
+
 /** Latest thumbnail per streamer per room, overwritten on each upload (ADR 10). */
 export const thumbnails = pgTable(
   "thumbnails",

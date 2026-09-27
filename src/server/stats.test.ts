@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "../db/client.ts";
 import {
   dailyPlatformStats,
+  hostIntervals,
   presenceIntervals,
   rooms,
   streamIntervals,
@@ -43,6 +44,7 @@ async function seedRoom(
     endedAt?: Date | null;
     presence?: Span[];
     streams?: Span[];
+    hosts?: Span[];
   },
 ) {
   const createdAt = opts.createdAt ?? T0;
@@ -65,6 +67,10 @@ async function seedRoom(
     }));
   if (opts.presence?.length) await db.insert(presenceIntervals).values(toRows(opts.presence));
   if (opts.streams?.length) await db.insert(streamIntervals).values(toRows(opts.streams));
+  if (opts.hosts?.length)
+    await db
+      .insert(hostIntervals)
+      .values(toRows(opts.hosts).map(({ lastSeenAt: _, ...row }) => row));
 }
 
 async function statsFor(userId: string) {
@@ -96,7 +102,8 @@ describe("rollupEndedRoom", () => {
 
     expect(await statsFor("a")).toEqual({
       userId: "a",
-      secondsWatched: 60 * 60,
+      // present 60m, of which 30m was spent streaming
+      secondsWatched: 30 * 60,
       secondsStreamed: 30 * 60,
       roomsHosted: 1,
       roomsJoined: 1,
@@ -151,7 +158,8 @@ describe("rollupEndedRoom", () => {
     });
     await rollupEndedRoom(db, "r1");
     expect(await statsFor("d")).toMatchObject({
-      secondsWatched: 30 * 60,
+      // merged presence 0–30 minus merged stream 0–20
+      secondsWatched: 10 * 60,
       secondsStreamed: 20 * 60,
       peakViewers: 1,
     });
@@ -187,6 +195,28 @@ describe("rollupEndedRoom", () => {
     expect(await cotime()).toEqual({ "a-b": 15 * 60 });
     const [daily] = await db.select().from(dailyPlatformStats);
     expect(daily).toMatchObject({ roomsCreated: 2, roomsEnded: 2 });
+  });
+
+  it("credits everyone who held host once, not just the creator", async () => {
+    await seedRoom("r1", {
+      createdBy: "a",
+      presence: [
+        ["a", 0, 20],
+        ["b", 0, 60],
+        ["c", 0, 60],
+      ],
+      hosts: [
+        ["a", 0, 20],
+        ["b", 20, 40],
+        ["c", 40, 50],
+        // b held host twice in the same room; still counts once.
+        ["b", 50, 60],
+      ],
+    });
+    await rollupEndedRoom(db, "r1");
+    expect(await statsFor("a")).toMatchObject({ roomsHosted: 1 });
+    expect(await statsFor("b")).toMatchObject({ roomsHosted: 1 });
+    expect(await statsFor("c")).toMatchObject({ roomsHosted: 1 });
   });
 
   it("leaves rooms that haven't ended alone", async () => {
@@ -238,7 +268,8 @@ describe("purgeExpiredRooms", () => {
     expect(await db.select().from(thumbnails)).toEqual([]);
     // Stats survive the purge.
     expect(await statsFor("a")).toMatchObject({
-      secondsWatched: 60 * 60,
+      // streamed the whole time, so no watch time
+      secondsWatched: 0,
       secondsStreamed: 60 * 60,
       // "old" and "recent" were rolled up; "live" hasn't ended.
       roomsHosted: 2,
@@ -249,7 +280,7 @@ describe("purgeExpiredRooms", () => {
 
     // Running again is a no-op.
     expect(await purgeExpiredRooms(db, now)).toEqual({ rolledUp: 0, purged: 0 });
-    expect(await statsFor("a")).toMatchObject({ secondsWatched: 60 * 60 });
+    expect(await statsFor("a")).toMatchObject({ secondsStreamed: 60 * 60 });
   });
 
   it("keeps rooms ended less than 30 days ago", async () => {

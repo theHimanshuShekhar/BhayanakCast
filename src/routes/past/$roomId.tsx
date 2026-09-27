@@ -6,7 +6,7 @@ import { StreamMosaic } from "~/components/room-cards";
 import { DOTS, SectionHead } from "~/components/section-head";
 import { Avatar, Chip } from "~/components/ui";
 import { fmtMins, parseMins, SCREEN_KINDS } from "~/lib/format";
-import { PAST_ROOMS } from "~/lib/mock-data";
+import { PAST_ROOMS, userIdOf } from "~/lib/mock-data";
 import type { PastRoom, ScreenKind } from "~/lib/types";
 
 export const Route = createFileRoute("/past/$roomId")({
@@ -90,8 +90,8 @@ const RecapStat = ({
 
 const NameLink = ({ name, className = "" }: { name: string; className?: string }) => (
   <Link
-    to="/profile/$username"
-    params={{ username: name }}
+    to="/profile/$userId"
+    params={{ userId: userIdOf(name) }}
     className={`text-left truncate !text-inherit hover:!text-primary-strong hover:underline underline-offset-2 ${className}`}
   >
     {name}
