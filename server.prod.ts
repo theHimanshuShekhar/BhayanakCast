@@ -9,6 +9,8 @@ import { Server as HttpServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { serve } from "srvx";
 import { staticMiddleware } from "srvx/static";
+import { getDb } from "./src/db/client.ts";
+import { startMaintenance } from "./src/server/maintenance.ts";
 import { attachRealtime } from "./src/server/realtime.ts";
 
 type ServerEntry = { fetch(request: Request): Response | Promise<Response> };
@@ -32,5 +34,8 @@ if (!(httpServer instanceof HttpServer)) {
 }
 
 attachRealtime(httpServer);
+
+// Daily retention purge + stats roll-up (ADR 11).
+startMaintenance(getDb());
 
 await server.serve();

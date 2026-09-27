@@ -1,0 +1,53 @@
+# Homelab deployment (ADR 9).
+#   docker compose up -d --build                    # app + db, app on 127.0.0.1:${APP_PORT}
+#   docker compose --profile tunnel up -d --build   # + Cloudflare Tunnel
+# In the Cloudflare dashboard, point the tunnel's public hostname at http://app:3000.
+
+services:
+  app:
+    build: .
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: postgres://${POSTGRES_USER:-bhayanakcast}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-bhayanakcast}
+    # Apply pending migrations, then start the server.
+    command: ["sh", "-c", "node src/db/migrate.ts && exec node server.prod.ts"]
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      # Loopback only: public traffic arrives through the tunnel.
+      - "127.0.0.1:${APP_PORT:-3000}:3000"
+    restart: unless-stopped
+
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-bhayanakcast}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-bhayanakcast}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: ["tunnel"]
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      # Not `:?`-required: compose interpolates every service, even ones whose
+      # profile isn't active, and the tunnel is optional.
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  pgdata:
