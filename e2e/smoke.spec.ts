@@ -1,5 +1,5 @@
-import { expect, test } from "@playwright/test";
 import { signIn } from "./auth";
+import { expect, newPage, test } from "./fixtures";
 import { createRoomAs, createRoomOnPage, seedPastRoom, uniqueRoomName } from "./rooms";
 
 test("home lists live rooms and past streams", async ({ page, browser }) => {
@@ -67,7 +67,7 @@ test("a private room is listed for its host but never for visitors", async ({
 
   const visitor = await browser.newContext();
   try {
-    const visitorPage = await visitor.newPage();
+    const visitorPage = await newPage(visitor);
     await visitorPage.goto("/");
     await expect(
       visitorPage.getByRole("heading", { level: 1, name: "Active Rooms" }),

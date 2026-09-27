@@ -1,5 +1,6 @@
-import { expect, type Page, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { signIn } from "./auth";
+import { expect, test } from "./fixtures";
 
 const railSignIn = (page: Page) =>
   page.getByRole("navigation").getByRole("button", { name: /sign in with discord/i });
@@ -58,7 +59,7 @@ test("a signed-in user sees the account menu and no sign-in buttons", async ({ p
 
 test("sign out ends the session and lands on the visitor home", async ({ page, context }) => {
   await signIn(context, { username: "sign_out_user" });
-  await page.goto("/past/p3");
+  await page.goto("/past/no-such-room");
   await page.getByRole("button", { name: "Account menu" }).click();
   await page.getByRole("menuitem", { name: /sign out/ }).click();
 

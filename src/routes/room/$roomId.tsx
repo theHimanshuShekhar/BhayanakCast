@@ -1,16 +1,15 @@
 import { Menu } from "@base-ui/react/menu";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound, redirect, useNavigate } from "@tanstack/react-router";
-import { type ButtonHTMLAttributes, useMemo, useState } from "react";
+import { type ButtonHTMLAttributes, useEffect, useMemo, useState } from "react";
 import { Icon } from "~/components/icons";
 import { RoomSide } from "~/components/room/side-panel";
 import { type ModAction, type Reaction, Tile } from "~/components/room/tile";
 import { Btn, Chip } from "~/components/ui";
 import { useAppActions } from "~/lib/app-actions";
 import { useCurrentSession } from "~/lib/current-user";
-import { MAX_STREAMERS } from "~/lib/format";
-import { ACTIVITY, buildRoomDetail, userIdOf } from "~/lib/mock-data";
-import type { RoomSummary } from "~/lib/rooms";
+import { fmtMins, MAX_STREAMERS } from "~/lib/format";
+import { roomDetailFor } from "~/lib/room-view";
 import { roomQuery } from "~/lib/rooms.queries";
 import { useSettings } from "~/lib/settings";
 import type { ActivityItem, ChatMessage, Participant, RoomDetail, RoomRole } from "~/lib/types";
@@ -41,31 +40,6 @@ function RoomNotFound() {
   );
 }
 
-/**
- * The room's people and chat stay mock until the realtime server lands (spec #3): the
- * host and "you" are real, seeded into the mock builder as a room of just the host.
- */
-function mockDetail(room: RoomSummary, me: { id: string; username: string } | null): RoomDetail {
-  const host = room.host?.username ?? "host";
-  return buildRoomDetail(
-    {
-      id: room.id,
-      name: room.name,
-      streamer: host,
-      hostId: room.host?.id,
-      viewers: 1,
-      capacity: room.capacity,
-      tags: room.tags,
-      kind: room.kind,
-      started: "",
-      members: [host],
-      streams: [{ user: host, screen: "browser" }],
-      isPrivate: room.isPrivate,
-    },
-    me,
-  );
-}
-
 function RoomRoute() {
   const { roomId } = Route.useParams();
   const { user } = useCurrentSession();
@@ -73,7 +47,7 @@ function RoomRoute() {
   // It can end or disappear after load (a later refetch or socket invalidation).
   if (!room) return <RoomNotFound />;
   // key resets all room state when navigating between rooms or the signed-in user changes
-  return <RoomPage key={`${room.id}:${user?.id ?? ""}`} detail={mockDetail(room, user)} />;
+  return <RoomPage key={`${room.id}:${user?.id ?? ""}`} detail={roomDetailFor(room, user)} />;
 }
 
 const DENSITY_CLS = {
@@ -107,6 +81,16 @@ const ControlBtn = ({
   );
 };
 
+/** Minutes since `iso`, ticking every 30s. */
+const useMinutesSince = (iso: string) => {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const clock = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(clock);
+  }, []);
+  return Math.max(0, now - Date.parse(iso)) / 60_000;
+};
+
 const nowTs = () => {
   const d = new Date();
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -117,16 +101,19 @@ function RoomPage({ detail }: { detail: RoomDetail }) {
   const { settings } = useSettings();
   const { openSettings } = useAppActions();
   const [participants, setParticipants] = useState<Participant[]>(detail.participants);
-  const [chat, setChat] = useState<ChatMessage[]>(detail.chat);
-  const [activity, setActivity] = useState<ActivityItem[]>(ACTIVITY);
+  // Chat and the feed start empty; history arrives over the socket (spec #3).
+  const [chat, setChat] = useState<ChatMessage[]>([]);
+  const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [showViewers, setShowViewers] = useState(true);
   const [pinnedId, setPinnedId] = useState<string | null>(null);
   const [mutedIds, setMutedIds] = useState<Set<string>>(() => new Set());
   const [reactions, setReactions] = useState<Reaction[]>([]);
   const [sideOpen, setSideOpen] = useState(false);
 
+  const liveFor = useMinutesSince(detail.createdAt);
+
   const me = participants.find((p) => p.you);
-  const myRole: RoomRole = me && detail.hostId === me.userId ? "host" : (me?.role ?? "member");
+  const myRole: RoomRole = me?.role ?? "member";
   const streamingCount = participants.filter((p) => p.streaming).length;
   const canStartShare = !!me?.streaming || streamingCount < MAX_STREAMERS;
 
@@ -168,7 +155,8 @@ function RoomPage({ detail }: { detail: RoomDetail }) {
     const target =
       participants.find((p) => p.id === pinnedId) ??
       participants.find((p) => p.streaming) ??
-      participants.find((p) => !p.viewerOnly);
+      participants.find((p) => !p.viewerOnly) ??
+      me;
     if (!target) return;
     const r: Reaction = {
       id: Date.now() + Math.random(),
@@ -223,14 +211,12 @@ function RoomPage({ detail }: { detail: RoomDetail }) {
   }, [participants, showViewers, pinnedId]);
 
   const leave = () => navigate({ to: "/" });
-  // Chat and the feed name people by username; resolve to the participant's user id when present.
-  const openProfile = (username: string) =>
-    navigate({
-      to: "/profile/$userId",
-      params: {
-        userId: participants.find((p) => p.name === username)?.userId ?? userIdOf(username),
-      },
-    });
+  // Chat and the feed name people by username: resolve it to the user id of whoever has (or,
+  // if removed since, had) that name here.
+  const openProfile = (username: string) => {
+    const person = [...participants, ...detail.participants].find((p) => p.name === username);
+    if (person) navigate({ to: "/profile/$userId", params: { userId: person.userId } });
+  };
 
   return (
     <div
@@ -253,7 +239,8 @@ function RoomPage({ detail }: { detail: RoomDetail }) {
               <Icon.Users size={11} /> {participants.length}/{detail.capacity}
             </Chip>
             <Chip kind="live" dot>
-              LIVE · 1h 42m
+              {/* The elapsed time can tick between the server render and hydration. */}
+              <span suppressHydrationWarning>LIVE · {fmtMins(liveFor)}</span>
             </Chip>
             <button
               type="button"

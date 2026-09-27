@@ -1,5 +1,6 @@
-import { expect, type Page, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { fakeDiscordId, setBan, signIn, trySignIn } from "./auth";
+import { expect, test } from "./fixtures";
 
 // Each test bans only its own fake user (fakeDiscordId), never one another test signs in as.
 
@@ -13,7 +14,7 @@ test("a signed-in user who gets banned is a visitor on their next navigation", a
 }) => {
   const discordId = fakeDiscordId("soon_banned");
   await signIn(context, { discordId, username: "soon_banned" });
-  await page.goto("/past/p3");
+  await page.goto("/past/no-such-room");
   await expect(accountMenu(page)).toBeVisible();
 
   await setBan(context, discordId, { reason: "spam" });

@@ -1,5 +1,6 @@
-import { expect, type Page, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { signIn } from "./auth";
+import { expect, test } from "./fixtures";
 import { createUser } from "./profiles";
 import { createRoomAs, seedPastRoom, uniqueRoomName } from "./rooms";
 
@@ -84,7 +85,7 @@ test.describe("a visitor", () => {
     // Own rate-limit bucket per test (see sign-in.spec.ts).
     const octet = () => Math.floor(Math.random() * 254) + 1;
     await page.setExtraHTTPHeaders({ "cf-connecting-ip": `10.${octet()}.${octet()}.${octet()}` });
-    await page.goto("/room/r2");
+    await page.goto("/room/no-such-room");
     const signInResponse = page.waitForResponse("**/api/auth/sign-in/social");
     await joinPrompt(page)
       .getByRole("button", { name: /sign in with discord/i })

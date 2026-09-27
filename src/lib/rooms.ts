@@ -33,7 +33,7 @@ export interface RoomPerson {
   username: string;
 }
 
-/** A live room as listed on home ("Live Now", search, "Filling Up"). */
+/** A live room as listed on home ("Live Now", search, "Filling Up") and opened by the room page. */
 export interface LiveRoomCard {
   id: string;
   name: string;
@@ -54,7 +54,7 @@ export interface LiveRoomCard {
   createdAt: string;
 }
 
-/** The room page's header data. Participants and chat come from the socket (spec #3). */
+/** What every room read shares: the room and its host. */
 export interface RoomSummary {
   id: string;
   name: string;

@@ -78,6 +78,7 @@ export const Tile = ({
             {p.muted ? <Icon.MicOff size={14} /> : <Icon.Mic size={14} />}
           </div>
         </div>
+        <FloatingReactions reactions={reactions} />
       </div>
     );
   }
@@ -222,15 +223,18 @@ export const Tile = ({
         </span>
       </div>
 
-      {reactions.map((r) => (
-        <span
-          key={r.id}
-          className="absolute bottom-4 left-1/2 z-[5] text-[22px] pointer-events-none animate-bc-float drop-shadow-[0_0_8px_var(--color-primary-glow)]"
-          style={{ "--dx": `${r.dx}px` } as CSSProperties}
-        >
-          {r.emoji}
-        </span>
-      ))}
+      <FloatingReactions reactions={reactions} />
     </div>
   );
 };
+
+const FloatingReactions = ({ reactions }: { reactions: Reaction[] }) =>
+  reactions.map((r) => (
+    <span
+      key={r.id}
+      className="absolute bottom-4 left-1/2 z-[5] text-[22px] pointer-events-none animate-bc-float drop-shadow-[0_0_8px_var(--color-primary-glow)]"
+      style={{ "--dx": `${r.dx}px` } as CSSProperties}
+    >
+      {r.emoji}
+    </span>
+  ));

@@ -1,5 +1,6 @@
-import { type APIRequestContext, expect, test } from "@playwright/test";
+import type { APIRequestContext } from "@playwright/test";
 import { signIn } from "./auth";
+import { expect, newPage, test } from "./fixtures";
 
 /** The server-rendered `<html>` start tag of home: what the browser paints first. */
 async function initialHtmlTag(request: APIRequestContext): Promise<string> {
@@ -38,7 +39,7 @@ test("theme and accent follow the user to a fresh browser with no flash", async 
       })
       .toEqual({ dark: false, accent: "190" });
 
-    const freshPage = await fresh.newPage();
+    const freshPage = await newPage(fresh);
     await freshPage.goto("/");
     await expect(freshPage.locator("html")).not.toHaveClass(/\bdark\b/);
     await expect(freshPage.getByRole("button", { name: "Accent · cyan" })).toBeVisible();

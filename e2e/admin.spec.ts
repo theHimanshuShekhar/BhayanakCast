@@ -1,5 +1,6 @@
-import { expect, type Page, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { E2E_ADMIN_DISCORD_ID, signIn } from "./auth";
+import { expect, test } from "./fixtures";
 import { createUser, uniqueUsername } from "./profiles";
 import { minutesAgo, seedPastRoom, seedRoom, uniqueRoomName } from "./rooms";
 
@@ -91,12 +92,9 @@ test("an admin sees real platform numbers, rooms and leaderboards", async ({
   await expect(liveRow.getByRole("cell").nth(2)).toHaveText("1/10");
 
   const recent = page.getByRole("table", { name: "recent rooms" });
-  // Typing before hydration is lost, so type again until the table filters: the header
-  // row and this test's room.
-  await expect(async () => {
-    await page.getByRole("textbox", { name: "Search rooms or hosts" }).fill(pastName);
-    await expect(recent.getByRole("row")).toHaveCount(2, { timeout: 1000 });
-  }).toPass();
+  await page.getByRole("textbox", { name: "Search rooms or hosts" }).fill(pastName);
+  // The header row and this test's room.
+  await expect(recent.getByRole("row")).toHaveCount(2);
   const pastRow = recent.getByRole("row").filter({ hasText: pastName });
   await expect(pastRow).toContainText("ended");
   await expect(pastRow).toContainText("30m");
