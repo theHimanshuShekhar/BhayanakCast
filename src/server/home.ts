@@ -45,7 +45,8 @@ async function rightNowCounts(db: Db, caller: Caller): Promise<RightNow> {
 }
 
 /** Postgres sums integers as bigint/numeric (a string on the wire); read it as a number. */
-const total = (column: AnyColumn) => sql<number>`coalesce(sum(${column}), 0)`.mapWith(Number);
+export const total = (column: AnyColumn) =>
+  sql<number>`coalesce(sum(${column}), 0)`.mapWith(Number);
 
 async function communityTotals(db: Db): Promise<CommunityTotals> {
   const [[members], [stats]] = await Promise.all([

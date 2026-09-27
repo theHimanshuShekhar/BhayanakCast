@@ -1,5 +1,7 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { E2E_ADMIN_DISCORD_ID, signIn } from "./auth";
+import { createUser, uniqueUsername } from "./profiles";
+import { minutesAgo, seedPastRoom, seedRoom, uniqueRoomName } from "./rooms";
 
 const dashboard = { level: 1, name: "Dashboard" } as const;
 
@@ -33,4 +35,80 @@ test("an ADMIN_DISCORD_IDS user sees the rail item and opens the dashboard", asy
   await page.getByRole("link", { name: "Admin Dashboard" }).click();
   await expect(page).toHaveURL(/\/admin$/);
   await expect(page.getByRole("heading", dashboard)).toBeVisible();
+});
+
+const HOUR = 3600;
+
+/** A dashboard stat card's number (hours drop their "h"). */
+async function stat(page: Page, label: string): Promise<number> {
+  const card = page.getByRole("region", { name: label, exact: true });
+  const value = await card.locator("div").nth(1).textContent();
+  return Number(value?.replace(/h$/, ""));
+}
+
+// Every test shares one database: assert growth by at least what this test seeded, and
+// find this test's rows by their unique names, never exact totals.
+test("an admin sees real platform numbers, rooms and leaderboards", async ({
+  page,
+  context,
+  browser,
+}) => {
+  await signIn(context, { discordId: E2E_ADMIN_DISCORD_ID, username: "admin_jpg" });
+  await page.goto("/admin");
+  await expect(page.getByRole("heading", dashboard)).toBeVisible();
+  const usersBefore = await stat(page, "total users");
+  const newUsersBefore = await stat(page, "new users (30d)");
+  const streamedBefore = await stat(page, "hours streamed");
+  const liveBefore = await stat(page, "live now");
+
+  const streamer = await createUser(browser, uniqueUsername("admin.streamer"), {
+    stats: { secondsStreamed: 100_000 * HOUR, secondsWatched: 90_000 * HOUR },
+  });
+  const liveName = uniqueRoomName("admin live");
+  await seedRoom(context, {
+    name: liveName,
+    hostUserId: streamer.id,
+    isPrivate: true,
+    createdAt: minutesAgo(15),
+    presence: [{ userId: streamer.id, startedAt: minutesAgo(15) }],
+  });
+  const pastName = uniqueRoomName("admin past");
+  await seedPastRoom(browser, uniqueUsername("admin.past"), pastName);
+
+  await page.reload();
+  expect(await stat(page, "total users")).toBeGreaterThanOrEqual(usersBefore + 2);
+  expect(await stat(page, "new users (30d)")).toBeGreaterThanOrEqual(newUsersBefore + 2);
+  expect(await stat(page, "hours streamed")).toBeGreaterThanOrEqual(streamedBefore + 99_999);
+  expect(await stat(page, "live now")).toBeGreaterThanOrEqual(liveBefore + 1);
+
+  // Private rooms included: admins see every room.
+  const liveRow = page
+    .getByRole("table", { name: "live rooms" })
+    .getByRole("row")
+    .filter({ hasText: liveName });
+  await expect(liveRow).toContainText("private");
+  await expect(liveRow).toContainText(streamer.username);
+  await expect(liveRow.getByRole("cell").nth(2)).toHaveText("1/10");
+
+  const recent = page.getByRole("table", { name: "recent rooms" });
+  // Typing before hydration is lost, so type again until the table filters: the header
+  // row and this test's room.
+  await expect(async () => {
+    await page.getByRole("textbox", { name: "Search rooms or hosts" }).fill(pastName);
+    await expect(recent.getByRole("row")).toHaveCount(2, { timeout: 1000 });
+  }).toPass();
+  const pastRow = recent.getByRole("row").filter({ hasText: pastName });
+  await expect(pastRow).toContainText("ended");
+  await expect(pastRow).toContainText("30m");
+
+  await expect(
+    page
+      .getByRole("region", { name: "top users by hours streamed" })
+      .getByRole("link", { name: streamer.username }),
+  ).toBeVisible();
+  await expect(
+    page
+      .getByRole("region", { name: "top users by hours watched" })
+      .getByRole("link", { name: streamer.username }),
+  ).toBeVisible();
 });

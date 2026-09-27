@@ -1,25 +1,42 @@
 // Admin dashboard — restricted to admins (ADR 6).
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import { BarChart, LineChart } from "~/components/charts";
 import { Icon } from "~/components/icons";
 import { SectionHead } from "~/components/section-head";
 import { Avatar, MonoCaps } from "~/components/ui";
-// Still mock data, live rooms included, until the admin tickets of spec #2.
 import {
-  ALLTIME_ROOMS,
-  LIVE_ROOMS,
-  ROOM_ACTIVITY,
-  USER_GROWTH,
-  USER_PROFILES,
-  userIdOf,
-} from "~/lib/mock-data";
-import type { AllTimeRoom, LiveRoom, UserStats } from "~/lib/types";
+  ADMIN_WINDOW_DAYS,
+  type AdminRoomRow,
+  LEADERBOARD_SIZE,
+  type LeaderboardEntry,
+  percentChange,
+  type WindowCount,
+} from "~/lib/admin";
+import {
+  adminDailySeriesQuery,
+  adminLeaderboardsQuery,
+  adminLiveRoomsQuery,
+  adminOverviewQuery,
+  adminRecentRoomsQuery,
+} from "~/lib/admin.queries";
+import { fmtAgo, fmtMins } from "~/lib/format";
+import type { LiveRoomCard } from "~/lib/rooms";
 
 export const Route = createFileRoute("/admin")({
   // Visitors and non-admins go home. A UX guard only: admin server functions check the role themselves.
   beforeLoad: ({ context }) => {
     if (context.session.role !== "admin") throw redirect({ to: "/" });
+  },
+  loader: async ({ context: { queryClient } }) => {
+    await Promise.all([
+      queryClient.ensureQueryData(adminOverviewQuery()),
+      queryClient.ensureQueryData(adminDailySeriesQuery()),
+      queryClient.ensureQueryData(adminLiveRoomsQuery()),
+      queryClient.ensureQueryData(adminRecentRoomsQuery()),
+      queryClient.ensureQueryData(adminLeaderboardsQuery()),
+    ]);
   },
   component: AdminPage,
 });
@@ -42,7 +59,8 @@ const StatCard = ({
   label: string;
   value: ReactNode;
   unit?: string;
-  delta?: number;
+  /** Percent change vs the previous 30 days; null when there's nothing to compare with. */
+  delta?: number | null;
   tone?: "accent" | "live";
 }) => {
   const toneCls =
@@ -52,7 +70,8 @@ const StatCard = ({
         ? "border-[color-mix(in_oklch,var(--color-live)_40%,var(--color-border))] bg-surface"
         : "border-border bg-surface";
   return (
-    <div
+    <section
+      aria-label={label}
       className={`border rounded-[var(--radius)] px-4 py-3.5 shadow-card flex flex-col gap-1.5 ${toneCls}`}
     >
       <div className="text-[10px] uppercase tracking-[0.12em] text-muted font-semibold">
@@ -62,7 +81,10 @@ const StatCard = ({
         {value}
         {unit && <span className="text-[13px] font-medium text-muted">{unit}</span>}
       </div>
-      {delta !== undefined && (
+      {delta === null && (
+        <div className="text-[10.5px] tracking-[0.04em] text-subtle">no data for prev 30d</div>
+      )}
+      {delta !== undefined && delta !== null && (
         <div
           className={`inline-flex items-center gap-[5px] text-[10.5px] tracking-[0.04em] ${delta >= 0 ? "text-success" : "text-live"}`}
         >
@@ -70,23 +92,36 @@ const StatCard = ({
           <span className="text-subtle text-[9.5px]">vs prev 30d</span>
         </div>
       )}
-    </div>
+    </section>
   );
 };
 
-const RoomCell = ({ live, name }: { live: boolean; name: string }) => (
+const RoomCell = ({
+  live,
+  name,
+  isPrivate,
+}: {
+  live: boolean;
+  name: string;
+  isPrivate: boolean;
+}) => (
   <div className="inline-flex items-center gap-2 font-medium text-fg">
     <span
       className={`w-[7px] h-[7px] rounded-full flex-shrink-0 ${live ? "bg-live shadow-[0_0_8px_var(--color-live)] animate-bc-pulse" : "bg-subtle"}`}
     />
     <span>{name}</span>
+    {isPrivate && <MonoCaps>private</MonoCaps>}
   </div>
 );
-const UserCell = ({ name }: { name: string }) => (
-  <div className="inline-flex items-center gap-2 text-fg-muted">
-    <Avatar name={name} size="sm" /> {name}
-  </div>
-);
+/** A room's host; null once their account is gone. */
+const UserCell = ({ name }: { name: string | null }) =>
+  name ? (
+    <div className="inline-flex items-center gap-2 text-fg-muted">
+      <Avatar name={name} size="sm" /> {name}
+    </div>
+  ) : (
+    <span className="text-subtle">—</span>
+  );
 const EmptyRow = ({ cols, children }: { cols: number; children: ReactNode }) => (
   <tr>
     <td colSpan={cols} className="text-center p-7 text-subtle text-[11.5px]">
@@ -95,9 +130,9 @@ const EmptyRow = ({ cols, children }: { cols: number; children: ReactNode }) => 
   </tr>
 );
 
-const LiveRoomsTable = ({ rooms }: { rooms: LiveRoom[] }) => (
+const LiveRoomsTable = ({ rooms }: { rooms: LiveRoomCard[] }) => (
   <div className="overflow-x-auto">
-    <table className="w-full min-w-[640px] border-collapse text-xs">
+    <table aria-label="live rooms" className="w-full min-w-[640px] border-collapse text-xs">
       <thead>
         <tr>
           <th className={th}>room</th>
@@ -114,17 +149,19 @@ const LiveRoomsTable = ({ rooms }: { rooms: LiveRoom[] }) => (
         {rooms.map((r) => (
           <tr key={r.id} className="group">
             <td className={td}>
-              <RoomCell live name={r.name} />
+              <RoomCell live name={r.name} isPrivate={r.isPrivate} />
             </td>
             <td className={td}>
-              <UserCell name={r.streamer} />
+              <UserCell name={r.host?.username ?? null} />
             </td>
             <td className={`${td} text-right`}>
-              <b>{r.viewers}</b>
+              <b>{r.participantCount}</b>
               <span className="text-subtle">/{r.capacity}</span>
             </td>
-            <td className={`${td} text-right`}>{r.streams.length}</td>
-            <td className={`${td} text-right`}>{r.started}</td>
+            <td className={`${td} text-right`}>{r.streamCount}</td>
+            <td className={`${td} text-right`}>
+              {fmtMins((Date.now() - Date.parse(r.createdAt)) / 60_000)}
+            </td>
             <td className={td}>
               <Link
                 to="/room/$roomId"
@@ -142,9 +179,10 @@ const LiveRoomsTable = ({ rooms }: { rooms: LiveRoom[] }) => (
   </div>
 );
 
+type RecentRoom = AdminRoomRow & { hostName: string };
 type SortKey = keyof Pick<
-  AllTimeRoom,
-  "name" | "streamer" | "status" | "peak" | "joined" | "duration" | "ended"
+  RecentRoom,
+  "name" | "hostName" | "status" | "peak" | "joined" | "durationMinutes" | "endedAt"
 >;
 type Sort = { key: SortKey; dir: "asc" | "desc" };
 
@@ -184,12 +222,13 @@ const SortHeader = ({
   );
 };
 
-const AllTimeRoomsTable = ({ rooms }: { rooms: AllTimeRoom[] }) => {
+const RecentRoomsTable = ({ rooms: rows }: { rooms: AdminRoomRow[] }) => {
   const [q, setQ] = useState("");
-  const [sort, setSort] = useState<Sort>({ key: "ended", dir: "desc" });
-  const term = q.toLowerCase();
+  const [sort, setSort] = useState<Sort>({ key: "endedAt", dir: "desc" });
+  const rooms: RecentRoom[] = rows.map((r) => ({ ...r, hostName: r.host?.username ?? "" }));
+  const term = q.trim().toLowerCase();
   const sorted = rooms
-    .filter((r) => r.name.toLowerCase().includes(term) || r.streamer.toLowerCase().includes(term))
+    .filter((r) => r.name.toLowerCase().includes(term) || r.hostName.toLowerCase().includes(term))
     .sort((a, b) => {
       const av = a[sort.key];
       const bv = b[sort.key];
@@ -220,11 +259,11 @@ const AllTimeRoomsTable = ({ rooms }: { rooms: AllTimeRoom[] }) => {
         </MonoCaps>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[640px] border-collapse text-xs">
+        <table aria-label="recent rooms" className="w-full min-w-[640px] border-collapse text-xs">
           <thead>
             <tr>
               <SortHeader label="room" sortKey="name" sort={sort} setSort={setSort} />
-              <SortHeader label="host" sortKey="streamer" sort={sort} setSort={setSort} />
+              <SortHeader label="host" sortKey="hostName" sort={sort} setSort={setSort} />
               <SortHeader label="status" sortKey="status" sort={sort} setSort={setSort} />
               <SortHeader label="peak" sortKey="peak" sort={sort} setSort={setSort} align="right" />
               <SortHeader
@@ -236,14 +275,14 @@ const AllTimeRoomsTable = ({ rooms }: { rooms: AllTimeRoom[] }) => {
               />
               <SortHeader
                 label="duration"
-                sortKey="duration"
+                sortKey="durationMinutes"
                 sort={sort}
                 setSort={setSort}
                 align="right"
               />
               <SortHeader
                 label="ended"
-                sortKey="ended"
+                sortKey="endedAt"
                 sort={sort}
                 setSort={setSort}
                 align="right"
@@ -254,10 +293,10 @@ const AllTimeRoomsTable = ({ rooms }: { rooms: AllTimeRoom[] }) => {
             {sorted.map((r) => (
               <tr key={r.id} className="group">
                 <td className={td}>
-                  <RoomCell live={r.status === "live"} name={r.name} />
+                  <RoomCell live={r.status === "live"} name={r.name} isPrivate={r.isPrivate} />
                 </td>
                 <td className={td}>
-                  <UserCell name={r.streamer} />
+                  <UserCell name={r.host?.username ?? null} />
                 </td>
                 <td className={td}>
                   <span
@@ -270,8 +309,10 @@ const AllTimeRoomsTable = ({ rooms }: { rooms: AllTimeRoom[] }) => {
                   <b>{r.peak}</b>
                 </td>
                 <td className={`${td} text-right`}>{r.joined}</td>
-                <td className={`${td} text-right !text-subtle`}>{r.duration}</td>
-                <td className={`${td} text-right !text-subtle`}>{r.ended ?? "—"}</td>
+                <td className={`${td} text-right !text-subtle`}>{fmtMins(r.durationMinutes)}</td>
+                <td className={`${td} text-right !text-subtle`}>
+                  {r.endedAt ? fmtAgo(r.endedAt) : "—"}
+                </td>
               </tr>
             ))}
             {sorted.length === 0 && <EmptyRow cols={7}>no matches</EmptyRow>}
@@ -282,43 +323,43 @@ const AllTimeRoomsTable = ({ rooms }: { rooms: AllTimeRoom[] }) => {
   );
 };
 
-const TopUsersTable = ({
-  users,
-  label,
-}: {
-  users: { username: string; value: number; pct: number }[];
-  label: string;
-}) => (
-  <div className={`${card} overflow-hidden`}>
-    <div className="flex items-baseline justify-between px-4 py-3 border-b border-border-subtle bg-canvas">
-      <h3 className="m-0 text-xs font-bold tracking-[-0.005em]">{label}</h3>
-      <MonoCaps>top 6</MonoCaps>
-    </div>
-    <div className="flex flex-col">
-      {users.map((u, i) => (
-        <Link
-          key={u.username}
-          to="/profile/$userId"
-          params={{ userId: userIdOf(u.username) }}
-          className="group grid grid-cols-[28px_28px_1fr_auto] grid-rows-[auto_auto] gap-x-3 items-center px-4 py-2.5 border-b border-border-subtle last:border-b-0 text-left !text-fg transition-colors hover:bg-surface-2 hover:no-underline"
-        >
-          <span className="row-span-2 text-[10.5px] font-bold text-subtle tracking-[0.05em] group-hover:text-primary">
-            #{i + 1}
-          </span>
-          <Avatar name={u.username} size="sm" ring={i === 0} className="row-span-2" />
-          <span className="col-start-3 text-[12.5px] font-semibold text-fg">{u.username}</span>
-          <span className="col-start-4 row-start-1 text-[13px] font-bold text-primary tracking-[-0.01em]">
-            {u.value.toFixed(1)}
-            <span className="text-subtle font-medium text-[11px]">h</span>
-          </span>
-          <span className="col-start-3 col-span-2 row-start-2 h-[3px] mt-1 rounded-full bg-surface-3 overflow-hidden">
-            <span className={barFill} style={{ width: `${u.pct * 100}%` }} />
-          </span>
-        </Link>
-      ))}
-    </div>
-  </div>
-);
+const TopUsersTable = ({ users, label }: { users: LeaderboardEntry[]; label: string }) => {
+  const max = users[0]?.hours || 1;
+  return (
+    <section aria-label={`top users by ${label}`} className={`${card} overflow-hidden`}>
+      <div className="flex items-baseline justify-between px-4 py-3 border-b border-border-subtle bg-canvas">
+        <h3 className="m-0 text-xs font-bold tracking-[-0.005em]">{label}</h3>
+        <MonoCaps>top {LEADERBOARD_SIZE}</MonoCaps>
+      </div>
+      <div className="flex flex-col">
+        {users.map((u, i) => (
+          <Link
+            key={u.id}
+            to="/profile/$userId"
+            params={{ userId: u.id }}
+            className="group grid grid-cols-[28px_28px_1fr_auto] grid-rows-[auto_auto] gap-x-3 items-center px-4 py-2.5 border-b border-border-subtle last:border-b-0 text-left !text-fg transition-colors hover:bg-surface-2 hover:no-underline"
+          >
+            <span className="row-span-2 text-[10.5px] font-bold text-subtle tracking-[0.05em] group-hover:text-primary">
+              #{i + 1}
+            </span>
+            <Avatar name={u.username} size="sm" ring={i === 0} className="row-span-2" />
+            <span className="col-start-3 text-[12.5px] font-semibold text-fg">{u.username}</span>
+            <span className="col-start-4 row-start-1 text-[13px] font-bold text-primary tracking-[-0.01em]">
+              {u.hours.toFixed(1)}
+              <span className="text-subtle font-medium text-[11px]">h</span>
+            </span>
+            <span className="col-start-3 col-span-2 row-start-2 h-[3px] mt-1 rounded-full bg-surface-3 overflow-hidden">
+              <span className={barFill} style={{ width: `${(u.hours / max) * 100}%` }} />
+            </span>
+          </Link>
+        ))}
+        {users.length === 0 && (
+          <div className="text-center p-7 text-subtle text-[11.5px]">no hours yet</div>
+        )}
+      </div>
+    </section>
+  );
+};
 
 const ChartCard = ({
   title,
@@ -344,17 +385,25 @@ const ChartCard = ({
   </div>
 );
 
+const windowStat = (count: WindowCount) => ({
+  value: count.current,
+  delta: percentChange(count),
+});
+
 function AdminPage() {
-  const liveRooms = LIVE_ROOMS;
-  const P = Object.values(USER_PROFILES);
-  const sum = (key: keyof UserStats) => P.reduce((s, p) => s + p.stats[key], 0);
-  const top = (key: keyof UserStats) => {
-    const list = P.map((p) => ({ username: p.username, value: p.stats[key] }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 6);
-    const max = list[0]?.value || 1;
-    return list.map((u) => ({ ...u, pct: u.value / max }));
-  };
+  const { data: overview } = useSuspenseQuery(adminOverviewQuery());
+  const { data: daily } = useSuspenseQuery(adminDailySeriesQuery());
+  const { data: liveRooms } = useSuspenseQuery(adminLiveRoomsQuery());
+  const { data: recentRooms } = useSuspenseQuery(adminRecentRoomsQuery());
+  const { data: leaderboards } = useSuspenseQuery(adminLeaderboardsQuery());
+  const { totals, window: last30 } = overview;
+  const chartDays = daily.map((d) => ({
+    date: d.day.slice(5),
+    new_users: d.newUsers,
+    cumulative: d.cumulativeUsers,
+    created: d.roomsCreated,
+    ended: d.roomsEnded,
+  }));
 
   return (
     <div className="overflow-auto min-h-0 h-full">
@@ -377,43 +426,24 @@ function AdminPage() {
 
         <SectionHead title="platform stats" sub="all-time" size="sm" />
         <div className="grid grid-cols-2 min-[720px]:grid-cols-3 min-[1100px]:grid-cols-5 gap-2.5">
-          <StatCard label="total users" value={P.length} delta={12} tone="accent" />
-          <StatCard
-            label="hours streamed"
-            value={sum("hoursStreamed").toFixed(0)}
-            unit="h"
-            delta={18}
-          />
-          <StatCard
-            label="hours watched"
-            value={sum("hoursWatched").toFixed(0)}
-            unit="h"
-            delta={23}
-          />
-          <StatCard label="rooms hosted" value={sum("roomsHosted")} delta={9} />
-          <StatCard label="live now" value={liveRooms.length} tone="live" />
+          <StatCard label="total users" value={totals.users} tone="accent" />
+          <StatCard label="hours streamed" value={totals.hoursStreamed.toFixed(0)} unit="h" />
+          <StatCard label="hours watched" value={totals.hoursWatched.toFixed(0)} unit="h" />
+          <StatCard label="rooms hosted" value={totals.roomsHosted} />
+          <StatCard label="live now" value={totals.liveRooms} tone="live" />
         </div>
 
         <SectionHead
           title="last 30 days"
-          sub="rolling window"
+          sub={`rolling ${ADMIN_WINDOW_DAYS} UTC days · vs the ${ADMIN_WINDOW_DAYS} before`}
           dot="success"
           size="sm"
           className="mt-6"
         />
-        <div className="grid grid-cols-2 min-[900px]:grid-cols-4 gap-2.5">
-          <StatCard
-            label="new users (30d)"
-            value={USER_GROWTH.reduce((s, d) => s + d.new_users, 0)}
-            delta={7}
-          />
-          <StatCard
-            label="rooms created (30d)"
-            value={ROOM_ACTIVITY.reduce((s, d) => s + d.created, 0)}
-            delta={14}
-          />
-          <StatCard label="avg peak people" value={6.4} delta={-3} />
-          <StatCard label="active streamers" value={9} delta={2} />
+        <div className="grid grid-cols-2 min-[900px]:grid-cols-3 gap-2.5">
+          <StatCard label="new users (30d)" {...windowStat(last30.newUsers)} />
+          <StatCard label="rooms created (30d)" {...windowStat(last30.roomsCreated)} />
+          <StatCard label="rooms ended (30d)" {...windowStat(last30.roomsEnded)} />
         </div>
 
         <div className="grid grid-cols-[repeat(auto-fit,minmax(min(420px,100%),1fr))] gap-3.5 mt-3.5">
@@ -426,7 +456,7 @@ function AdminPage() {
           >
             <LineChart
               label="New and cumulative users per day, last 30 days"
-              data={USER_GROWTH}
+              data={chartDays}
               xKey="date"
               height={200}
               series={[
@@ -444,7 +474,7 @@ function AdminPage() {
           >
             <BarChart
               label="Rooms created and ended per day, last 30 days"
-              data={ROOM_ACTIVITY}
+              data={chartDays}
               xKey="date"
               height={200}
               series={[
@@ -457,7 +487,7 @@ function AdminPage() {
 
         <SectionHead
           title="live rooms"
-          sub={`${liveRooms.length} streaming now`}
+          sub={`${liveRooms.length} live now`}
           dot="livePulse"
           size="sm"
           className="mt-6"
@@ -474,13 +504,13 @@ function AdminPage() {
           className="mt-6"
         />
         <div className={`${card} overflow-hidden`}>
-          <AllTimeRoomsTable rooms={ALLTIME_ROOMS} />
+          <RecentRoomsTable rooms={recentRooms} />
         </div>
 
         <SectionHead title="top users" sub="leaderboards" size="sm" className="mt-6" />
         <div className="grid grid-cols-[repeat(auto-fit,minmax(min(380px,100%),1fr))] gap-3.5">
-          <TopUsersTable users={top("hoursStreamed")} label="hours streamed" />
-          <TopUsersTable users={top("hoursWatched")} label="hours watched" />
+          <TopUsersTable users={leaderboards.streamed} label="hours streamed" />
+          <TopUsersTable users={leaderboards.watched} label="hours watched" />
         </div>
       </div>
     </div>
