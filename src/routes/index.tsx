@@ -6,15 +6,20 @@ import { SignInButton } from "~/components/sign-in-button";
 import { SignInErrorNotice } from "~/components/sign-in-error-notice";
 import { Avatar, Btn, Chip } from "~/components/ui";
 import { useAppActions } from "~/lib/app-actions";
-import { validateSignInErrorSearch } from "~/lib/ban";
+import { type SignInErrorSearch, validateSignInErrorSearch } from "~/lib/ban";
 import { useCurrentSession } from "~/lib/current-user";
 import { ONLINE_COUNT, PAST_ROOMS, USER_PROFILES, userIdOf } from "~/lib/mock-data";
 import { useLiveRooms } from "~/lib/rooms-store";
 import type { LiveRoom, PastRoom, UserProfile } from "~/lib/types";
 
 export const Route = createFileRoute("/")({
-  // A failed Discord sign-in (e.g. a banned user) lands here with an error to show.
-  validateSearch: validateSignInErrorSearch,
+  // `join` is set when a visitor was sent here from a room URL; the shell then shows the
+  // "sign in to join" prompt for that room. A failed Discord sign-in (e.g. a banned
+  // user) lands here with `error`/`error_description` to show.
+  validateSearch: (search: Record<string, unknown>): { join?: string } & SignInErrorSearch => ({
+    ...(typeof search.join === "string" && search.join ? { join: search.join } : {}),
+    ...validateSignInErrorSearch(search),
+  }),
   component: HomePage,
 });
 
@@ -171,7 +176,7 @@ const SignInPanel = () => (
 
 function HomePage() {
   const navigate = useNavigate();
-  const { openCreateRoom } = useAppActions();
+  const { openCreateRoom, promptSignIn } = useAppActions();
   const { user } = useCurrentSession();
   const search = Route.useSearch();
   const rooms = useLiveRooms();
@@ -201,7 +206,9 @@ function HomePage() {
     rooms.find((r) => r.streams.some((s) => s.user === name)) ??
     rooms.find((r) => r.members.includes(name));
 
-  const openRoom = (r: LiveRoom) => navigate({ to: "/room/$roomId", params: { roomId: r.id } });
+  // Entering a room needs sign-in: visitors get the prompt and stay on home.
+  const openRoom = (r: LiveRoom) =>
+    user ? navigate({ to: "/room/$roomId", params: { roomId: r.id } }) : promptSignIn(r.name);
   const openPast = (r: PastRoom) => navigate({ to: "/past/$roomId", params: { roomId: r.id } });
   const openProfile = (username: string) =>
     navigate({ to: "/profile/$userId", params: { userId: userIdOf(username) } });
@@ -328,7 +335,7 @@ function HomePage() {
           </div>
         </div>
 
-        <div className={panelCls}>
+        <section aria-label="Filling Up" className={panelCls}>
           <PanelHead icon={Icon.Bolt}>Filling Up</PanelHead>
           {sidebar.trending.map((r) => (
             <button
@@ -347,7 +354,7 @@ function HomePage() {
               </span>
             </button>
           ))}
-        </div>
+        </section>
 
         <div className={panelCls}>
           <PanelHead icon={Icon.Users}>Community</PanelHead>

@@ -1,9 +1,7 @@
 import { expect, type Page, test } from "@playwright/test";
-import { setBan, signIn, trySignIn } from "./auth";
+import { fakeDiscordId, setBan, signIn, trySignIn } from "./auth";
 
-/** These tests change the user's ban state, so each browser project gets its own fake user. */
-const fakeDiscordId = (n: number) =>
-  `900000000000000${test.info().project.name === "firefox" ? 4 : 3}0${n}`;
+// Each test bans only its own fake user (fakeDiscordId), never one another test signs in as.
 
 const accountMenu = (page: Page) => page.getByRole("button", { name: "Account menu" });
 const railSignIn = (page: Page) =>
@@ -13,7 +11,7 @@ test("a signed-in user who gets banned is a visitor on their next navigation", a
   page,
   context,
 }) => {
-  const discordId = fakeDiscordId(1);
+  const discordId = fakeDiscordId("soon_banned");
   await signIn(context, { discordId, username: "soon_banned" });
   await page.goto("/past/p3");
   await expect(accountMenu(page)).toBeVisible();
@@ -32,7 +30,7 @@ test("a signed-in user who gets banned is a visitor on their next navigation", a
 });
 
 test("a banned user can't sign in until the ban is lifted", async ({ page, context }) => {
-  const discordId = fakeDiscordId(2);
+  const discordId = fakeDiscordId("banned_user");
   await signIn(context, { discordId, username: "banned_user" });
   await setBan(context, discordId, { expiresAt: "2031-01-02T03:04:00Z" });
 

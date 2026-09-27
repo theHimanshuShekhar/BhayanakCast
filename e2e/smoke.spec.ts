@@ -17,7 +17,7 @@ test("search filters rooms and surfaces users", async ({ page }) => {
 });
 
 test("start a room from the rail and land in it as host", async ({ page, context }) => {
-  await signIn(context, { discordId: "900000000000000103", username: "room.starter" });
+  await signIn(context, { username: "room.starter" });
   await page.goto("/");
   await page.getByRole("button", { name: "Start a Room" }).click();
   const dialog = page.getByRole("dialog");
@@ -30,7 +30,7 @@ test("start a room from the rail and land in it as host", async ({ page, context
 });
 
 test("room chat sends a message", async ({ page, context }) => {
-  await signIn(context, { discordId: "900000000000000102", username: "chatter" });
+  await signIn(context, { username: "chatter" });
   await page.goto("/room/r2");
   await page.getByLabel("Chat message").fill("hello from e2e");
   await page.getByRole("button", { name: "Send" }).click();
@@ -38,7 +38,7 @@ test("room chat sends a message", async ({ page, context }) => {
 });
 
 test("settings dialog changes theme", async ({ page, context }) => {
-  await signIn(context, { discordId: "900000000000000100", username: "nelly.jpg" });
+  await signIn(context, { username: "nelly.jpg" });
   await page.goto("/");
   await page.getByRole("button", { name: "Account menu" }).click();
   await page.getByRole("menuitem", { name: /settings/ }).click();
