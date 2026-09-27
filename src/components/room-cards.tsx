@@ -1,8 +1,9 @@
 // Room cards + thumbnail mosaic, shared by home, profile and past pages.
 // Ported from docs/design/prototype/home.jsx.
 import { useEffect, useState } from "react";
-import type { LiveRoomCard } from "~/lib/rooms";
-import type { PastRoom, Stream } from "~/lib/types";
+import { fmtAgo, fmtMins } from "~/lib/format";
+import type { LiveRoomCard, PastRoomCard, RoomPerson } from "~/lib/rooms";
+import type { Stream } from "~/lib/types";
 import { Icon } from "./icons";
 import { Avatar, AvatarStack, Chip, ScreenPlaceholder } from "./ui";
 
@@ -69,7 +70,12 @@ export const StreamMosaic = ({
           <span className={pill}>
             <Icon.Screen size={10} /> {list.length} {list.length === 1 ? "stream" : "streams"}
           </span>
-          {freshness && <span className={`${pill} !text-[9.5px] !text-white/85`}>{freshness}</span>}
+          {freshness && (
+            // Relative times can tick between the server render and hydration.
+            <span className={`${pill} !text-[9.5px] !text-white/85`} suppressHydrationWarning>
+              {freshness}
+            </span>
+          )}
         </div>
       </div>
     </div>
@@ -97,9 +103,9 @@ export const useSnapshots = () => {
   return { frame, freshness: mins < 1 ? "updated just now" : `updated ${mins}m ago` };
 };
 
-/** Placeholder screens for live shares until thumbnails land (ADR 10, spec #5). */
-const liveStreams = (room: LiveRoomCard): Stream[] =>
-  room.streamers.map((s) => ({ user: s.username, screen: "browser" }));
+/** Placeholder screens for shares until thumbnails land (ADR 10, spec #5). */
+export const placeholderStreams = (streamers: RoomPerson[]): Stream[] =>
+  streamers.map((s) => ({ user: s.username, screen: "browser" }));
 
 export const LiveCard = ({
   room,
@@ -124,7 +130,11 @@ export const LiveCard = ({
       onClick={() => onOpen(room)}
       className={`${cardBase} shadow-pop transition-[transform,border-color] duration-[160ms] ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-0.5 hover:border-[color-mix(in_oklch,var(--color-primary)_40%,var(--color-border))]`}
     >
-      <StreamMosaic streams={liveStreams(room)} frame={snap?.frame} freshness={snap?.freshness} />
+      <StreamMosaic
+        streams={placeholderStreams(room.streamers)}
+        frame={snap?.frame}
+        freshness={snap?.freshness}
+      />
       <div className="flex items-center gap-2 min-w-0">
         <span className="text-[15px] font-bold tracking-[-0.005em] truncate">{room.name}</span>
         {room.isPrivate && (
@@ -161,31 +171,45 @@ export const PastCard = ({
   room,
   onOpen,
 }: {
-  room: PastRoom;
-  onOpen: (room: PastRoom) => void;
-}) => (
-  <button
-    type="button"
-    aria-label={`View recap of ${room.name}`}
-    onClick={() => onOpen(room)}
-    className={`${cardBase} shadow-card transition-[transform,border-color] duration-[120ms] hover:-translate-y-px hover:border-border-strong`}
-  >
-    <StreamMosaic streams={room.streams} cached freshness={`cached · ${room.cachedAgo}`} />
-    <div className="text-[13.5px] font-semibold">{room.name}</div>
-    <div className="flex items-center gap-2.5 w-full">
-      <AvatarStack names={room.members} max={3} size="md" />
-      <div className="flex-1 min-w-0">
-        <div className="text-xs font-semibold">{room.members.length} joined</div>
-        <div className="text-[10.5px] text-muted">Stream participants</div>
+  room: PastRoomCard;
+  onOpen: (room: PastRoomCard) => void;
+}) => {
+  const names = room.people.map((p) => p.username);
+  return (
+    <button
+      type="button"
+      aria-label={`View recap of ${room.name}`}
+      onClick={() => onOpen(room)}
+      className={`${cardBase} shadow-card transition-[transform,border-color] duration-[120ms] hover:-translate-y-px hover:border-border-strong`}
+    >
+      <StreamMosaic
+        streams={placeholderStreams(room.streamers)}
+        cached
+        freshness={`ended · ${fmtAgo(room.endedAt)}`}
+      />
+      <div className="flex items-center gap-2 min-w-0">
+        <span className="text-[13.5px] font-semibold truncate">{room.name}</span>
+        {room.isPrivate && (
+          <span className="text-muted" title="private room">
+            <Icon.Lock size={12} />
+          </span>
+        )}
       </div>
-    </div>
-    <div className={`${cardFoot} gap-2.5 text-[10.5px] w-full`}>
-      <span className="inline-flex items-center gap-1">
-        <Icon.Users size={11} /> {room.members.length} joined
-      </span>
-      <span className="inline-flex items-center gap-1">
-        <Icon.Eye size={11} /> Ended · {room.started}
-      </span>
-    </div>
-  </button>
-);
+      <div className="flex items-center gap-2.5 w-full">
+        <AvatarStack names={names} max={3} size="md" />
+        <div className="flex-1 min-w-0">
+          <div className="text-xs font-semibold truncate">{room.host?.username ?? "no host"}</div>
+          <div className="text-[10.5px] text-muted">Host</div>
+        </div>
+      </div>
+      <div className={`${cardFoot} gap-2.5 text-[10.5px] w-full`}>
+        <span className="inline-flex items-center gap-1">
+          <Icon.Users size={11} /> {names.length} joined
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <Icon.Clock size={11} /> lasted {fmtMins(room.durationMinutes)}
+        </span>
+      </div>
+    </button>
+  );
+};

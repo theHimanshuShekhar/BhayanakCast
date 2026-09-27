@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 import { signIn } from "./auth";
-import { createRoomAs, uniqueRoomName } from "./rooms";
+import { createRoomAs, seedPastRoom, uniqueRoomName } from "./rooms";
 
 const activeRooms = { level: 1, name: "Active Rooms" } as const;
 const joinPrompt = (page: Page) => page.getByRole("dialog", { name: "sign in to join" });
@@ -9,12 +9,13 @@ const fillingUp = (page: Page) =>
   page.getByRole("region", { name: "Filling Up" }).getByRole("button").first();
 
 test.describe("a visitor", () => {
-  test("browses home, a profile and a past-stream recap", async ({ page }) => {
+  test("browses home, a profile and a past-stream recap", async ({ page, browser }) => {
+    const roomId = await seedPastRoom(browser, "gate.past.host", uniqueRoomName("gate recap"));
     await page.goto("/");
     await expect(page.getByRole("heading", activeRooms)).toBeVisible();
     await page.goto("/profile/usr_kodama_jpg");
     await expect(page.getByRole("heading", { level: 1, name: "kodama_jpg" })).toBeVisible();
-    await page.goto("/past/p3");
+    await page.goto(`/past/${roomId}`);
     await expect(page.getByRole("heading", { name: "who streamed" })).toBeVisible();
   });
 
@@ -99,12 +100,13 @@ test.describe("a signed-in user", () => {
     await signIn(context, { username: "gate.keeper" });
   });
 
-  test("browses home, a profile and a past-stream recap", async ({ page }) => {
+  test("browses home, a profile and a past-stream recap", async ({ page, browser }) => {
+    const roomId = await seedPastRoom(browser, "gate.past.host", uniqueRoomName("gate recap"));
     await page.goto("/");
     await expect(page.getByRole("heading", activeRooms)).toBeVisible();
     await page.goto("/profile/usr_kodama_jpg");
     await expect(page.getByRole("heading", { level: 1, name: "kodama_jpg" })).toBeVisible();
-    await page.goto("/past/p3");
+    await page.goto(`/past/${roomId}`);
     await expect(page.getByRole("heading", { name: "who streamed" })).toBeVisible();
   });
 

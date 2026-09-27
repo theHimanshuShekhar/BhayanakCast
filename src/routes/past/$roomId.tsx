@@ -1,64 +1,38 @@
-// Past stream recap — who joined, for how long, who streamed. No chat history (ADR 4).
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo } from "react";
+// Past stream recap: who joined, for how long, who streamed. No chat history (ADR 4).
+// Built from the room's real presence and stream intervals (src/server/recaps.ts).
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { Icon, type IconComponent } from "~/components/icons";
-import { StreamMosaic } from "~/components/room-cards";
+import { placeholderStreams, StreamMosaic } from "~/components/room-cards";
 import { DOTS, SectionHead } from "~/components/section-head";
 import { Avatar, Chip } from "~/components/ui";
-import { fmtMins, parseMins, SCREEN_KINDS } from "~/lib/format";
-import { PAST_ROOMS, userIdOf } from "~/lib/mock-data";
-import type { PastRoom, ScreenKind } from "~/lib/types";
+import { fmtAgo, fmtMins } from "~/lib/format";
+import type { Recap, RecapPerson, RecapSpan } from "~/lib/recaps";
+import { recapQuery } from "~/lib/recaps.queries";
+import type { RoomPerson } from "~/lib/rooms";
 
 export const Route = createFileRoute("/past/$roomId")({
+  loader: async ({ context, params }) => {
+    const recap = await context.queryClient.ensureQueryData(recapQuery(params.roomId));
+    if (!recap) throw notFound();
+  },
+  notFoundComponent: RecapNotFound,
   component: PastStreamRoute,
 });
 
-const seeded = (str: string) => {
-  let h = 2166136261;
-  for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619);
-  return () => {
-    h = Math.imul(h ^ (h >>> 15), 2246822507);
-    h = Math.imul(h ^ (h >>> 13), 3266489909);
-    h ^= h >>> 16;
-    return (h >>> 0) / 4294967296;
-  };
-};
-
-type RecapPerson = {
-  name: string;
-  host: boolean;
-  start: number;
-  end: number;
-  mins: number;
-  stream: { start: number; end: number; screen: ScreenKind; mins: number } | null;
-};
-
-// Deterministic recap from the mock room record; replaced by presence/stream intervals (ADR 12).
-const buildRecap = (room: PastRoom) => {
-  const total = parseMins(room.started);
-  const rnd = seeded(room.id + room.name);
-  const names = [...new Set([room.streamer, ...room.members, ...room.streams.map((s) => s.user)])];
-  const people: RecapPerson[] = names
-    .map((name) => {
-      const host = name === room.streamer;
-      const start = host ? 0 : rnd() * 0.35;
-      const end = host ? 1 : Math.min(1, start + (0.4 + rnd() * 0.6) * (1 - start));
-      const st = room.streams.find((s) => s.user === name);
-      let stream: RecapPerson["stream"] = null;
-      if (st) {
-        const len = end - start;
-        const s0 = host ? start : start + rnd() * len * 0.3;
-        const s1 = host ? end : Math.min(end, s0 + len * (0.4 + rnd() * 0.5));
-        stream = { start: s0, end: s1, screen: st.screen, mins: (s1 - s0) * total };
-      }
-      return { name, host, start, end, mins: (end - start) * total, stream };
-    })
-    .sort((a, b) => Number(b.host) - Number(a.host) || a.start - b.start);
-  const streamers = people
-    .filter((p): p is RecapPerson & { stream: NonNullable<RecapPerson["stream"]> } => !!p.stream)
-    .sort((a, b) => b.stream.mins - a.stream.mins);
-  return { total, people, streamers };
-};
+function RecapNotFound() {
+  return (
+    <div className="px-10 py-20 text-center">
+      <h1 className="m-0 mb-2 text-lg">recap not found</h1>
+      <p className="m-0 mb-4 text-muted text-[12.5px]">
+        past streams are kept for 30 days, then only stats remain.
+      </p>
+      <Link to="/" className="text-primary">
+        back to rooms
+      </Link>
+    </div>
+  );
+}
 
 const RecapStat = ({
   icon: I,
@@ -88,38 +62,55 @@ const RecapStat = ({
   </div>
 );
 
-const NameLink = ({ name, className = "" }: { name: string; className?: string }) => (
+const NameLink = ({ person, className = "" }: { person: RoomPerson; className?: string }) => (
   <Link
     to="/profile/$userId"
-    params={{ userId: userIdOf(name) }}
+    params={{ userId: person.id }}
     className={`text-left truncate !text-inherit hover:!text-primary-strong hover:underline underline-offset-2 ${className}`}
   >
-    {name}
+    {person.username}
   </Link>
 );
 
+const HostBadge = () => (
+  <span className="text-[9.5px] px-[5px] py-px rounded tracking-[0.05em] uppercase bg-primary text-primary-ink">
+    host
+  </span>
+);
+
+const EmptyRow = ({ children }: { children: string }) => (
+  <div className="px-4 py-5 text-center text-subtle text-[11.5px]">{children}</div>
+);
+
+type Place = (span: RecapSpan) => { left: string; width: string };
+
+/** Where a span sits on the room's timeline, as percentages of its duration. */
+const placeOn = (recap: Recap): Place => {
+  const start = Date.parse(recap.createdAt);
+  const length = Math.max(1, Date.parse(recap.endedAt) - start);
+  const at = (iso: string) => Math.min(1, Math.max(0, (Date.parse(iso) - start) / length));
+  return (span) => {
+    const left = at(span.start);
+    return { left: `${left * 100}%`, width: `${(at(span.end) - left) * 100}%` };
+  };
+};
+
 function PastStreamRoute() {
   const { roomId } = Route.useParams();
-  const room = PAST_ROOMS.find((r) => r.id === roomId);
-  if (!room) {
-    return (
-      <div className="px-10 py-20 text-center">
-        <h1 className="m-0 mb-2 text-lg">recap not found</h1>
-        <p className="m-0 mb-4 text-muted text-[12.5px]">
-          past streams are kept for 30 days, then only stats remain.
-        </p>
-        <Link to="/" className="text-primary">
-          back to rooms
-        </Link>
-      </div>
-    );
-  }
-  return <PastStreamPage room={room} />;
+  const { data: recap } = useSuspenseQuery(recapQuery(roomId));
+  // It can expire after load (a later refetch).
+  if (!recap) return <RecapNotFound />;
+  return <PastStreamPage recap={recap} />;
 }
 
-function PastStreamPage({ room }: { room: PastRoom }) {
-  const { total, people, streamers } = useMemo(() => buildRecap(room), [room]);
-  const watchSum = people.reduce((s, p) => s + p.mins, 0);
+function PastStreamPage({ recap }: { recap: Recap }) {
+  const total = recap.durationMinutes;
+  const joined = recap.people.filter((p) => p.presence.length > 0);
+  const streamers = recap.people
+    .filter((p) => p.streams.length > 0)
+    .sort((a, b) => b.streamMinutes - a.streamMinutes);
+  const place = placeOn(recap);
+  const endedAgo = fmtAgo(recap.endedAt);
   const ticks = [0, 0.25, 0.5, 0.75, 1];
 
   return (
@@ -135,25 +126,32 @@ function PastStreamPage({ room }: { room: PastRoom }) {
           <span className="text-subtle">/</span>
           <span>past streams</span>
           <span className="text-subtle">/</span>
-          <span className="text-fg font-semibold">{room.name}</span>
+          <span className="text-fg font-semibold">{recap.name}</span>
         </nav>
 
         <div className="flex flex-wrap items-end justify-between gap-4 pb-5 mb-6 border-b border-border-subtle">
           <div className="min-w-0">
             <div className="flex items-center gap-2.5 mb-1.5">
               <h1 className="m-0 text-[20px] sm:text-[26px] font-extrabold tracking-[-0.02em] truncate">
-                {room.name}
+                {recap.name}
               </h1>
               <Chip>ended</Chip>
             </div>
             <div className="flex items-center gap-x-2 gap-y-1 text-xs text-muted flex-wrap [&>span]:whitespace-nowrap">
               <span>hosted by</span>
-              <Avatar name={room.streamer} size="sm" />
-              <NameLink name={room.streamer} className="text-fg-muted font-semibold" />
+              {recap.host ? (
+                <>
+                  <Avatar name={recap.host.username} size="sm" />
+                  <NameLink person={recap.host} className="text-fg-muted font-semibold" />
+                </>
+              ) : (
+                <span>nobody</span>
+              )}
               <span className="w-[3px] h-[3px] rounded-full bg-subtle" />
               <span>lasted {fmtMins(total)}</span>
               <span className="w-[3px] h-[3px] rounded-full bg-subtle" />
-              <span>ended {room.cachedAgo}</span>
+              {/* Relative times can tick between the server render and hydration. */}
+              <span suppressHydrationWarning>ended {endedAgo}</span>
             </div>
           </div>
           <Link
@@ -165,49 +163,51 @@ function PastStreamPage({ room }: { room: PastRoom }) {
         </div>
 
         <div className="grid grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] gap-4 max-[820px]:grid-cols-1">
+          {/* Placeholder screens until thumbnails land (spec #5). */}
           <StreamMosaic
-            streams={room.streams}
+            streams={placeholderStreams(streamers)}
             cached
-            freshness={`last cached · ${room.cachedAgo}`}
+            freshness={`ended · ${endedAgo}`}
           />
           <div className="grid grid-cols-2 gap-2.5 content-start">
             <RecapStat icon={Icon.Clock} label="duration" value={fmtMins(total)} accent />
-            <RecapStat icon={Icon.Users} label="joined" value={people.length} />
+            <RecapStat icon={Icon.Users} label="joined" value={joined.length} />
             <RecapStat icon={Icon.Screen} label="streamers" value={streamers.length} />
-            <RecapStat icon={Icon.Eye} label="watch time" value={fmtMins(watchSum)} />
+            <RecapStat
+              icon={Icon.Eye}
+              label="watch time"
+              value={fmtMins(recap.totalWatchMinutes)}
+            />
           </div>
         </div>
 
         <section className="mt-8">
           <SectionHead title="who streamed" sub="screen share duration" dot="live" />
           <div className="flex flex-col bg-surface border border-border rounded-[var(--radius)] overflow-hidden">
+            {streamers.length === 0 && <EmptyRow>nobody shared their screen</EmptyRow>}
             {streamers.map((p) => (
               <div
-                key={p.name}
+                key={p.id}
                 className="flex items-center gap-3 sm:gap-3.5 px-3 sm:px-4 py-3 border-b border-border-subtle last:border-b-0"
               >
-                <Avatar name={p.name} size="md" ring={p.host} />
+                <Avatar name={p.username} size="md" ring={p.isHost} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <NameLink name={p.name} className="text-[13px] font-semibold" />
-                    {p.host && (
-                      <span className="text-[9.5px] px-[5px] py-px rounded tracking-[0.05em] uppercase bg-primary text-primary-ink">
-                        host
-                      </span>
-                    )}
+                    <NameLink person={p} className="text-[13px] font-semibold" />
+                    {p.isHost && <HostBadge />}
                   </div>
                   <div className="text-[10.5px] text-subtle tracking-[0.04em] truncate">
-                    {SCREEN_KINDS[p.stream.screen].label}
+                    {p.streams.length} {p.streams.length === 1 ? "share" : "shares"}
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-1.5 sm:min-w-[140px]">
                   <div className="text-[13px] font-bold text-primary-strong">
-                    {fmtMins(p.stream.mins)}
+                    {fmtMins(p.streamMinutes)}
                   </div>
                   <div className="w-20 sm:w-[120px] h-1 rounded-full bg-surface-3 overflow-hidden">
                     <span
                       className="block h-full rounded-full bg-live"
-                      style={{ width: `${(p.stream.mins / total) * 100}%` }}
+                      style={{ width: `${Math.min(1, p.streamMinutes / (total || 1)) * 100}%` }}
                     />
                   </div>
                 </div>
@@ -228,41 +228,15 @@ function PastStreamPage({ room }: { room: PastRoom }) {
                     className={`${t === 0.25 || t === 0.75 ? "max-sm:hidden " : ""}absolute top-0 -translate-x-1/2 normal-case tracking-normal first:translate-x-0 last:-translate-x-full`}
                     style={{ left: `${t * 100}%` }}
                   >
-                    {t === 0 ? "0m" : fmtMins(t * total)}
+                    {fmtMins(t * total)}
                   </span>
                 ))}
               </div>
               <span className="text-right">in room</span>
             </div>
-            {people.map((p) => (
-              <div
-                key={p.name}
-                className="grid grid-cols-[100px_minmax(0,1fr)_52px] sm:grid-cols-[180px_minmax(0,1fr)_72px] gap-3 sm:gap-4 items-center px-3 sm:px-4 py-2.5 border-b border-border-subtle last:border-b-0 hover:bg-surface-2"
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  <Avatar name={p.name} size="sm" />
-                  <NameLink name={p.name} className="text-xs font-medium" />
-                </div>
-                <div className="relative h-2.5 rounded-full bg-surface-3">
-                  <span
-                    className="absolute inset-y-0 rounded-full bg-[color-mix(in_oklch,var(--color-primary)_55%,transparent)]"
-                    style={{ left: `${p.start * 100}%`, width: `${(p.end - p.start) * 100}%` }}
-                  />
-                  {p.stream && (
-                    <span
-                      className={`absolute inset-y-0 rounded-full ${DOTS.live}`}
-                      title={`streamed ${fmtMins(p.stream.mins)}`}
-                      style={{
-                        left: `${p.stream.start * 100}%`,
-                        width: `${(p.stream.end - p.stream.start) * 100}%`,
-                      }}
-                    />
-                  )}
-                </div>
-                <span className="text-right text-xs font-semibold tabular-nums">
-                  {fmtMins(p.mins)}
-                </span>
-              </div>
+            {joined.length === 0 && <EmptyRow>nobody joined</EmptyRow>}
+            {joined.map((p) => (
+              <PersonTimeline key={p.id} person={p} place={place} />
             ))}
             <div className="flex items-center gap-4 px-4 py-2 bg-canvas border-t border-border-subtle text-[10.5px] text-muted">
               <span className="inline-flex items-center gap-1.5">
@@ -276,6 +250,40 @@ function PastStreamPage({ room }: { room: PastRoom }) {
           </div>
         </section>
       </div>
+    </div>
+  );
+}
+
+function PersonTimeline({ person: p, place }: { person: RecapPerson; place: Place }) {
+  return (
+    <div
+      data-testid="recap-person"
+      className="grid grid-cols-[100px_minmax(0,1fr)_52px] sm:grid-cols-[180px_minmax(0,1fr)_72px] gap-3 sm:gap-4 items-center px-3 sm:px-4 py-2.5 border-b border-border-subtle last:border-b-0 hover:bg-surface-2"
+    >
+      <div className="flex items-center gap-2 min-w-0">
+        <Avatar name={p.username} size="sm" />
+        <NameLink person={p} className="text-xs font-medium" />
+      </div>
+      <div className="relative h-2.5 rounded-full bg-surface-3">
+        {p.presence.map((span) => (
+          <span
+            key={span.start}
+            className="absolute inset-y-0 rounded-full bg-[color-mix(in_oklch,var(--color-primary)_55%,transparent)]"
+            style={place(span)}
+          />
+        ))}
+        {p.streams.map((span) => (
+          <span
+            key={span.start}
+            className={`absolute inset-y-0 rounded-full ${DOTS.live}`}
+            title={`streamed ${fmtMins(p.streamMinutes)}`}
+            style={place(span)}
+          />
+        ))}
+      </div>
+      <span className="text-right text-xs font-semibold tabular-nums">
+        {fmtMins(p.presenceMinutes)}
+      </span>
     </div>
   );
 }

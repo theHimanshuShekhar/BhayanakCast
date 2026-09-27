@@ -9,10 +9,10 @@ import { Avatar, Btn, Chip } from "~/components/ui";
 import { useAppActions } from "~/lib/app-actions";
 import { type SignInErrorSearch, validateSignInErrorSearch } from "~/lib/ban";
 import { useCurrentSession } from "~/lib/current-user";
-import { ONLINE_COUNT, PAST_ROOMS, USER_PROFILES, userIdOf } from "~/lib/mock-data";
-import type { LiveRoomCard } from "~/lib/rooms";
-import { liveRoomsQuery, roomQuery } from "~/lib/rooms.queries";
-import type { PastRoom, UserProfile } from "~/lib/types";
+import { ONLINE_COUNT, USER_PROFILES, userIdOf } from "~/lib/mock-data";
+import type { LiveRoomCard, PastRoomCard } from "~/lib/rooms";
+import { liveRoomsQuery, pastRoomsQuery, roomQuery } from "~/lib/rooms.queries";
+import type { UserProfile } from "~/lib/types";
 
 export const Route = createFileRoute("/")({
   // `join` is set when a visitor was sent here from a room URL; the shell then shows the
@@ -27,6 +27,7 @@ export const Route = createFileRoute("/")({
     const { queryClient, session } = context;
     await Promise.all([
       queryClient.ensureQueryData(liveRoomsQuery()),
+      queryClient.ensureQueryData(pastRoomsQuery()),
       // The shell's "sign in to join" prompt names this room.
       !session.user && deps.join ? queryClient.ensureQueryData(roomQuery(deps.join)) : null,
     ]);
@@ -191,6 +192,7 @@ function HomePage() {
   const { user } = useCurrentSession();
   const search = Route.useSearch();
   const { data: rooms } = useSuspenseQuery(liveRoomsQuery());
+  const { data: pastRooms } = useSuspenseQuery(pastRoomsQuery());
   const [q, setQ] = useState("");
   const snap = useSnapshots();
   const term = q.trim().toLowerCase();
@@ -219,8 +221,13 @@ function HomePage() {
       kind: r.kind,
     }),
   );
-  const past = PAST_ROOMS.filter((r) =>
-    matches({ name: r.name, people: [r.streamer, ...r.members] }),
+  const past = pastRooms.filter((r) =>
+    matches({
+      name: r.name,
+      people: [...(r.host ? [r.host.username] : []), ...r.people.map((p) => p.username)],
+      tags: r.tags,
+      kind: r.kind,
+    }),
   );
   const users =
     term && !term.startsWith("#")
@@ -234,7 +241,7 @@ function HomePage() {
   // Entering a room needs sign-in: visitors get the prompt and stay on home.
   const openRoom = (r: LiveRoomCard) =>
     user ? navigate({ to: "/room/$roomId", params: { roomId: r.id } }) : promptSignIn(r.name);
-  const openPast = (r: PastRoom) => navigate({ to: "/past/$roomId", params: { roomId: r.id } });
+  const openPast = (r: PastRoomCard) => navigate({ to: "/past/$roomId", params: { roomId: r.id } });
   const openProfile = (username: string) =>
     navigate({ to: "/profile/$userId", params: { userId: userIdOf(username) } });
 

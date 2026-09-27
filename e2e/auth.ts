@@ -34,7 +34,11 @@ export function fakeDiscordId(username: string): string {
  * POST to a test-only Better Auth endpoint from the browser context. Sends an
  * Origin header, which Better Auth requires once the context holds a session cookie.
  */
-function postTestAuth(context: BrowserContext, path: string, data: object): Promise<APIResponse> {
+export function postTestAuth(
+  context: BrowserContext,
+  path: string,
+  data: object,
+): Promise<APIResponse> {
   const origin = new URL(test.info().project.use.baseURL ?? "").origin;
   return context.request.post(`/api/auth/test/${path}`, { data, headers: { origin } });
 }

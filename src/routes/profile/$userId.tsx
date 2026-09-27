@@ -1,3 +1,4 @@
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { Icon, type IconComponent } from "~/components/icons";
@@ -7,9 +8,13 @@ import { Avatar, Btn } from "~/components/ui";
 import { useAppActions } from "~/lib/app-actions";
 import { useCurrentSession } from "~/lib/current-user";
 import { avatarFor, formatCotime } from "~/lib/format";
-import { PAST_ROOMS, profileById, topCoUsers, userIdOf } from "~/lib/mock-data";
+import { profileById, topCoUsers, userIdOf } from "~/lib/mock-data";
+import { pastRoomsQuery } from "~/lib/rooms.queries";
 
 export const Route = createFileRoute("/profile/$userId")({
+  loader: async ({ context, params }) => {
+    await context.queryClient.ensureQueryData(pastRoomsQuery(params.userId));
+  },
   component: ProfilePage,
 });
 
@@ -68,6 +73,8 @@ function ProfilePage() {
   const { user } = useCurrentSession();
   const [isFavorite, setIsFavorite] = useState(() => favorites.has(userId));
   const profile = profileById(userId);
+  // Rooms this user hosted or joined in the last 30 days, visible to the viewer.
+  const { data: recent } = useSuspenseQuery(pastRoomsQuery(userId));
 
   if (!profile) {
     return (
@@ -93,7 +100,6 @@ function ProfilePage() {
   const coRaw = topCoUsers(username, 5);
   const max = coRaw[0]?.seconds || 1;
   const av = avatarFor(username);
-  const recent = PAST_ROOMS.filter((r) => r.streamer === username || r.members.includes(username));
 
   return (
     <div className="overflow-auto min-h-0 h-full">
