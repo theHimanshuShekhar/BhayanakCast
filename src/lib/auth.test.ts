@@ -144,6 +144,35 @@ describe("test-only sign-in", () => {
   });
 });
 
+describe("settings column", () => {
+  it("can't be written through Better Auth's /update-user", async () => {
+    const signedIn = await testSignInRequest("4000", "kodama_jpg");
+    const { userId } = (await signedIn.clone().json()) as { userId: string };
+    const updateUser = (body: object) => {
+      const headers = cookiesFrom(signedIn);
+      headers.set("content-type", "application/json");
+      headers.set("origin", testEnv.BETTER_AUTH_URL);
+      return auth.handler(
+        new Request(`${testEnv.BETTER_AUTH_URL}/api/auth/update-user`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+        }),
+      );
+    };
+    const rowOf = async () => {
+      const [row] = await db.select().from(user).where(eq(user.id, userId));
+      return row;
+    };
+    // Control: the same request can change a writable field.
+    expect((await updateUser({ name: "renamed" })).ok).toBe(true);
+    expect((await rowOf())?.name).toBe("renamed");
+
+    await updateUser({ settings: { ...DEFAULT_USER_SETTINGS, theme: "light" } });
+    expect((await rowOf())?.settings).toEqual(DEFAULT_USER_SETTINGS);
+  });
+});
+
 describe("bans", () => {
   const DAY = 24 * 60 * 60 * 1000;
 
