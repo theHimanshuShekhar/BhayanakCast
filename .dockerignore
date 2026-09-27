@@ -1,0 +1,17 @@
+node_modules
+dist
+.output
+.tanstack
+.vite
+.git
+.claude
+.env
+.env.*
+!.env.example
+docs
+e2e
+test-results
+playwright-report
+blob-report
+coverage
+*.log
