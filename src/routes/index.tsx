@@ -2,8 +2,10 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useMemo, useState } from "react";
 import { Icon, type IconComponent } from "~/components/icons";
 import { LiveCard, PastCard, useSnapshots } from "~/components/room-cards";
+import { SignInButton } from "~/components/sign-in-button";
 import { Avatar, Btn, Chip } from "~/components/ui";
 import { useAppActions } from "~/lib/app-actions";
+import { useCurrentSession } from "~/lib/current-user";
 import { ONLINE_COUNT, PAST_ROOMS, USER_PROFILES, userIdOf } from "~/lib/mock-data";
 import { useLiveRooms } from "~/lib/rooms-store";
 import type { LiveRoom, PastRoom, UserProfile } from "~/lib/types";
@@ -150,9 +152,23 @@ const EmptyBrowse = ({ onCreate }: { onCreate: () => void }) => (
   </div>
 );
 
+const SignInPanel = () => (
+  <section aria-label="Sign in" className={`${panelCls} relative overflow-hidden`}>
+    <div className="absolute -inset-px pointer-events-none bg-[radial-gradient(220px_110px_at_50%_0%,var(--color-primary-soft),transparent_65%)]" />
+    <div className="relative">
+      <PanelHead icon={Icon.Headset}>Join the Hang</PanelHead>
+      <p className="m-0 mb-3 text-[12px] text-muted">
+        Sign in with Discord to join rooms, share your screen and start your own.
+      </p>
+      <SignInButton />
+    </div>
+  </section>
+);
+
 function HomePage() {
   const navigate = useNavigate();
   const { openCreateRoom } = useAppActions();
+  const { user } = useCurrentSession();
   const rooms = useLiveRooms();
   const [q, setQ] = useState("");
   const snap = useSnapshots();
@@ -285,6 +301,8 @@ function HomePage() {
       </div>
 
       <aside className="flex flex-col gap-3.5 lg:min-h-0 lg:overflow-auto [&>*]:shrink-0 max-lg:grid max-lg:sm:grid-cols-2 max-lg:items-start">
+        {!user && <SignInPanel />}
+
         <div className={panelCls}>
           <PanelHead icon={Icon.Sparkle}>Right Now</PanelHead>
           <div className="grid grid-cols-2 gap-2">
