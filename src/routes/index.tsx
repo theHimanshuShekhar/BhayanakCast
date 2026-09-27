@@ -9,7 +9,8 @@ import { Avatar, Btn, Chip } from "~/components/ui";
 import { useAppActions } from "~/lib/app-actions";
 import { type SignInErrorSearch, validateSignInErrorSearch } from "~/lib/ban";
 import { useCurrentSession } from "~/lib/current-user";
-import { ONLINE_COUNT, PAST_ROOMS, USER_PROFILES } from "~/lib/mock-data";
+import { homeSummaryQuery } from "~/lib/home.queries";
+import { PAST_ROOMS } from "~/lib/mock-data";
 import { USER_SEARCH_QUERY_MAX, type UserSearchResult } from "~/lib/profiles";
 import { searchUsersQuery } from "~/lib/profiles.queries";
 import type { LiveRoomCard } from "~/lib/rooms";
@@ -29,6 +30,7 @@ export const Route = createFileRoute("/")({
     const { queryClient, session } = context;
     await Promise.all([
       queryClient.ensureQueryData(liveRoomsQuery()),
+      queryClient.ensureQueryData(homeSummaryQuery()),
       // The shell's "sign in to join" prompt names this room.
       !session.user && deps.join ? queryClient.ensureQueryData(roomQuery(deps.join)) : null,
     ]);
@@ -69,16 +71,29 @@ const StatMini = ({
   icon: I,
   label,
   value,
+  pending,
 }: {
   icon: IconComponent;
   label: string;
-  value: number;
+  value?: number;
+  /** Why there's no number yet: shows a muted dash with this as its tooltip. */
+  pending?: string;
 }) => (
-  <div className="bg-surface border border-border rounded-[10px] px-3 py-2.5 shadow-card">
+  <div
+    className="bg-surface border border-border rounded-[10px] px-3 py-2.5 shadow-card"
+    title={pending}
+  >
     <div className="inline-flex items-center gap-[5px] text-[10px] tracking-[0.06em] text-muted uppercase">
       <I size={10} /> {label}
     </div>
-    <div className="mt-1 text-lg font-bold tracking-[-0.01em]">{value}</div>
+    {pending ? (
+      <div className="mt-1 text-lg font-bold tracking-[-0.01em] text-subtle">
+        <span aria-hidden="true">—</span>
+        <span className="sr-only">{pending}</span>
+      </div>
+    ) : (
+      <div className="mt-1 text-lg font-bold tracking-[-0.01em] tabular-nums">{value}</div>
+    )}
   </div>
 );
 
@@ -203,6 +218,9 @@ function HomePage() {
   const { user } = useCurrentSession();
   const search = Route.useSearch();
   const { data: rooms } = useSuspenseQuery(liveRoomsQuery());
+  const {
+    data: { rightNow, community },
+  } = useSuspenseQuery(homeSummaryQuery());
   const [q, setQ] = useState("");
   const snap = useSnapshots();
   const term = q.trim().toLowerCase();
@@ -255,16 +273,14 @@ function HomePage() {
   const openPast = (r: PastRoom) => navigate({ to: "/past/$roomId", params: { roomId: r.id } });
   const openProfile = (userId: string) => navigate({ to: "/profile/$userId", params: { userId } });
 
-  const sidebar = useMemo(() => {
-    const P = Object.values(USER_PROFILES);
-    const streaming = rooms.reduce((s, r) => s + r.streamCount, 0);
-    const watching = rooms.reduce((s, r) => s + r.participantCount, 0);
-    // "Filling Up": fullest first (a stable sort keeps newest first among ties).
-    const trending = [...rooms]
-      .sort((a, b) => b.participantCount / b.capacity - a.participantCount / a.capacity)
-      .slice(0, 3);
-    return { P, streaming, watching, trending };
-  }, [rooms]);
+  // "Filling Up": fullest first (a stable sort keeps newest first among ties).
+  const trending = useMemo(
+    () =>
+      [...rooms]
+        .sort((a, b) => b.participantCount / b.capacity - a.participantCount / a.capacity)
+        .slice(0, 3),
+    [rooms],
+  );
 
   return (
     <div className="grid lg:grid-cols-[minmax(0,1fr)_300px] content-start lg:content-stretch gap-6 px-6 py-5 max-sm:px-3.5 max-sm:py-4 h-full overflow-auto lg:overflow-hidden">
@@ -363,19 +379,20 @@ function HomePage() {
       <aside className="flex flex-col gap-3.5 lg:min-h-0 lg:overflow-auto [&>*]:shrink-0 max-lg:grid max-lg:sm:grid-cols-2 max-lg:items-start">
         {!user && <SignInPanel />}
 
-        <div className={panelCls}>
+        <section aria-label="Right Now" className={panelCls}>
           <PanelHead icon={Icon.Sparkle}>Right Now</PanelHead>
           <div className="grid grid-cols-2 gap-2">
-            <StatMini icon={Icon.Users} label="Online" value={ONLINE_COUNT} />
-            <StatMini icon={Icon.Broadcast} label="Live Rooms" value={rooms.length} />
-            <StatMini icon={Icon.Eye} label="Watching" value={sidebar.watching} />
-            <StatMini icon={Icon.Screen} label="Streaming" value={sidebar.streaming} />
+            {/* The online-user count arrives with the realtime server (spec #3). */}
+            <StatMini icon={Icon.Users} label="Online" pending="Live online count coming soon" />
+            <StatMini icon={Icon.Broadcast} label="Live Rooms" value={rightNow.liveRooms} />
+            <StatMini icon={Icon.Eye} label="Watching" value={rightNow.inRooms} />
+            <StatMini icon={Icon.Screen} label="Streaming" value={rightNow.streaming} />
           </div>
-        </div>
+        </section>
 
         <section aria-label="Filling Up" className={panelCls}>
           <PanelHead icon={Icon.Bolt}>Filling Up</PanelHead>
-          {sidebar.trending.map((r) => (
+          {trending.map((r) => (
             <button
               key={r.id}
               type="button"
@@ -394,26 +411,22 @@ function HomePage() {
           ))}
         </section>
 
-        <div className={panelCls}>
+        <section aria-label="Community" className={panelCls}>
           <PanelHead icon={Icon.Users}>Community</PanelHead>
-          <CommunityRow icon={Icon.Users} label="Members" value={sidebar.P.length} />
+          <CommunityRow icon={Icon.Users} label="Members" value={community.members} />
           <CommunityRow
             icon={Icon.Eye}
             label="Hours Watched"
-            value={`${Math.round(sidebar.P.reduce((s, p) => s + p.stats.hoursWatched, 0))}h`}
+            value={`${Math.round(community.hoursWatched)}h`}
             accent
           />
           <CommunityRow
             icon={Icon.Broadcast}
             label="Hours Streamed"
-            value={`${Math.round(sidebar.P.reduce((s, p) => s + p.stats.hoursStreamed, 0))}h`}
+            value={`${Math.round(community.hoursStreamed)}h`}
           />
-          <CommunityRow
-            icon={Icon.Plus}
-            label="Rooms Hosted"
-            value={sidebar.P.reduce((s, p) => s + p.stats.roomsHosted, 0)}
-          />
-        </div>
+          <CommunityRow icon={Icon.Plus} label="Rooms Hosted" value={community.roomsHosted} />
+        </section>
       </aside>
     </div>
   );
