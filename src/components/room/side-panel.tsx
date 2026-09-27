@@ -170,6 +170,7 @@ export const RoomSide = ({
   chatError,
   activity,
   onSend,
+  canSend,
   onOpenProfile,
   open,
   onClose,
@@ -181,6 +182,8 @@ export const RoomSide = ({
   activity: ActivityItem[];
   /** Send a chat message; false if it couldn't be sent (not connected). */
   onSend: (text: string) => boolean;
+  /** False until the server has admitted us to the room; sending waits for that. */
+  canSend: boolean;
   onOpenProfile: (username: string) => void;
   open: boolean;
   onClose: () => void;
@@ -232,6 +235,7 @@ export const RoomSide = ({
     e.preventDefault();
     const text = draft.trim();
     if (!text) return;
+    if (!canSend) return;
     if (!onSend(text)) {
       setNotice("not connected. trying to reconnect…");
       return;
@@ -317,7 +321,13 @@ export const RoomSide = ({
                 </span>
               )}
               <EmojiPicker onPick={insertEmoji} returnFocus={inputRef} />
-              <IconBtn type="submit" aria-label="Send" className="!w-7 !h-7 !text-primary">
+              <IconBtn
+                type="submit"
+                aria-label="Send"
+                disabled={!canSend}
+                title={canSend ? undefined : "joining the room…"}
+                className="!w-7 !h-7 !text-primary disabled:opacity-40 disabled:cursor-wait"
+              >
                 <Icon.Send size={14} />
               </IconBtn>
             </form>

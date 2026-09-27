@@ -397,6 +397,7 @@ function RoomPage({ detail, meId }: { detail: RoomDetail; meId: string | null })
           chatError={live.chatError}
           activity={activity}
           onSend={sendChat}
+          canSend={live.room !== null}
           onOpenProfile={openProfile}
           open={sideOpen}
           onClose={() => setSideOpen(false)}
