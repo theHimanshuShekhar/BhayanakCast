@@ -11,3 +11,8 @@ Date: 2026-09-27 · Status: accepted
 ## Consequences
 - "Past streams", recaps and the admin all-time rooms table only reach back 30 days; the UI should say so.
 - Stats tables must not reference purged rows by foreign key.
+
+## Addendum: stat definitions (2026-09-27)
+- **Hours watched** = time present in a room *minus* that user's own stream intervals in it. Watched and streamed never overlap.
+- **Hours streamed** = the sum of the user's stream intervals.
+- **Rooms hosted**: every user who held the host role at any point in a room gets +1 for that room (at most once per room). This requires a host-interval log (`host_intervals`: roomId, userId, startedAt, endedAt), written by the realtime server on room creation and on each host transfer (ADR 14).

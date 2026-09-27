@@ -13,3 +13,6 @@ Date: 2026-09-27 · Status: accepted
 
 ## Addendum: settings storage
 Appearance settings are stored on the user's DB row, so they follow the user across devices, and cached in localStorage. Theme and accent are also mirrored into a cookie so SSR renders the right `dark` class and `--accent-h` without a flash.
+
+## Addendum: profile URLs use the user id (2026-09-27)
+Profiles live at `/profile/$userId`, not the Discord username. Discord usernames can be renamed and later reused by someone else, so an id-keyed URL never points to the wrong person. The page shows the current Discord username.

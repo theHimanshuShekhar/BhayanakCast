@@ -12,9 +12,9 @@
 | [8](0008-postgres-drizzle.md) | Postgres + Drizzle |
 | [9](0009-homelab-hosting.md) | Homelab Docker Compose + Cloudflare Tunnel |
 | [10](0010-thumbnails.md) | Streamer-captured WebP thumbnails every 3 min, Postgres bytea |
-| [11](0011-data-retention.md) | Room data purged after 30 days; aggregate stats persist |
+| [11](0011-data-retention.md) | Room data purged after 30 days; aggregate stats persist; stat definitions |
 | [12](0012-presence-event-source.md) | Server WS lifecycle is source of truth for join/leave/stream events |
-| [13](0013-ui-port.md) | Port design as-is + Base UI primitives; settings in DB + cache |
+| [13](0013-ui-port.md) | Port design as-is + Base UI primitives; settings in DB + cache; id-keyed profile URLs |
 | [14](0014-room-lifecycle.md) | Room ends after 5 min empty; host grace 30s then longest-present |
 | [15](0015-room-moderation.md) | Host/mod/admin moderation powers |
 | [16](0016-private-rooms.md) | Private rooms: invite link + host approval |
