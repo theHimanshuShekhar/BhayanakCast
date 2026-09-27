@@ -13,6 +13,7 @@ import { type Db, getDb } from "../db/client.ts";
 import * as schema from "../db/schema/index.ts";
 import { adminDiscordIds, type Env, env, isTestSignInEnabled } from "../server/env.ts";
 import { recordNewUser } from "../server/stats.ts";
+import { describeBan } from "./ban.ts";
 import { testSignIn } from "./test-sign-in.ts";
 
 /** Fields users may never change through Better Auth's own `/update-user` endpoint. */
@@ -141,7 +142,9 @@ export function createAuth(db: Db, config: AuthConfig) {
       },
     },
     plugins: [
-      admin(),
+      // A banned user's sign-in fails with BANNED_USER and this message; the Discord
+      // callback carries both back to home, which shows the ban notice (./ban.ts).
+      admin({ bannedUserMessage: (user) => describeBan(user) }),
       ...(isTestSignInEnabled(config.env) ? [testSignIn()] : []),
       // Must stay last (Better Auth TanStack Start integration docs).
       tanstackStartCookies(),

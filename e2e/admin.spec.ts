@@ -14,7 +14,7 @@ test("a non-admin has no Admin Dashboard rail item and /admin sends them home", 
   page,
   context,
 }) => {
-  await signIn(context, { discordId: "900000000000000101", username: "plain_user" });
+  await signIn(context, { username: "plain_user" });
   await page.goto("/");
   await expect(page.getByRole("button", { name: "Account menu" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Admin Dashboard" })).toHaveCount(0);

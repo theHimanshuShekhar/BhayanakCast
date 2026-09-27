@@ -1,10 +1,12 @@
 import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Db } from "../db/client.ts";
-import { dailyPlatformStats, user } from "../db/schema/index.ts";
+import { dailyPlatformStats, session, user } from "../db/schema/index.ts";
 import { DEFAULT_USER_SETTINGS } from "../db/settings.ts";
 import { createTestDb } from "../db/test-db.ts";
+import { resolveSession } from "../server/session.ts";
 import { createAuth } from "./auth.ts";
+import { BANNED_USER_ERROR } from "./ban.ts";
 
 const testEnv = {
   NODE_ENV: "test" as const,
@@ -139,5 +141,147 @@ describe("test-only sign-in", () => {
     expect(response.status).toBe(404);
     expect(response.headers.getSetCookie()).toEqual([]);
     expect(await db.select().from(user)).toHaveLength(0);
+  });
+});
+
+describe("bans", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+
+  async function ban(discordId: string, fields: { banReason?: string; banExpires?: Date }) {
+    await db
+      .update(user)
+      .set({ banned: true, banReason: null, banExpires: null, ...fields })
+      .where(eq(user.discordId, discordId));
+  }
+
+  it("gives a signed-in user who gets banned no session on their next request", async () => {
+    const headers = cookiesFrom(await testSignInRequest("5000", "soon_banned"));
+    expect(await resolveSession(auth, headers)).not.toBeNull();
+
+    await ban("5000", { banReason: "spam" });
+    expect(await resolveSession(auth, headers)).toBeNull();
+  });
+
+  it("honours ban expiry for an existing session", async () => {
+    const headers = cookiesFrom(await testSignInRequest("5000", "soon_banned"));
+    await ban("5000", { banExpires: new Date(Date.now() + DAY) });
+    expect(await resolveSession(auth, headers)).toBeNull();
+
+    await ban("5000", { banExpires: new Date(Date.now() - DAY) });
+    expect((await resolveSession(auth, headers))?.user.discordId).toBe("5000");
+  });
+
+  it("refuses sign-in to a banned user and creates no session", async () => {
+    await testSignInRequest("5000", "banned_user");
+    await ban("5000", { banReason: "spam" });
+    const sessionsBefore = await db.select().from(session);
+
+    const response = await testSignInRequest("5000", "banned_user");
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ code: BANNED_USER_ERROR });
+    expect(response.headers.getSetCookie()).toEqual([]);
+    expect(await db.select().from(session)).toHaveLength(sessionsBefore.length);
+  });
+
+  it("lets a user whose ban has expired sign in again, and lifts the ban", async () => {
+    await testSignInRequest("5000", "was_banned");
+    await ban("5000", { banReason: "spam", banExpires: new Date(Date.now() - DAY) });
+
+    const response = await testSignInRequest("5000", "was_banned");
+    expect(response.status).toBe(200);
+    expect((await resolveSession(auth, cookiesFrom(response)))?.user.discordId).toBe("5000");
+    const [row] = await db.select().from(user).where(eq(user.discordId, "5000"));
+    expect(row).toMatchObject({ banned: false, banReason: null, banExpires: null });
+  });
+
+  it("bans and unbans through the test-only ban endpoint", async () => {
+    const headers = cookiesFrom(await testSignInRequest("5000", "test_banned"));
+    const setBan = (body: object) =>
+      auth.handler(
+        new Request(`${testEnv.BETTER_AUTH_URL}/api/auth/test/ban`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ discordId: "5000", ...body }),
+        }),
+      );
+
+    expect((await setBan({ banned: true, reason: "spam" })).status).toBe(200);
+    expect(await resolveSession(auth, headers)).toBeNull();
+    expect((await setBan({ banned: false })).status).toBe(200);
+    expect(await resolveSession(auth, headers)).not.toBeNull();
+  });
+
+  describe("Discord sign-in", () => {
+    const discordProfile = {
+      id: "5000",
+      username: "discord_user",
+      global_name: null,
+      avatar: null,
+      discriminator: "0",
+    };
+
+    beforeEach(() => {
+      // Stand in for Discord's token and user endpoints.
+      const realFetch = globalThis.fetch;
+      vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.startsWith("https://discord.com/api/oauth2/token")) {
+          return Response.json({ access_token: "token", token_type: "Bearer", expires_in: 3600 });
+        }
+        if (url.startsWith("https://discord.com/api/users/")) {
+          return Response.json(discordProfile);
+        }
+        return realFetch(input, init);
+      });
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    /** Starts Discord sign-in the way the app's button does, then completes Discord's callback. */
+    async function completeDiscordSignIn() {
+      const start = await auth.handler(
+        new Request(`${testEnv.BETTER_AUTH_URL}/api/auth/sign-in/social`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ provider: "discord", callbackURL: "/", errorCallbackURL: "/" }),
+        }),
+      );
+      expect(start.status).toBe(200);
+      const { url } = (await start.json()) as { url: string };
+      const callback = new URL(`${testEnv.BETTER_AUTH_URL}/api/auth/callback/discord`);
+      callback.searchParams.set("code", "code");
+      callback.searchParams.set("state", new URL(url).searchParams.get("state") ?? "");
+      return auth.handler(new Request(callback, { headers: cookiesFrom(start) }));
+    }
+
+    it("signs the user in and returns to home", async () => {
+      const response = await completeDiscordSignIn();
+      expect(response.status).toBe(302);
+      expect(response.headers.get("location")).toBe("/");
+      const signedIn = await resolveSession(auth, cookiesFrom(response));
+      expect(signedIn?.user.discordUsername).toBe("discord_user");
+    });
+
+    it("sends a banned user home with the ban notice and creates no session", async () => {
+      await completeDiscordSignIn();
+      await ban("5000", {
+        banReason: "spamming rooms",
+        banExpires: new Date("2031-01-02T03:04:00Z"),
+      });
+      const sessionsBefore = await db.select().from(session);
+
+      const response = await completeDiscordSignIn();
+      expect(response.status).toBe(302);
+      const location = new URL(response.headers.get("location") ?? "", "http://app.invalid");
+      expect(location.pathname).toBe("/");
+      expect(location.searchParams.get("error")).toBe(BANNED_USER_ERROR);
+      expect(location.searchParams.get("error_description")).toBe(
+        "Reason: spamming rooms. The ban ends 2 Jan 2031, 03:04 UTC.",
+      );
+      expect(await resolveSession(auth, cookiesFrom(response))).toBeNull();
+      expect(await db.select().from(session)).toHaveLength(sessionsBefore.length);
+    });
   });
 });

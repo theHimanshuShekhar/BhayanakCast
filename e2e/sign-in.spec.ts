@@ -49,7 +49,7 @@ for (const [where, button] of [
 }
 
 test("a signed-in user sees the account menu and no sign-in buttons", async ({ page, context }) => {
-  await signIn(context, { discordId: "900000000000000010", username: "sign_in_panel" });
+  await signIn(context, { username: "sign_in_panel" });
   await page.goto("/");
   await expect(page.getByRole("button", { name: "Account menu" })).toBeVisible();
   await expect(page.getByRole("button", { name: /sign in with discord/i })).toHaveCount(0);
@@ -57,7 +57,7 @@ test("a signed-in user sees the account menu and no sign-in buttons", async ({ p
 });
 
 test("sign out ends the session and lands on the visitor home", async ({ page, context }) => {
-  await signIn(context, { discordId: "900000000000000011", username: "sign_out_user" });
+  await signIn(context, { username: "sign_out_user" });
   await page.goto("/past/p3");
   await page.getByRole("button", { name: "Account menu" }).click();
   await page.getByRole("menuitem", { name: /sign out/ }).click();

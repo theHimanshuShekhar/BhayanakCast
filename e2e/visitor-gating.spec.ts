@@ -87,7 +87,7 @@ test.describe("a visitor", () => {
 
 test.describe("a signed-in user", () => {
   test.beforeEach(async ({ context }) => {
-    await signIn(context, { discordId: "900000000000000301", username: "gate.keeper" });
+    await signIn(context, { username: "gate.keeper" });
   });
 
   test("browses home, a profile and a past-stream recap", async ({ page }) => {

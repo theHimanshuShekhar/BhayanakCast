@@ -3,7 +3,6 @@ import { signIn } from "./auth";
 
 test('"my profile" opens the signed-in user\'s own id URL', async ({ page, context }) => {
   const userId = await signIn(context, {
-    discordId: "900000000000000201",
     username: "self.viewer",
   });
   await page.goto("/");
@@ -16,7 +15,7 @@ test('"my profile" opens the signed-in user\'s own id URL', async ({ page, conte
 });
 
 test("someone else's profile offers favorite, not edit", async ({ page, context }) => {
-  await signIn(context, { discordId: "900000000000000202", username: "nelly.jpg" });
+  await signIn(context, { username: "nelly.jpg" });
   await page.goto("/profile/usr_nellyjpg");
   // Same username as the mock profile, different user id: not "you".
   await expect(page.getByRole("heading", { level: 1, name: "nelly.jpg" })).toBeVisible();
@@ -26,7 +25,7 @@ test("someone else's profile offers favorite, not edit", async ({ page, context 
 });
 
 test("the room marks the signed-in user, by id, as (you)", async ({ page, context }) => {
-  await signIn(context, { discordId: "900000000000000203", username: "kodama_jpg" });
+  await signIn(context, { username: "kodama_jpg" });
   await page.goto("/room/r1");
   await expect(page.getByRole("heading", { name: "midnight speedrun club" })).toBeVisible();
   // The mock host shares the username but is a different user.

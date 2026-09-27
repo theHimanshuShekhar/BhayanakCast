@@ -5,6 +5,7 @@
  */
 import type { IncomingHttpHeaders, IncomingMessage } from "node:http";
 import { type AuthSession, auth } from "../lib/auth.ts";
+import { isBanActive } from "../lib/ban.ts";
 
 type HeaderSource = Request | IncomingMessage | IncomingHttpHeaders | Headers;
 
@@ -27,9 +28,23 @@ export function toHeaders(source: HeaderSource): Headers {
   return headers;
 }
 
-/** Returns the signed-in user's session, or null if absent, expired, or the user is banned. */
-export async function getSessionFromRequest(source: HeaderSource): Promise<AuthSession | null> {
-  const session = await auth.api.getSession({ headers: toHeaders(source) });
-  if (!session || session.user.banned) return null;
+type Auth = Pick<typeof auth, "api">;
+
+/**
+ * The session for `headers` from `authInstance`, or null if absent, expired, or the
+ * user is banned. A ban takes effect on the user's next request even though their
+ * session row still exists; a ban whose expiry has passed no longer counts.
+ */
+export async function resolveSession(
+  authInstance: Auth,
+  headers: Headers,
+): Promise<AuthSession | null> {
+  const session = await authInstance.api.getSession({ headers });
+  if (!session || isBanActive(session.user)) return null;
   return session;
+}
+
+/** Returns the signed-in user's session, or null if absent, expired, or the user is banned. */
+export function getSessionFromRequest(source: HeaderSource): Promise<AuthSession | null> {
+  return resolveSession(auth, toHeaders(source));
 }
