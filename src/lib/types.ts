@@ -1,4 +1,5 @@
 // UI view models. Shapes mirror what server functions / the realtime socket will return.
+import type { UserSettings } from "~/db/settings";
 import type { RoomKind } from "./rooms";
 
 export type { RoomKind };
@@ -98,11 +99,4 @@ export type AllTimeRoom = {
 export type UserGrowthPoint = { date: string; new_users: number; cumulative: number };
 export type RoomActivityPoint = { date: string; created: number; ended: number };
 
-export type Settings = {
-  theme: "dark" | "light";
-  accentHue: number;
-  radius: number;
-  density: "compact" | "comfortable" | "spacious";
-  layout: "mosaic" | "grid" | "spotlight";
-  showChat: boolean;
-};
+export type Settings = UserSettings;

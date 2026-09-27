@@ -13,14 +13,15 @@ export interface FakeDiscordUser {
 export const E2E_ADMIN_DISCORD_ID = "900000000000000999";
 
 /**
- * A fake Discord id unique to the running test (project + file + title) and `username`.
- * Tests run in parallel against one server and the same id always maps to the same user,
- * so a per-test id keeps one test's changes (a ban, the stored username) out of another.
+ * A fake Discord id unique to the running test attempt (project + file + title, retry and
+ * repeat index) and `username`. Tests run in parallel against one server and the same id
+ * always maps to the same user, so a per-attempt id keeps one test's changes (a ban, the
+ * stored username, saved settings) out of another test and out of its own retries.
  * Ids start with 8, so they never meet `E2E_ADMIN_DISCORD_ID`.
  */
 export function fakeDiscordId(username: string): string {
-  const { project, titlePath } = test.info();
-  const key = [project.name, ...titlePath, username].join("\u0000");
+  const { project, titlePath, retry, repeatEachIndex } = test.info();
+  const key = [project.name, ...titlePath, retry, repeatEachIndex, username].join("\u0000");
   // FNV-1a, 64-bit.
   let hash = 0xcbf29ce484222325n;
   for (const byte of new TextEncoder().encode(key)) {
