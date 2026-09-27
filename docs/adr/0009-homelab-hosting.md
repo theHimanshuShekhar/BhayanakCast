@@ -15,3 +15,6 @@ Deploy on the homelab as Docker Compose: `app` (TanStack Start Node server with 
 - Uses the homelab's **existing shared cloudflared**, with public hostname `cast.bhayanak.net` pointing at the app's LAN port. This stack has no cloudflared service of its own.
 - Postgres data lives on a **local Docker volume**, never on the NAS CIFS share. Postgres needs working fsync, locking and Unix permissions, which CIFS doesn't provide, so running it there risks silent corruption.
 - A small sidecar writes a nightly compressed `pg_dump` and rsyncs the dump directory to the NAS CIFS share, keeping 14 days. The raw data directory is never rsynced, because a live copy isn't restorable.
+
+## Addendum: one origin for pages and the socket (2026-09-28)
+The realtime WebSocket (`/ws`) runs on the same port and hostname as the app, so the single tunnel public hostname `cast.bhayanak.net` carries both HTTPS pages and `wss://…/ws`. No second tunnel route is needed. Don't override the tunnel's HTTP Host header: the socket's same-origin check compares the page's Origin with the Host it receives.
