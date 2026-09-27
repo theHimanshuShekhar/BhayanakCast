@@ -5,8 +5,9 @@ import { PastCard } from "~/components/room-cards";
 import { SectionHead } from "~/components/section-head";
 import { Avatar, Btn } from "~/components/ui";
 import { useAppActions } from "~/lib/app-actions";
+import { useCurrentSession } from "~/lib/current-user";
 import { avatarFor, formatCotime } from "~/lib/format";
-import { CURRENT_USER, PAST_ROOMS, profileById, topCoUsers, userIdOf } from "~/lib/mock-data";
+import { PAST_ROOMS, profileById, topCoUsers, userIdOf } from "~/lib/mock-data";
 
 export const Route = createFileRoute("/profile/$userId")({
   component: ProfilePage,
@@ -64,6 +65,7 @@ function ProfilePage() {
   const { userId } = Route.useParams();
   const navigate = useNavigate();
   const { openSettings } = useAppActions();
+  const { user } = useCurrentSession();
   const [isFavorite, setIsFavorite] = useState(() => favorites.has(userId));
   const profile = profileById(userId);
 
@@ -80,7 +82,7 @@ function ProfilePage() {
   }
 
   const { username } = profile;
-  const isSelf = username === CURRENT_USER;
+  const isSelf = user?.id === profile.id;
   const toggleFavorite = () => {
     if (favorites.has(userId)) favorites.delete(userId);
     else favorites.add(userId);

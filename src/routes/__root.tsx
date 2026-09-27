@@ -9,7 +9,6 @@ import {
 import { SideNav } from "~/components/sidenav";
 import { AppActionsContext } from "~/lib/app-actions";
 import { loadCurrentSession, useCurrentSession } from "~/lib/current-user";
-import { CURRENT_USER, userIdOf } from "~/lib/mock-data";
 import { createRoom, useLiveRooms } from "~/lib/rooms-store";
 import { SettingsProvider } from "~/lib/settings";
 import appCss from "~/styles/app.css?url";
@@ -68,7 +67,7 @@ function AppShell() {
                 <ProfileMenu
                   username={user.username}
                   onOpenProfile={() =>
-                    navigate({ to: "/profile/$userId", params: { userId: userIdOf(CURRENT_USER) } })
+                    navigate({ to: "/profile/$userId", params: { userId: user.id } })
                   }
                   onSettings={() => setSettingsOpen(true)}
                   onSignOut={() => setSignedOut(true)}
@@ -85,7 +84,8 @@ function AppShell() {
           open={createOpen}
           onOpenChange={setCreateOpen}
           onCreate={(input) => {
-            const room = createRoom(input);
+            if (!user) return;
+            const room = createRoom(input, user);
             setCreateOpen(false);
             navigate({ to: "/room/$roomId", params: { roomId: room.id } });
           }}

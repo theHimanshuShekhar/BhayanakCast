@@ -16,7 +16,8 @@ test("search filters rooms and surfaces users", async ({ page }) => {
   await expect(page.getByRole("button", { name: /^Join / })).toHaveCount(1);
 });
 
-test("start a room from the rail and land in it as host", async ({ page }) => {
+test("start a room from the rail and land in it as host", async ({ page, context }) => {
+  await signIn(context, { discordId: "900000000000000101", username: "room.starter" });
   await page.goto("/");
   await page.getByRole("button", { name: "Start a Room" }).click();
   const dialog = page.getByRole("dialog");
@@ -25,10 +26,11 @@ test("start a room from the rail and land in it as host", async ({ page }) => {
   await dialog.getByRole("button", { name: /start hang/ }).click();
   await expect(page).toHaveURL(/\/room\/r\d+/);
   await expect(page.getByRole("heading", { name: "e2e hang" })).toBeVisible();
-  await expect(page.getByText("nelly.jpg (you)")).toHaveCount(1);
+  await expect(page.getByText("room.starter (you)")).toHaveCount(1);
 });
 
-test("room chat sends a message", async ({ page }) => {
+test("room chat sends a message", async ({ page, context }) => {
+  await signIn(context, { discordId: "900000000000000102", username: "chatter" });
   await page.goto("/room/r2");
   await page.getByLabel("Chat message").fill("hello from e2e");
   await page.getByRole("button", { name: "Send" }).click();
