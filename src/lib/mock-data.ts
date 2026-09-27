@@ -16,8 +16,6 @@ import type {
   UserProfile,
 } from "./types";
 
-export const CURRENT_USER_ADMIN = true;
-
 type RoomSeed = Omit<LiveRoom, "viewers" | "capacity" | "streams">;
 
 const ROOM_SEED: RoomSeed[] = [
