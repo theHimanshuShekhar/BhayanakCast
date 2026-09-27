@@ -4,6 +4,7 @@
  * session cookie, so browser tests don't depend on Discord. Only registered
  * when `isTestSignInEnabled` allows it; production startup refuses the flag.
  * It goes through the normal user/session hooks, so admin env ids and bans apply.
+ * `POST /api/auth/test/ban` bans or unbans a fake user by Discord id (test-only too).
  */
 import type { BetterAuthPlugin, User } from "better-auth";
 import { APIError, createAuthEndpoint } from "better-auth/api";
@@ -11,6 +12,7 @@ import { setSessionCookie } from "better-auth/cookies";
 import { z } from "zod";
 
 export const TEST_SIGN_IN_PATH = "/test/sign-in";
+export const TEST_BAN_PATH = "/test/ban";
 
 export function testSignIn() {
   return {
@@ -49,8 +51,44 @@ export function testSignIn() {
           return ctx.json({ userId: user.id });
         },
       ),
+      // Bans or unbans a fake user by Discord id, straight on the user row, the way a
+      // test would edit the DB: sessions are left in place so tests see the ban take
+      // effect on the next request. (Real bans go through the admin plugin, spec #7.)
+      testSetBan: createAuthEndpoint(
+        TEST_BAN_PATH,
+        {
+          method: "POST",
+          body: z.object({
+            discordId: z.string().min(1),
+            banned: z.boolean(),
+            reason: z.string().optional(),
+            expiresAt: z.iso.datetime().optional(),
+          }),
+        },
+        async (ctx) => {
+          const { discordId, banned, reason, expiresAt } = ctx.body;
+          const updated = await ctx.context.adapter.update<User>({
+            model: "user",
+            where: [{ field: "discordId", value: discordId }],
+            update: {
+              banned,
+              banReason: banned ? (reason ?? null) : null,
+              banExpires: banned && expiresAt ? new Date(expiresAt) : null,
+            },
+          });
+          if (!updated)
+            throw new APIError("NOT_FOUND", { message: "No user with that Discord id" });
+          return ctx.json({ userId: updated.id });
+        },
+      ),
     },
     // Every parallel browser test signs in from the same IP; don't throttle them.
-    rateLimit: [{ pathMatcher: (path) => path === TEST_SIGN_IN_PATH, window: 60, max: 10_000 }],
+    rateLimit: [
+      {
+        pathMatcher: (path) => path === TEST_SIGN_IN_PATH || path === TEST_BAN_PATH,
+        window: 60,
+        max: 10_000,
+      },
+    ],
   } satisfies BetterAuthPlugin;
 }

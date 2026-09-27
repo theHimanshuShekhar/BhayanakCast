@@ -9,6 +9,10 @@ export const authClient = createAuthClient({
 
 export const { useSession, signOut } = authClient;
 
+/**
+ * A failed sign-in (e.g. a banned user) also returns to home, with Better Auth's
+ * `?error=…&error_description=…`, which home turns into a notice.
+ */
 export function signInWithDiscord(callbackURL = "/") {
-  return authClient.signIn.social({ provider: "discord", callbackURL });
+  return authClient.signIn.social({ provider: "discord", callbackURL, errorCallbackURL: "/" });
 }

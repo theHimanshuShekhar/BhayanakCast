@@ -3,14 +3,18 @@ import { type ReactNode, useMemo, useState } from "react";
 import { Icon, type IconComponent } from "~/components/icons";
 import { LiveCard, PastCard, useSnapshots } from "~/components/room-cards";
 import { SignInButton } from "~/components/sign-in-button";
+import { SignInErrorNotice } from "~/components/sign-in-error-notice";
 import { Avatar, Btn, Chip } from "~/components/ui";
 import { useAppActions } from "~/lib/app-actions";
+import { validateSignInErrorSearch } from "~/lib/ban";
 import { useCurrentSession } from "~/lib/current-user";
 import { ONLINE_COUNT, PAST_ROOMS, USER_PROFILES, userIdOf } from "~/lib/mock-data";
 import { useLiveRooms } from "~/lib/rooms-store";
 import type { LiveRoom, PastRoom, UserProfile } from "~/lib/types";
 
 export const Route = createFileRoute("/")({
+  // A failed Discord sign-in (e.g. a banned user) lands here with an error to show.
+  validateSearch: validateSignInErrorSearch,
   component: HomePage,
 });
 
@@ -169,6 +173,7 @@ function HomePage() {
   const navigate = useNavigate();
   const { openCreateRoom } = useAppActions();
   const { user } = useCurrentSession();
+  const search = Route.useSearch();
   const rooms = useLiveRooms();
   const [q, setQ] = useState("");
   const snap = useSnapshots();
@@ -214,6 +219,16 @@ function HomePage() {
   return (
     <div className="grid lg:grid-cols-[minmax(0,1fr)_300px] content-start lg:content-stretch gap-6 px-6 py-5 max-sm:px-3.5 max-sm:py-4 h-full overflow-auto lg:overflow-hidden">
       <div className="lg:min-h-0 lg:overflow-auto min-w-0">
+        <SignInErrorNotice
+          search={search}
+          onDismiss={() =>
+            navigate({
+              to: "/",
+              search: (prev) => ({ ...prev, error: undefined, error_description: undefined }),
+              replace: true,
+            })
+          }
+        />
         <h1 className="m-0 mb-1 text-xl sm:text-2xl font-extrabold tracking-[-0.01em]">
           Active Rooms
         </h1>
