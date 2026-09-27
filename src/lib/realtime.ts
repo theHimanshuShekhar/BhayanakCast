@@ -173,10 +173,15 @@ export const ERROR_CODES = [
   /** `hello` carried a protocol version this server doesn't speak. */
   "unsupported_version",
   "not_found",
+  /** `room.join` refused: the room already holds `ROOM_CAPACITY` people (grace included). */
   "room_full",
   "share_limit",
   "forbidden",
   "rate_limited",
+  /**
+   * Unprompted (no `re`): the same user joined a room from another connection, so this one is
+   * no longer in its room (ADR 21). It stays open for the lobby.
+   */
   "taken_over",
   "kicked",
   "banned",

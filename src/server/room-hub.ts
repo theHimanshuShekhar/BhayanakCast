@@ -16,6 +16,8 @@
  * Adding a client message: add it to the protocol (src/lib/realtime.ts) and a handler to
  * `#handlers` below (the type checker insists). Refusals go through `#refuse(conn, code, …)`.
  */
+
+import { ROOM_CAPACITY } from "../lib/format.ts";
 import {
   CHAT_HISTORY_SIZE,
   CHAT_MAX_LENGTH,
@@ -260,13 +262,24 @@ export class RoomHub {
       const stored = await this.#store.findRoomFor(caller, roomId);
       if (!stored) return this.#refuse(conn, "not_found", "That room isn't live", message.type);
       const room = this.#rooms.get(roomId) ?? this.#addRoom(stored);
+      const existing = room.participants.get(user.id);
+      // Capacity (ADRs 2, 21) counts everyone present, including those in reconnect grace.
+      if (!existing && room.participants.size >= ROOM_CAPACITY) {
+        return this.#refuse(
+          conn,
+          "room_full",
+          `This room is full (${room.participants.size}/${ROOM_CAPACITY})`,
+          message.type,
+        );
+      }
+      await this.#takeOverElsewhere(user.id, roomId);
       await this.#endGraceElsewhere(user.id, roomId);
 
-      const existing = room.participants.get(user.id);
       if (existing) {
-        // The same user from another socket (a reload racing its old socket's close, or a
-        // return within the reconnect grace): the new socket takes over the presence and its
-        // open interval, with no leave/join churn. Takeover notices are #26.
+        // The same user from another socket (a second tab or device, a reload racing its old
+        // socket's close, or a return within the reconnect grace): the new socket takes over
+        // the presence and its open interval, with no leave/join churn (takeover, ADR 21).
+        if (existing.connection !== conn) this.#tellTakenOver(existing.connection);
         this.#cancelGrace(existing);
         existing.connection.roomId = null;
         existing.connection = conn;
@@ -401,6 +414,29 @@ export class RoomHub {
       if (participant?.grace)
         await this.#removeParticipant(room, participant, participant.grace.since);
     }
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // Takeover (ADR 21): a user is in at most one room, over one connection
+
+  /**
+   * `userId` is joining `roomId` from another connection: an open connection of theirs in a
+   * different room is told `taken_over` and leaves that room now.
+   */
+  async #takeOverElsewhere(userId: string, roomId: string): Promise<void> {
+    for (const room of this.#rooms.values()) {
+      if (room.id === roomId) continue;
+      const participant = room.participants.get(userId);
+      if (!participant || participant.grace) continue;
+      this.#tellTakenOver(participant.connection);
+      await this.#removeParticipant(room, participant, this.#clock.now());
+    }
+  }
+
+  /** `conn` no longer holds its room: another connection of its user joined one. */
+  #tellTakenOver(conn: HubConnection): void {
+    conn.roomId = null;
+    this.#refuse(conn, "taken_over", "You joined a room from another tab or device");
   }
 
   /** (Re)start `conn`'s idle timer: silent for `IDLE_TIMEOUT_MS`, it's closed and dropped. */
