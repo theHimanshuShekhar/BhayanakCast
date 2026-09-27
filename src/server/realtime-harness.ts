@@ -12,6 +12,12 @@
  *   const joined = await a.waitForEvent("joined");      // someone else joined
  *   await h.advance(30_000);                            // fire due hub timers, then settle
  *   await h.settled();                                  // closes seen by server + hub idle
+ *   await h.restart();                                  // crash + new hub on the same DB
+ *
+ * Like the browser client, every welcomed client heartbeats: `advance` moves the clock in
+ * steps of at most `PING_INTERVAL_MS` and has each one `ping` (and swallows the `pong`) before
+ * every step, so long advances don't trip the server's idle timeout. Pass
+ * `{ heartbeat: false }` to `connectAs` for a client that stays silent (and sees its pongs).
  *
  * Messages are consumed in order per type: `waitFor(type)` returns the oldest unconsumed
  * message of that type, waiting up to `timeoutMs` for one. `pending()` lists what's unconsumed,
@@ -25,6 +31,7 @@ import { createTestDb } from "../db/test-db.ts";
 import { createAuth } from "../lib/auth.ts";
 import {
   type ClientMessage,
+  PING_INTERVAL_MS,
   PROTOCOL_VERSION,
   parseServerMessage,
   REALTIME_PATH,
@@ -34,10 +41,10 @@ import {
   type ServerMessageType,
 } from "../lib/realtime.ts";
 import type { CreateRoomInput } from "../lib/rooms.ts";
-import { FakeClock } from "./clock.ts";
+import { type Clock, FakeClock } from "./clock.ts";
 import { attachRealtime, type RealtimeServer } from "./realtime.ts";
 import { RoomHub } from "./room-hub.ts";
-import { createDbRoomStore } from "./room-store.ts";
+import { createDbRoomStore, type RoomStore } from "./room-store.ts";
 import { createRoom } from "./rooms.ts";
 import { callerFromSession, resolveSession, toHeaders } from "./session.ts";
 
@@ -86,14 +93,28 @@ export interface TestClient {
   /** Messages received but not yet consumed by a `waitFor`. */
   pending(): ServerMessage[];
   readonly isClosed: boolean;
+  /** Wait until the socket is closed (by either side); resolves with the close code. */
+  closed(): Promise<number>;
   /** Close the socket and wait until it's closed. */
   close(): Promise<void>;
+}
+
+/** A client plus the harness's heartbeat hook. */
+interface HarnessClient extends TestClient {
+  /** If this client heartbeats and is welcomed and open: ping and wait for the pong. */
+  beat(): Promise<void>;
+}
+
+export interface ConnectOptions {
+  /** Ping during `advance` like the browser client does (default true). */
+  heartbeat?: boolean;
 }
 
 export interface RealtimeHarness {
   db: Db;
   clock: FakeClock;
-  hub: RoomHub;
+  /** The current hub (a new one after `restart`). */
+  readonly hub: RoomHub;
   /** `ws://127.0.0.1:<port>/ws` */
   url: string;
   /** A signed-in user with a real session, via the test-only sign-in. */
@@ -103,13 +124,19 @@ export interface RealtimeHarness {
   /** Open a socket as `user` (null: no cookie) without the handshake. Rejects if refused. */
   connect(user: TestUser | null, headers?: Record<string, string>): Promise<TestClient>;
   /** Open a socket as `user` and complete `hello`/`welcome`. */
-  connectAs(user: TestUser): Promise<TestClient>;
+  connectAs(user: TestUser, options?: ConnectOptions): Promise<TestClient>;
   /** Try an upgrade and return the HTTP status: 101 if accepted (then closed), else the refusal. */
   upgradeStatus(user: TestUser | null, headers?: Record<string, string>): Promise<number>;
   /** Advance the fake clock (firing due hub timers), then `settled()`. */
   advance(ms: number): Promise<void>;
   /** Wait until the server has seen every client close and the hub has finished its work. */
   settled(): Promise<void>;
+  /**
+   * Simulate a server crash and restart: the running hub dies mid-flight (no more DB writes or
+   * timers, so nothing is cleaned up), every socket drops, the clock moves on `downFor` ms, and
+   * a new hub boots on the same database. Reconnect with `connectAs` afterwards.
+   */
+  restart(options?: { downFor?: number }): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -118,22 +145,28 @@ export async function startRealtimeHarness(): Promise<RealtimeHarness> {
   const adminDiscordIds = new Set<string>();
   const auth = createAuth(db, { env: testEnv, adminDiscordIds });
   const clock = new FakeClock();
-  const hub = new RoomHub({ clock, store: createDbRoomStore(db) });
 
   const server = createServer((_request, response) => {
     response.statusCode = 404;
     response.end();
   });
-  const realtime: RealtimeServer = attachRealtime(server, {
-    hub,
-    authenticate: async (request) =>
-      callerFromSession(await resolveSession(auth, toHeaders(request))),
-  });
+  /** A hub that a simulated crash can kill, attached to `server`. */
+  function boot() {
+    const mortal = mortalDeps(clock, createDbRoomStore(db));
+    const hub = new RoomHub({ clock: mortal.clock, store: mortal.store });
+    const realtime: RealtimeServer = attachRealtime(server, {
+      hub,
+      authenticate: async (request) =>
+        callerFromSession(await resolveSession(auth, toHeaders(request))),
+    });
+    return { hub, realtime, kill: mortal.kill };
+  }
+  let running = boot();
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
   const url = `ws://127.0.0.1:${port}${REALTIME_PATH}`;
 
-  const clients = new Set<TestClient>();
+  const clients = new Set<HarnessClient>();
   let nextDiscordId = 100_000;
 
   async function createUser(username: string, options: { admin?: boolean } = {}) {
@@ -159,11 +192,15 @@ export async function startRealtimeHarness(): Promise<RealtimeHarness> {
     return { ...(user ? { cookie: user.cookie } : {}), ...extra };
   }
 
-  function connect(user: TestUser | null, headers?: Record<string, string>) {
+  function connect(
+    user: TestUser | null,
+    headers?: Record<string, string>,
+    options: ConnectOptions = {},
+  ) {
     const ws = new WebSocket(url, { headers: headersFor(user, headers) });
     return new Promise<TestClient>((resolve, reject) => {
       ws.once("open", () => {
-        const client = wrap(ws, user);
+        const client = wrap(ws, user, options.heartbeat ?? true);
         clients.add(client);
         resolve(client);
       });
@@ -177,17 +214,19 @@ export async function startRealtimeHarness(): Promise<RealtimeHarness> {
   async function settled() {
     const deadline = Date.now() + DEFAULT_TIMEOUT_MS;
     const open = () => [...clients].filter((c) => !c.isClosed).length;
-    while (realtime.openSockets > open()) {
+    while (running.realtime.openSockets > open()) {
       if (Date.now() > deadline) throw new Error("Server never saw a client close");
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
-    await hub.idle();
+    await running.hub.idle();
   }
 
   return {
     db,
     clock,
-    hub,
+    get hub() {
+      return running.hub;
+    },
     url,
     createUser,
     async createRoom(host, input = {}) {
@@ -200,9 +239,9 @@ export async function startRealtimeHarness(): Promise<RealtimeHarness> {
       });
       return id;
     },
-    connect,
-    async connectAs(user) {
-      const client = await connect(user);
+    connect: (user, headers) => connect(user, headers),
+    async connectAs(user, options) {
+      const client = await connect(user, undefined, options);
       client.send({ type: "hello", v: PROTOCOL_VERSION });
       await client.waitFor("welcome");
       return client;
@@ -222,39 +261,85 @@ export async function startRealtimeHarness(): Promise<RealtimeHarness> {
       });
     },
     async advance(ms) {
-      clock.advance(ms);
-      await settled();
+      let remaining = ms;
+      do {
+        await Promise.all([...clients].map((client) => client.beat()));
+        const step = Math.min(remaining, PING_INTERVAL_MS);
+        clock.advance(step);
+        remaining -= step;
+        await settled();
+      } while (remaining > 0);
     },
     settled,
+    async restart(options = {}) {
+      running.kill();
+      await running.realtime.close();
+      await Promise.all([...clients].map((client) => client.closed()));
+      clock.advance(options.downFor ?? 0);
+      running = boot();
+      await running.hub.idle();
+    },
     async close() {
       await Promise.all([...clients].map((client) => client.close()));
-      await realtime.close();
+      await running.realtime.close();
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await closeDb();
     },
   };
 }
 
-function wrap(ws: WebSocket, user: TestUser | null): TestClient {
+/**
+ * The hub's clock and store, wrapped so `kill()` stops them dead like a crashed process: no
+ * timer fires and no DB call happens afterwards.
+ */
+function mortalDeps(clock: Clock, store: RoomStore) {
+  let dead = false;
+  const mortalClock: Clock = {
+    now: () => clock.now(),
+    setTimer: (ms, fn) =>
+      clock.setTimer(ms, () => {
+        if (!dead) fn();
+      }),
+  };
+  const mortalStore = new Proxy(store, {
+    get(target, key, receiver) {
+      const value: unknown = Reflect.get(target, key, receiver);
+      if (typeof value !== "function") return value;
+      return (...args: unknown[]) =>
+        dead ? Promise.resolve(undefined) : Reflect.apply(value, target, args);
+    },
+  });
+  return { clock: mortalClock, store: mortalStore, kill: () => (dead = true) };
+}
+
+function wrap(ws: WebSocket, user: TestUser | null, heartbeat: boolean): HarnessClient {
   const received: ServerMessage[] = [];
   const unconsumed: ServerMessage[] = [];
   const waiters = new Set<() => void>();
   let protocolError: Error | null = null;
   let closed = false;
+  let closeCode = 0;
+  let welcomed = false;
+  /** Pongs swallowed by the heartbeat. */
+  let pongs = 0;
 
   ws.on("message", (data) => {
     const parsed = parseServerMessage(data.toString());
     if (!parsed.ok) {
       protocolError = new Error(`Server sent an invalid message: ${parsed.error}`);
+    } else if (heartbeat && parsed.message.type === "pong") {
+      pongs++;
     } else {
+      if (parsed.message.type === "welcome") welcomed = true;
       received.push(parsed.message);
       unconsumed.push(parsed.message);
     }
     for (const wake of waiters) wake();
   });
   const closedPromise = new Promise<void>((resolve) => {
-    ws.once("close", () => {
+    ws.once("close", (code) => {
       closed = true;
+      closeCode = code;
       for (const wake of waiters) wake();
       resolve();
     });
@@ -298,7 +383,7 @@ function wrap(ws: WebSocket, user: TestUser | null): TestClient {
     });
   }
 
-  const client: TestClient = {
+  const client: HarnessClient = {
     user,
     received,
     send: (message) => ws.send(JSON.stringify(message)),
@@ -337,9 +422,33 @@ function wrap(ws: WebSocket, user: TestUser | null): TestClient {
     get isClosed() {
       return closed;
     },
+    async closed() {
+      await closedPromise;
+      return closeCode;
+    },
     async close() {
       if (!closed) ws.close();
       await closedPromise;
+    },
+    beat() {
+      if (!heartbeat || !welcomed || closed) return Promise.resolve();
+      const want = pongs + 1;
+      return new Promise<void>((resolve, reject) => {
+        const check = () => {
+          if (pongs >= want || closed) finish(resolve);
+        };
+        const timer = setTimeout(
+          () => finish(() => reject(new Error("Timed out waiting for a heartbeat pong"))),
+          DEFAULT_TIMEOUT_MS,
+        );
+        const finish = (settle: () => void) => {
+          clearTimeout(timer);
+          waiters.delete(check);
+          settle();
+        };
+        waiters.add(check);
+        ws.send(JSON.stringify({ type: "ping" } satisfies ClientMessage));
+      });
     },
   };
   return client;

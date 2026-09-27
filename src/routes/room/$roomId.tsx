@@ -251,6 +251,14 @@ function RoomPage({ detail, meId }: { detail: RoomDetail; meId: string | null })
             <h1 className="m-0 text-[11.5px] text-fg font-semibold truncate">{detail.name}</h1>
           </nav>
           <div className="flex gap-1.5 items-center flex-shrink-0">
+            {/* The socket dropped; the realtime client is reconnecting with backoff. */}
+            <span role="status" className="contents">
+              {live.reconnecting && (
+                <Chip dot className="animate-bc-pulse">
+                  reconnecting…
+                </Chip>
+              )}
+            </span>
             <Chip className="!bg-surface max-sm:!hidden">
               <Icon.Users size={11} /> {participants.length}/{detail.capacity}
             </Chip>

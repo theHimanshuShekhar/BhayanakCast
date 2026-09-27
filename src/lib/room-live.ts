@@ -49,11 +49,25 @@ export interface RoomLiveResult {
   room: RoomLive | null;
   /** The server's refusal of this page's join (e.g. `not_found`), if any. */
   error: ServerMessageOf<"error"> | null;
+  /**
+   * The socket dropped and the client is reconnecting (with backoff). `room` is the last
+   * known state until the server's fresh snapshot replaces it.
+   */
+  reconnecting: boolean;
 }
 
 /** Be in `roomId` over the realtime socket while mounted, and follow who is there. */
 export function useRoomLive(roomId: string): RoomLiveResult {
-  const [result, setResult] = useState<RoomLiveResult>({ room: null, error: null });
+  const [result, setResult] = useState<Omit<RoomLiveResult, "reconnecting">>({
+    room: null,
+    error: null,
+  });
+  const [reconnecting, setReconnecting] = useState(false);
+  useEffect(() => {
+    const client = getRealtimeClient();
+    setReconnecting(client.status === "reconnecting");
+    return client.onStatus((status) => setReconnecting(status === "reconnecting"));
+  }, []);
   useEffect(() => {
     const client = getRealtimeClient();
     const unsubscribe = client.subscribe((message) => {
@@ -72,5 +86,5 @@ export function useRoomLive(roomId: string): RoomLiveResult {
       client.leaveRoom(roomId);
     };
   }, [roomId]);
-  return result;
+  return { ...result, reconnecting };
 }

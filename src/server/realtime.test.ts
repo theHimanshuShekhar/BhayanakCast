@@ -155,7 +155,7 @@ describe("join and leave", () => {
     expect(b.pending()).toEqual([]);
   });
 
-  it("treats a disconnect as leaving (no grace yet)", async () => {
+  it("treats a disconnect as leaving at the disconnect, once the 30s grace is over", async () => {
     const a = await h.connectAs(ana);
     await a.join(roomId);
     const b = await h.connectAs(bo);
@@ -164,11 +164,15 @@ describe("join and leave", () => {
 
     await h.advance(60 * SECOND);
     await b.close();
-    expect(await a.waitForEvent("left")).toMatchObject({ event: { userId: bo.id } });
+    await h.advance(30 * SECOND);
+    expect(await a.waitForEvent("left")).toMatchObject({
+      at: "2026-09-01T12:01:00.000Z",
+      event: { userId: bo.id },
+    });
     await a.close();
-    await h.settled();
+    await h.advance(30 * SECOND);
     expect(await presenceRows()).toEqual([
-      { userId: ana.id, startedAt: new Date(T0), endedAt: new Date("2026-09-01T12:01:00.000Z") },
+      { userId: ana.id, startedAt: new Date(T0), endedAt: new Date("2026-09-01T12:01:30.000Z") },
       { userId: bo.id, startedAt: new Date(T0), endedAt: new Date("2026-09-01T12:01:00.000Z") },
     ]);
   });

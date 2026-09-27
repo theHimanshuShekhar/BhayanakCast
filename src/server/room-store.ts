@@ -7,11 +7,12 @@
  * Later tickets grow this port rather than touching the DB from the hub: host intervals and
  * `rooms.hostUserId` (host lifecycle), stream intervals (media state), `lastEmptyAt`, room end
  * and `rollupEndedRoom` (room ending), `room_members` roles and kicks (moderation), live rooms
- * on boot and `last_seen_at` checkpoints (restart recovery).
+ * on boot and `last_seen_at` checkpoints (restart recovery: `loadLiveRooms`,
+ * `checkpointPresence`).
  */
-import { and, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
-import { presenceIntervals, roomMembers, rooms } from "../db/schema/index.ts";
+import { presenceIntervals, roomMembers, rooms, user } from "../db/schema/index.ts";
 import type { RoomRole } from "../lib/realtime.ts";
 import type { SignedInCaller } from "./caller.ts";
 import { roomVisibleTo } from "./visibility.ts";
@@ -24,6 +25,27 @@ export interface StoredRoom {
   roles: Map<string, Exclude<RoomRole, "member">>;
 }
 
+/** An open presence interval found on boot (left behind by a restart or crash). */
+export interface OpenPresence {
+  userId: string;
+  username: string;
+  startedAt: Date;
+  lastSeenAt: Date;
+}
+
+/** A live room as the hub reloads it on boot (ADR 4 restart addendum). */
+export interface RestoredRoom extends StoredRoom {
+  /** Its open presence intervals, oldest first. */
+  presences: OpenPresence[];
+}
+
+/** "`userId` was still in `roomId` at `at`", for the `last_seen_at` checkpoint (ADR 12). */
+export interface PresenceSeen {
+  roomId: string;
+  userId: string;
+  at: Date;
+}
+
 export interface RoomStore {
   /** The live room `roomId` if `caller` may enter it; null if unknown, ended or hidden (ADR 16). */
   findRoomFor(caller: SignedInCaller, roomId: string): Promise<StoredRoom | null>;
@@ -34,6 +56,10 @@ export interface RoomStore {
   openPresence(roomId: string, userId: string, at: Date): Promise<void>;
   /** Close the user's open presence interval in `roomId` at `at`, if there is one. */
   closePresence(roomId: string, userId: string, at: Date): Promise<void>;
+  /** Move each open interval's `last_seen_at` forward to its `at` (never backwards). */
+  checkpointPresence(seen: PresenceSeen[]): Promise<void>;
+  /** Every live room with its roles and open presence intervals, for the hub on boot. */
+  loadLiveRooms(): Promise<RestoredRoom[]>;
 }
 
 export function createDbRoomStore(db: Db): RoomStore {
@@ -81,6 +107,59 @@ export function createDbRoomStore(db: Db): RoomStore {
             isNull(presenceIntervals.endedAt),
           ),
         );
+    },
+
+    async checkpointPresence(seen) {
+      if (seen.length === 0) return;
+      await db.transaction(async (tx) => {
+        for (const { roomId, userId, at } of seen) {
+          await tx
+            .update(presenceIntervals)
+            .set({
+              lastSeenAt: sql`greatest(${presenceIntervals.lastSeenAt}, ${at.toISOString()}::timestamptz)`,
+            })
+            .where(
+              and(
+                eq(presenceIntervals.roomId, roomId),
+                eq(presenceIntervals.userId, userId),
+                isNull(presenceIntervals.endedAt),
+              ),
+            );
+        }
+      });
+    },
+
+    async loadLiveRooms() {
+      const live = await db
+        .select({ id: rooms.id, hostUserId: rooms.hostUserId })
+        .from(rooms)
+        .where(isNull(rooms.endedAt));
+      if (live.length === 0) return [];
+      const ids = live.map((room) => room.id);
+      const members = await db
+        .select({ roomId: roomMembers.roomId, userId: roomMembers.userId, role: roomMembers.role })
+        .from(roomMembers)
+        .where(and(inArray(roomMembers.roomId, ids), ne(roomMembers.role, "member")));
+      const open = await db
+        .select({
+          roomId: presenceIntervals.roomId,
+          userId: presenceIntervals.userId,
+          username: sql<string>`coalesce(${user.discordUsername}, ${user.name})`,
+          startedAt: presenceIntervals.startedAt,
+          lastSeenAt: presenceIntervals.lastSeenAt,
+        })
+        .from(presenceIntervals)
+        .innerJoin(user, eq(user.id, presenceIntervals.userId))
+        .where(and(inArray(presenceIntervals.roomId, ids), isNull(presenceIntervals.endedAt)))
+        .orderBy(asc(presenceIntervals.startedAt));
+      const restored = new Map<string, RestoredRoom>(
+        live.map((room) => [room.id, { ...room, roles: new Map(), presences: [] }]),
+      );
+      for (const { roomId, userId, role } of members) {
+        if (role !== "member") restored.get(roomId)?.roles.set(userId, role);
+      }
+      for (const { roomId, ...presence } of open) restored.get(roomId)?.presences.push(presence);
+      return [...restored.values()];
     },
   };
 }

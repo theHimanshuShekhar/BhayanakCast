@@ -26,17 +26,33 @@ export const MAX_CLIENT_MESSAGE_BYTES = 16 * 1024;
 
 const roomId = z.string().min(1).max(64);
 
+/**
+ * Heartbeats (ADR 9): the client sends `ping` about this often and the server answers `pong`,
+ * which keeps idle sockets open through Cloudflare Tunnel.
+ */
+export const PING_INTERVAL_MS = 25_000;
+/**
+ * The server closes a socket it hasn't heard from (any frame) for this long, and the client
+ * gives up on a server it hasn't heard from for this long and reconnects.
+ */
+export const IDLE_TIMEOUT_MS = 60_000;
+/** The close code the server uses for a socket that went silent past `IDLE_TIMEOUT_MS`. */
+export const IDLE_CLOSE_CODE = 4000;
+
 // ---------------------------------------------------------------------------------------------
 // Client → server
 
 export const helloMessage = z.object({ type: z.literal("hello"), v: z.number().int() });
 export const roomJoinMessage = z.object({ type: z.literal("room.join"), roomId });
 export const roomLeaveMessage = z.object({ type: z.literal("room.leave") });
+/** Heartbeat; the server answers `pong`. */
+export const pingMessage = z.object({ type: z.literal("ping") });
 
 export const clientMessage = z.discriminatedUnion("type", [
   helloMessage,
   roomJoinMessage,
   roomLeaveMessage,
+  pingMessage,
 ]);
 export type ClientMessage = z.infer<typeof clientMessage>;
 export type ClientMessageType = ClientMessage["type"];
@@ -115,11 +131,15 @@ export const errorMessage = z.object({
   re: z.string().optional(),
 });
 
+/** The answer to `ping`. */
+export const pongMessage = z.object({ type: z.literal("pong") });
+
 export const serverMessage = z.discriminatedUnion("type", [
   welcomeMessage,
   roomSnapshotMessage,
   roomEventMessage,
   errorMessage,
+  pongMessage,
 ]);
 export type ServerMessage = z.infer<typeof serverMessage>;
 export type ServerMessageType = ServerMessage["type"];
