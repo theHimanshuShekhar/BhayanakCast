@@ -1,5 +1,5 @@
 import { Menu } from "@base-ui/react/menu";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
 import { type ButtonHTMLAttributes, useMemo, useState } from "react";
 import { Icon } from "~/components/icons";
 import { RoomSide } from "~/components/room/side-panel";
@@ -14,6 +14,11 @@ import { useSettings } from "~/lib/settings";
 import type { ActivityItem, ChatMessage, Participant, RoomDetail, RoomRole } from "~/lib/types";
 
 export const Route = createFileRoute("/room/$roomId")({
+  // Visitors go home with the "sign in to join" prompt open. A UX guard only: the room
+  // server functions and socket check the session themselves.
+  beforeLoad: ({ context, params }) => {
+    if (!context.session.user) throw redirect({ to: "/", search: { join: params.roomId } });
+  },
   component: RoomRoute,
 });
 
