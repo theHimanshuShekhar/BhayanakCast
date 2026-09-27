@@ -296,6 +296,17 @@ describe("restart recovery", () => {
     ]);
   });
 
+  it("loses chat history with the restart (it's memory only)", async () => {
+    const { a } = await anaAndBo();
+    a.send({ type: "chat.send", text: "hello" });
+    await a.waitFor("chat.message");
+    await h.restart({ downFor: 2 * SECOND });
+    const a2 = await h.connectAs(ana);
+    const snapshot = await a2.join(roomId);
+    expect(snapshot.participants.map((p) => p.username).sort()).toEqual(["ana", "bo"]);
+    expect(snapshot.chat).toEqual([]);
+  });
+
   it("boots with nothing live", async () => {
     await h.restart();
     const a = await h.connectAs(ana);

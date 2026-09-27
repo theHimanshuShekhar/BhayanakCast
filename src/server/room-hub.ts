@@ -17,6 +17,10 @@
  * `#handlers` below (the type checker insists). Refusals go through `#refuse(conn, code, …)`.
  */
 import {
+  CHAT_HISTORY_SIZE,
+  CHAT_MAX_LENGTH,
+  CHAT_RATE_LIMIT,
+  type ChatEntry,
   type ClientMessage,
   type ClientMessageOf,
   type ClientMessageType,
@@ -102,6 +106,8 @@ interface LiveRoom {
   roles: StoredRoom["roles"];
   /** By user id, in order of arrival. */
   participants: Map<string, LiveParticipant>;
+  /** The last `CHAT_HISTORY_SIZE` chat messages, oldest first; memory only, gone with the room. */
+  chat: ChatEntry[];
 }
 
 type Handler<T extends ClientMessageType> = (
@@ -116,6 +122,9 @@ export class RoomHub {
   readonly #connections = new Set<HubConnection>();
   readonly #rooms = new Map<string, LiveRoom>();
   #nextId = 1;
+  #nextChatId = 1;
+  /** Per user id, when (epoch ms) their recent accepted chat messages were sent. */
+  readonly #chatSends = new Map<string, number[]>();
   #queue: Promise<void> = Promise.resolve();
 
   constructor(deps: RoomHubDeps) {
@@ -257,6 +266,8 @@ export class RoomHub {
     ping: (conn) => {
       this.#send(conn, { type: "pong" });
     },
+
+    "chat.send": (conn, message) => this.#chat(conn, message),
   };
 
   #dispatch(conn: HubConnection, message: ClientMessage): Promise<void> | void {
@@ -273,6 +284,7 @@ export class RoomHub {
       hostUserId: stored.hostUserId,
       roles: stored.roles,
       participants: new Map(),
+      chat: [],
     };
     this.#rooms.set(room.id, room);
     return room;
@@ -452,6 +464,7 @@ export class RoomHub {
       roomId,
       hostUserId: room.hostUserId,
       participants: [...room.participants.values()].map((p) => this.#view(room, p)),
+      chat: [...room.chat],
     });
   }
 
@@ -466,6 +479,57 @@ export class RoomHub {
     for (const participant of room.participants.values()) {
       if (participant.connection !== except) this.#send(participant.connection, message);
     }
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // Chat (ADR 4 addendum: the last 50 per room, in memory only, never persisted)
+
+  #chat(conn: HubConnection, message: ClientMessageOf<"chat.send">) {
+    const userId = conn.caller.user?.id;
+    const room = conn.roomId ? this.#rooms.get(conn.roomId) : undefined;
+    const participant = userId ? room?.participants.get(userId) : undefined;
+    if (!room || !participant || participant.connection !== conn) {
+      return this.#refuse(conn, "forbidden", "Join the room to chat", message.type);
+    }
+    const text = message.text.trim();
+    if (!text) return this.#refuse(conn, "bad_request", "Say something first", message.type);
+    if (text.length > CHAT_MAX_LENGTH) {
+      return this.#refuse(
+        conn,
+        "bad_request",
+        `Chat messages are at most ${CHAT_MAX_LENGTH} characters`,
+        message.type,
+      );
+    }
+
+    const at = this.#clock.now();
+    const since = at.getTime() - CHAT_RATE_LIMIT.windowMs;
+    const recent = (this.#chatSends.get(participant.userId) ?? []).filter((t) => t > since);
+    if (recent.length >= CHAT_RATE_LIMIT.messages) {
+      this.#chatSends.set(participant.userId, recent);
+      return this.#refuse(
+        conn,
+        "rate_limited",
+        "You're sending messages too fast; wait a moment",
+        message.type,
+      );
+    }
+    recent.push(at.getTime());
+    this.#chatSends.set(participant.userId, recent);
+
+    const entry: ChatEntry = {
+      id: `c${this.#nextChatId++}`,
+      userId: participant.userId,
+      username: participant.username,
+      role: this.#roleOf(room, participant.userId),
+      text,
+      at: at.toISOString(),
+    };
+    room.chat.push(entry);
+    if (room.chat.length > CHAT_HISTORY_SIZE)
+      room.chat.splice(0, room.chat.length - CHAT_HISTORY_SIZE);
+    const out: ServerMessage = { type: "chat.message", roomId: room.id, message: entry };
+    for (const p of room.participants.values()) this.#send(p.connection, out);
   }
 
   // -------------------------------------------------------------------------------------------

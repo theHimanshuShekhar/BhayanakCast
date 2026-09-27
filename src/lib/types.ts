@@ -26,9 +26,19 @@ export type Participant = {
   you?: boolean;
 };
 
+/** A line in the room chat: someone's message, or a system line (joins and leaves). */
 export type ChatMessage =
-  | { id: string; system: true; text: string }
-  | { id: string; system?: false; user: string; role: RoomRole; ts: string; text: string };
+  | { id: string; system: true; text: string; at: string }
+  | {
+      id: string;
+      system?: false;
+      userId: string;
+      user: string;
+      role: RoomRole;
+      text: string;
+      /** ISO timestamp, server clock. */
+      at: string;
+    };
 
 /** The room page's starting view (src/lib/room-view.ts). */
 export type RoomDetail = {

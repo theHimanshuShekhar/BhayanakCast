@@ -38,6 +38,12 @@ export const PING_INTERVAL_MS = 25_000;
 export const IDLE_TIMEOUT_MS = 60_000;
 /** The close code the server uses for a socket that went silent past `IDLE_TIMEOUT_MS`. */
 export const IDLE_CLOSE_CODE = 4000;
+/** Longest chat message after trimming, in UTF-16 code units (what an input's maxLength counts). */
+export const CHAT_MAX_LENGTH = 500;
+/** How many recent chat messages a live room keeps in memory for joiners (ADR 4 addendum). */
+export const CHAT_HISTORY_SIZE = 50;
+/** Chat rate limit per user: at most `messages` in any `windowMs` (server clock). */
+export const CHAT_RATE_LIMIT = { messages: 5, windowMs: 5_000 } as const;
 
 // ---------------------------------------------------------------------------------------------
 // Client → server
@@ -47,12 +53,19 @@ export const roomJoinMessage = z.object({ type: z.literal("room.join"), roomId }
 export const roomLeaveMessage = z.object({ type: z.literal("room.leave") });
 /** Heartbeat; the server answers `pong`. */
 export const pingMessage = z.object({ type: z.literal("ping") });
+/**
+ * Say something in the sender's room. The server trims `text`, refuses it empty or longer than
+ * `CHAT_MAX_LENGTH` (`bad_request`) or over `CHAT_RATE_LIMIT` (`rate_limited`), and stamps the
+ * time, sender and role itself.
+ */
+export const chatSendMessage = z.object({ type: z.literal("chat.send"), text: z.string() });
 
 export const clientMessage = z.discriminatedUnion("type", [
   helloMessage,
   roomJoinMessage,
   roomLeaveMessage,
   pingMessage,
+  chatSendMessage,
 ]);
 export type ClientMessage = z.infer<typeof clientMessage>;
 export type ClientMessageType = ClientMessage["type"];
@@ -75,6 +88,19 @@ export const roomParticipant = z.object({
 });
 export type RoomParticipant = z.infer<typeof roomParticipant>;
 
+/** One chat message, as the server stamped it. Never persisted (ADR 4 addendum). */
+export const chatEntry = z.object({
+  /** Unique within the server process's lifetime. */
+  id: z.string(),
+  userId: z.string(),
+  username: z.string(),
+  /** The sender's room role when they sent it. */
+  role: z.enum(ROOM_ROLES),
+  text: z.string(),
+  at: z.iso.datetime(),
+});
+export type ChatEntry = z.infer<typeof chatEntry>;
+
 export const welcomeMessage = z.object({
   type: z.literal("welcome"),
   v: z.number().int(),
@@ -89,6 +115,8 @@ export const roomSnapshotMessage = z.object({
   hostUserId: z.string().nullable(),
   /** In order of arrival. Includes the joiner. */
   participants: z.array(roomParticipant),
+  /** The room's last `CHAT_HISTORY_SIZE` chat messages at most, oldest first. */
+  chat: z.array(chatEntry),
 });
 
 export const roomEvent = z.discriminatedUnion("kind", [
@@ -103,6 +131,13 @@ export const roomEventMessage = z.object({
   roomId,
   at: z.iso.datetime(),
   event: roomEvent,
+});
+
+/** A chat message, sent to everyone in the room (the sender included, as confirmation). */
+export const chatMessageMessage = z.object({
+  type: z.literal("chat.message"),
+  roomId,
+  message: chatEntry,
 });
 
 export const ERROR_CODES = [
@@ -138,6 +173,7 @@ export const serverMessage = z.discriminatedUnion("type", [
   welcomeMessage,
   roomSnapshotMessage,
   roomEventMessage,
+  chatMessageMessage,
   errorMessage,
   pongMessage,
 ]);
