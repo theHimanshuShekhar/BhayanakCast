@@ -9,7 +9,8 @@ import { Btn, Chip } from "~/components/ui";
 import { useAppActions } from "~/lib/app-actions";
 import { useCurrentSession } from "~/lib/current-user";
 import { fmtMins, MAX_STREAMERS } from "~/lib/format";
-import { roomDetailFor } from "~/lib/room-view";
+import { useRoomLive } from "~/lib/room-live";
+import { roomDetailFor, withRoster } from "~/lib/room-view";
 import { roomQuery } from "~/lib/rooms.queries";
 import { useSettings } from "~/lib/settings";
 import type { ActivityItem, ChatMessage, Participant, RoomDetail, RoomRole } from "~/lib/types";
@@ -47,7 +48,13 @@ function RoomRoute() {
   // It can end or disappear after load (a later refetch or socket invalidation).
   if (!room) return <RoomNotFound />;
   // key resets all room state when navigating between rooms or the signed-in user changes
-  return <RoomPage key={`${room.id}:${user?.id ?? ""}`} detail={roomDetailFor(room, user)} />;
+  return (
+    <RoomPage
+      key={`${room.id}:${user?.id ?? ""}`}
+      detail={roomDetailFor(room, user)}
+      meId={user?.id ?? null}
+    />
+  );
 }
 
 const DENSITY_CLS = {
@@ -96,11 +103,17 @@ const nowTs = () => {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 
-function RoomPage({ detail }: { detail: RoomDetail }) {
+function RoomPage({ detail, meId }: { detail: RoomDetail; meId: string | null }) {
   const navigate = useNavigate();
   const { settings } = useSettings();
   const { openSettings } = useAppActions();
+  // Starts from the loader's view; the realtime socket's snapshot and events take over.
   const [participants, setParticipants] = useState<Participant[]>(detail.participants);
+  const live = useRoomLive(detail.id);
+  const roster = live.room?.participants;
+  useEffect(() => {
+    if (roster) setParticipants((shown) => withRoster(shown, roster, meId));
+  }, [roster, meId]);
   // Chat and the feed start empty; history arrives over the socket (spec #3).
   const [chat, setChat] = useState<ChatMessage[]>([]);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
@@ -209,6 +222,9 @@ function RoomPage({ detail }: { detail: RoomDetail }) {
         .map((p) => (p.size === "l" ? { ...p, size: "m" as const } : p)),
     ];
   }, [participants, showViewers, pinnedId]);
+
+  // The room ended or was hidden from us since the page loaded.
+  if (live.error?.code === "not_found") return <RoomNotFound />;
 
   const leave = () => navigate({ to: "/" });
   // Chat and the feed name people by username: resolve it to the user id of whoever has (or,

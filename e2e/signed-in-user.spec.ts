@@ -39,7 +39,7 @@ test("the room marks the signed-in user, by id, as (you)", async ({ page, contex
   await expect(page.getByText("room.host (you)")).toHaveCount(0);
 });
 
-test("the room shows who is in it now, with an empty chat and feed", async ({
+test("the room shows who is connected, with an empty chat and feed", async ({
   page,
   context,
   browser,
@@ -49,6 +49,7 @@ test("the room shows who is in it now, with an empty chat and feed", async ({
     "present.viewer",
   ]);
   const name = uniqueRoomName("people present");
+  // Open presence rows with nobody connected behind them (as a crash would leave them).
   const roomId = await seedRoom(context, {
     name,
     hostUserId: hostId,
@@ -57,21 +58,20 @@ test("the room shows who is in it now, with an empty chat and feed", async ({
       { userId: hostId, startedAt: minutesAgo(20) },
       { userId: viewerId, startedAt: minutesAgo(10) },
     ],
-    streams: [{ userId: hostId, startedAt: minutesAgo(15) }],
   });
   await signIn(context, { username: "present.me" });
   await page.goto(`/room/${roomId}`);
   await expect(page.getByRole("heading", { name })).toBeVisible();
   // Live since the room was created (a slow run may tick a minute over).
   await expect(page.getByText(/^LIVE · 2[01]m$/)).toBeVisible();
-  await expect(page.getByText("3/10")).toBeVisible();
   await expect(page.getByText("no messages yet")).toBeVisible();
 
+  // The realtime server's snapshot decides who is here: only the signed-in user.
+  await expect(page.getByText("1/10")).toBeVisible();
   await page.getByRole("tab", { name: /people/ }).click();
   const people = page.getByRole("tabpanel", { name: /people/ });
-  await expect(people).toContainText("present.host");
-  await expect(people).toContainText("present.viewer");
   await expect(people).toContainText("present.me (you)");
+  await expect(people).not.toContainText("present.viewer");
   await page.getByRole("tab", { name: /feed/ }).click();
   await expect(page.getByText("nothing has happened yet")).toBeVisible();
 });

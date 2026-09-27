@@ -6,6 +6,7 @@
 import type { IncomingHttpHeaders, IncomingMessage } from "node:http";
 import { type AuthSession, auth } from "../lib/auth.ts";
 import { isBanActive } from "../lib/ban.ts";
+import type { Caller } from "./caller.ts";
 
 type HeaderSource = Request | IncomingMessage | IncomingHttpHeaders | Headers;
 
@@ -47,4 +48,14 @@ export async function resolveSession(
 /** Returns the signed-in user's session, or null if absent, expired, or the user is banned. */
 export function getSessionFromRequest(source: HeaderSource): Promise<AuthSession | null> {
   return resolveSession(auth, toHeaders(source));
+}
+
+/** The caller a resolved session (or its absence) stands for. */
+export function callerFromSession(session: Pick<AuthSession, "user"> | null): Caller {
+  if (!session) return { user: null, role: "visitor" };
+  const { id, name, discordUsername, role } = session.user;
+  return {
+    user: { id, username: discordUsername ?? name },
+    role: role === "admin" ? "admin" : "user",
+  };
 }

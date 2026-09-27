@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { roomDetailFor } from "./room-view";
+import type { RoomParticipant } from "./realtime";
+import { roomDetailFor, withRoster } from "./room-view";
 import type { LiveRoomCard } from "./rooms";
 
 const host = { id: "u-host", username: "host.discord" };
@@ -64,5 +65,37 @@ describe("roomDetailFor", () => {
   it("handles a room whose host account is gone", () => {
     const detail = roomDetailFor(room({ host: null }), me);
     expect(detail).toMatchObject({ host: null, hostId: null });
+  });
+});
+
+describe("withRoster", () => {
+  const live = (person: { id: string; username: string }, role: RoomParticipant["role"]) => ({
+    userId: person.id,
+    username: person.username,
+    role,
+    joinedAt: "2026-09-27T10:00:00.000Z",
+  });
+
+  it("keeps who the server says is there, in place, and adds newcomers at the end", () => {
+    const shown = roomDetailFor(
+      room({ participants: [host, viewer], streamers: [host], participantCount: 2 }),
+      me,
+    ).participants;
+    const next = withRoster(
+      shown,
+      [live(me, "member"), live(host, "host"), live({ id: "u-new", username: "new" }, "member")],
+      me.id,
+    );
+    expect(next.map((p) => [p.name, p.role, p.streaming, p.size, !!p.viewerOnly])).toEqual([
+      ["host.discord", "host", true, "l", false],
+      ["me.discord", "member", false, undefined, true],
+      ["new", "member", false, "s", false],
+    ]);
+  });
+
+  it("adds you as a viewer when you weren't shown yet", () => {
+    expect(withRoster([], [live(me, "member")], me.id)).toEqual([
+      expect.objectContaining({ userId: "u-me", you: true, viewerOnly: true }),
+    ]);
   });
 });
