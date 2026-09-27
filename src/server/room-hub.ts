@@ -21,6 +21,7 @@ import {
   type ClientMessageOf,
   type ClientMessageType,
   type ErrorCode,
+  type LobbyRoomChange,
   PROTOCOL_VERSION,
   parseClientMessage,
   type RoomEvent,
@@ -30,6 +31,7 @@ import {
 } from "../lib/realtime.ts";
 import type { Caller, SignedInCaller } from "./caller.ts";
 import type { Clock } from "./clock.ts";
+import type { RoomAnnouncement } from "./room-announcements.ts";
 import type { RoomStore, StoredRoom } from "./room-store.ts";
 
 /** How the hub talks to one socket. */
@@ -78,10 +80,17 @@ interface LiveParticipant {
 interface LiveRoom {
   id: string;
   hostUserId: string | null;
+  isPrivate: boolean;
   roles: StoredRoom["roles"];
   /** By user id, in order of arrival. */
   participants: Map<string, LiveParticipant>;
 }
+
+/**
+ * What an anonymous (lobby-only) socket may send (ADR 20): the handshake and the heartbeat
+ * (`ping`, #25). Anything else is refused with `forbidden`.
+ */
+const ANONYMOUS_MESSAGES: ReadonlySet<string> = new Set(["hello", "ping"]);
 
 type Handler<T extends ClientMessageType> = (
   conn: HubConnection,
@@ -94,6 +103,8 @@ export class RoomHub {
   readonly #log: (message: string, error: unknown) => void;
   readonly #connections = new Set<HubConnection>();
   readonly #rooms = new Map<string, LiveRoom>();
+  /** Open sockets per signed-in user id: the online users (ADR 20). */
+  readonly #online = new Map<string, number>();
   #nextId = 1;
   #queue: Promise<void> = Promise.resolve();
 
@@ -107,7 +118,23 @@ export class RoomHub {
   connect(transport: Transport, caller: Caller): Connection {
     const conn = new HubConnection(this.#nextId++, caller, transport);
     this.#connections.add(conn);
+    const userId = caller.user?.id;
+    if (userId) {
+      void this.#enqueue(() => {
+        const sockets = this.#online.get(userId) ?? 0;
+        this.#online.set(userId, sockets + 1);
+        if (sockets === 0) this.#lobbyChanged();
+      });
+    }
     return conn;
+  }
+
+  /** A room change made outside the hub (./room-announcements.ts), for the lobby. */
+  announce(announcement: RoomAnnouncement): Promise<void> {
+    return this.#enqueue(() => {
+      if (announcement.isPrivate) return;
+      this.#lobbyChanged({ roomId: announcement.roomId, change: "created", participantCount: 0 });
+    });
   }
 
   /**
@@ -121,6 +148,9 @@ export class RoomHub {
       const parsed = parseClientMessage(data);
       if (!parsed.ok) return this.#refuse(conn, "bad_request", parsed.error, parsed.type);
       const message = parsed.message;
+      if (!conn.caller.user && !ANONYMOUS_MESSAGES.has(message.type)) {
+        return this.#refuse(conn, "forbidden", "Sign in first", message.type);
+      }
       if (message.type !== "hello" && !conn.greeted) {
         return this.#refuse(conn, "bad_request", "Send hello first", message.type);
       }
@@ -140,6 +170,7 @@ export class RoomHub {
       if (conn.closed) return;
       conn.closed = true;
       this.#connections.delete(conn);
+      this.#goOffline(conn);
       await this.#leaveRoom(conn);
     });
   }
@@ -173,6 +204,7 @@ export class RoomHub {
         v: PROTOCOL_VERSION,
         user: user ? { id: user.id, username: user.username } : null,
       });
+      this.#send(conn, { type: "lobby.snapshot", online: this.#online.size });
     },
 
     "room.join": async (conn, message) => {
@@ -220,6 +252,7 @@ export class RoomHub {
         joinedAt,
         conn,
       );
+      this.#lobbyRoomCount(room);
     },
 
     "room.leave": async (conn) => {
@@ -239,6 +272,7 @@ export class RoomHub {
     const room: LiveRoom = {
       id: stored.id,
       hostUserId: stored.hostUserId,
+      isPrivate: stored.isPrivate,
       roles: stored.roles,
       participants: new Map(),
     };
@@ -261,6 +295,7 @@ export class RoomHub {
     const at = this.#clock.now();
     this.#broadcast(room, { kind: "left", userId: participant.userId }, at);
     await this.#store.closePresence(room.id, participant.userId, at);
+    this.#lobbyRoomCount(room);
   }
 
   #roleOf(room: LiveRoom, userId: string): RoomRole {
@@ -299,6 +334,45 @@ export class RoomHub {
     for (const participant of room.participants.values()) {
       if (participant.connection !== except) this.#send(participant.connection, message);
     }
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // Lobby (ADR 20): online users and public room changes, for every greeted socket
+
+  /** `conn` closed: one socket fewer for its user, who goes offline with their last one. */
+  #goOffline(conn: HubConnection): void {
+    const userId = conn.caller.user?.id;
+    if (!userId) return;
+    const sockets = (this.#online.get(userId) ?? 1) - 1;
+    if (sockets > 0) {
+      this.#online.set(userId, sockets);
+      return;
+    }
+    this.#online.delete(userId);
+    this.#lobbyChanged();
+  }
+
+  /**
+   * Tell the lobby `room`'s participant count changed. Call it after the presence write, so a
+   * list refetched on this word already shows the change. Private rooms stay out of it.
+   */
+  #lobbyRoomCount(room: LiveRoom): void {
+    if (room.isPrivate) return;
+    this.#lobbyChanged({
+      roomId: room.id,
+      change: "count",
+      participantCount: room.participants.size,
+    });
+  }
+
+  /** Send the online count, and `room`'s change if given, to every greeted socket. */
+  #lobbyChanged(room?: LobbyRoomChange): void {
+    const message: ServerMessage = {
+      type: "lobby.changed",
+      online: this.#online.size,
+      ...(room ? { room } : {}),
+    };
+    for (const conn of this.#connections) if (conn.greeted) this.#send(conn, message);
   }
 
   // -------------------------------------------------------------------------------------------

@@ -21,9 +21,10 @@ import { SignInButton } from "~/components/sign-in-button";
 import { AppActionsContext } from "~/lib/app-actions";
 import { signOut } from "~/lib/auth-client";
 import { loadCurrentSession, useCurrentSession } from "~/lib/current-user";
+import { useLobbyLive } from "~/lib/lobby-live";
 import type { CreateRoomInput } from "~/lib/rooms";
 import { createRoomFn } from "~/lib/rooms.functions";
-import { liveRoomsQuery, roomKeys, roomQuery } from "~/lib/rooms.queries";
+import { roomKeys, roomQuery } from "~/lib/rooms.queries";
 import { SettingsProvider, useDocumentAppearance } from "~/lib/settings";
 import { getSettings } from "~/lib/settings-fns";
 import type { RouterContext } from "~/router";
@@ -34,15 +35,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
   beforeLoad: async () => ({ session: await loadCurrentSession() }),
   // Initial appearance settings, rendered into <html> during SSR. After that the client's copy
   // is authoritative, so this only reloads when the router is invalidated (e.g. sign-out).
-  // It also seeds the live rooms behind the rail's badge (on every page); the badge then reads
-  // the query cache, so it stays fresh even though this loader rarely reruns.
-  loader: async ({ context }) => {
-    const [settings] = await Promise.all([
-      getSettings(),
-      context.queryClient.ensureQueryData(liveRoomsQuery()),
-    ]);
-    return settings;
-  },
+  loader: () => getSettings(),
   staleTime: Number.POSITIVE_INFINITY,
   head: () => ({
     meta: [
@@ -70,7 +63,8 @@ function AppShell() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { user, role } = useCurrentSession();
-  const liveCount = useQuery(liveRoomsQuery()).data?.length ?? 0;
+  // The page's realtime socket, reconnected as the session changes (ADR 20).
+  useLobbyLive(user?.id ?? null);
   const [createOpen, setCreateOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [prompt, setPrompt] = useState<SignInPrompt | null>(null);
@@ -120,7 +114,6 @@ function AppShell() {
       <div className="grid grid-rows-1 h-[100dvh] bg-bg text-fg">
         <div className="grid grid-cols-[64px_minmax(0,1fr)] max-sm:grid-cols-1 max-sm:grid-rows-[minmax(0,1fr)_auto] min-h-0 overflow-hidden">
           <SideNav
-            liveCount={liveCount}
             isAdmin={role === "admin"}
             onCreate={actions.openCreateRoom}
             profileMenu={

@@ -51,10 +51,10 @@ describe("upgrade", () => {
     });
   });
 
-  it("refuses sockets without a valid session (anonymous lobby comes later)", async () => {
-    expect(await h.upgradeStatus(null)).toBe(401);
-    expect(await h.upgradeStatus({ ...ana, cookie: "better-auth.session_token=forged" })).toBe(401);
-    expect(await h.upgradeStatus(ana)).toBe(101);
+  it("takes sockets without a valid session as anonymous (lobby.test.ts)", async () => {
+    const forged = await h.connect({ ...ana, cookie: "better-auth.session_token=forged" });
+    forged.send({ type: "hello", v: PROTOCOL_VERSION });
+    expect(await forged.waitFor("welcome")).toMatchObject({ user: null });
   });
 
   it("refuses upgrades from another origin", async () => {
@@ -214,21 +214,5 @@ describe("join and leave", () => {
       { userId: ana.id, startedAt: new Date("2026-09-01T11:00:00.000Z"), endedAt: lastSeen },
       { userId: ana.id, startedAt: new Date(T0), endedAt: null },
     ]);
-  });
-
-  it("refuses room messages on a connection that was never signed in", async () => {
-    // Anonymous sockets can't reach the hub yet (401 above), so drive its interface directly.
-    const sent: unknown[] = [];
-    const conn = h.hub.connect(
-      { send: (m) => sent.push(m), close: () => {} },
-      { user: null, role: "visitor" },
-    );
-    await h.hub.handle(conn, JSON.stringify({ type: "hello", v: PROTOCOL_VERSION }));
-    await h.hub.handle(conn, JSON.stringify({ type: "room.join", roomId }));
-    expect(sent).toEqual([
-      { type: "welcome", v: PROTOCOL_VERSION, user: null },
-      expect.objectContaining({ type: "error", code: "forbidden", re: "room.join" }),
-    ]);
-    await h.hub.disconnect(conn);
   });
 });

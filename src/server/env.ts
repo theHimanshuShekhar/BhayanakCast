@@ -28,6 +28,8 @@ const baseSchema = z.object({
   ADMIN_DISCORD_IDS: commaList,
   CLOUDFLARE_TURN_KEY_ID: z.string().optional(),
   CLOUDFLARE_TURN_API_TOKEN: z.string().optional(),
+  /** Open anonymous (lobby-only) realtime sockets allowed per client IP (ADR 20). */
+  REALTIME_ANONYMOUS_SOCKETS_PER_IP: z.coerce.number().int().positive().default(20),
   /** `1` enables the test-only sign-in outside tests (e2e). See `isTestSignInEnabled`. */
   E2E_AUTH: z.string().optional(),
 });

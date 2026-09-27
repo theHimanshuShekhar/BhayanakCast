@@ -52,11 +52,13 @@ test("the home sidebar counts real rooms, members and lifetime stats", async ({
   expect(await community(page, "Rooms Hosted")).toBeGreaterThanOrEqual(hostedBefore + 40);
 });
 
-test("the online tile waits for the realtime server", async ({ page }) => {
+test("every Right Now tile shows a number, the online count from the lobby socket", async ({
+  page,
+}) => {
   await page.goto("/");
   const panel = page.getByRole("region", { name: "Right Now" });
-  await expect(panel.getByTitle("Live online count coming soon")).toContainText("—");
-  // The other tiles show numbers.
-  expect(Number.isInteger(await rightNow(page, "Watching"))).toBe(true);
-  expect(Number.isInteger(await rightNow(page, "Streaming"))).toBe(true);
+  await expect(panel.getByTitle("Connecting to the live count")).toHaveCount(0);
+  for (const label of ["Online", "Live Rooms", "Watching", "Streaming"]) {
+    expect(Number.isInteger(await rightNow(page, label)), label).toBe(true);
+  }
 });

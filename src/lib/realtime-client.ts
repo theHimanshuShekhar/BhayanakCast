@@ -69,6 +69,24 @@ export class RealtimeClient {
     this.#ws?.close(1000, "stopped");
   }
 
+  /**
+   * Drop the socket and connect again now, e.g. once the session changed: the server reads the
+   * session cookie at the upgrade only (ADR 20: an anonymous socket becomes authenticated by
+   * reconnecting after sign-in). The room the page is in is re-joined as after any reconnect.
+   * A no-op while stopped.
+   */
+  restart(): void {
+    if (this.#stopped) return;
+    if (this.#retry) clearTimeout(this.#retry);
+    this.#retry = null;
+    const old = this.#ws;
+    this.#ws = null;
+    this.#welcomed = false;
+    this.#attempt = 0;
+    old?.close(1000, "restarting");
+    this.#open();
+  }
+
   /** Every server message, in order. Returns an unsubscribe function. */
   subscribe(listener: Listener<ServerMessage>): () => void {
     this.#messageListeners.add(listener);
@@ -116,6 +134,7 @@ export class RealtimeClient {
       ws.send(JSON.stringify({ type: "hello", v: PROTOCOL_VERSION } satisfies ClientMessage));
     });
     ws.addEventListener("message", (event) => {
+      if (this.#ws !== ws) return; // A socket `restart` dropped.
       const parsed = parseServerMessage(typeof event.data === "string" ? event.data : null);
       if (!parsed.ok) {
         console.warn("[realtime] ignoring an invalid server message", parsed.error);
