@@ -38,11 +38,13 @@ test("two signed-in users in one room see each other arrive and leave", async ({
     await expect(hostPeople).not.toContainText("rt.guest");
     await expect(page.getByText("1/10")).toBeVisible();
 
-    // Coming back, and then closing the tab, work the same way.
+    // Coming back works the same way; closing the tab counts as leaving once the 30s
+    // reconnect grace runs out.
     await guest.goto(`/room/${roomId}`);
     await expect(hostPeople).toContainText("rt.guest");
+    test.setTimeout(120_000);
     await guest.close();
-    await expect(hostPeople).not.toContainText("rt.guest");
+    await expect(hostPeople).not.toContainText("rt.guest", { timeout: 45_000 });
   } finally {
     await guestContext.close();
   }

@@ -4,7 +4,12 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
-import { PROTOCOL_VERSION, type ServerMessage, type ServerMessageOf } from "../lib/realtime.ts";
+import {
+  IDLE_TIMEOUT_MS,
+  PROTOCOL_VERSION,
+  type ServerMessage,
+  type ServerMessageOf,
+} from "../lib/realtime.ts";
 import { RealtimeClient } from "../lib/realtime-client.ts";
 import {
   type RealtimeHarness,
@@ -13,8 +18,10 @@ import {
   type TestClient,
   type TestUser,
 } from "./realtime-harness.ts";
+import { RECONNECT_GRACE_MS } from "./room-hub.ts";
 
 let h: RealtimeHarness;
+const SECOND = 1_000;
 
 async function start(options?: RealtimeHarnessOptions) {
   h = await startRealtimeHarness(options);
@@ -166,6 +173,7 @@ describe("public room changes", () => {
     b.send({ type: "room.leave" });
     expect((await nextRoomChange(anon)).room).toMatchObject({ roomId, participantCount: 1 });
     await a.close();
+    await h.advance(RECONNECT_GRACE_MS); // a dropped socket leaves the room after the grace
     expect(await nextRoomChange(anon)).toEqual({
       type: "lobby.changed",
       online: 1,
@@ -202,6 +210,49 @@ describe("public room changes", () => {
       expect(JSON.stringify(lobby)).not.toContain(privateRoom);
     }
     expect(JSON.stringify([...anon.received, ...b.received])).not.toContain(privateRoom);
+  });
+});
+
+describe("with the reconnect grace", () => {
+  it("drops a user from online with their last socket, but the room count after the grace", async () => {
+    await start();
+    const [ana, bo] = [await h.createUser("ana"), await h.createUser("bo")];
+    const { client: anon } = await visitor();
+    const roomId = await h.createRoom(ana);
+    const a = await h.connectAs(ana);
+    await a.join(roomId);
+    const b = await h.connectAs(bo);
+    await b.join(roomId);
+    await anon.waitFor("lobby.changed", (m) => m.room?.participantCount === 2);
+    await h.settled();
+    const seenBefore = anon.received.length;
+
+    await b.close();
+    // Online follows open sockets: bo is offline at once.
+    const changesSince = () =>
+      anon.received.slice(seenBefore).filter((m) => m.type === "lobby.changed");
+    await expect.poll(changesSince).toEqual([{ type: "lobby.changed", online: 1 }]);
+    await h.advance(RECONNECT_GRACE_MS - SECOND);
+    expect(changesSince()).toEqual([{ type: "lobby.changed", online: 1 }]);
+
+    // Once the grace runs out bo leaves the room, and the lobby hears the new count.
+    await h.advance(SECOND);
+    await expect.poll(changesSince).toEqual([
+      { type: "lobby.changed", online: 1 },
+      {
+        type: "lobby.changed",
+        online: 1,
+        room: { roomId, change: "count", participantCount: 1 },
+      },
+    ]);
+  });
+
+  it("keeps a heartbeating anonymous socket open past the idle timeout, pings not refused", async () => {
+    await start();
+    const { client: anon } = await visitor();
+    await h.advance(2 * IDLE_TIMEOUT_MS);
+    expect(anon.isClosed).toBe(false);
+    expect(anon.pending()).toEqual([]);
   });
 });
 

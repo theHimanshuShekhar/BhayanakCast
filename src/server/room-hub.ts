@@ -25,6 +25,8 @@ import {
   type ClientMessageOf,
   type ClientMessageType,
   type ErrorCode,
+  IDLE_CLOSE_CODE,
+  IDLE_TIMEOUT_MS,
   type LobbyRoomChange,
   PROTOCOL_VERSION,
   parseClientMessage,
@@ -34,9 +36,23 @@ import {
   type ServerMessage,
 } from "../lib/realtime.ts";
 import type { Caller, SignedInCaller } from "./caller.ts";
-import type { Clock } from "./clock.ts";
+import type { Clock, Timer } from "./clock.ts";
 import type { RoomAnnouncement } from "./room-announcements.ts";
-import type { RoomStore, StoredRoom } from "./room-store.ts";
+import type { PresenceSeen, RoomStore, StoredRoom } from "./room-store.ts";
+
+/**
+ * How long a participant whose socket closed stays in the room before it counts as leaving
+ * (ADR 12). Rejoining within it continues the same presence interval, with no left/joined.
+ */
+export const RECONNECT_GRACE_MS = 30_000;
+/** How often open presence intervals get their `last_seen_at` checkpoint (ADR 12). */
+export const CHECKPOINT_INTERVAL_MS = 60_000;
+/**
+ * On boot, an open presence interval last seen longer ago than this is from a server that was
+ * down too long to resume: it closes at its last-seen time straight away. Fresher ones wait
+ * one reconnect grace for their user to come back (restart recovery, ADR 4 addendum).
+ */
+export const RESTORE_STALE_AFTER_MS = CHECKPOINT_INTERVAL_MS + RECONNECT_GRACE_MS;
 
 /** How the hub talks to one socket. */
 export interface Transport {
@@ -66,6 +82,8 @@ class HubConnection implements Connection {
   closed = false;
   /** The room this connection is in, if any. */
   roomId: string | null = null;
+  /** Closes the socket if it stays silent for `IDLE_TIMEOUT_MS` (heartbeats, ADR 9). */
+  idle: Timer | null = null;
 
   constructor(id: number, caller: Caller, transport: Transport) {
     this.id = id;
@@ -78,7 +96,10 @@ interface LiveParticipant {
   userId: string;
   username: string;
   joinedAt: Date;
+  /** Their socket; a closed one while they're in the reconnect grace. */
   connection: HubConnection;
+  /** Set while their socket is gone: since when, and the timer that ends their presence. */
+  grace?: { since: Date; timer: Timer };
 }
 
 interface LiveRoom {
@@ -93,10 +114,13 @@ interface LiveRoom {
 }
 
 /**
- * What an anonymous (lobby-only) socket may send (ADR 20): the handshake and the heartbeat
- * (`ping`, #25). Anything else is refused with `forbidden`.
+ * What an anonymous (lobby-only) socket may send (ADR 20): the handshake and the heartbeat.
+ * Anything else is refused with `forbidden`.
  */
-const ANONYMOUS_MESSAGES: ReadonlySet<string> = new Set(["hello", "ping"]);
+const ANONYMOUS_MESSAGES: ReadonlySet<ClientMessageType> = new Set<ClientMessageType>([
+  "hello",
+  "ping",
+]);
 
 type Handler<T extends ClientMessageType> = (
   conn: HubConnection,
@@ -121,6 +145,9 @@ export class RoomHub {
     this.#clock = deps.clock;
     this.#store = deps.store;
     this.#log = deps.log ?? ((message, error) => console.error(`[realtime] ${message}`, error));
+    // Restart recovery: the first thing on the queue, so joins wait for it.
+    void this.#enqueue(() => this.#restore());
+    this.#scheduleCheckpoint();
   }
 
   /** Register a newly opened socket for `caller` (a visitor for an anonymous socket). */
@@ -135,6 +162,7 @@ export class RoomHub {
         if (sockets === 0) this.#lobbyChanged();
       });
     }
+    this.#armIdle(conn);
     return conn;
   }
 
@@ -152,6 +180,8 @@ export class RoomHub {
    */
   handle(connection: Connection, data: unknown): Promise<void> {
     const conn = this.#own(connection);
+    // Any frame counts as a sign of life.
+    if (!conn.closed) this.#armIdle(conn);
     return this.#enqueue(async () => {
       if (conn.closed) return;
       const parsed = parseClientMessage(data);
@@ -172,16 +202,13 @@ export class RoomHub {
     });
   }
 
-  /** The socket closed. Leaves its room (immediately for now; the reconnect grace is #25). */
+  /**
+   * The socket closed. Its user stays in their room for the reconnect grace
+   * (`RECONNECT_GRACE_MS`); rejoining within it resumes their presence.
+   */
   disconnect(connection: Connection): Promise<void> {
     const conn = this.#own(connection);
-    return this.#enqueue(async () => {
-      if (conn.closed) return;
-      conn.closed = true;
-      this.#connections.delete(conn);
-      this.#goOffline(conn);
-      await this.#leaveRoom(conn);
-    });
+    return this.#enqueue(() => this.#drop(conn));
   }
 
   /** Resolves once every queued operation (messages, disconnects, timers) has finished. */
@@ -233,11 +260,14 @@ export class RoomHub {
       const stored = await this.#store.findRoomFor(caller, roomId);
       if (!stored) return this.#refuse(conn, "not_found", "That room isn't live", message.type);
       const room = this.#rooms.get(roomId) ?? this.#addRoom(stored);
+      await this.#endGraceElsewhere(user.id, roomId);
 
       const existing = room.participants.get(user.id);
       if (existing) {
-        // The same user from another socket (a reload racing its old socket's close): the new
-        // socket takes over the presence, with no leave/join churn. Takeover notices are #26.
+        // The same user from another socket (a reload racing its old socket's close, or a
+        // return within the reconnect grace): the new socket takes over the presence and its
+        // open interval, with no leave/join churn. Takeover notices are #26.
+        this.#cancelGrace(existing);
         existing.connection.roomId = null;
         existing.connection = conn;
         conn.roomId = roomId;
@@ -266,6 +296,10 @@ export class RoomHub {
 
     "room.leave": async (conn) => {
       await this.#leaveRoom(conn);
+    },
+
+    ping: (conn) => {
+      this.#send(conn, { type: "pong" });
     },
 
     "chat.send": (conn, message) => this.#chat(conn, message),
@@ -301,13 +335,151 @@ export class RoomHub {
     const userId = conn.caller.user?.id;
     const participant = userId ? room?.participants.get(userId) : undefined;
     if (!room || !participant || participant.connection !== conn) return;
+    await this.#removeParticipant(room, participant, this.#clock.now());
+  }
+
+  /**
+   * `participant` left `room` at `at` (now for an explicit leave; when their socket closed for
+   * an expired reconnect grace): tell everyone and close the presence interval at `at`.
+   */
+  async #removeParticipant(room: LiveRoom, participant: LiveParticipant, at: Date): Promise<void> {
+    this.#cancelGrace(participant);
     room.participants.delete(participant.userId);
     // Lifecycle (#31) keeps empty rooms around for 5 minutes; for now they're dropped.
     if (room.participants.size === 0) this.#rooms.delete(room.id);
-    const at = this.#clock.now();
     this.#broadcast(room, { kind: "left", userId: participant.userId }, at);
     await this.#store.closePresence(room.id, participant.userId, at);
     this.#lobbyRoomCount(room);
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // Resilience (#25): reconnect grace, heartbeats, checkpoints and restart recovery
+
+  /** `conn`'s socket is gone: forget it, and start its user's reconnect grace in their room. */
+  async #drop(conn: HubConnection): Promise<void> {
+    if (conn.closed) return;
+    conn.closed = true;
+    conn.idle?.cancel();
+    conn.idle = null;
+    this.#connections.delete(conn);
+    // Online follows open sockets (ADR 20), so this is immediate; the room count waits out the
+    // grace (#removeParticipant).
+    this.#goOffline(conn);
+    const room = conn.roomId ? this.#rooms.get(conn.roomId) : undefined;
+    const userId = conn.caller.user?.id;
+    const participant = room && userId ? room.participants.get(userId) : undefined;
+    if (!room || !participant || participant.connection !== conn) return;
+    const since = this.#clock.now();
+    this.#startGrace(room, participant, since);
+    // If the server dies during the grace, the interval closes here, not at an older checkpoint.
+    await this.#store.checkpointPresence([
+      { roomId: room.id, userId: participant.userId, at: since },
+    ]);
+  }
+
+  /** Keep `participant` in `room` for the reconnect grace, as gone since `since`. */
+  #startGrace(room: LiveRoom, participant: LiveParticipant, since: Date): void {
+    this.#cancelGrace(participant);
+    const timer = this.#setTimer(RECONNECT_GRACE_MS, async () => {
+      if (participant.grace?.timer !== timer) return;
+      if (this.#rooms.get(room.id)?.participants.get(participant.userId) !== participant) return;
+      await this.#removeParticipant(room, participant, since);
+    });
+    participant.grace = { since, timer };
+  }
+
+  #cancelGrace(participant: LiveParticipant): void {
+    participant.grace?.timer.cancel();
+    participant.grace = undefined;
+  }
+
+  /** `userId` is joining `roomId`: a presence of theirs left in grace elsewhere ends now. */
+  async #endGraceElsewhere(userId: string, roomId: string): Promise<void> {
+    for (const room of this.#rooms.values()) {
+      if (room.id === roomId) continue;
+      const participant = room.participants.get(userId);
+      if (participant?.grace)
+        await this.#removeParticipant(room, participant, participant.grace.since);
+    }
+  }
+
+  /** (Re)start `conn`'s idle timer: silent for `IDLE_TIMEOUT_MS`, it's closed and dropped. */
+  #armIdle(conn: HubConnection): void {
+    conn.idle?.cancel();
+    const timer = this.#setTimer(IDLE_TIMEOUT_MS, async () => {
+      if (conn.idle !== timer || conn.closed) return;
+      try {
+        conn.transport.close(IDLE_CLOSE_CODE, "idle timeout");
+      } catch (error) {
+        this.#log("closing an idle socket failed", error);
+      }
+      await this.#drop(conn);
+    });
+    conn.idle = timer;
+  }
+
+  #scheduleCheckpoint(): void {
+    // Rescheduled when it fires, not when the queue gets to it, so it doesn't drift.
+    this.#clock.setTimer(CHECKPOINT_INTERVAL_MS, () => {
+      const at = this.#clock.now();
+      this.#scheduleCheckpoint();
+      void this.#enqueue(() => this.#checkpoint(at));
+    });
+  }
+
+  /** Write `last_seen_at = at` for everyone present with a socket (ADR 12). */
+  async #checkpoint(at: Date): Promise<void> {
+    const seen: PresenceSeen[] = [];
+    for (const room of this.#rooms.values()) {
+      for (const participant of room.participants.values()) {
+        // Someone in grace was last seen when their socket closed, which #drop wrote.
+        if (!participant.grace) seen.push({ roomId: room.id, userId: participant.userId, at });
+      }
+    }
+    await this.#store.checkpointPresence(seen);
+  }
+
+  /**
+   * Restart recovery (ADR 4 addendum): reload live rooms with their roles, and treat everyone
+   * whose presence interval the last server left open as having just disconnected. Those who
+   * come back within the reconnect grace continue their interval; the rest close at their
+   * last-seen checkpoint (ADR 12). Intervals too old to resume close at once.
+   */
+  async #restore(): Promise<void> {
+    const now = this.#clock.now();
+    for (const stored of await this.#store.loadLiveRooms()) {
+      if (this.#rooms.has(stored.id)) continue;
+      const room = this.#addRoom(stored);
+      for (const presence of stored.presences) {
+        if (now.getTime() - presence.lastSeenAt.getTime() > RESTORE_STALE_AFTER_MS) {
+          await this.#store.closePresence(room.id, presence.userId, presence.lastSeenAt);
+          continue;
+        }
+        const participant: LiveParticipant = {
+          userId: presence.userId,
+          username: presence.username,
+          joinedAt: presence.startedAt,
+          connection: this.#goneConnection(presence.userId, presence.username),
+        };
+        room.participants.set(participant.userId, participant);
+        this.#startGrace(room, participant, presence.lastSeenAt);
+      }
+      // Room ending (#31): a room restored with nobody to wait for (or whose restored people
+      // never return, via #removeParticipant) must end 5 minutes after boot at its last-seen
+      // time (ADR 14): `rooms.lastEmptyAt`, else the latest `presences[].lastSeenAt`.
+      if (room.participants.size === 0) this.#rooms.delete(room.id);
+    }
+  }
+
+  /** A stand-in, already-closed socket for someone restored from the DB with none yet. */
+  #goneConnection(userId: string, username: string): HubConnection {
+    const conn = new HubConnection(
+      this.#nextId++,
+      { user: { id: userId, username }, role: "user" },
+      { send: () => {}, close: () => {} },
+    );
+    conn.closed = true;
+    return conn;
   }
 
   #roleOf(room: LiveRoom, userId: string): RoomRole {
@@ -453,6 +625,17 @@ export class RoomHub {
     });
     this.#queue = run;
     return run;
+  }
+
+  /**
+   * Run `operation` on the queue after `ms` (hub timers never run outside it). It gets the
+   * time the timer fired: by the time the queue reaches it the clock may have moved on.
+   */
+  #setTimer(ms: number, operation: (firedAt: Date) => Promise<void> | void): Timer {
+    return this.#clock.setTimer(ms, () => {
+      const firedAt = this.#clock.now();
+      void this.#enqueue(() => operation(firedAt));
+    });
   }
 
   #send(conn: HubConnection, message: ServerMessage): void {
