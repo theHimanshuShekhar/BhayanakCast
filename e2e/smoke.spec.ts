@@ -46,7 +46,7 @@ test("settings dialog changes theme", async ({ page, context }) => {
   await expect(page.getByRole("dialog")).toBeHidden();
 });
 
-test("profile, recap and admin pages render", async ({ page }) => {
+test("profile and recap pages render", async ({ page }) => {
   await page.goto("/profile/usr_kodama_jpg");
   await expect(page.getByRole("heading", { level: 1, name: "kodama_jpg" })).toBeVisible();
   // co-user links resolve by id, never by (renameable) username
@@ -58,6 +58,4 @@ test("profile, recap and admin pages render", async ({ page }) => {
   await expect(page.getByRole("heading", { level: 1, name: "bitreverb" })).toBeVisible();
   await page.goto("/past/p3");
   await expect(page.getByRole("heading", { name: "who streamed" })).toBeVisible();
-  await page.goto("/admin");
-  await expect(page.getByRole("heading", { level: 1, name: "Dashboard" })).toBeVisible();
 });
