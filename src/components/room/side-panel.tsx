@@ -1,9 +1,12 @@
 // Room sidebar — chat / people / feed tabs (Base UI Tabs). Ported from docs/design/prototype/room.jsx.
 import { Tabs } from "@base-ui/react/tabs";
 import { type FormEvent, Fragment, type ReactNode, useEffect, useRef, useState } from "react";
-import type { ActivityItem, ChatMessage, Participant, RoomDetail, RoomRole } from "~/lib/types";
+import { tokenizeChat } from "~/lib/chat-text";
+import { CHAT_MAX_LENGTH } from "~/lib/realtime";
+import type { ActivityItem, ChatMessage, Participant, RoomRole } from "~/lib/types";
 import { Icon } from "../icons";
 import { Avatar, Chip, IconBtn } from "../ui";
+import { EmojiPicker } from "./emoji-picker";
 
 const ROLE_BADGE: Partial<Record<RoomRole, string>> = {
   mod: "bg-primary-soft text-primary-strong border border-[color-mix(in_oklch,var(--color-primary)_35%,transparent)]",
@@ -17,25 +20,51 @@ const RoleBadge = ({ role }: { role: RoomRole }) => (
   </span>
 );
 
-const renderMentions = (text: string) =>
-  text.split(/(@[\w.]+)/g).map((part, i) =>
-    part.startsWith("@") ? (
-      // biome-ignore lint/suspicious/noArrayIndexKey: split parts have no stable identity
-      <span key={i} className="text-primary font-semibold">
-        {part}
-      </span>
-    ) : (
-      part
-    ),
-  );
+/** Chat text with @mentions highlighted (yours more strongly) and http(s) URLs as safe links. */
+const ChatText = ({ text, me }: { text: string; me: string | null }) =>
+  tokenizeChat(text).map((token, i) => {
+    switch (token.kind) {
+      case "mention":
+        return (
+          <span
+            // biome-ignore lint/suspicious/noArrayIndexKey: tokens have no stable identity
+            key={i}
+            className={`text-primary font-semibold ${token.username === me ? "bg-primary-soft rounded px-0.5" : ""}`}
+          >
+            {token.text}
+          </span>
+        );
+      case "link":
+        return (
+          <a
+            // biome-ignore lint/suspicious/noArrayIndexKey: tokens have no stable identity
+            key={i}
+            href={token.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary underline underline-offset-2 break-all"
+          >
+            {token.text}
+          </a>
+        );
+      default:
+        // biome-ignore lint/suspicious/noArrayIndexKey: tokens have no stable identity
+        return <Fragment key={i}>{token.text}</Fragment>;
+    }
+  });
+
+const hhmm = (iso: string) => {
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+};
 
 const ChatLine = ({
   m,
-  host,
+  me,
   onOpenProfile,
 }: {
   m: ChatMessage;
-  host: string | null;
+  me: string | null;
   onOpenProfile: (u: string) => void;
 }) => {
   if (m.system)
@@ -44,7 +73,7 @@ const ChatLine = ({
         — {m.text} —
       </div>
     );
-  const role: RoomRole = m.user === host ? "host" : m.role;
+  const role: RoomRole = m.role;
   const whoCls = role === "member" ? "" : "text-primary-strong";
   return (
     <div className="flex gap-2 py-1.5">
@@ -66,9 +95,13 @@ const ChatLine = ({
             {m.user}
           </button>
           {role !== "member" && <RoleBadge role={role} />}
-          <span className="text-[10px] text-subtle">{m.ts}</span>
+          <time dateTime={m.at} className="text-[10px] text-subtle">
+            {hhmm(m.at)}
+          </time>
         </div>
-        <div className="text-xs text-fg break-words">{renderMentions(m.text)}</div>
+        <div className="text-xs text-fg break-words">
+          <ChatText text={m.text} me={me} />
+        </div>
       </div>
     </div>
   );
@@ -129,40 +162,93 @@ const tabCls =
   "flex-1 h-8 text-[11px] rounded-lg inline-flex items-center justify-center gap-1.5 cursor-pointer text-muted hover:text-fg outline-0 focus-visible:outline-2 focus-visible:outline-primary data-active:bg-surface-2 data-active:text-fg data-active:shadow-card";
 const panelCls = "flex-1 min-h-0 overflow-auto px-3 py-2.5 outline-0";
 
+const NOTICE_MS = 4_000;
+
 export const RoomSide = ({
-  room,
   participants,
   chat,
+  chatError,
   activity,
   onSend,
   onOpenProfile,
   open,
   onClose,
 }: {
-  room: RoomDetail;
   participants: Participant[];
   chat: ChatMessage[];
+  /** The server's latest refusal of a chat message; a new object each time. */
+  chatError: { message: string } | null;
   activity: ActivityItem[];
-  onSend: (text: string) => void;
+  /** Send a chat message; false if it couldn't be sent (not connected). */
+  onSend: (text: string) => boolean;
   onOpenProfile: (username: string) => void;
   open: boolean;
   onClose: () => void;
 }) => {
   const [tab, setTab] = useState<string>("chat");
   const [draft, setDraft] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
   const chatRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  /** The last message sent, restored to the composer if the server refuses it. */
+  const lastSent = useRef<string | null>(null);
+  /** Where to put the caret after the draft changes (an emoji was inserted). */
+  const caret = useRef<number | null>(null);
+  const me = participants.find((p) => p.you)?.name ?? null;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: scroll on new messages / tab switch
   useEffect(() => {
     if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
   }, [chat.length, tab]);
 
+  useEffect(() => {
+    if (!chatError) return;
+    setNotice(chatError.message);
+    const refused = lastSent.current;
+    lastSent.current = null;
+    if (refused) setDraft((d) => d || refused);
+  }, [chatError]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs after each draft change
+  useEffect(() => {
+    const at = caret.current;
+    const input = inputRef.current;
+    if (at === null || !input) return;
+    caret.current = null;
+    // After the picker has closed and handed focus back to the input.
+    requestAnimationFrame(() => {
+      input.focus();
+      input.setSelectionRange(at, at);
+    });
+  }, [draft]);
+
   const submit = (e: FormEvent) => {
     e.preventDefault();
     const text = draft.trim();
     if (!text) return;
-    onSend(text);
+    if (!onSend(text)) {
+      setNotice("not connected. trying to reconnect…");
+      return;
+    }
+    lastSent.current = text;
+    setNotice(null);
     setDraft("");
+  };
+
+  /** Put `emoji` in the draft at the caret (replacing any selection), within the length cap. */
+  const insertEmoji = (emoji: string) => {
+    const input = inputRef.current;
+    const start = input?.selectionStart ?? draft.length;
+    const end = input?.selectionEnd ?? draft.length;
+    if (draft.length - (end - start) + emoji.length > CHAT_MAX_LENGTH) return;
+    caret.current = start + emoji.length;
+    setDraft(draft.slice(0, start) + emoji + draft.slice(end));
   };
 
   const groups: [string, Participant[]][] = [
@@ -202,22 +288,35 @@ export const RoomSide = ({
           <div className={panelCls} ref={chatRef} aria-live="polite">
             {chat.length === 0 && <EmptyNote>no messages yet. say hi!</EmptyNote>}
             {chat.map((m) => (
-              <ChatLine key={m.id} m={m} host={room.host} onOpenProfile={onOpenProfile} />
+              <ChatLine key={m.id} m={m} me={me} onOpenProfile={onOpenProfile} />
             ))}
           </div>
           <div className="px-3 py-2.5 border-t border-border-subtle bg-canvas">
+            <p
+              role="status"
+              className={`m-0 text-[10.5px] text-live-ink ${notice ? "mb-1.5" : "sr-only"}`}
+            >
+              {notice}
+            </p>
             <form
-              className="flex items-center gap-1.5 bg-surface border border-border rounded-xl py-1 pr-1 pl-3 focus-within:border-primary"
+              className="flex items-center gap-1 bg-surface border border-border rounded-xl py-1 pr-1 pl-3 focus-within:border-primary"
               onSubmit={submit}
             >
               <input
+                ref={inputRef}
                 aria-label="Chat message"
                 className="flex-1 min-w-0 bg-transparent border-0 outline-0 h-8 text-xs"
                 placeholder="say something…"
-                maxLength={500}
+                maxLength={CHAT_MAX_LENGTH}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
               />
+              {draft.length > CHAT_MAX_LENGTH - 50 && (
+                <span className="text-[10px] text-subtle tabular-nums" aria-hidden="true">
+                  {CHAT_MAX_LENGTH - draft.length}
+                </span>
+              )}
+              <EmojiPicker onPick={insertEmoji} returnFocus={inputRef} />
               <IconBtn type="submit" aria-label="Send" className="!w-7 !h-7 !text-primary">
                 <Icon.Send size={14} />
               </IconBtn>
