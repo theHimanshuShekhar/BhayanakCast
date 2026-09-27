@@ -6,8 +6,9 @@ import { RoomSide } from "~/components/room/side-panel";
 import { type ModAction, type Reaction, Tile } from "~/components/room/tile";
 import { Btn, Chip } from "~/components/ui";
 import { useAppActions } from "~/lib/app-actions";
+import { useCurrentSession } from "~/lib/current-user";
 import { MAX_STREAMERS } from "~/lib/format";
-import { ACTIVITY, buildRoomDetail, CURRENT_USER, userIdOf } from "~/lib/mock-data";
+import { ACTIVITY, buildRoomDetail, userIdOf } from "~/lib/mock-data";
 import { findRoom } from "~/lib/rooms-store";
 import { useSettings } from "~/lib/settings";
 import type { ActivityItem, ChatMessage, Participant, RoomDetail, RoomRole } from "~/lib/types";
@@ -18,6 +19,7 @@ export const Route = createFileRoute("/room/$roomId")({
 
 function RoomRoute() {
   const { roomId } = Route.useParams();
+  const { user } = useCurrentSession();
   const room = findRoom(roomId);
   if (!room) {
     return (
@@ -30,8 +32,8 @@ function RoomRoute() {
       </div>
     );
   }
-  // key resets all room state when navigating between rooms
-  return <RoomPage key={room.id} detail={buildRoomDetail(room)} />;
+  // key resets all room state when navigating between rooms or the signed-in user changes
+  return <RoomPage key={`${room.id}:${user?.id ?? ""}`} detail={buildRoomDetail(room, user)} />;
 }
 
 const DENSITY_CLS = {
@@ -84,7 +86,7 @@ function RoomPage({ detail }: { detail: RoomDetail }) {
   const [sideOpen, setSideOpen] = useState(false);
 
   const me = participants.find((p) => p.you);
-  const myRole: RoomRole = detail.host === CURRENT_USER ? "host" : (me?.role ?? "member");
+  const myRole: RoomRole = me && detail.hostId === me.userId ? "host" : (me?.role ?? "member");
   const streamingCount = participants.filter((p) => p.streaming).length;
   const canStartShare = !!me?.streaming || streamingCount < MAX_STREAMERS;
 
@@ -111,14 +113,16 @@ function RoomPage({ detail }: { detail: RoomDetail }) {
     if (!me) return;
     const streaming = !me.streaming;
     updateMe({ streaming, screen: "browser" });
-    log(CURRENT_USER, streaming ? "started streaming" : "stopped streaming");
+    log(me.name, streaming ? "started streaming" : "stopped streaming");
   };
 
-  const send = (text: string) =>
+  const send = (text: string) => {
+    if (!me) return;
     setChat((c) => [
       ...c,
-      { id: `c${Date.now()}`, user: CURRENT_USER, role: myRole, ts: nowTs(), text },
+      { id: `c${Date.now()}`, user: me.name, role: myRole, ts: nowTs(), text },
     ]);
+  };
 
   const react = (emoji: string) => {
     const target =
@@ -179,8 +183,14 @@ function RoomPage({ detail }: { detail: RoomDetail }) {
   }, [participants, showViewers, pinnedId]);
 
   const leave = () => navigate({ to: "/" });
+  // Chat and the feed name people by username; resolve to the participant's user id when present.
   const openProfile = (username: string) =>
-    navigate({ to: "/profile/$userId", params: { userId: userIdOf(username) } });
+    navigate({
+      to: "/profile/$userId",
+      params: {
+        userId: participants.find((p) => p.name === username)?.userId ?? userIdOf(username),
+      },
+    });
 
   return (
     <div

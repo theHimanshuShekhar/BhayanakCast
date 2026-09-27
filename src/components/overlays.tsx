@@ -3,8 +3,8 @@
 import { Dialog } from "@base-ui/react/dialog";
 import { Menu } from "@base-ui/react/menu";
 import { type ReactNode, useState } from "react";
+import { useCurrentSession } from "~/lib/current-user";
 import { ACCENTS } from "~/lib/format";
-import { CURRENT_USER, USER_PROFILES } from "~/lib/mock-data";
 import type { NewRoom } from "~/lib/rooms-store";
 import { useSettings } from "~/lib/settings";
 import type { RoomKind } from "~/lib/types";
@@ -210,7 +210,7 @@ export const SettingsDialog = ({
   onOpenChange: (open: boolean) => void;
 }) => {
   const { settings, update } = useSettings();
-  const me = USER_PROFILES[CURRENT_USER];
+  const { user } = useCurrentSession();
   const row = "flex flex-col gap-1.5";
   return (
     <Sheet
@@ -224,14 +224,17 @@ export const SettingsDialog = ({
         </Btn>
       }
     >
-      <MonoCaps>profile</MonoCaps>
-      <div className="flex items-center gap-3 -mt-2">
-        <Avatar name={CURRENT_USER} size="lg" ring />
-        <div className="flex-1 min-w-0 text-[11px] text-muted">
-          discord <span className="text-fg-muted font-medium">{me?.discord}</span> · joined{" "}
-          {me?.joined}
-        </div>
-      </div>
+      {user && (
+        <>
+          <MonoCaps>profile</MonoCaps>
+          <div className="flex items-center gap-3 -mt-2">
+            <Avatar name={user.username} size="lg" ring />
+            <div className="flex-1 min-w-0 text-[11px] text-muted">
+              discord <span className="text-fg-muted font-medium">{user.username}</span>
+            </div>
+          </div>
+        </>
+      )}
       <MonoCaps>appearance</MonoCaps>
       <div className={`${row} -mt-2`}>
         <span className={fieldLabel}>theme</span>

@@ -16,7 +16,6 @@ import type {
   UserProfile,
 } from "./types";
 
-export const CURRENT_USER = "nelly.jpg";
 export const CURRENT_USER_ADMIN = true;
 
 type RoomSeed = Omit<LiveRoom, "viewers" | "capacity" | "streams">;
@@ -233,14 +232,22 @@ export const ACTIVITY: ActivityItem[] = [
 ];
 
 // Build a room's live detail from its card record so every room opens its own people/streams.
-export const buildRoomDetail = (r: LiveRoom): RoomDetail => {
+// `me` is the signed-in user (null for a visitor); "you" is decided by user id, never username.
+export const buildRoomDetail = (
+  r: LiveRoom,
+  me: { id: string; username: string } | null,
+): RoomDetail => {
+  // Mock rooms name people by username; only a room's host may be a real (non-mock) user.
+  const idOf = (name: string) => (name === r.streamer && r.hostId ? r.hostId : userIdOf(name));
+  const isMe = (name: string) => !!me && idOf(name) === me.id;
   const streams = r.streams.slice(0, MAX_STREAMERS);
   const streamUsers = streams.map((s) => s.user);
-  const others = r.members.filter((n) => !streamUsers.includes(n) && n !== CURRENT_USER);
+  const others = r.members.filter((n) => !streamUsers.includes(n) && !isMe(n));
   const participants: Participant[] = [
     ...streams.map(
       (s, i): Participant => ({
         id: `s${i}`,
+        userId: idOf(s.user),
         name: s.user,
         role: s.user === r.streamer ? "host" : "member",
         streaming: true,
@@ -249,12 +256,13 @@ export const buildRoomDetail = (r: LiveRoom): RoomDetail => {
         camera: i < 2,
         size: i === 0 ? "l" : "m",
         screen: s.screen,
-        you: s.user === CURRENT_USER,
+        you: isMe(s.user),
       }),
     ),
     ...others.slice(0, 2).map(
       (n, i): Participant => ({
         id: `c${i}`,
+        userId: idOf(n),
         name: n,
         role: i === 0 ? "mod" : "member",
         streaming: false,
@@ -267,6 +275,7 @@ export const buildRoomDetail = (r: LiveRoom): RoomDetail => {
     ...others.slice(2).map(
       (n, i): Participant => ({
         id: `v${i}`,
+        userId: idOf(n),
         name: n,
         role: "member",
         streaming: false,
@@ -277,10 +286,11 @@ export const buildRoomDetail = (r: LiveRoom): RoomDetail => {
       }),
     ),
   ];
-  if (!streamUsers.includes(CURRENT_USER)) {
+  if (me && !streams.some((s) => isMe(s.user))) {
     participants.push({
       id: "me",
-      name: CURRENT_USER,
+      userId: me.id,
+      name: me.username,
       role: "member",
       streaming: false,
       speaking: false,
@@ -290,9 +300,10 @@ export const buildRoomDetail = (r: LiveRoom): RoomDetail => {
       viewerOnly: true,
     });
   }
-  if (!streamUsers.includes(r.streamer) && r.streamer !== CURRENT_USER) {
+  if (!streamUsers.includes(r.streamer) && !isMe(r.streamer)) {
     participants.unshift({
       id: "h",
+      userId: idOf(r.streamer),
       name: r.streamer,
       role: "host",
       streaming: false,
@@ -309,6 +320,7 @@ export const buildRoomDetail = (r: LiveRoom): RoomDetail => {
       id: r.id,
       name: r.name,
       host: r.streamer,
+      hostId: idOf(r.streamer),
       capacity: r.capacity,
       participants,
       chat: [],
@@ -324,7 +336,15 @@ export const buildRoomDetail = (r: LiveRoom): RoomDetail => {
     }
     return { ...m, user, text: m.text.replace(/@(\w+)/g, () => `@${pool[0] ?? r.streamer}`) };
   });
-  return { id: r.id, name: r.name, host: r.streamer, capacity: r.capacity, participants, chat };
+  return {
+    id: r.id,
+    name: r.name,
+    host: r.streamer,
+    hostId: idOf(r.streamer),
+    capacity: r.capacity,
+    participants,
+    chat,
+  };
 };
 
 const PAST_SEED: Omit<PastRoom, "streams" | "cachedAgo">[] = [

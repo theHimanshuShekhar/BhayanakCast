@@ -18,6 +18,8 @@ export type LiveRoom = {
   members: string[];
   streams: Stream[];
   isPrivate?: boolean;
+  /** Host's user id when the host isn't a mock user (a room created in the UI). */
+  hostId?: string;
 };
 
 export type PastRoom = {
@@ -32,6 +34,7 @@ export type PastRoom = {
 
 export type Participant = {
   id: string;
+  userId: string;
   name: string;
   role: RoomRole;
   streaming: boolean;
@@ -53,6 +56,7 @@ export type RoomDetail = {
   id: string;
   name: string;
   host: string;
+  hostId: string;
   capacity: number;
   participants: Participant[];
   chat: ChatMessage[];
