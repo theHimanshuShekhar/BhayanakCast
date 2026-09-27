@@ -23,3 +23,18 @@ export class SignInRequiredError extends Error {
 export function requireSignedIn(caller: Caller): asserts caller is SignedInCaller {
   if (!caller.user) throw new SignInRequiredError();
 }
+
+/** A signed-in caller with the admin role. */
+export type AdminCaller = SignedInCaller & { role: "admin" };
+
+/** Thrown when a visitor or non-admin calls something that needs the admin role (ADR 6). */
+export class AdminRequiredError extends Error {
+  constructor() {
+    super("Only admins can do that");
+    this.name = "AdminRequiredError";
+  }
+}
+
+export function requireAdmin(caller: Caller): asserts caller is AdminCaller {
+  if (!caller.user || caller.role !== "admin") throw new AdminRequiredError();
+}

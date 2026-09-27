@@ -20,7 +20,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 type Executor = Pick<Db, "execute" | "insert">;
 
-function utcDay(at: Date): string {
+/** The UTC day of `at`, as `YYYY-MM-DD` (the daily counters' key). */
+export function utcDay(at: Date): string {
   return at.toISOString().slice(0, 10);
 }
 
