@@ -58,6 +58,7 @@ describe("anonymous sockets", () => {
     for (const message of [
       { type: "room.join", roomId } as const,
       { type: "room.leave" } as const,
+      { type: "chat.send", text: "hi" } as const,
     ]) {
       anon.send(message);
       expect(await anon.waitFor("error")).toMatchObject({ code: "forbidden", re: message.type });
