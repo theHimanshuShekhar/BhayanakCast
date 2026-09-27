@@ -21,12 +21,17 @@ import { AppActionsContext } from "~/lib/app-actions";
 import { signOut } from "~/lib/auth-client";
 import { loadCurrentSession, useCurrentSession } from "~/lib/current-user";
 import { createRoom, findRoom, useLiveRooms } from "~/lib/rooms-store";
-import { SettingsProvider } from "~/lib/settings";
+import { SettingsProvider, useDocumentAppearance } from "~/lib/settings";
+import { getSettings } from "~/lib/settings-fns";
 import appCss from "~/styles/app.css?url";
 
 export const Route = createRootRoute({
   // Runs on the server for SSR and again on each client navigation (via the server fn).
   beforeLoad: async () => ({ session: await loadCurrentSession() }),
+  // Initial appearance settings, rendered into <html> during SSR. After that the client's copy
+  // is authoritative, so this only reloads when the router is invalidated (e.g. sign-out).
+  loader: () => getSettings(),
+  staleTime: Number.POSITIVE_INFINITY,
   head: () => ({
     meta: [
       { charSet: "utf-8" },
@@ -40,11 +45,11 @@ export const Route = createRootRoute({
 
 function RootComponent() {
   return (
-    <RootDocument>
-      <SettingsProvider>
+    <SettingsProvider initial={Route.useLoaderData()}>
+      <RootDocument>
         <AppShell />
-      </SettingsProvider>
-    </RootDocument>
+      </RootDocument>
+    </SettingsProvider>
   );
 }
 
@@ -130,10 +135,12 @@ function AppShell() {
   );
 }
 
-// TODO(ADR 13 addendum): derive the theme class and --accent-h from the bc_theme cookie during SSR.
+// The theme class and --accent-h come from the user's saved settings or, for a visitor, the
+// bc_theme cookie (ADR 13 addendum), so the server-rendered first paint has the right theme.
 function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
+  const { className, style } = useDocumentAppearance();
   return (
-    <html lang="en" className="dark">
+    <html lang="en" className={className} style={style}>
       <head>
         <HeadContent />
       </head>
