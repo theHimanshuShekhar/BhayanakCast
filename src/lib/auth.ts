@@ -11,8 +11,9 @@ import { tanstackStartCookies } from "better-auth/tanstack-start";
 import { eq } from "drizzle-orm";
 import { type Db, getDb } from "../db/client.ts";
 import * as schema from "../db/schema/index.ts";
-import { adminDiscordIds, type Env, env } from "../server/env.ts";
+import { adminDiscordIds, type Env, env, isTestSignInEnabled } from "../server/env.ts";
 import { recordNewUser } from "../server/stats.ts";
+import { testSignIn } from "./test-sign-in.ts";
 
 /** Fields users may never change through Better Auth's own `/update-user` endpoint. */
 const SERVER_OWNED_USER_FIELDS = ["discordId", "discordUsername"] as const;
@@ -20,7 +21,12 @@ const SERVER_OWNED_USER_FIELDS = ["discordId", "discordUsername"] as const;
 export interface AuthConfig {
   env: Pick<
     Env,
-    "BETTER_AUTH_URL" | "BETTER_AUTH_SECRET" | "DISCORD_CLIENT_ID" | "DISCORD_CLIENT_SECRET"
+    | "NODE_ENV"
+    | "BETTER_AUTH_URL"
+    | "BETTER_AUTH_SECRET"
+    | "DISCORD_CLIENT_ID"
+    | "DISCORD_CLIENT_SECRET"
+    | "E2E_AUTH"
   >;
   /** Discord user IDs granted the admin role at sign-in (ADR 6 addendum). */
   adminDiscordIds: ReadonlySet<string>;
@@ -136,6 +142,7 @@ export function createAuth(db: Db, config: AuthConfig) {
     },
     plugins: [
       admin(),
+      ...(isTestSignInEnabled(config.env) ? [testSignIn()] : []),
       // Must stay last (Better Auth TanStack Start integration docs).
       tanstackStartCookies(),
     ],

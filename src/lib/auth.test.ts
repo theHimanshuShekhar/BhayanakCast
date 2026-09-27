@@ -7,6 +7,7 @@ import { createTestDb } from "../db/test-db.ts";
 import { createAuth } from "./auth.ts";
 
 const testEnv = {
+  NODE_ENV: "test" as const,
   BETTER_AUTH_URL: "http://localhost:3000",
   BETTER_AUTH_SECRET: "test-secret-test-secret-test-secret-0000",
   DISCORD_CLIENT_ID: "id",
@@ -37,6 +38,25 @@ async function createDiscordUser(discordId: string) {
     },
     { method: "oauth" },
   );
+}
+
+function testSignInRequest(discordId: string, username: string) {
+  return auth.handler(
+    new Request(`${testEnv.BETTER_AUTH_URL}/api/auth/test/sign-in`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ discordId, username }),
+    }),
+  );
+}
+
+/** Replays a response's Set-Cookie headers as a request Cookie header. */
+function cookiesFrom(response: Response) {
+  const cookie = response.headers
+    .getSetCookie()
+    .map((c) => c.split(";")[0])
+    .join("; ");
+  return new Headers({ cookie });
 }
 
 async function roleOf(id: string) {
@@ -79,5 +99,36 @@ describe("auth database hooks", () => {
     await createDiscordUser("2001");
     const rows = await db.select().from(dailyPlatformStats);
     expect(rows.reduce((sum, r) => sum + r.newUsers, 0)).toBe(2);
+  });
+});
+
+describe("test-only sign-in", () => {
+  it("signs in a named fake user with a valid session cookie", async () => {
+    const response = await testSignInRequest("4000", "kodama_jpg");
+    expect(response.status).toBe(200);
+    const session = await auth.api.getSession({ headers: cookiesFrom(response) });
+    expect(session?.user).toMatchObject({ discordId: "4000", discordUsername: "kodama_jpg" });
+  });
+
+  it("reuses the user for the same Discord id, even when signed in concurrently", async () => {
+    const [first, second] = await Promise.all([
+      testSignInRequest("4000", "kodama_jpg"),
+      testSignInRequest("4000", "kodama_jpg"),
+    ]);
+    const userIdOf = async (response: Response) =>
+      ((await response.json()) as { userId: string }).userId;
+    expect(await userIdOf(second)).toBe(await userIdOf(first));
+    expect(await db.select().from(user)).toHaveLength(1);
+  });
+
+  it.each([
+    { NODE_ENV: "production" as const, E2E_AUTH: "1" },
+    { NODE_ENV: "development" as const, E2E_AUTH: undefined },
+  ])("is refused with NODE_ENV=$NODE_ENV and E2E_AUTH=$E2E_AUTH", async (flags) => {
+    auth = createAuth(db, { env: { ...testEnv, ...flags }, adminDiscordIds: new Set() });
+    const response = await testSignInRequest("4000", "kodama_jpg");
+    expect(response.status).toBe(404);
+    expect(response.headers.getSetCookie()).toEqual([]);
+    expect(await db.select().from(user)).toHaveLength(0);
   });
 });

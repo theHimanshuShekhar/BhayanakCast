@@ -302,10 +302,12 @@ const menuItem =
   "w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[12px] text-fg-muted outline-0 cursor-pointer data-highlighted:bg-surface-2 data-highlighted:text-fg transition-colors";
 
 export const ProfileMenu = ({
+  username,
   onOpenProfile,
   onSettings,
   onSignOut,
 }: {
+  username: string;
   onOpenProfile: () => void;
   onSettings: () => void;
   onSignOut: () => void;
@@ -315,15 +317,15 @@ export const ProfileMenu = ({
       className="w-9 h-9 p-0 rounded-[10px] bg-transparent grid place-items-center cursor-pointer"
       aria-label="Account menu"
     >
-      <Avatar name={CURRENT_USER} size="md" ring />
+      <Avatar name={username} size="md" ring />
     </Menu.Trigger>
     <Menu.Portal>
       <Menu.Positioner side="right" align="end" sideOffset={14} className="z-[150] outline-0">
         <Menu.Popup className="w-[260px] bg-surface border border-border-strong rounded-[var(--radius)] shadow-deep overflow-hidden outline-0 origin-[var(--transform-origin)] transition-[scale,opacity] duration-100 data-starting-style:opacity-0 data-starting-style:scale-[0.98] data-ending-style:opacity-0">
           <div className="flex items-center gap-2.5 px-3 py-3 border-b border-border-subtle bg-canvas">
-            <Avatar name={CURRENT_USER} size="lg" ring />
+            <Avatar name={username} size="lg" ring />
             <div className="flex-1 min-w-0">
-              <div className="font-semibold text-[13px]">{CURRENT_USER}</div>
+              <div className="font-semibold text-[13px]">{username}</div>
               <div className="text-[11px] text-muted">· connected via discord</div>
             </div>
           </div>

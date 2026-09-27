@@ -20,8 +20,24 @@ export function createDb(url: string, options: postgres.Options<Record<string, n
 
 let cached: ReturnType<typeof createDb> | undefined;
 
-/** Process-wide connection pool, created on first use from DATABASE_URL. */
-export function getDb() {
+// A process global, not a module variable: the built SSR bundle and
+// server.prod.ts each load their own copy of this module.
+const PROVIDED_DB = Symbol.for("bhayanakcast.providedDb");
+const registry = globalThis as { [PROVIDED_DB]?: Db };
+
+/**
+ * Serve every `getDb()` in this process from `db` instead of DATABASE_URL.
+ * For the e2e server only (e2e/serve.ts runs the prod build on PGlite).
+ */
+export function provideDb(db: Db): void {
+  if (env.NODE_ENV === "production") throw new Error("provideDb is not allowed in production");
+  registry[PROVIDED_DB] = db;
+}
+
+/** Process-wide database: the provided one, else a pool created on first use from DATABASE_URL. */
+export function getDb(): Db {
+  const provided = registry[PROVIDED_DB];
+  if (provided) return provided;
   if (!cached) {
     cached = createDb(env.DATABASE_URL);
   }

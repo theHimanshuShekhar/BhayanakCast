@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { signIn } from "./auth";
 
 test("home lists live rooms and past streams", async ({ page }) => {
   await page.goto("/");
@@ -34,7 +35,8 @@ test("room chat sends a message", async ({ page }) => {
   await expect(page.getByText("hello from e2e")).toBeVisible();
 });
 
-test("settings dialog changes theme", async ({ page }) => {
+test("settings dialog changes theme", async ({ page, context }) => {
+  await signIn(context, { discordId: "900000000000000100", username: "nelly.jpg" });
   await page.goto("/");
   await page.getByRole("button", { name: "Account menu" }).click();
   await page.getByRole("menuitem", { name: /settings/ }).click();
