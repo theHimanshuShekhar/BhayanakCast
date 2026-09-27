@@ -1,0 +1,12 @@
+/* Global base only — all component styling lives in JSX as Tailwind utilities.
+   Wrapped in @layer base so Tailwind utilities always win. */
+@layer base {
+  *{box-sizing:border-box}
+  html,body,#root{height:100%}
+  body{margin:0;font-family:var(--font-mono);background:var(--color-bg);color:var(--color-fg);font-size:13px;line-height:1.45;-webkit-font-smoothing:antialiased;letter-spacing:0.01em;overflow:hidden}
+  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;letter-spacing:inherit}
+  input,textarea{font:inherit;color:inherit;letter-spacing:inherit}
+  a{color:var(--color-primary);text-decoration:none}
+  a:hover{text-decoration:underline}
+  :focus-visible{outline:2px solid var(--color-primary);outline-offset:2px;border-radius:6px}
+}
