@@ -9,7 +9,7 @@ import { Btn, Chip } from "~/components/ui";
 import { useAppActions } from "~/lib/app-actions";
 import { useCurrentSession } from "~/lib/current-user";
 import { fmtMins, MAX_STREAMERS } from "~/lib/format";
-import { useRoomLive } from "~/lib/room-live";
+import { sendChat, useRoomLive } from "~/lib/room-live";
 import { roomDetailFor, withRoster } from "~/lib/room-view";
 import { roomQuery } from "~/lib/rooms.queries";
 import { useSettings } from "~/lib/settings";
@@ -98,10 +98,7 @@ const useMinutesSince = (iso: string) => {
   return Math.max(0, now - Date.parse(iso)) / 60_000;
 };
 
-const nowTs = () => {
-  const d = new Date();
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-};
+const NO_CHAT: ChatMessage[] = [];
 
 function RoomPage({ detail, meId }: { detail: RoomDetail; meId: string | null }) {
   const navigate = useNavigate();
@@ -114,8 +111,8 @@ function RoomPage({ detail, meId }: { detail: RoomDetail; meId: string | null })
   useEffect(() => {
     if (roster) setParticipants((shown) => withRoster(shown, roster, meId));
   }, [roster, meId]);
-  // Chat and the feed start empty; history arrives over the socket (spec #3).
-  const [chat, setChat] = useState<ChatMessage[]>([]);
+  // Chat (with its last-50 history) comes over the socket; the feed starts empty (spec #3).
+  const chat = live.room?.chat ?? NO_CHAT;
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [showViewers, setShowViewers] = useState(true);
   const [pinnedId, setPinnedId] = useState<string | null>(null);
@@ -132,8 +129,6 @@ function RoomPage({ detail, meId }: { detail: RoomDetail; meId: string | null })
 
   const log = (who: string, what: string) =>
     setActivity((a) => [{ who, what, when: "just now" }, ...a]);
-  const system = (text: string) =>
-    setChat((c) => [...c, { id: `sys${Date.now()}`, system: true, text }]);
 
   const updateMe = (patch: Partial<Participant>) =>
     setParticipants((ps) =>
@@ -154,14 +149,6 @@ function RoomPage({ detail, meId }: { detail: RoomDetail; meId: string | null })
     const streaming = !me.streaming;
     updateMe({ streaming, screen: "browser" });
     log(me.name, streaming ? "started streaming" : "stopped streaming");
-  };
-
-  const send = (text: string) => {
-    if (!me) return;
-    setChat((c) => [
-      ...c,
-      { id: `c${Date.now()}`, user: me.name, role: myRole, ts: nowTs(), text },
-    ]);
   };
 
   const react = (emoji: string) => {
@@ -187,7 +174,6 @@ function RoomPage({ detail, meId }: { detail: RoomDetail; meId: string | null })
     if (!target) return;
     if (action === "kick") {
       setParticipants((ps) => ps.filter((p) => p.id !== id));
-      system(`${target.name} was removed from the room`);
       log(target.name, "was kicked");
       if (pinnedId === id) setPinnedId(null);
     } else if (action === "stopShare") {
@@ -406,11 +392,11 @@ function RoomPage({ detail, meId }: { detail: RoomDetail; meId: string | null })
       )}
       {settings.showChat && (
         <RoomSide
-          room={detail}
           participants={participants}
           chat={chat}
+          chatError={live.chatError}
           activity={activity}
-          onSend={send}
+          onSend={sendChat}
           onOpenProfile={openProfile}
           open={sideOpen}
           onClose={() => setSideOpen(false)}

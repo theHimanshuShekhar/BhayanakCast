@@ -109,6 +109,7 @@ describe("join and leave", () => {
       roomId,
       hostUserId: ana.id,
       participants: [{ userId: ana.id, username: "ana", role: "host", joinedAt: T0 }],
+      chat: [],
     });
 
     await h.advance(10 * SECOND);
