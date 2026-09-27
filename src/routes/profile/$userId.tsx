@@ -1,12 +1,13 @@
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
 import { Icon, type IconComponent } from "~/components/icons";
 import { PastCard } from "~/components/room-cards";
 import { SectionHead } from "~/components/section-head";
 import { Avatar, Btn } from "~/components/ui";
 import { useAppActions } from "~/lib/app-actions";
 import { useCurrentSession } from "~/lib/current-user";
+import { toggleFavoriteFn } from "~/lib/favorites.functions";
+import { favoriteKeys, isFavoriteQuery } from "~/lib/favorites.queries";
 import { avatarFor, formatCotime } from "~/lib/format";
 import { formatJoined, type Profile } from "~/lib/profiles";
 import { profileQuery } from "~/lib/profiles.queries";
@@ -19,6 +20,11 @@ export const Route = createFileRoute("/profile/$userId")({
       context.queryClient.ensureQueryData(pastRoomsQuery(params.userId)),
     ]);
     if (!profile) throw notFound();
+    // Seed the favorite badge for first paint (signed in, on someone else's profile).
+    const { user } = context.session;
+    if (user && user.id !== params.userId) {
+      await context.queryClient.ensureQueryData(isFavoriteQuery(params.userId));
+    }
   },
   notFoundComponent: ProfileNotFound,
   component: ProfileRoute,
@@ -89,25 +95,42 @@ const StatCard = ({
   </div>
 );
 
-// TODO(ADR 19, #18): favorites persist to the favorites table (keyed by user id).
-const favorites = new Set<string>();
+/**
+ * Whether the signed-in caller has favorited `userId`, and a toggle that flips it
+ * optimistically (rolled back if the server refuses). Off for visitors and yourself.
+ */
+function useFavorite(userId: string, enabled: boolean) {
+  const queryClient = useQueryClient();
+  const queryKey = favoriteKeys.detail(userId);
+  const { data: isFavorite = false } = useQuery({ ...isFavoriteQuery(userId), enabled });
+  const mutation = useMutation({
+    mutationFn: (favorite: boolean) => toggleFavoriteFn({ data: { userId, favorite } }),
+    onMutate: async (favorite) => {
+      await queryClient.cancelQueries({ queryKey });
+      const previous = queryClient.getQueryData<boolean>(queryKey);
+      queryClient.setQueryData(queryKey, favorite);
+      return { previous };
+    },
+    onError: (_error, _favorite, context) => {
+      queryClient.setQueryData(queryKey, context?.previous);
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey }),
+  });
+  return { isFavorite, toggle: () => mutation.mutate(!isFavorite) };
+}
 
 function ProfilePage({ profile }: { profile: Profile }) {
   const userId = profile.id;
   const navigate = useNavigate();
   const { openSettings } = useAppActions();
   const { user } = useCurrentSession();
-  const [isFavorite, setIsFavorite] = useState(() => favorites.has(userId));
   // Rooms this user hosted or joined in the last 30 days, visible to the viewer.
   const { data: recent } = useSuspenseQuery(pastRoomsQuery(profile.id));
 
   const { username } = profile;
   const isSelf = user?.id === profile.id;
-  const toggleFavorite = () => {
-    if (favorites.has(userId)) favorites.delete(userId);
-    else favorites.add(userId);
-    setIsFavorite(favorites.has(userId));
-  };
+  const canFavorite = user !== null && !isSelf;
+  const { isFavorite, toggle: toggleFavorite } = useFavorite(userId, canFavorite);
 
   const { stats, coUsers } = profile;
   const max = coUsers[0]?.secondsTogether || 1;
@@ -144,7 +167,7 @@ function ProfilePage({ profile }: { profile: Profile }) {
               <h1 className="m-0 text-[22px] sm:text-[28px] font-extrabold tracking-[-0.02em] text-fg break-all">
                 {username}
               </h1>
-              {isFavorite && !isSelf && (
+              {canFavorite && isFavorite && (
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-[3px] rounded-full bg-[color-mix(in_oklch,var(--color-primary)_18%,transparent)] border border-[color-mix(in_oklch,var(--color-primary)_40%,transparent)] text-primary text-[10px] tracking-[0.08em] uppercase font-semibold">
                   <Icon.Sparkle size={10} /> favorite
                 </span>
@@ -171,7 +194,7 @@ function ProfilePage({ profile }: { profile: Profile }) {
               <Btn onClick={openSettings}>
                 <Icon.Gear size={14} /> edit profile
               </Btn>
-            ) : (
+            ) : canFavorite ? (
               <Btn
                 variant={isFavorite ? "danger" : "primary"}
                 onClick={toggleFavorite}
@@ -180,7 +203,7 @@ function ProfilePage({ profile }: { profile: Profile }) {
                 <Icon.Sparkle size={14} />
                 {isFavorite ? "unfavorite" : "favorite"}
               </Btn>
-            )}
+            ) : null}
           </div>
         </div>
 
