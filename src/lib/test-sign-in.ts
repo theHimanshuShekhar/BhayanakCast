@@ -7,18 +7,31 @@
  * `POST /api/auth/test/ban` bans or unbans a fake user by Discord id (test-only too).
  * `POST /api/auth/test/seed-room` inserts a room with its presence/stream intervals and
  * end time as given, so browser tests can build past streams without the realtime server.
+ * `POST /api/auth/test/stats` sets a fake user's lifetime stats and co-time (test-only too).
  */
 import type { BetterAuthPlugin, User } from "better-auth";
 import { APIError, createAuthEndpoint } from "better-auth/api";
 import { setSessionCookie } from "better-auth/cookies";
+import { inArray } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "../db/client.ts";
-import { presenceIntervals, roomMembers, rooms, streamIntervals } from "../db/schema/index.ts";
+import {
+  presenceIntervals,
+  roomMembers,
+  rooms,
+  streamIntervals,
+  userCotime,
+  userStats,
+  user as userTable,
+} from "../db/schema/index.ts";
 import { ROOM_KINDS } from "./rooms.ts";
 
 export const TEST_SIGN_IN_PATH = "/test/sign-in";
 export const TEST_BAN_PATH = "/test/ban";
 export const TEST_SEED_ROOM_PATH = "/test/seed-room";
+export const TEST_STATS_PATH = "/test/stats";
+
+const count = z.number().int().nonnegative();
 
 const seedInterval = z.object({
   userId: z.string().min(1),
@@ -163,12 +176,67 @@ export function testSignIn(db: Db) {
         { method: "POST", body: seedRoomBody },
         async (ctx) => ctx.json({ roomId: await seedRoom(db, ctx.body) }),
       ),
+      // Seeds the persistent aggregates the way the stats roll-up would leave them, so
+      // browser tests can show real profile stats without playing out whole rooms.
+      testSetStats: createAuthEndpoint(
+        TEST_STATS_PATH,
+        {
+          method: "POST",
+          body: z.object({
+            discordId: z.string().min(1),
+            stats: z
+              .object({
+                secondsStreamed: count,
+                secondsWatched: count,
+                roomsHosted: count,
+                roomsJoined: count,
+                peakViewers: count,
+              })
+              .partial()
+              .default({}),
+            cotime: z
+              .array(z.object({ discordId: z.string().min(1), secondsTogether: count }))
+              .default([]),
+          }),
+        },
+        async (ctx) => {
+          const { discordId, stats, cotime } = ctx.body;
+          const rows = await db
+            .select({ id: userTable.id, discordId: userTable.discordId })
+            .from(userTable)
+            .where(inArray(userTable.discordId, [discordId, ...cotime.map((c) => c.discordId)]));
+          const userIdOf = new Map(rows.map((row) => [row.discordId, row.id]));
+          const userId = userIdOf.get(discordId);
+          if (!userId || cotime.some((c) => !userIdOf.has(c.discordId)))
+            throw new APIError("NOT_FOUND", { message: "No user with that Discord id" });
+          await db
+            .insert(userStats)
+            .values({ userId, ...stats })
+            .onConflictDoUpdate({ target: userStats.userId, set: { ...stats, userId } });
+          for (const { discordId: otherDiscordId, secondsTogether } of cotime) {
+            const other = userIdOf.get(otherDiscordId) ?? "";
+            // One row per pair, userA < userB, as the roll-up stores it.
+            const [userA, userB] = userId < other ? [userId, other] : [other, userId];
+            await db
+              .insert(userCotime)
+              .values({ userA, userB, secondsTogether })
+              .onConflictDoUpdate({
+                target: [userCotime.userA, userCotime.userB],
+                set: { secondsTogether },
+              });
+          }
+          return ctx.json({ userId });
+        },
+      ),
     },
     // Every parallel browser test signs in from the same IP; don't throttle them.
     rateLimit: [
       {
         pathMatcher: (path) =>
-          path === TEST_SIGN_IN_PATH || path === TEST_BAN_PATH || path === TEST_SEED_ROOM_PATH,
+          path === TEST_SIGN_IN_PATH ||
+          path === TEST_BAN_PATH ||
+          path === TEST_SEED_ROOM_PATH ||
+          path === TEST_STATS_PATH,
         window: 60,
         max: 10_000,
       },

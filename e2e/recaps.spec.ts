@@ -101,3 +101,51 @@ test("an unknown or expired recap says recaps are kept for 30 days", async ({ pa
   await page.goto(`/past/${roomId}`);
   await expect(page.getByRole("heading", { name: "recap not found" })).toBeVisible();
 });
+
+test("a profile's recent streams show rooms they hosted or joined, minus hidden private ones", async ({
+  page,
+  context,
+  browser,
+}) => {
+  const [hostId = "", memberId = "", outsiderId = ""] = await createUsers(browser, [
+    "recents.host",
+    "recents.member",
+    "recents.outsider",
+  ]);
+  const publicName = uniqueRoomName("recents open");
+  const privateName = uniqueRoomName("recents secret");
+  const seed = (name: string, isPrivate: boolean) =>
+    seedRoom(context, {
+      name,
+      hostUserId: hostId,
+      isPrivate,
+      members: isPrivate ? [{ userId: memberId }] : [],
+      createdAt: minutesAgo(90),
+      endedAt: minutesAgo(30),
+      presence: [
+        { userId: hostId, startedAt: minutesAgo(90), endedAt: minutesAgo(30) },
+        { userId: memberId, startedAt: minutesAgo(80), endedAt: minutesAgo(40) },
+      ],
+    });
+  const publicId = await seed(publicName, false);
+  await seed(privateName, true);
+
+  const recap = (name: string) => page.getByRole("button", { name: `View recap of ${name}` });
+  // As a visitor: the public room on the host's and the member's profile, the private one on neither.
+  for (const userId of [hostId, memberId]) {
+    await page.goto(`/profile/${userId}`);
+    await expect(page.getByRole("heading", { name: "recent streams" })).toBeVisible();
+    await expect(recap(publicName)).toBeVisible();
+    await expect(recap(privateName)).toHaveCount(0);
+  }
+  await page.goto(`/profile/${outsiderId}`);
+  await expect(page.getByText("no streams in the last 30 days")).toBeVisible();
+
+  // The approved member sees the private room on the host's profile; a card opens its recap.
+  await signIn(context, { username: "recents.member" });
+  await page.goto(`/profile/${hostId}`);
+  await expect(recap(privateName)).toBeVisible();
+  await recap(publicName).click();
+  await expect(page).toHaveURL(new RegExp(`/past/${publicId}$`));
+  await expect(page.getByRole("heading", { level: 1, name: publicName })).toBeVisible();
+});

@@ -101,17 +101,9 @@ test("settings dialog changes theme", async ({ page, context }) => {
   await expect(page.getByRole("dialog")).toBeHidden();
 });
 
-test("profile and recap pages render", async ({ page, browser }) => {
+// Profiles are covered by profiles.spec.ts.
+test("recap page renders", async ({ page, browser }) => {
   const roomId = await seedPastRoom(browser, "smoke.recap.host", uniqueRoomName("smoke recap"));
-  await page.goto("/profile/usr_kodama_jpg");
-  await expect(page.getByRole("heading", { level: 1, name: "kodama_jpg" })).toBeVisible();
-  // co-user links resolve by id, never by (renameable) username
-  await page
-    .getByRole("link", { name: /bitreverb/ })
-    .first()
-    .click();
-  await expect(page).toHaveURL(/\/profile\/usr_bitreverb$/);
-  await expect(page.getByRole("heading", { level: 1, name: "bitreverb" })).toBeVisible();
   await page.goto(`/past/${roomId}`);
   await expect(page.getByRole("heading", { name: "who streamed" })).toBeVisible();
 });

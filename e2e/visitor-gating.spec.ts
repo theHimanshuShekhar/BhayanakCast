@@ -1,5 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 import { signIn } from "./auth";
+import { createUser } from "./profiles";
 import { createRoomAs, seedPastRoom, uniqueRoomName } from "./rooms";
 
 const activeRooms = { level: 1, name: "Active Rooms" } as const;
@@ -11,10 +12,11 @@ const fillingUp = (page: Page) =>
 test.describe("a visitor", () => {
   test("browses home, a profile and a past-stream recap", async ({ page, browser }) => {
     const roomId = await seedPastRoom(browser, "gate.past.host", uniqueRoomName("gate recap"));
+    const someone = await createUser(browser, "someone");
     await page.goto("/");
     await expect(page.getByRole("heading", activeRooms)).toBeVisible();
-    await page.goto("/profile/usr_kodama_jpg");
-    await expect(page.getByRole("heading", { level: 1, name: "kodama_jpg" })).toBeVisible();
+    await page.goto(`/profile/${someone.id}`);
+    await expect(page.getByRole("heading", { level: 1, name: "someone" })).toBeVisible();
     await page.goto(`/past/${roomId}`);
     await expect(page.getByRole("heading", { name: "who streamed" })).toBeVisible();
   });
@@ -67,7 +69,7 @@ test.describe("a visitor", () => {
   });
 
   test('"Start a Room" asks to sign in instead of opening the create dialog', async ({ page }) => {
-    await page.goto("/profile/usr_kodama_jpg");
+    await page.goto("/profile/no-such-user");
     await page.getByRole("button", { name: "Start a Room" }).click();
     const dialog = createPrompt(page);
     await expect(dialog).toBeVisible();
@@ -102,10 +104,11 @@ test.describe("a signed-in user", () => {
 
   test("browses home, a profile and a past-stream recap", async ({ page, browser }) => {
     const roomId = await seedPastRoom(browser, "gate.past.host", uniqueRoomName("gate recap"));
+    const someone = await createUser(browser, "someone");
     await page.goto("/");
     await expect(page.getByRole("heading", activeRooms)).toBeVisible();
-    await page.goto("/profile/usr_kodama_jpg");
-    await expect(page.getByRole("heading", { level: 1, name: "kodama_jpg" })).toBeVisible();
+    await page.goto(`/profile/${someone.id}`);
+    await expect(page.getByRole("heading", { level: 1, name: "someone" })).toBeVisible();
     await page.goto(`/past/${roomId}`);
     await expect(page.getByRole("heading", { name: "who streamed" })).toBeVisible();
   });
@@ -138,7 +141,7 @@ test.describe("a signed-in user", () => {
   });
 
   test('"Start a Room" opens the create dialog', async ({ page }) => {
-    await page.goto("/profile/usr_kodama_jpg");
+    await page.goto("/profile/no-such-user");
     await page.getByRole("button", { name: "Start a Room" }).click();
     const dialog = page.getByRole("dialog", { name: "start a hang" });
     await expect(dialog).toBeVisible();
