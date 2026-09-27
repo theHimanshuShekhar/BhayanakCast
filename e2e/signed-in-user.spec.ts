@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { signIn } from "./auth";
+import { createRoomAs, uniqueRoomName } from "./rooms";
 
 test('"my profile" opens the signed-in user\'s own id URL', async ({ page, context }) => {
   const userId = await signIn(context, {
@@ -24,11 +25,13 @@ test("someone else's profile offers favorite, not edit", async ({ page, context 
   await expect(page.getByRole("button", { name: /favorite/ })).toBeVisible();
 });
 
-test("the room marks the signed-in user, by id, as (you)", async ({ page, context }) => {
+test("the room marks the signed-in user, by id, as (you)", async ({ page, context, browser }) => {
+  const name = uniqueRoomName("midnight speedrun club");
+  const roomId = await createRoomAs(browser, "room.host", { name });
   await signIn(context, { username: "kodama_jpg" });
-  await page.goto("/room/r1");
-  await expect(page.getByRole("heading", { name: "midnight speedrun club" })).toBeVisible();
-  // The mock host shares the username but is a different user.
+  await page.goto(`/room/${roomId}`);
+  await expect(page.getByRole("heading", { name })).toBeVisible();
   await expect(page.getByText("kodama_jpg (you)")).toHaveCount(1);
-  await expect(page.getByText("nelly.jpg (you)")).toHaveCount(0);
+  // The host is someone else.
+  await expect(page.getByText("room.host (you)")).toHaveCount(0);
 });

@@ -5,14 +5,15 @@ import { BarChart, LineChart } from "~/components/charts";
 import { Icon } from "~/components/icons";
 import { SectionHead } from "~/components/section-head";
 import { Avatar, MonoCaps } from "~/components/ui";
+// Still mock data, live rooms included, until the admin tickets of spec #2.
 import {
   ALLTIME_ROOMS,
+  LIVE_ROOMS,
   ROOM_ACTIVITY,
   USER_GROWTH,
   USER_PROFILES,
   userIdOf,
 } from "~/lib/mock-data";
-import { useLiveRooms } from "~/lib/rooms-store";
 import type { AllTimeRoom, LiveRoom, UserStats } from "~/lib/types";
 
 export const Route = createFileRoute("/admin")({
@@ -344,7 +345,7 @@ const ChartCard = ({
 );
 
 function AdminPage() {
-  const liveRooms = useLiveRooms();
+  const liveRooms = LIVE_ROOMS;
   const P = Object.values(USER_PROFILES);
   const sum = (key: keyof UserStats) => P.reduce((s, p) => s + p.stats[key], 0);
   const top = (key: keyof UserStats) => {

@@ -1,3 +1,4 @@
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useMemo, useState } from "react";
 import { Icon, type IconComponent } from "~/components/icons";
@@ -9,8 +10,9 @@ import { useAppActions } from "~/lib/app-actions";
 import { type SignInErrorSearch, validateSignInErrorSearch } from "~/lib/ban";
 import { useCurrentSession } from "~/lib/current-user";
 import { ONLINE_COUNT, PAST_ROOMS, USER_PROFILES, userIdOf } from "~/lib/mock-data";
-import { useLiveRooms } from "~/lib/rooms-store";
-import type { LiveRoom, PastRoom, UserProfile } from "~/lib/types";
+import type { LiveRoomCard } from "~/lib/rooms";
+import { liveRoomsQuery, roomQuery } from "~/lib/rooms.queries";
+import type { PastRoom, UserProfile } from "~/lib/types";
 
 export const Route = createFileRoute("/")({
   // `join` is set when a visitor was sent here from a room URL; the shell then shows the
@@ -20,6 +22,15 @@ export const Route = createFileRoute("/")({
     ...(typeof search.join === "string" && search.join ? { join: search.join } : {}),
     ...validateSignInErrorSearch(search),
   }),
+  loaderDeps: ({ search }) => ({ join: search.join }),
+  loader: async ({ context, deps }) => {
+    const { queryClient, session } = context;
+    await Promise.all([
+      queryClient.ensureQueryData(liveRoomsQuery()),
+      // The shell's "sign in to join" prompt names this room.
+      !session.user && deps.join ? queryClient.ensureQueryData(roomQuery(deps.join)) : null,
+    ]);
+  },
   component: HomePage,
 });
 
@@ -101,7 +112,7 @@ const UserResult = ({
   onOpen,
 }: {
   user: UserProfile;
-  liveRoom: LiveRoom | undefined;
+  liveRoom: LiveRoomCard | undefined;
   onOpen: (username: string) => void;
 }) => (
   <button
@@ -179,23 +190,38 @@ function HomePage() {
   const { openCreateRoom, promptSignIn } = useAppActions();
   const { user } = useCurrentSession();
   const search = Route.useSearch();
-  const rooms = useLiveRooms();
+  const { data: rooms } = useSuspenseQuery(liveRoomsQuery());
   const [q, setQ] = useState("");
   const snap = useSnapshots();
   const term = q.trim().toLowerCase();
 
-  const matches = (r: LiveRoom | PastRoom) => {
+  // Search over rooms: name, host, people in it, #tags and kind.
+  const matches = (fields: {
+    name: string;
+    people: string[];
+    tags?: string[];
+    kind?: LiveRoomCard["kind"];
+  }) => {
     if (!term) return true;
-    const tags = ("tags" in r ? r.tags : []).map((t) => t.toLowerCase());
+    const tags = (fields.tags ?? []).map((t) => t.toLowerCase());
     if (term.startsWith("#")) return tags.some((t) => t.includes(term.slice(1)));
-    const kind = "kind" in r ? r.kind : undefined;
-    const hay = [r.name, r.streamer, ...r.members, ...tags, kind, kind && KIND_LABELS[kind]]
+    const { kind } = fields;
+    const hay = [fields.name, ...fields.people, ...tags, kind, kind && KIND_LABELS[kind]]
       .filter((s): s is string => !!s)
       .map((s) => s.toLowerCase());
     return hay.some((s) => s.includes(term));
   };
-  const filtered = rooms.filter(matches);
-  const past = PAST_ROOMS.filter(matches);
+  const filtered = rooms.filter((r) =>
+    matches({
+      name: r.name,
+      people: [...(r.host ? [r.host.username] : []), ...r.participants.map((p) => p.username)],
+      tags: r.tags,
+      kind: r.kind,
+    }),
+  );
+  const past = PAST_ROOMS.filter((r) =>
+    matches({ name: r.name, people: [r.streamer, ...r.members] }),
+  );
   const users =
     term && !term.startsWith("#")
       ? Object.values(USER_PROFILES).filter(
@@ -203,11 +229,10 @@ function HomePage() {
         )
       : [];
   const liveRoomOf = (name: string) =>
-    rooms.find((r) => r.streams.some((s) => s.user === name)) ??
-    rooms.find((r) => r.members.includes(name));
+    rooms.find((r) => r.participants.some((p) => p.username === name));
 
   // Entering a room needs sign-in: visitors get the prompt and stay on home.
-  const openRoom = (r: LiveRoom) =>
+  const openRoom = (r: LiveRoomCard) =>
     user ? navigate({ to: "/room/$roomId", params: { roomId: r.id } }) : promptSignIn(r.name);
   const openPast = (r: PastRoom) => navigate({ to: "/past/$roomId", params: { roomId: r.id } });
   const openProfile = (username: string) =>
@@ -215,12 +240,13 @@ function HomePage() {
 
   const sidebar = useMemo(() => {
     const P = Object.values(USER_PROFILES);
-    const streamers = new Set(rooms.flatMap((r) => r.streams.map((s) => s.user)));
-    const watching = rooms.reduce((s, r) => s + r.viewers, 0);
+    const streaming = rooms.reduce((s, r) => s + r.streamCount, 0);
+    const watching = rooms.reduce((s, r) => s + r.participantCount, 0);
+    // "Filling Up": fullest first (a stable sort keeps newest first among ties).
     const trending = [...rooms]
-      .sort((a, b) => b.viewers / b.capacity - a.viewers / a.capacity)
+      .sort((a, b) => b.participantCount / b.capacity - a.participantCount / a.capacity)
       .slice(0, 3);
-    return { P, streamers, watching, trending };
+    return { P, streaming, watching, trending };
   }, [rooms]);
 
   return (
@@ -331,7 +357,7 @@ function HomePage() {
             <StatMini icon={Icon.Users} label="Online" value={ONLINE_COUNT} />
             <StatMini icon={Icon.Broadcast} label="Live Rooms" value={rooms.length} />
             <StatMini icon={Icon.Eye} label="Watching" value={sidebar.watching} />
-            <StatMini icon={Icon.Screen} label="Streaming" value={sidebar.streamers.size} />
+            <StatMini icon={Icon.Screen} label="Streaming" value={sidebar.streaming} />
           </div>
         </div>
 
@@ -344,13 +370,13 @@ function HomePage() {
               onClick={() => openRoom(r)}
               className="w-[calc(100%+1rem)] flex items-center gap-2.5 p-2 -mx-2 rounded-lg cursor-pointer text-left hover:bg-surface"
             >
-              <Avatar name={r.streamer} size="md" />
+              <Avatar name={r.host?.username ?? r.name} size="md" />
               <div className="flex-1 min-w-0">
                 <div className="text-xs font-medium truncate">{r.name}</div>
-                <div className="text-[10.5px] text-muted">{r.streamer}</div>
+                <div className="text-[10.5px] text-muted">{r.host?.username ?? "no host"}</div>
               </div>
               <span className="text-[10.5px] font-semibold text-success-ink px-1.5 py-0.5 rounded-md tabular-nums bg-[color-mix(in_oklch,var(--color-success)_15%,transparent)]">
-                {r.viewers}/{r.capacity}
+                {r.participantCount}/{r.capacity}
               </span>
             </button>
           ))}

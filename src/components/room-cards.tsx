@@ -1,7 +1,8 @@
 // Room cards + thumbnail mosaic, shared by home, profile and past pages.
 // Ported from docs/design/prototype/home.jsx.
 import { useEffect, useState } from "react";
-import type { LiveRoom, PastRoom, Stream } from "~/lib/types";
+import type { LiveRoomCard } from "~/lib/rooms";
+import type { PastRoom, Stream } from "~/lib/types";
 import { Icon } from "./icons";
 import { Avatar, AvatarStack, Chip, ScreenPlaceholder } from "./ui";
 
@@ -34,6 +35,11 @@ export const StreamMosaic = ({
   const n = Math.max(1, list.length);
   return (
     <div className="relative aspect-video rounded-[var(--radius-sm)] overflow-hidden bg-[oklch(0.14_0.02_260)] border border-border-subtle">
+      {list.length === 0 && (
+        <div className="absolute inset-0 grid place-items-center text-[11px] text-white/60">
+          nobody's sharing yet
+        </div>
+      )}
       <div
         key={frame}
         className={`absolute inset-0 grid gap-[2px] animate-bc-fade ${MOSAIC_GRID[n]} ${cached ? "saturate-[0.35] brightness-[0.8]" : ""}`}
@@ -61,7 +67,7 @@ export const StreamMosaic = ({
         )}
         <div className="flex flex-col items-end gap-1">
           <span className={pill}>
-            <Icon.Screen size={10} /> {n} {n === 1 ? "stream" : "streams"}
+            <Icon.Screen size={10} /> {list.length} {list.length === 1 ? "stream" : "streams"}
           </span>
           {freshness && <span className={`${pill} !text-[9.5px] !text-white/85`}>{freshness}</span>}
         </div>
@@ -91,16 +97,26 @@ export const useSnapshots = () => {
   return { frame, freshness: mins < 1 ? "updated just now" : `updated ${mins}m ago` };
 };
 
+/** Placeholder screens for live shares until thumbnails land (ADR 10, spec #5). */
+const liveStreams = (room: LiveRoomCard): Stream[] =>
+  room.streamers.map((s) => ({ user: s.username, screen: "browser" }));
+
 export const LiveCard = ({
   room,
   onOpen,
   snap,
 }: {
-  room: LiveRoom;
-  onOpen: (room: LiveRoom) => void;
+  room: LiveRoomCard;
+  onOpen: (room: LiveRoomCard) => void;
   snap?: { frame: number; freshness: string };
 }) => {
-  const viewers = room.members.length - 1;
+  const hostName = room.host?.username ?? "no host";
+  const viewers = room.participants.filter((p) => p.id !== room.host?.id).length;
+  const faces = room.participants.length
+    ? room.participants.map((p) => p.username)
+    : room.host
+      ? [room.host.username]
+      : [];
   return (
     <button
       type="button"
@@ -108,7 +124,7 @@ export const LiveCard = ({
       onClick={() => onOpen(room)}
       className={`${cardBase} shadow-pop transition-[transform,border-color] duration-[160ms] ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-0.5 hover:border-[color-mix(in_oklch,var(--color-primary)_40%,var(--color-border))]`}
     >
-      <StreamMosaic streams={room.streams} frame={snap?.frame} freshness={snap?.freshness} />
+      <StreamMosaic streams={liveStreams(room)} frame={snap?.frame} freshness={snap?.freshness} />
       <div className="flex items-center gap-2 min-w-0">
         <span className="text-[15px] font-bold tracking-[-0.005em] truncate">{room.name}</span>
         {room.isPrivate && (
@@ -118,9 +134,9 @@ export const LiveCard = ({
         )}
       </div>
       <div className="flex items-center gap-2.5 w-full">
-        <AvatarStack names={room.members} max={4} size="md" />
+        <AvatarStack names={faces} max={4} size="md" />
         <div className="flex-1 min-w-0">
-          <div className="text-xs font-semibold">{room.streamer}</div>
+          <div className="text-xs font-semibold">{hostName}</div>
           <div className="text-[10.5px] text-muted">
             Host · {viewers} viewer{viewers === 1 ? "" : "s"}
           </div>
@@ -128,12 +144,14 @@ export const LiveCard = ({
       </div>
       <div className={`${cardFoot} gap-3 text-[11px] w-full`}>
         <span className="inline-flex items-center gap-1.5">
-          <Icon.Users size={12} /> {room.viewers}/{room.capacity}
+          <Icon.Users size={12} /> {room.participantCount}/{room.capacity}
         </span>
-        <span className="inline-flex items-center gap-1.5 text-success">
-          <span className="w-1.5 h-1.5 rounded-full bg-success shadow-[0_0_6px_var(--color-success)]" />{" "}
-          Streaming
-        </span>
+        {room.streamCount > 0 && (
+          <span className="inline-flex items-center gap-1.5 text-success">
+            <span className="w-1.5 h-1.5 rounded-full bg-success shadow-[0_0_6px_var(--color-success)]" />{" "}
+            Streaming
+          </span>
+        )}
       </div>
     </button>
   );

@@ -1,5 +1,6 @@
 import { Menu } from "@base-ui/react/menu";
-import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { createFileRoute, Link, notFound, redirect, useNavigate } from "@tanstack/react-router";
 import { type ButtonHTMLAttributes, useMemo, useState } from "react";
 import { Icon } from "~/components/icons";
 import { RoomSide } from "~/components/room/side-panel";
@@ -9,7 +10,8 @@ import { useAppActions } from "~/lib/app-actions";
 import { useCurrentSession } from "~/lib/current-user";
 import { MAX_STREAMERS } from "~/lib/format";
 import { ACTIVITY, buildRoomDetail, userIdOf } from "~/lib/mock-data";
-import { findRoom } from "~/lib/rooms-store";
+import type { RoomSummary } from "~/lib/rooms";
+import { roomQuery } from "~/lib/rooms.queries";
 import { useSettings } from "~/lib/settings";
 import type { ActivityItem, ChatMessage, Participant, RoomDetail, RoomRole } from "~/lib/types";
 
@@ -19,26 +21,59 @@ export const Route = createFileRoute("/room/$roomId")({
   beforeLoad: ({ context, params }) => {
     if (!context.session.user) throw redirect({ to: "/", search: { join: params.roomId } });
   },
+  loader: async ({ context, params }) => {
+    const room = await context.queryClient.ensureQueryData(roomQuery(params.roomId));
+    if (!room) throw notFound();
+  },
+  notFoundComponent: RoomNotFound,
   component: RoomRoute,
 });
+
+function RoomNotFound() {
+  return (
+    <div className="px-10 py-20 text-center">
+      <h1 className="m-0 mb-2 text-lg">room not found</h1>
+      <p className="m-0 mb-4 text-muted text-[12.5px]">it may have ended or never existed.</p>
+      <Link to="/" className="text-primary">
+        back to rooms
+      </Link>
+    </div>
+  );
+}
+
+/**
+ * The room's people and chat stay mock until the realtime server lands (spec #3): the
+ * host and "you" are real, seeded into the mock builder as a room of just the host.
+ */
+function mockDetail(room: RoomSummary, me: { id: string; username: string } | null): RoomDetail {
+  const host = room.host?.username ?? "host";
+  return buildRoomDetail(
+    {
+      id: room.id,
+      name: room.name,
+      streamer: host,
+      hostId: room.host?.id,
+      viewers: 1,
+      capacity: room.capacity,
+      tags: room.tags,
+      kind: room.kind,
+      started: "",
+      members: [host],
+      streams: [{ user: host, screen: "browser" }],
+      isPrivate: room.isPrivate,
+    },
+    me,
+  );
+}
 
 function RoomRoute() {
   const { roomId } = Route.useParams();
   const { user } = useCurrentSession();
-  const room = findRoom(roomId);
-  if (!room) {
-    return (
-      <div className="px-10 py-20 text-center">
-        <h1 className="m-0 mb-2 text-lg">room not found</h1>
-        <p className="m-0 mb-4 text-muted text-[12.5px]">it may have ended or never existed.</p>
-        <Link to="/" className="text-primary">
-          back to rooms
-        </Link>
-      </div>
-    );
-  }
+  const { data: room } = useSuspenseQuery(roomQuery(roomId));
+  // It can end or disappear after load (a later refetch or socket invalidation).
+  if (!room) return <RoomNotFound />;
   // key resets all room state when navigating between rooms or the signed-in user changes
-  return <RoomPage key={`${room.id}:${user?.id ?? ""}`} detail={buildRoomDetail(room, user)} />;
+  return <RoomPage key={`${room.id}:${user?.id ?? ""}`} detail={mockDetail(room, user)} />;
 }
 
 const DENSITY_CLS = {
