@@ -1,15 +1,18 @@
 import { expect, test } from "@playwright/test";
 import { signIn } from "./auth";
-import { createRoomAs, createRoomOnPage, uniqueRoomName } from "./rooms";
+import { createRoomAs, createRoomOnPage, seedPastRoom, uniqueRoomName } from "./rooms";
 
 test("home lists live rooms and past streams", async ({ page, browser }) => {
   const name = uniqueRoomName("smoke room");
+  const pastName = uniqueRoomName("smoke past");
   await createRoomAs(browser, "smoke.host", { name });
+  await seedPastRoom(browser, "smoke.past.host", pastName);
   await page.goto("/");
   await expect(page).toHaveTitle(/BhayanakCast/);
   await expect(page.getByRole("heading", { level: 1, name: "Active Rooms" })).toBeVisible();
   await expect(page.getByRole("button", { name: `Join ${name}` })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Past Streams" })).toBeVisible();
+  await expect(page.getByRole("button", { name: `View recap of ${pastName}` })).toBeVisible();
 });
 
 test("search filters rooms by name, host, #tag and kind", async ({ page, browser }) => {
@@ -99,7 +102,8 @@ test("settings dialog changes theme", async ({ page, context }) => {
 });
 
 // Profiles are covered by profiles.spec.ts.
-test("recap page renders", async ({ page }) => {
-  await page.goto("/past/p3");
+test("recap page renders", async ({ page, browser }) => {
+  const roomId = await seedPastRoom(browser, "smoke.recap.host", uniqueRoomName("smoke recap"));
+  await page.goto(`/past/${roomId}`);
   await expect(page.getByRole("heading", { name: "who streamed" })).toBeVisible();
 });

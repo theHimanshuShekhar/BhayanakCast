@@ -1,5 +1,62 @@
-import { type Browser, expect, type Page } from "@playwright/test";
-import { signIn } from "./auth";
+import { type Browser, type BrowserContext, expect, type Page } from "@playwright/test";
+import type { SeedRoom } from "../src/lib/test-sign-in";
+import { postTestAuth, signIn } from "./auth";
+
+export type { SeedRoom };
+
+/**
+ * Insert a room as given (host, end time, presence and stream intervals) through the
+ * test-only seed endpoint, bypassing the UI and realtime server. User ids come from
+ * `signIn`. Returns the room id.
+ */
+export async function seedRoom(context: BrowserContext, room: SeedRoom): Promise<string> {
+  const response = await postTestAuth(context, "seed-room", room);
+  expect(response.ok(), await response.text()).toBe(true);
+  const { roomId } = (await response.json()) as { roomId: string };
+  return roomId;
+}
+
+/** Sign up fresh users (one per username) in a throwaway context; returns their ids in order. */
+export async function createUsers(browser: Browser, usernames: string[]): Promise<string[]> {
+  const context = await browser.newContext();
+  try {
+    const ids: string[] = [];
+    for (const username of usernames) ids.push(await signIn(context, { username }));
+    return ids;
+  } finally {
+    await context.close();
+  }
+}
+
+/** An ISO timestamp `minutes` before now. */
+export const minutesAgo = (minutes: number) =>
+  new Date(Date.now() - minutes * 60_000).toISOString();
+
+/**
+ * A public past stream named `name`: 30 minutes, ended 10 minutes ago, with a fresh
+ * `hostUsername` present and streaming throughout. Returns the room id.
+ */
+export async function seedPastRoom(
+  browser: Browser,
+  hostUsername: string,
+  name: string,
+): Promise<string> {
+  const context = await browser.newContext();
+  try {
+    const hostUserId = await signIn(context, { username: hostUsername });
+    const span = { userId: hostUserId, startedAt: minutesAgo(40), endedAt: minutesAgo(10) };
+    return await seedRoom(context, {
+      name,
+      hostUserId,
+      createdAt: span.startedAt,
+      endedAt: span.endedAt,
+      presence: [span],
+      streams: [span],
+    });
+  } finally {
+    await context.close();
+  }
+}
 
 /**
  * A room name no other test (or browser project) uses: every test shares one server and

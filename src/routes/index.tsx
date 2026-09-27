@@ -10,12 +10,10 @@ import { useAppActions } from "~/lib/app-actions";
 import { type SignInErrorSearch, validateSignInErrorSearch } from "~/lib/ban";
 import { useCurrentSession } from "~/lib/current-user";
 import { homeSummaryQuery } from "~/lib/home.queries";
-import { PAST_ROOMS } from "~/lib/mock-data";
 import { USER_SEARCH_QUERY_MAX, type UserSearchResult } from "~/lib/profiles";
 import { searchUsersQuery } from "~/lib/profiles.queries";
-import type { LiveRoomCard } from "~/lib/rooms";
-import { liveRoomsQuery, roomQuery } from "~/lib/rooms.queries";
-import type { PastRoom } from "~/lib/types";
+import type { LiveRoomCard, PastRoomCard } from "~/lib/rooms";
+import { liveRoomsQuery, pastRoomsQuery, roomQuery } from "~/lib/rooms.queries";
 
 export const Route = createFileRoute("/")({
   // `join` is set when a visitor was sent here from a room URL; the shell then shows the
@@ -30,6 +28,7 @@ export const Route = createFileRoute("/")({
     const { queryClient, session } = context;
     await Promise.all([
       queryClient.ensureQueryData(liveRoomsQuery()),
+      queryClient.ensureQueryData(pastRoomsQuery()),
       queryClient.ensureQueryData(homeSummaryQuery()),
       // The shell's "sign in to join" prompt names this room.
       !session.user && deps.join ? queryClient.ensureQueryData(roomQuery(deps.join)) : null,
@@ -218,6 +217,7 @@ function HomePage() {
   const { user } = useCurrentSession();
   const search = Route.useSearch();
   const { data: rooms } = useSuspenseQuery(liveRoomsQuery());
+  const { data: pastRooms } = useSuspenseQuery(pastRoomsQuery());
   const {
     data: { rightNow, community },
   } = useSuspenseQuery(homeSummaryQuery());
@@ -249,8 +249,13 @@ function HomePage() {
       kind: r.kind,
     }),
   );
-  const past = PAST_ROOMS.filter((r) =>
-    matches({ name: r.name, people: [r.streamer, ...r.members] }),
+  const past = pastRooms.filter((r) =>
+    matches({
+      name: r.name,
+      people: [...(r.host ? [r.host.username] : []), ...r.people.map((p) => p.username)],
+      tags: r.tags,
+      kind: r.kind,
+    }),
   );
   // Users by Discord username, searched server-side once typing pauses. A #tag search is
   // for rooms only.
@@ -270,7 +275,7 @@ function HomePage() {
   // Entering a room needs sign-in: visitors get the prompt and stay on home.
   const openRoom = (r: LiveRoomCard) =>
     user ? navigate({ to: "/room/$roomId", params: { roomId: r.id } }) : promptSignIn(r.name);
-  const openPast = (r: PastRoom) => navigate({ to: "/past/$roomId", params: { roomId: r.id } });
+  const openPast = (r: PastRoomCard) => navigate({ to: "/past/$roomId", params: { roomId: r.id } });
   const openProfile = (userId: string) => navigate({ to: "/profile/$userId", params: { userId } });
 
   // "Filling Up": fullest first (a stable sort keeps newest first among ties).

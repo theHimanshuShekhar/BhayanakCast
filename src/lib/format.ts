@@ -37,18 +37,24 @@ export const formatCotime = (seconds: number) => {
   return `${h}h`;
 };
 
-export const parseMins = (s = "") => {
-  const h = /(\d+)\s*h/.exec(s);
-  const m = /(\d+)\s*m/.exec(s);
-  return (h ? Number(h[1]) * 60 : 0) + (m ? Number(m[1]) : 0) || 30;
-};
-
+/** Minutes as "0m", "<1m", "45m", "2h", "1h 5m". */
 export const fmtMins = (mins: number) => {
-  const m = Math.max(1, Math.round(mins));
+  const m = Math.round(mins);
+  if (m <= 0) return mins > 0 ? "<1m" : "0m";
   const h = Math.floor(m / 60);
   const r = m % 60;
   if (!h) return `${r}m`;
   return r ? `${h}h ${r}m` : `${h}h`;
+};
+
+/** "just now", "12m ago", "3h ago", "4d ago" for an ISO timestamp in the past. */
+export const fmtAgo = (iso: string, now: number = Date.now()) => {
+  const mins = Math.floor(Math.max(0, now - Date.parse(iso)) / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 };
 
 export const SCREEN_KINDS: Record<ScreenKind, { label: string; hue: number }> = {

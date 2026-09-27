@@ -8,8 +8,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getDb } from "~/db/client";
 import { getCaller } from "~/server/request-caller";
-import { createRoom, getLiveRoom, listLiveRooms } from "~/server/rooms";
-import { createRoomInput, roomIdInput } from "./rooms";
+import { createRoom, getLiveRoom, listLiveRooms, listPastRooms } from "~/server/rooms";
+import { createRoomInput, listPastRoomsInput, roomIdInput } from "./rooms";
 
 export const createRoomFn = createServerFn({ method: "POST" })
   .validator(createRoomInput)
@@ -22,3 +22,7 @@ export const listLiveRoomsFn = createServerFn({ method: "GET" }).handler(async (
 export const getLiveRoomFn = createServerFn({ method: "GET" })
   .validator(roomIdInput)
   .handler(async ({ data }) => getLiveRoom(getDb(), await getCaller(), data.roomId));
+
+export const listPastRoomsFn = createServerFn({ method: "GET" })
+  .validator(listPastRoomsInput)
+  .handler(async ({ data }) => listPastRooms(getDb(), await getCaller(), data));

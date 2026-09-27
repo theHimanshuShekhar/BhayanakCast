@@ -3,13 +3,27 @@
  * caller explicitly, so the server functions in src/lib/rooms.functions.ts are
  * thin wrappers and tests call these directly against PGlite.
  *
- * Live = `ended_at is null`. Until the realtime server tracks people in memory
+ * Live = `ended_at is null`; past = ended within the last 30 days (ADR 11). Until the realtime server tracks people in memory
  * (spec #3), a live room's participants are its open presence intervals and its
  * streamers its open stream intervals.
  */
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  min,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import {
+  hostIntervals,
   presenceIntervals,
   roomMembers,
   rooms,
@@ -20,11 +34,15 @@ import { ROOM_CAPACITY } from "../lib/format.ts";
 import {
   type CreateRoomInput,
   createRoomInput,
+  type ListPastRoomsInput,
   type LiveRoomCard,
+  listPastRoomsInput,
+  type PastRoomCard,
   type RoomPerson,
   type RoomSummary,
 } from "../lib/rooms.ts";
 import { type Caller, requireSignedIn } from "./caller.ts";
+import { RETENTION_DAYS } from "./stats.ts";
 import { roomVisibleTo } from "./visibility.ts";
 
 const roomColumns = {
@@ -35,22 +53,34 @@ const roomColumns = {
   tags: rooms.tags,
   isPrivate: rooms.isPrivate,
   createdAt: rooms.createdAt,
+  endedAt: rooms.endedAt,
   hostId: user.id,
   hostName: user.name,
   hostDiscordUsername: user.discordUsername,
 };
 
 /** Rooms with their host, the base of every room read. Add the WHERE per use. */
-function selectRooms(db: Db) {
+export function selectRooms(db: Db) {
   return db.select(roomColumns).from(rooms).leftJoin(user, eq(user.id, rooms.hostUserId));
 }
-type RoomRow = Awaited<ReturnType<typeof selectRooms>>[number];
+export type RoomRow = Awaited<ReturnType<typeof selectRooms>>[number];
 
-function usernameOf(row: { name: string; discordUsername: string | null }): string {
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Rooms that ended at most RETENTION_DAYS before `now`: the past streams and recaps
+ * still kept (ADR 11). Older ones are about to be purged and count as gone.
+ */
+export function endedWithinRetention(now: Date): SQL | undefined {
+  const cutoff = new Date(now.getTime() - RETENTION_DAYS * DAY_MS);
+  return and(isNotNull(rooms.endedAt), gte(rooms.endedAt, cutoff));
+}
+
+export function usernameOf(row: { name: string; discordUsername: string | null }): string {
   return row.discordUsername ?? row.name;
 }
 
-function toSummary(row: RoomRow): RoomSummary {
+export function toSummary(row: RoomRow): RoomSummary {
   return {
     id: row.id,
     name: row.name,
@@ -94,14 +124,19 @@ export async function createRoom(
   });
 }
 
-/** Open presence or stream intervals of `roomIds`, as people per room, earliest first. */
-async function openPeople(
+/**
+ * People with presence or stream intervals in `roomIds` (only open ones if `openOnly`),
+ * once per room, by first start.
+ */
+async function peopleIn(
   db: Db,
   table: typeof presenceIntervals | typeof streamIntervals,
   roomIds: string[],
+  { openOnly }: { openOnly: boolean },
 ): Promise<Map<string, RoomPerson[]>> {
   const byRoom = new Map<string, RoomPerson[]>();
   if (roomIds.length === 0) return byRoom;
+  const firstStart = min(table.startedAt);
   const rows = await db
     .select({
       roomId: table.roomId,
@@ -111,8 +146,9 @@ async function openPeople(
     })
     .from(table)
     .innerJoin(user, eq(user.id, table.userId))
-    .where(and(inArray(table.roomId, roomIds), isNull(table.endedAt)))
-    .orderBy(asc(table.startedAt));
+    .where(and(inArray(table.roomId, roomIds), openOnly ? isNull(table.endedAt) : undefined))
+    .groupBy(table.roomId, user.id)
+    .orderBy(asc(firstStart), asc(user.id));
   for (const row of rows) {
     const people = byRoom.get(row.roomId) ?? [];
     people.push({ id: row.id, username: usernameOf(row) });
@@ -128,8 +164,8 @@ export async function listLiveRooms(db: Db, caller: Caller): Promise<LiveRoomCar
     .orderBy(desc(rooms.createdAt), asc(rooms.id));
   const ids = rows.map((row) => row.id);
   const [present, streaming] = await Promise.all([
-    openPeople(db, presenceIntervals, ids),
-    openPeople(db, streamIntervals, ids),
+    peopleIn(db, presenceIntervals, ids, { openOnly: true }),
+    peopleIn(db, streamIntervals, ids, { openOnly: true }),
   ]);
   return rows.map((row) => {
     const participants = present.get(row.id) ?? [];
@@ -154,4 +190,59 @@ export async function getLiveRoom(
     and(eq(rooms.id, roomId), isNull(rooms.endedAt), roomVisibleTo(caller)),
   );
   return row ? toSummary(row) : null;
+}
+
+/** Rooms `userId` hosted (at any point) or was present in. */
+function involving(userId: string): SQL | undefined {
+  return or(
+    eq(rooms.hostUserId, userId),
+    eq(rooms.createdBy, userId),
+    sql`exists (
+      select 1 from ${hostIntervals}
+      where ${hostIntervals.roomId} = ${rooms.id} and ${hostIntervals.userId} = ${userId}
+    )`,
+    sql`exists (
+      select 1 from ${presenceIntervals}
+      where ${presenceIntervals.roomId} = ${rooms.id} and ${presenceIntervals.userId} = ${userId}
+    )`,
+  );
+}
+
+/**
+ * Rooms the caller may see that ended within the last 30 days, most recently ended
+ * first; with `userId`, only those that user hosted or joined.
+ */
+export async function listPastRooms(
+  db: Db,
+  caller: Caller,
+  input: ListPastRoomsInput = {},
+  now: Date = new Date(),
+): Promise<PastRoomCard[]> {
+  const { userId } = listPastRoomsInput.parse(input);
+  const rows = await selectRooms(db)
+    .where(
+      and(endedWithinRetention(now), roomVisibleTo(caller), userId ? involving(userId) : undefined),
+    )
+    .orderBy(desc(rooms.endedAt), asc(rooms.id));
+  const ids = rows.map((row) => row.id);
+  const [present, streamed] = await Promise.all([
+    peopleIn(db, presenceIntervals, ids, { openOnly: false }),
+    peopleIn(db, streamIntervals, ids, { openOnly: false }),
+  ]);
+  return rows.flatMap((row) => {
+    if (!row.endedAt) return [];
+    return [
+      {
+        ...toSummary(row),
+        endedAt: row.endedAt.toISOString(),
+        durationMinutes: minutesBetween(row.createdAt, row.endedAt),
+        people: present.get(row.id) ?? [],
+        streamers: streamed.get(row.id) ?? [],
+      },
+    ];
+  });
+}
+
+export function minutesBetween(start: Date, end: Date): number {
+  return Math.max(0, end.getTime() - start.getTime()) / 60_000;
 }

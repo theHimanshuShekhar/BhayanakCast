@@ -8,14 +8,16 @@ import { Avatar, Btn } from "~/components/ui";
 import { useAppActions } from "~/lib/app-actions";
 import { useCurrentSession } from "~/lib/current-user";
 import { avatarFor, formatCotime } from "~/lib/format";
-// TODO(#17): recent streams still come from mock past rooms.
-import { PAST_ROOMS } from "~/lib/mock-data";
 import { formatJoined, type Profile } from "~/lib/profiles";
 import { profileQuery } from "~/lib/profiles.queries";
+import { pastRoomsQuery } from "~/lib/rooms.queries";
 
 export const Route = createFileRoute("/profile/$userId")({
   loader: async ({ context, params }) => {
-    const profile = await context.queryClient.ensureQueryData(profileQuery(params.userId));
+    const [profile] = await Promise.all([
+      context.queryClient.ensureQueryData(profileQuery(params.userId)),
+      context.queryClient.ensureQueryData(pastRoomsQuery(params.userId)),
+    ]);
     if (!profile) throw notFound();
   },
   notFoundComponent: ProfileNotFound,
@@ -96,6 +98,8 @@ function ProfilePage({ profile }: { profile: Profile }) {
   const { openSettings } = useAppActions();
   const { user } = useCurrentSession();
   const [isFavorite, setIsFavorite] = useState(() => favorites.has(userId));
+  // Rooms this user hosted or joined in the last 30 days, visible to the viewer.
+  const { data: recent } = useSuspenseQuery(pastRoomsQuery(profile.id));
 
   const { username } = profile;
   const isSelf = user?.id === profile.id;
@@ -108,7 +112,6 @@ function ProfilePage({ profile }: { profile: Profile }) {
   const { stats, coUsers } = profile;
   const max = coUsers[0]?.secondsTogether || 1;
   const av = avatarFor(username);
-  const recent = PAST_ROOMS.filter((r) => r.streamer === username || r.members.includes(username));
 
   return (
     <div className="overflow-auto min-h-0 h-full">

@@ -66,3 +66,19 @@ export interface RoomSummary {
   capacity: number;
   createdAt: string;
 }
+
+/** Past rooms, optionally only those a user hosted or joined (a profile's "recent streams"). */
+export const listPastRoomsInput = z.object({ userId: z.string().min(1).max(64).optional() });
+export type ListPastRoomsInput = z.input<typeof listPastRoomsInput>;
+
+/** An ended room as listed on home ("Past Streams") and profiles ("recent streams"). */
+export interface PastRoomCard extends RoomSummary {
+  /** ISO timestamp. */
+  endedAt: string;
+  /** From creation to end. */
+  durationMinutes: number;
+  /** Everyone who was present at some point, by first arrival. */
+  people: RoomPerson[];
+  /** Everyone who streamed at some point, by first stream. */
+  streamers: RoomPerson[];
+}
