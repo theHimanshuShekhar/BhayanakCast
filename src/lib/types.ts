@@ -1,8 +1,10 @@
 // UI view models. Shapes mirror what server functions / the realtime socket will return.
 import type { UserSettings } from "~/db/settings";
+import type { RoomKind } from "./rooms";
+
+export type { RoomKind };
 
 export type ScreenKind = "ableton" | "fl-studio" | "cli" | "browser" | "game";
-export type RoomKind = "gaming" | "code" | "music" | "art" | "watch" | "chat";
 export type RoomRole = "host" | "mod" | "member";
 
 export type Stream = { user: string; screen: ScreenKind };

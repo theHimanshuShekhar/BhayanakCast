@@ -17,6 +17,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { ROOM_KINDS } from "../../lib/rooms.ts";
 import { newInviteToken, newRoomId } from "../ids.ts";
 import { user } from "./auth.ts";
 
@@ -24,7 +25,7 @@ const bytea = customType<{ data: Uint8Array; driverData: Uint8Array }>({
   dataType: () => "bytea",
 });
 
-export const roomKind = pgEnum("room_kind", ["gaming", "code", "music", "art", "watch", "chat"]);
+export const roomKind = pgEnum("room_kind", ROOM_KINDS);
 export const roomRole = pgEnum("room_role", ["host", "mod", "member"]);
 
 export const rooms = pgTable(

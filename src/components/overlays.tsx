@@ -5,7 +5,7 @@ import { Menu } from "@base-ui/react/menu";
 import { type ReactNode, useState } from "react";
 import { useCurrentSession } from "~/lib/current-user";
 import { ACCENTS } from "~/lib/format";
-import type { NewRoom } from "~/lib/rooms-store";
+import { type CreateRoomInput, ROOM_NAME_MAX } from "~/lib/rooms";
 import { useSettings } from "~/lib/settings";
 import type { RoomKind } from "~/lib/types";
 import { Icon } from "./icons";
@@ -84,13 +84,16 @@ export const CreateRoomDialog = ({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreate: (room: NewRoom) => void;
+  /** Saves the room; rejects if the server refuses it. */
+  onCreate: (room: CreateRoomInput) => Promise<unknown>;
 }) => {
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
   const [tags, setTags] = useState<Set<string>>(() => new Set(["chill"]));
   const [kind, setKind] = useState<RoomKind>("gaming");
   const [isPrivate, setIsPrivate] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   const toggleTag = (t: string) =>
     setTags((prev) => {
@@ -100,11 +103,25 @@ export const CreateRoomDialog = ({
       return n;
     });
 
-  const submit = () => {
-    if (!name.trim()) return;
-    onCreate({ name: name.trim(), description: desc.trim(), kind, tags: [...tags], isPrivate });
-    setName("");
-    setDesc("");
+  const submit = async () => {
+    if (!name.trim() || pending) return;
+    setPending(true);
+    setFailed(false);
+    try {
+      await onCreate({
+        name: name.trim(),
+        description: desc.trim(),
+        kind,
+        tags: [...tags],
+        isPrivate,
+      });
+      setName("");
+      setDesc("");
+    } catch {
+      setFailed(true);
+    } finally {
+      setPending(false);
+    }
   };
 
   return (
@@ -116,7 +133,7 @@ export const CreateRoomDialog = ({
       footer={
         <>
           <Btn onClick={() => onOpenChange(false)}>cancel</Btn>
-          <Btn variant="primary" onClick={submit} disabled={!name.trim()}>
+          <Btn variant="primary" onClick={submit} disabled={!name.trim() || pending}>
             <Icon.Broadcast size={13} /> start hang
           </Btn>
         </>
@@ -138,7 +155,7 @@ export const CreateRoomDialog = ({
             type="text"
             placeholder="e.g. sunday synth jams"
             value={name}
-            maxLength={60}
+            maxLength={ROOM_NAME_MAX}
             onChange={(e) => setName(e.target.value)}
             className={fieldInput}
           />
@@ -198,6 +215,11 @@ export const CreateRoomDialog = ({
           on={isPrivate}
           onChange={setIsPrivate}
         />
+        {failed && (
+          <p role="alert" className="m-0 text-[11.5px] text-live-ink">
+            couldn't start the room. check the details and try again.
+          </p>
+        )}
       </form>
     </Sheet>
   );

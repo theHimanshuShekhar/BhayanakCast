@@ -6,8 +6,7 @@
  */
 import { useRouteContext } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
-import { getRequestHeaders } from "@tanstack/react-start/server";
-import { getSessionFromRequest } from "~/server/session";
+import { getCaller } from "~/server/request-caller";
 
 export type Role = "visitor" | "user" | "admin";
 
@@ -25,15 +24,7 @@ export interface CurrentSession {
 export const VISITOR: CurrentSession = { user: null, role: "visitor" };
 
 export const loadCurrentSession = createServerFn({ method: "GET" }).handler(
-  async (): Promise<CurrentSession> => {
-    const session = await getSessionFromRequest(getRequestHeaders());
-    if (!session) return VISITOR;
-    const { id, name, discordUsername, role } = session.user;
-    return {
-      user: { id, username: discordUsername ?? name },
-      role: role === "admin" ? "admin" : "user",
-    };
-  },
+  (): Promise<CurrentSession> => getCaller(),
 );
 
 export function useCurrentSession(): CurrentSession {

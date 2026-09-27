@@ -1,5 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 import { signIn } from "./auth";
+import { createRoomAs, uniqueRoomName } from "./rooms";
 
 const activeRooms = { level: 1, name: "Active Rooms" } as const;
 const joinPrompt = (page: Page) => page.getByRole("dialog", { name: "sign in to join" });
@@ -17,12 +18,17 @@ test.describe("a visitor", () => {
     await expect(page.getByRole("heading", { name: "who streamed" })).toBeVisible();
   });
 
-  test("clicking a live room card opens the sign-in prompt and stays home", async ({ page }) => {
+  test("clicking a live room card opens the sign-in prompt and stays home", async ({
+    page,
+    browser,
+  }) => {
+    const name = uniqueRoomName("midnight speedrun club");
+    await createRoomAs(browser, "gate.host", { name });
     await page.goto("/");
-    await page.getByRole("button", { name: "Join midnight speedrun club" }).click();
+    await page.getByRole("button", { name: `Join ${name}` }).click();
     const dialog = joinPrompt(page);
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByText("midnight speedrun club")).toBeVisible();
+    await expect(dialog.getByText(name)).toBeVisible();
     await expect(dialog.getByRole("button", { name: /sign in with discord/i })).toBeVisible();
     await expect(page).toHaveURL(/\/$/);
 
@@ -31,19 +37,22 @@ test.describe("a visitor", () => {
     await expect(page).toHaveURL(/\/$/);
   });
 
-  test('clicking a "Filling Up" entry opens the sign-in prompt', async ({ page }) => {
+  test('clicking a "Filling Up" entry opens the sign-in prompt', async ({ page, browser }) => {
+    await createRoomAs(browser, "gate.host", { name: uniqueRoomName("filling") });
     await page.goto("/");
     await fillingUp(page).click();
     await expect(joinPrompt(page)).toBeVisible();
     await expect(page).toHaveURL(/\/$/);
   });
 
-  test("opening a room URL lands on home with the prompt open", async ({ page }) => {
-    await page.goto("/room/r1");
-    await expect(page).toHaveURL(/\/\?join=r1$/);
+  test("opening a room URL lands on home with the prompt open", async ({ page, browser }) => {
+    const name = uniqueRoomName("midnight speedrun club");
+    const roomId = await createRoomAs(browser, "gate.host", { name });
+    await page.goto(`/room/${roomId}`);
+    await expect(page).toHaveURL(new RegExp(`/\\?join=${roomId}$`));
     const dialog = joinPrompt(page);
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByText("midnight speedrun club")).toBeVisible();
+    await expect(dialog.getByText(name)).toBeVisible();
     await expect(dialog.getByRole("button", { name: /sign in with discord/i })).toBeVisible();
 
     // Closing the prompt drops the param (so a reload doesn't reopen it) and shows home.
@@ -99,25 +108,30 @@ test.describe("a signed-in user", () => {
     await expect(page.getByRole("heading", { name: "who streamed" })).toBeVisible();
   });
 
-  test("clicking a live room card enters the room", async ({ page }) => {
+  test("clicking a live room card enters the room", async ({ page, browser }) => {
+    const name = uniqueRoomName("midnight speedrun club");
+    const roomId = await createRoomAs(browser, "gate.host", { name });
     await page.goto("/");
-    await page.getByRole("button", { name: "Join midnight speedrun club" }).click();
-    await expect(page).toHaveURL(/\/room\/r1$/);
-    await expect(page.getByRole("heading", { name: "midnight speedrun club" })).toBeVisible();
+    await page.getByRole("button", { name: `Join ${name}` }).click();
+    await expect(page).toHaveURL(new RegExp(`/room/${roomId}$`));
+    await expect(page.getByRole("heading", { name })).toBeVisible();
     await expect(joinPrompt(page)).toHaveCount(0);
   });
 
-  test('clicking a "Filling Up" entry enters the room', async ({ page }) => {
+  test('clicking a "Filling Up" entry enters the room', async ({ page, browser }) => {
+    await createRoomAs(browser, "gate.host", { name: uniqueRoomName("filling") });
     await page.goto("/");
     await fillingUp(page).click();
-    await expect(page).toHaveURL(/\/room\/r\d+$/);
+    await expect(page).toHaveURL(/\/room\/[^/]+$/);
     await expect(joinPrompt(page)).toHaveCount(0);
   });
 
-  test("opening a room URL shows the room", async ({ page }) => {
-    await page.goto("/room/r1");
-    await expect(page).toHaveURL(/\/room\/r1$/);
-    await expect(page.getByRole("heading", { name: "midnight speedrun club" })).toBeVisible();
+  test("opening a room URL shows the room", async ({ page, browser }) => {
+    const name = uniqueRoomName("midnight speedrun club");
+    const roomId = await createRoomAs(browser, "gate.host", { name });
+    await page.goto(`/room/${roomId}`);
+    await expect(page).toHaveURL(new RegExp(`/room/${roomId}$`));
+    await expect(page.getByRole("heading", { name })).toBeVisible();
     await expect(joinPrompt(page)).toHaveCount(0);
   });
 
