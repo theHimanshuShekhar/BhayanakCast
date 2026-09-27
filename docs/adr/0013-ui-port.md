@@ -1,0 +1,15 @@
+# 13. Port the design as-is with Base UI primitives
+
+Date: 2026-09-27 · Status: accepted
+
+## Decision
+- Port the claude.ai/design prototype (`BhayanakCast.html` + JSX) directly: Tailwind v4 via `@tailwindcss/vite`, the `@theme` oklch token set with its `.dark` overrides, JetBrains Mono, the hand-rolled stroke icon set, and the custom SVG line/bar charts.
+- Use **Base UI** (unstyled) only for interactive primitives that need correct accessibility behaviour: Dialog (create room, settings), Menu (profile menu), Tabs (room sidebar), Switch, and Tooltip (rail labels).
+- Prototype-only mechanisms are dropped: the CDN Tailwind, Babel-in-browser, `window` globals, the edit-mode `postMessage` bridge, and seed data. Components become ES modules, and data comes from server functions and the WebSocket.
+
+## Consequences
+- The visual result stays identical to the design.
+- The design's "tweaks" (accent hue, radius, density, layout, chat panel, theme) become user settings (storage decided separately).
+
+## Addendum: settings storage
+Appearance settings are stored on the user's DB row, so they follow the user across devices, and cached in localStorage. Theme and accent are also mirrored into a cookie so SSR renders the right `dark` class and `--accent-h` without a flash.
