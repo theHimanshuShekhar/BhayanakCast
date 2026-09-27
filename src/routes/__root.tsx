@@ -1,13 +1,17 @@
-import { createRootRoute, HeadContent, Outlet, Scripts, useNavigate } from "@tanstack/react-router";
-import { type ReactNode, useMemo, useState } from "react";
 import {
-  CreateRoomDialog,
-  ProfileMenu,
-  SettingsDialog,
-  SignedOutScreen,
-} from "~/components/overlays";
+  createRootRoute,
+  HeadContent,
+  Outlet,
+  Scripts,
+  useNavigate,
+  useRouter,
+} from "@tanstack/react-router";
+import { type ReactNode, useMemo, useState } from "react";
+import { CreateRoomDialog, ProfileMenu, SettingsDialog } from "~/components/overlays";
 import { SideNav } from "~/components/sidenav";
+import { SignInButton } from "~/components/sign-in-button";
 import { AppActionsContext } from "~/lib/app-actions";
+import { signOut } from "~/lib/auth-client";
 import { loadCurrentSession, useCurrentSession } from "~/lib/current-user";
 import { CURRENT_USER, userIdOf } from "~/lib/mock-data";
 import { createRoom, useLiveRooms } from "~/lib/rooms-store";
@@ -40,12 +44,18 @@ function RootComponent() {
 
 function AppShell() {
   const navigate = useNavigate();
+  const router = useRouter();
   const { user, role } = useCurrentSession();
   const rooms = useLiveRooms();
   const [createOpen, setCreateOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // TODO(ADR 7): replace with Better Auth session state.
-  const [signedOut, setSignedOut] = useState(false);
+
+  // End the session, then reload the session in router context and land on the public home.
+  const signOutToHome = async () => {
+    await signOut();
+    await navigate({ to: "/" });
+    await router.invalidate();
+  };
 
   const actions = useMemo(
     () => ({
@@ -64,15 +74,17 @@ function AppShell() {
             isAdmin={role === "admin"}
             onCreate={() => setCreateOpen(true)}
             profileMenu={
-              user && (
+              user ? (
                 <ProfileMenu
                   username={user.username}
                   onOpenProfile={() =>
                     navigate({ to: "/profile/$userId", params: { userId: userIdOf(CURRENT_USER) } })
                   }
                   onSettings={() => setSettingsOpen(true)}
-                  onSignOut={() => setSignedOut(true)}
+                  onSignOut={signOutToHome}
                 />
+              ) : (
+                <SignInButton variant="rail" />
               )
             }
           />
@@ -91,7 +103,6 @@ function AppShell() {
           }}
         />
         <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
-        {signedOut && <SignedOutScreen onSignIn={() => setSignedOut(false)} />}
       </div>
     </AppActionsContext>
   );

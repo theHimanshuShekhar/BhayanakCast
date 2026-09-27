@@ -5,10 +5,10 @@ import { ACCENTS } from "~/lib/format";
 import { useSettings } from "~/lib/settings";
 import { Icon, type IconComponent } from "./icons";
 
-const tipCls =
+export const tipCls =
   "max-sm:hidden pointer-events-none absolute left-[calc(100%+10px)] top-1/2 -translate-y-1/2 -translate-x-1 px-2.5 py-[5px] bg-surface-3 text-fg border border-border-strong rounded-md text-[11px] tracking-[0.02em] whitespace-nowrap opacity-0 transition-[opacity,transform] duration-150 z-[100] shadow-pop group-hover:opacity-100 group-hover:translate-x-0 group-focus-visible:opacity-100 group-focus-visible:translate-x-0";
 
-const railBase =
+export const railBase =
   "group relative w-10 h-10 rounded-[10px] grid place-items-center transition-[background-color,color] duration-150 cursor-pointer";
 const railIdle = "text-muted hover:bg-surface hover:text-fg";
 const railActive =

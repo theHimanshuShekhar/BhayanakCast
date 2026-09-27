@@ -1,4 +1,4 @@
-// Create-room dialog, settings dialog, profile menu, signed-out screen.
+// Create-room dialog, settings dialog, profile menu.
 // Ported from docs/design/prototype/overlays.jsx onto Base UI Dialog/Menu (focus trap, Esc, a11y).
 import { Dialog } from "@base-ui/react/dialog";
 import { Menu } from "@base-ui/react/menu";
@@ -345,22 +345,4 @@ export const ProfileMenu = ({
       </Menu.Positioner>
     </Menu.Portal>
   </Menu.Root>
-);
-
-export const SignedOutScreen = ({ onSignIn }: { onSignIn: () => void }) => (
-  <div className="fixed inset-0 z-[300] grid place-items-center p-6 bg-bg">
-    <div className="relative overflow-hidden text-center max-w-[400px] w-full px-6 sm:px-8 py-10 bg-canvas border border-border rounded-[var(--radius-lg)] shadow-pop">
-      <div className="absolute -inset-px pointer-events-none bg-[radial-gradient(200px_120px_at_50%_0%,var(--color-primary-soft),transparent_60%)]" />
-      <div className="relative w-14 h-14 mx-auto mb-4 rounded-2xl grid place-items-center bg-surface-2 border border-border font-extrabold text-sm tracking-[0.08em] text-primary">
-        BC
-      </div>
-      <h2 className="relative m-0 mb-2 text-lg tracking-[-0.01em]">you're signed out</h2>
-      <p className="relative m-0 mb-6 text-muted text-[12.5px]">
-        sign in with discord to join rooms and pick up where your crew left off.
-      </p>
-      <Btn variant="primary" className="relative w-full" onClick={onSignIn}>
-        sign in with discord
-      </Btn>
-    </div>
-  </div>
 );
