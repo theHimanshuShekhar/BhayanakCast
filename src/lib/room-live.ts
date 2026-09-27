@@ -93,7 +93,11 @@ export function applyRoomMessage(
 export interface RoomLiveResult {
   /** Null until the server's snapshot arrives. */
   room: RoomLive | null;
-  /** The server's refusal of this page's join (e.g. `not_found`), if any. */
+  /**
+   * Why this page isn't (or is no longer) in the room, if it isn't: the server's refusal of its
+   * join (`not_found`; `room_full`, which the realtime client keeps retrying until a snapshot
+   * clears it), or `taken_over` once the same user joined a room from another tab or device.
+   */
   error: ServerMessageOf<"error"> | null;
   /**
    * The socket dropped and the client is reconnecting (with backoff). `room` is the last
@@ -129,7 +133,9 @@ export function useRoomLive(roomId: string): RoomLiveResult {
     const client = getRealtimeClient();
     const unsubscribe = client.subscribe((message) => {
       if (message.type === "error") {
-        if (message.re === "room.join") setResult((r) => ({ ...r, error: message }));
+        if (message.re === "room.join" || message.code === "taken_over") {
+          setResult((r) => ({ ...r, error: message }));
+        }
         if (message.re === "chat.send") setResult((r) => ({ ...r, chatError: message }));
         return;
       }

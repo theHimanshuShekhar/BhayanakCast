@@ -60,6 +60,7 @@ beforeEach(() => {
   client = new RealtimeClient("ws://test/ws", {
     WebSocket: FakeSocket as unknown as typeof WebSocket,
     backoff: (attempt) => 1_000 * 2 ** attempt,
+    fullRoomBackoff: (attempt) => 2_000 + 1_000 * attempt,
   });
   statuses = [];
   client.onStatus((status) => statuses.push(status));
@@ -131,6 +132,69 @@ describe("RealtimeClient", () => {
     expect(client.status).toBe("open");
     latest().close();
     opensAfter(1_000);
+  });
+
+  it("keeps asking a full room with backoff until it gets in, or when the lobby says a spot freed", () => {
+    const joins = () =>
+      latest().sent.filter((m) => (m as { type: string }).type === "room.join").length;
+    const full = () =>
+      latest().serverSends({
+        type: "error",
+        code: "room_full",
+        message: "This room is full (10/10)",
+        re: "room.join",
+      });
+    client.joinRoom("r1");
+    latest().handshake();
+    expect(joins()).toBe(1);
+
+    full();
+    vi.advanceTimersByTime(1_999);
+    expect(joins()).toBe(1);
+    vi.advanceTimersByTime(1);
+    expect(joins()).toBe(2);
+
+    full();
+    vi.advanceTimersByTime(3_000);
+    expect(joins()).toBe(3);
+
+    // The lobby says a spot freed in this room: ask again at once. Other rooms, or the room
+    // still full, don't count.
+    full();
+    const count = (roomId: string, participantCount: number) =>
+      latest().serverSends({
+        type: "lobby.changed",
+        online: 12,
+        room: { roomId, change: "count", participantCount },
+      });
+    count("r2", 3);
+    count("r1", 10);
+    expect(joins()).toBe(3);
+    count("r1", 9);
+    expect(joins()).toBe(4);
+    count("r1", 8); // not waiting on a refusal: nothing
+    expect(joins()).toBe(4);
+
+    latest().serverSends({
+      type: "room.snapshot",
+      roomId: "r1",
+      hostUserId: null,
+      participants: [],
+      chat: [],
+    });
+    vi.advanceTimersByTime(15_000); // (within one ping interval: the socket stays up)
+    expect(joins()).toBe(4);
+  });
+
+  it("stops wanting its room once taken over, even across reconnects", () => {
+    client.joinRoom("r1");
+    const first = latest();
+    first.handshake();
+    first.serverSends({ type: "error", code: "taken_over", message: "elsewhere" });
+    first.close();
+    vi.advanceTimersByTime(1_000);
+    latest().handshake();
+    expect(latest().sent).toEqual([{ type: "hello", v: PROTOCOL_VERSION }]);
   });
 
   it("is closed, not reconnecting, once stopped", () => {

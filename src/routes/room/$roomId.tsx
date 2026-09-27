@@ -1,7 +1,7 @@
 import { Menu } from "@base-ui/react/menu";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound, redirect, useNavigate } from "@tanstack/react-router";
-import { type ButtonHTMLAttributes, useEffect, useMemo, useState } from "react";
+import { type ButtonHTMLAttributes, type ReactNode, useEffect, useMemo, useState } from "react";
 import { Icon } from "~/components/icons";
 import { RoomSide } from "~/components/room/side-panel";
 import { type ModAction, type Reaction, Tile } from "~/components/room/tile";
@@ -34,6 +34,28 @@ function RoomNotFound() {
     <div className="px-10 py-20 text-center">
       <h1 className="m-0 mb-2 text-lg">room not found</h1>
       <p className="m-0 mb-4 text-muted text-[12.5px]">it may have ended or never existed.</p>
+      <Link to="/" className="text-primary">
+        back to rooms
+      </Link>
+    </div>
+  );
+}
+
+/** Why this page isn't showing the room (it's full, or the user took it elsewhere). */
+function RoomNotice({
+  title,
+  waiting = false,
+  children,
+}: {
+  title: string;
+  /** Still trying to get in: announce it as a live status. */
+  waiting?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div className="px-10 py-20 text-center" role={waiting ? "status" : "alert"}>
+      <h1 className="m-0 mb-2 text-lg">{title}</h1>
+      <p className="m-0 mb-4 text-muted text-[12.5px]">{children}</p>
       <Link to="/" className="text-primary">
         back to rooms
       </Link>
@@ -211,6 +233,20 @@ function RoomPage({ detail, meId }: { detail: RoomDetail; meId: string | null })
 
   // The room ended or was hidden from us since the page loaded.
   if (live.error?.code === "not_found") return <RoomNotFound />;
+  if (live.error?.code === "taken_over") {
+    return (
+      <RoomNotice title="you joined from elsewhere">
+        you're in a room in another tab or device now, so you left this one here.
+      </RoomNotice>
+    );
+  }
+  if (live.error?.code === "room_full") {
+    return (
+      <RoomNotice title={`room full (${detail.capacity}/${detail.capacity})`} waiting>
+        you'll join {detail.name} automatically as soon as a spot frees up.
+      </RoomNotice>
+    );
+  }
 
   const leave = () => navigate({ to: "/" });
   // Chat and the feed name people by username: resolve it to the user id of whoever has (or,

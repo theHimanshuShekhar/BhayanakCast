@@ -3,12 +3,16 @@
  * `RealtimeClient`, which connects on first use, says `hello`, reconnects with backoff when
  * the socket drops, and re-joins the room the page is in after every reconnect. It pings every
  * `PING_INTERVAL_MS` (heartbeats keep the socket alive through Cloudflare Tunnel, ADR 9) and
- * treats a server that doesn't answer before the next ping as gone. Components
+ * treats a server that doesn't answer before the next ping as gone. A join refused as
+ * `room_full` is asked again when the lobby reports a free spot, and on a slow poll, until it
+ * succeeds (ADR 21: no waitlist); after `taken_over` (the user
+ * joined a room elsewhere, ADR 21) the client stops wanting its room. Components
  * don't touch the socket: they subscribe to server messages and call `joinRoom`/`leaveRoom`
  * (see ./room-live.ts for the room page's hook).
  *
  * Browser-only: call it from effects and event handlers, never during render.
  */
+import { ROOM_CAPACITY } from "./format";
 import {
   type ClientMessage,
   PING_INTERVAL_MS,
@@ -31,6 +35,8 @@ export interface RealtimeClientOptions {
   backoff?: (attempt: number) => number;
   /** How often to ping once welcomed, in ms. */
   pingIntervalMs?: number;
+  /** Delay before asking a full room again for the `attempt`th time (0-based), in ms. */
+  fullRoomBackoff?: (attempt: number) => number;
   /** For tests. */
   WebSocket?: typeof WebSocket;
 }
@@ -38,6 +44,14 @@ export interface RealtimeClientOptions {
 /** 0.5s, 1s, 2s, … capped at 15s, with ±20% jitter so clients don't reconnect in lockstep. */
 export const defaultBackoff = (attempt: number) =>
   Math.min(15_000, 500 * 2 ** attempt) * (0.8 + Math.random() * 0.4);
+
+/**
+ * The fallback poll of a full room: 5s, 7.5s, 11s, … capped at 30s, with ±20% jitter. A public
+ * room is asked again as soon as the lobby reports a free spot (ADR 20); the poll is for
+ * private rooms, which the lobby never mentions, and for a lobby message missed in a reconnect.
+ */
+export const defaultFullRoomBackoff = (attempt: number) =>
+  Math.min(30_000, 5_000 * 1.5 ** attempt) * (0.8 + Math.random() * 0.4);
 
 export class RealtimeClient {
   readonly #url: string;
@@ -57,10 +71,15 @@ export class RealtimeClient {
   #stopped = true;
   /** The room this page wants to be in; re-joined after every reconnect. */
   #roomId: string | null = null;
+  readonly #fullRoomBackoff: (attempt: number) => number;
+  /** The next ask of a full room (`room_full`), and how many asks have been refused so far. */
+  #fullRetry: ReturnType<typeof setTimeout> | null = null;
+  #fullAttempt = 0;
 
   constructor(url: string, options: RealtimeClientOptions = {}) {
     this.#url = url;
     this.#backoff = options.backoff ?? defaultBackoff;
+    this.#fullRoomBackoff = options.fullRoomBackoff ?? defaultFullRoomBackoff;
     this.#pingIntervalMs = options.pingIntervalMs ?? PING_INTERVAL_MS;
     this.#WebSocket = options.WebSocket ?? WebSocket;
   }
@@ -81,6 +100,7 @@ export class RealtimeClient {
     if (this.#retry) clearTimeout(this.#retry);
     this.#retry = null;
     this.#stopHeartbeat();
+    this.#stopFullRetry();
     if (this.#ws) this.#ws.close(1000, "stopped");
     else this.#setStatus("closed");
   }
@@ -116,6 +136,7 @@ export class RealtimeClient {
 
   /** Be in `roomId`: join now if connected, and again after every reconnect. */
   joinRoom(roomId: string): void {
+    this.#stopFullRetry();
     this.#roomId = roomId;
     this.start();
     this.send({ type: "room.join", roomId });
@@ -124,6 +145,7 @@ export class RealtimeClient {
   /** Stop being in `roomId` (a no-op if the page has since moved to another room). */
   leaveRoom(roomId: string): void {
     if (this.#roomId !== roomId) return;
+    this.#stopFullRetry();
     this.#roomId = null;
     this.send({ type: "room.leave" });
   }
@@ -202,9 +224,49 @@ export class RealtimeClient {
       this.#attempt = 0;
       this.#setStatus("open");
       if (this.#ws) this.#startHeartbeat(this.#ws);
-      if (this.#roomId) this.send({ type: "room.join", roomId: this.#roomId });
+      if (this.#roomId) {
+        this.#stopFullRetry();
+        this.send({ type: "room.join", roomId: this.#roomId });
+      }
+    } else if (message.type === "room.snapshot" && message.roomId === this.#roomId) {
+      this.#stopFullRetry();
+      this.#fullAttempt = 0;
+    } else if (message.type === "error" && message.code === "room_full" && this.#roomId) {
+      // No waitlist (ADR 21): keep asking until a spot frees up.
+      this.#stopFullRetry();
+      const roomId = this.#roomId;
+      this.#fullRetry = setTimeout(
+        () => {
+          this.#fullRetry = null;
+          if (this.#roomId === roomId) this.send({ type: "room.join", roomId });
+        },
+        this.#fullRoomBackoff(this.#fullAttempt++),
+      );
+    } else if (message.type === "error" && message.code === "taken_over") {
+      // This user joined a room elsewhere: never rejoin from here, even after a reconnect.
+      this.#stopFullRetry();
+      this.#roomId = null;
+    } else if (
+      message.type === "lobby.changed" &&
+      message.room?.roomId === this.#roomId &&
+      (message.room.change === "ended" || message.room.participantCount < ROOM_CAPACITY)
+    ) {
+      // The full room we're waiting on has a free spot (or ended, which the join will say).
+      this.#retryFullJoin();
     }
     for (const listener of this.#messageListeners) listener(message);
+  }
+
+  /** Ask the room refused as full again now, not at the next poll. A no-op unless waiting. */
+  #retryFullJoin(): void {
+    if (!this.#fullRetry || !this.#roomId) return;
+    this.#stopFullRetry();
+    this.send({ type: "room.join", roomId: this.#roomId });
+  }
+
+  #stopFullRetry(): void {
+    if (this.#fullRetry) clearTimeout(this.#fullRetry);
+    this.#fullRetry = null;
   }
 }
 
