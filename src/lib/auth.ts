@@ -145,7 +145,7 @@ export function createAuth(db: Db, config: AuthConfig) {
       // A banned user's sign-in fails with BANNED_USER and this message; the Discord
       // callback carries both back to home, which shows the ban notice (./ban.ts).
       admin({ bannedUserMessage: (user) => describeBan(user) }),
-      ...(isTestSignInEnabled(config.env) ? [testSignIn()] : []),
+      ...(isTestSignInEnabled(config.env) ? [testSignIn(db)] : []),
       // Must stay last (Better Auth TanStack Start integration docs).
       tanstackStartCookies(),
     ],

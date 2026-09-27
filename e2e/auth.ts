@@ -58,6 +58,31 @@ export async function signIn(context: BrowserContext, user: FakeDiscordUser): Pr
   return userId;
 }
 
+export interface SeededStats {
+  stats?: Partial<{
+    secondsStreamed: number;
+    secondsWatched: number;
+    roomsHosted: number;
+    roomsJoined: number;
+    peakViewers: number;
+  }>;
+  /** Seconds together with other fake users, by their Discord ids. */
+  cotime?: { discordId: string; secondsTogether: number }[];
+}
+
+/**
+ * Set a fake user's lifetime stats and co-time through the test-only stats endpoint, as
+ * the stats roll-up would leave them. Only seed users of the calling test.
+ */
+export async function setStats(
+  context: BrowserContext,
+  discordId: string,
+  seed: SeededStats,
+): Promise<void> {
+  const response = await postTestAuth(context, "stats", { discordId, ...seed });
+  expect(response.ok(), await response.text()).toBe(true);
+}
+
 export interface Ban {
   reason?: string;
   /** ISO timestamp; omit for a ban with no end date. */

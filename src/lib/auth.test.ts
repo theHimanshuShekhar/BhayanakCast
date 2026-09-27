@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Db } from "../db/client.ts";
-import { dailyPlatformStats, session, user } from "../db/schema/index.ts";
+import { dailyPlatformStats, session, user, userCotime, userStats } from "../db/schema/index.ts";
 import { DEFAULT_USER_SETTINGS } from "../db/settings.ts";
 import { createTestDb } from "../db/test-db.ts";
 import { resolveSession } from "../server/session.ts";
@@ -130,6 +130,41 @@ describe("test-only sign-in", () => {
       (await auth.api.getSession({ headers: cookiesFrom(response) }))?.user.role;
     expect(await roleIn(admin)).toBe("admin");
     expect(await roleIn(regular)).toBe("user");
+  });
+
+  it("seeds stats and one-way co-time through the test-only stats endpoint", async () => {
+    await testSignInRequest("4000", "kodama_jpg");
+    await testSignInRequest("4001", "bitreverb");
+    const setStats = (body: object) =>
+      auth.handler(
+        new Request(`${testEnv.BETTER_AUTH_URL}/api/auth/test/stats`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      );
+    const seed = {
+      stats: { secondsStreamed: 7200, peakViewers: 4 },
+      cotime: [{ discordId: "4000", secondsTogether: 600 }],
+    };
+
+    expect((await setStats({ discordId: "4001", ...seed })).status).toBe(200);
+    // Again, to update in place.
+    expect((await setStats({ discordId: "4001", ...seed })).status).toBe(200);
+    const idOf = async (discordId: string) =>
+      (await db.select().from(user).where(eq(user.discordId, discordId)))[0]?.id ?? "";
+    const [a, b] = [await idOf("4000"), await idOf("4001")].sort();
+    expect(await db.select().from(userStats)).toEqual([
+      expect.objectContaining({
+        userId: await idOf("4001"),
+        secondsStreamed: 7200,
+        peakViewers: 4,
+      }),
+    ]);
+    expect(await db.select().from(userCotime)).toEqual([
+      { userA: a, userB: b, secondsTogether: 600 },
+    ]);
+    expect((await setStats({ discordId: "9999" })).status).toBe(404);
   });
 
   it.each([
