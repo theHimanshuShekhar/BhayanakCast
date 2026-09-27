@@ -18,6 +18,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@base-ui/react": "^1.8.0",
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "@tanstack/react-router": "^1.170.39",
     "@tanstack/react-start": "^1.168.58",

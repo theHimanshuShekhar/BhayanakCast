@@ -16,3 +16,6 @@ playwright/.cache/
 coverage/
 *.log
 .DS_Store
+
+# Claude Code local state / agent worktrees
+.claude/

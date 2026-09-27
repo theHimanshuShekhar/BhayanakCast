@@ -9,6 +9,7 @@
     "includes": [
       "**",
       "!docs",
+      "!.claude",
       "!src/routeTree.gen.ts",
       "!.output",
       "!dist",
