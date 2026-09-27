@@ -2,7 +2,8 @@
  * The realtime WebSocket endpoint (ADR 4 + addenda) on the app's Node HTTP server, so it runs
  * in the same process as SSR. A thin adapter: it authenticates the upgrade with the session
  * cookie (ADR 7), then hands frames and closes to the room hub (./room-hub.ts), which owns all
- * live state and the protocol (src/lib/realtime.ts).
+ * live state and the protocol (src/lib/realtime.ts). An upgrade without a valid session opens
+ * an anonymous, lobby-only socket (ADR 20), at most `anonymousSocketsPerIp` per client IP.
  *
  * `ws` runs in no-server mode on the server's `upgrade` event and only takes upgrades on
  * `REALTIME_PATH`, leaving any others (Vite's HMR socket in dev) to their own listeners.
@@ -14,6 +15,8 @@ import { getDb } from "../db/client.ts";
 import { MAX_CLIENT_MESSAGE_BYTES, REALTIME_PATH } from "../lib/realtime.ts";
 import type { Caller } from "./caller.ts";
 import { systemClock } from "./clock.ts";
+import { env } from "./env.ts";
+import { onRoomAnnouncement } from "./room-announcements.ts";
 import { RoomHub } from "./room-hub.ts";
 import { createDbRoomStore } from "./room-store.ts";
 import { callerFromSession, getSessionFromRequest } from "./session.ts";
@@ -26,6 +29,11 @@ export interface RealtimeOptions {
    * cookie (banned users count as signed out).
    */
   authenticate?: (request: IncomingMessage) => Promise<Caller>;
+  /**
+   * Open anonymous sockets allowed per client IP (ADR 20); more are refused with 429.
+   * Defaults to `REALTIME_ANONYMOUS_SOCKETS_PER_IP`.
+   */
+  anonymousSocketsPerIp?: number;
 }
 
 export interface RealtimeServer {
@@ -42,6 +50,12 @@ const authenticateFromSession = async (request: IncomingMessage): Promise<Caller
 export function attachRealtime(server: Server, options: RealtimeOptions = {}): RealtimeServer {
   const hub = options.hub ?? new RoomHub({ clock: systemClock, store: createDbRoomStore(getDb()) });
   const authenticate = options.authenticate ?? authenticateFromSession;
+  const anonymousLimit = options.anonymousSocketsPerIp ?? env.REALTIME_ANONYMOUS_SOCKETS_PER_IP;
+  /** Open anonymous sockets (and upgrades in progress) by client IP. */
+  const anonymousByIp = new Map<string, number>();
+  const stopAnnouncements = onRoomAnnouncement((announcement) => {
+    void hub.announce(announcement);
+  });
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_CLIENT_MESSAGE_BYTES });
 
   function serve(ws: WebSocket, caller: Caller): void {
@@ -73,8 +87,18 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
       console.error("[realtime] authenticating an upgrade failed", error);
       return refuse(socket, 500, "Internal Server Error");
     }
-    // Signed-in sockets only until the anonymous lobby channel lands (ADR 20, #24).
-    if (!caller.user) return refuse(socket, 401, "Unauthorized");
+    if (!caller.user) {
+      const ip = clientIp(request);
+      const open = anonymousByIp.get(ip) ?? 0;
+      if (open >= anonymousLimit) return refuse(socket, 429, "Too Many Requests");
+      // Held until the TCP socket closes, whether the handshake completes or not.
+      anonymousByIp.set(ip, open + 1);
+      socket.once("close", () => {
+        const left = (anonymousByIp.get(ip) ?? 1) - 1;
+        if (left > 0) anonymousByIp.set(ip, left);
+        else anonymousByIp.delete(ip);
+      });
+    }
     wss.handleUpgrade(request, socket, head, (ws) => serve(ws, caller));
   }
 
@@ -92,6 +116,7 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
     },
     async close() {
       server.off("upgrade", onUpgrade);
+      stopAnnouncements();
       for (const ws of wss.clients) ws.terminate();
       await new Promise<void>((resolve) => wss.close(() => resolve()));
       await hub.idle();
@@ -111,6 +136,16 @@ function isSameOrigin(request: IncomingMessage): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * The client's IP: Cloudflare's `cf-connecting-ip` (ADR 9: behind the tunnel every socket comes
+ * from cloudflared), else the socket's own address.
+ */
+function clientIp(request: IncomingMessage): string {
+  const forwarded = request.headers["cf-connecting-ip"];
+  const ip = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+  return ip?.trim() || request.socket.remoteAddress || "unknown";
 }
 
 function refuse(socket: Duplex, status: number, text: string): void {

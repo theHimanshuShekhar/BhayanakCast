@@ -2,6 +2,7 @@
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { ACCENTS } from "~/lib/format";
+import { useOnlineUsers } from "~/lib/lobby-live";
 import { useSettings } from "~/lib/settings";
 import { Icon, type IconComponent } from "./icons";
 
@@ -80,13 +81,34 @@ const RailButton = ({
   </button>
 );
 
+/**
+ * The rail's live count of online users (CONTEXT.md: signed-in users with an open connection),
+ * from the lobby socket (ADR 20). A dash until the socket's first snapshot. It reads the count
+ * itself, so a lobby update re-renders only this, never the shell around the page.
+ */
+const OnlineCount = () => {
+  const online = useOnlineUsers();
+  const label = online === null ? "Online users: connecting" : `${online} online`;
+  return (
+    <div
+      role="status"
+      aria-label={label}
+      className="group relative w-10 h-10 grid place-items-center"
+    >
+      <span className="inline-flex items-center gap-[5px] text-[11px] font-semibold tabular-nums text-fg-muted">
+        <span className="w-1.5 h-1.5 rounded-full bg-success shadow-[0_0_6px_var(--color-success)]" />
+        {online ?? "–"}
+      </span>
+      <span className={tipCls}>{label}</span>
+    </div>
+  );
+};
+
 export const SideNav = ({
-  liveCount,
   isAdmin,
   onCreate,
   profileMenu,
 }: {
-  liveCount: number;
   isAdmin: boolean;
   onCreate: () => void;
   profileMenu: ReactNode;
@@ -111,7 +133,7 @@ export const SideNav = ({
       </Link>
 
       <div className="flex flex-col items-center gap-1 w-full max-sm:contents">
-        <RailLink to="/" exact icon={Icon.Users} label="Active Rooms" badge={liveCount} />
+        <RailLink to="/" exact icon={Icon.Users} label="Active Rooms" />
         <RailButton onClick={onCreate} label="Start a Room">
           <span className="inline-flex">
             <Icon.Plus size={16} />
@@ -121,6 +143,8 @@ export const SideNav = ({
       </div>
 
       <div className="flex-1 max-sm:hidden" />
+
+      <OnlineCount />
 
       <div className="flex flex-col items-center gap-1 pt-2 border-t border-border-subtle w-full max-sm:contents">
         <RailButton onClick={cycleAccent} label={`Accent · ${accentName}`}>

@@ -21,6 +21,8 @@ import { roomVisibleTo } from "./visibility.ts";
 export interface StoredRoom {
   id: string;
   hostUserId: string | null;
+  /** Private rooms never reach the lobby channel (ADR 20). */
+  isPrivate: boolean;
   /** Room roles other than plain member, by user id (`room_members`). */
   roles: Map<string, Exclude<RoomRole, "member">>;
 }
@@ -66,7 +68,7 @@ export function createDbRoomStore(db: Db): RoomStore {
   return {
     async findRoomFor(caller, roomId) {
       const [room] = await db
-        .select({ id: rooms.id, hostUserId: rooms.hostUserId })
+        .select({ id: rooms.id, hostUserId: rooms.hostUserId, isPrivate: rooms.isPrivate })
         .from(rooms)
         .where(and(eq(rooms.id, roomId), isNull(rooms.endedAt), roomVisibleTo(caller)));
       if (!room) return null;
@@ -131,7 +133,7 @@ export function createDbRoomStore(db: Db): RoomStore {
 
     async loadLiveRooms() {
       const live = await db
-        .select({ id: rooms.id, hostUserId: rooms.hostUserId })
+        .select({ id: rooms.id, hostUserId: rooms.hostUserId, isPrivate: rooms.isPrivate })
         .from(rooms)
         .where(isNull(rooms.endedAt));
       if (live.length === 0) return [];

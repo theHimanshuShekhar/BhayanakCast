@@ -52,6 +52,8 @@ export default defineConfig({
       BETTER_AUTH_URL: baseURL,
       E2E_AUTH: "1",
       ADMIN_DISCORD_IDS: E2E_ADMIN_DISCORD_ID,
+      // Every test's visitor pages connect from 127.0.0.1 at once.
+      REALTIME_ANONYMOUS_SOCKETS_PER_IP: "1000",
     },
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,

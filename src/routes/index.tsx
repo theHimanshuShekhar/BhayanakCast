@@ -10,6 +10,7 @@ import { useAppActions } from "~/lib/app-actions";
 import { type SignInErrorSearch, validateSignInErrorSearch } from "~/lib/ban";
 import { useCurrentSession } from "~/lib/current-user";
 import { homeSummaryQuery } from "~/lib/home.queries";
+import { useOnlineUsers } from "~/lib/lobby-live";
 import { USER_SEARCH_QUERY_MAX, type UserSearchResult } from "~/lib/profiles";
 import { searchUsersQuery } from "~/lib/profiles.queries";
 import type { LiveRoomCard, PastRoomCard } from "~/lib/rooms";
@@ -95,6 +96,16 @@ const StatMini = ({
     )}
   </div>
 );
+
+/** Online users from the lobby socket (ADR 20); reads the count itself, like the rail's. */
+const OnlineTile = () => {
+  const online = useOnlineUsers();
+  return online === null ? (
+    <StatMini icon={Icon.Users} label="Online" pending="Connecting to the live count" />
+  ) : (
+    <StatMini icon={Icon.Users} label="Online" value={online} />
+  );
+};
 
 const CommunityRow = ({
   icon: I,
@@ -387,8 +398,7 @@ function HomePage() {
         <section aria-label="Right Now" className={panelCls}>
           <PanelHead icon={Icon.Sparkle}>Right Now</PanelHead>
           <div className="grid grid-cols-2 gap-2">
-            {/* The online-user count arrives with the realtime server (spec #3). */}
-            <StatMini icon={Icon.Users} label="Online" pending="Live online count coming soon" />
+            <OnlineTile />
             <StatMini icon={Icon.Broadcast} label="Live Rooms" value={rightNow.liveRooms} />
             <StatMini icon={Icon.Eye} label="Watching" value={rightNow.inRooms} />
             <StatMini icon={Icon.Screen} label="Streaming" value={rightNow.streaming} />

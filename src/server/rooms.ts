@@ -42,6 +42,7 @@ import {
   type RoomSummary,
 } from "../lib/rooms.ts";
 import { type Caller, requireSignedIn } from "./caller.ts";
+import { announceRoom } from "./room-announcements.ts";
 import { RETENTION_DAYS } from "./stats.ts";
 import { roomVisibleTo } from "./visibility.ts";
 
@@ -102,7 +103,8 @@ export function toSummary(row: RoomRow): RoomSummary {
 
 /**
  * Create a room hosted by the caller (a signed-in user) and return its id. The input is
- * validated here too, so every entry point gets the same rules. The host's `host_intervals`
+ * validated here too, so every entry point gets the same rules, and the realtime server hears
+ * of it (./room-announcements.ts) to tell the lobby. The host's `host_intervals`
  * row opens when they actually enter the room (spec #3), not here.
  */
 export async function createRoom(
@@ -113,15 +115,18 @@ export async function createRoom(
   requireSignedIn(caller);
   const data = createRoomInput.parse(input);
   const hostId = caller.user.id;
-  return db.transaction(async (tx) => {
-    const [room] = await tx
+  const room = await db.transaction(async (tx) => {
+    const [inserted] = await tx
       .insert(rooms)
       .values({ ...data, createdBy: hostId, hostUserId: hostId })
       .returning({ id: rooms.id });
-    if (!room) throw new Error("Room insert returned nothing");
-    await tx.insert(roomMembers).values({ roomId: room.id, userId: hostId, role: "host" });
-    return room;
+    if (!inserted) throw new Error("Room insert returned nothing");
+    await tx.insert(roomMembers).values({ roomId: inserted.id, userId: hostId, role: "host" });
+    return inserted;
   });
+  // After the commit, so lists refetched on the lobby's word include the room.
+  announceRoom({ kind: "created", roomId: room.id, isPrivate: data.isPrivate });
+  return room;
 }
 
 /**

@@ -133,6 +133,33 @@ export const roomEventMessage = z.object({
   event: roomEvent,
 });
 
+/**
+ * The lobby channel (ADR 20): list-level facts every socket gets, signed in or not. Never
+ * anything about private rooms.
+ */
+export const lobbySnapshotMessage = z.object({
+  type: z.literal("lobby.snapshot"),
+  /** Online users: distinct signed-in users with at least one open socket. */
+  online: z.number().int().min(0),
+});
+
+export const LOBBY_ROOM_CHANGES = ["created", "ended", "count"] as const;
+
+/** A public live room that was created, ended, or whose participant count changed. */
+export const lobbyRoomChange = z.object({
+  roomId,
+  change: z.enum(LOBBY_ROOM_CHANGES),
+  participantCount: z.number().int().min(0),
+});
+export type LobbyRoomChange = z.infer<typeof lobbyRoomChange>;
+
+/** The online count changed, or a public room did (then `room` says which), or both. */
+export const lobbyChangedMessage = z.object({
+  type: z.literal("lobby.changed"),
+  online: z.number().int().min(0),
+  room: lobbyRoomChange.optional(),
+});
+
 /** A chat message, sent to everyone in the room (the sender included, as confirmation). */
 export const chatMessageMessage = z.object({
   type: z.literal("chat.message"),
@@ -171,6 +198,8 @@ export const pongMessage = z.object({ type: z.literal("pong") });
 
 export const serverMessage = z.discriminatedUnion("type", [
   welcomeMessage,
+  lobbySnapshotMessage,
+  lobbyChangedMessage,
   roomSnapshotMessage,
   roomEventMessage,
   chatMessageMessage,

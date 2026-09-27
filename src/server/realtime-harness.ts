@@ -21,7 +21,8 @@
  *
  * Messages are consumed in order per type: `waitFor(type)` returns the oldest unconsumed
  * message of that type, waiting up to `timeoutMs` for one. `pending()` lists what's unconsumed,
- * so `expect(client.pending()).toEqual([])` after `settled()` asserts nothing else arrived.
+ * so `expect(client.pending()).toEqual([])` after `settled()` asserts nothing else arrived
+ * (lobby traffic aside: see `pendingLobby()`).
  */
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -90,8 +91,13 @@ export interface TestClient {
   ): Promise<RoomEventMessage<K>>;
   /** Send `room.join` and wait for the room's snapshot. */
   join(roomId: string): Promise<ServerMessageOf<"room.snapshot">>;
-  /** Messages received but not yet consumed by a `waitFor`. */
+  /**
+   * Messages received but not yet consumed by a `waitFor`, apart from lobby traffic
+   * (`lobby.*`), which every socket gets whenever anyone comes online or rooms change.
+   */
   pending(): ServerMessage[];
+  /** Unconsumed `lobby.*` messages, in order. */
+  pendingLobby(): ServerMessage[];
   readonly isClosed: boolean;
   /** Wait until the socket is closed (by either side); resolves with the close code. */
   closed(): Promise<number>;
@@ -140,7 +146,14 @@ export interface RealtimeHarness {
   close(): Promise<void>;
 }
 
-export async function startRealtimeHarness(): Promise<RealtimeHarness> {
+export interface RealtimeHarnessOptions {
+  /** Passed to `attachRealtime`; the default is generous so tests' anonymous sockets fit. */
+  anonymousSocketsPerIp?: number;
+}
+
+export async function startRealtimeHarness(
+  options: RealtimeHarnessOptions = {},
+): Promise<RealtimeHarness> {
   const { db, close: closeDb } = await createTestDb();
   const adminDiscordIds = new Set<string>();
   const auth = createAuth(db, { env: testEnv, adminDiscordIds });
@@ -158,6 +171,7 @@ export async function startRealtimeHarness(): Promise<RealtimeHarness> {
       hub,
       authenticate: async (request) =>
         callerFromSession(await resolveSession(auth, toHeaders(request))),
+      anonymousSocketsPerIp: options.anonymousSocketsPerIp ?? 100,
     });
     return { hub, realtime, kill: mortal.kill };
   }
@@ -287,6 +301,8 @@ export async function startRealtimeHarness(): Promise<RealtimeHarness> {
     },
   };
 }
+
+const isLobbyMessage = (message: ServerMessage) => message.type.startsWith("lobby.");
 
 /**
  * The hub's clock and store, wrapped so `kill()` stops them dead like a crashed process: no
@@ -418,7 +434,8 @@ function wrap(ws: WebSocket, user: TestUser | null, heartbeat: boolean): Harness
       client.send({ type: "room.join", roomId });
       return client.waitFor("room.snapshot", (m) => m.roomId === roomId);
     },
-    pending: () => [...unconsumed],
+    pending: () => unconsumed.filter((m) => !isLobbyMessage(m)),
+    pendingLobby: () => unconsumed.filter(isLobbyMessage),
     get isClosed() {
       return closed;
     },
