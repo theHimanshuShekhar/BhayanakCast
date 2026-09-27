@@ -17,3 +17,8 @@ Live room state is held in memory in that process. Durable events (room created/
 
 ## Addendum: chat history for late joiners
 The server keeps a ring buffer of the **last 50 chat messages** per live room in memory and sends it to each joiner. It is discarded when the room ends or the server restarts. Chat is never written to Postgres.
+
+## Addendum: implementation and restarts (2026-09-27)
+- The server uses the `ws` library on the HTTP server's `upgrade` event. The protocol is JSON with zod-validated discriminated unions shared by client and server.
+- After a server restart, rooms stay live in the DB. Clients auto-reconnect and re-announce their state, and roles are restored from the DB. Rooms nobody returns to within 5 minutes end at their last-seen time (ADR 14). Peer-to-peer media keeps flowing during the blip.
+- Home and lists load through route loaders and TanStack Query. The socket pushes invalidation events so lists and counts update live.

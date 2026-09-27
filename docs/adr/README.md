@@ -21,3 +21,5 @@
 | [17](0017-browser-support.md) | Desktop Chromium + Firefox; mobile can't share |
 | [18](0018-tooling.md) | pnpm, Biome, Vitest, Playwright |
 | [19](0019-favorites-and-notifications.md) | Favorites are a badge; no notifications |
+| [20](0020-anonymous-lobby-socket.md) | Anonymous read-only lobby socket for visitors; upgrade on sign-in |
+| [21](0021-one-room-connection.md) | One room connection per user (takeover); full rooms refuse |

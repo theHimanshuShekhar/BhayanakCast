@@ -16,6 +16,10 @@ Small-group live screen-sharing hangouts. Anyone signs in with Discord, starts o
 - **Stats**: per-user lifetime aggregates (hours streamed/watched, rooms hosted/joined, peak viewers) and platform daily counters. They persist forever.
 - **Thumbnail**: a still captured by a streamer's browser every 3 min, used in room card mosaics.
 - **Mesh**: one RTCPeerConnection between every pair of participants.
+- **Online user**: a signed-in user with an open connection, whether or not they are in a room. The side rail's count shows this number.
+- **Visitor**: someone not signed in. They can browse home, profiles and recaps, but must sign in to enter a room.
+- **Lobby**: the pre-join check before entering a room, where the user picks and previews devices. Mic and camera start off.
+- **Takeover**: joining from a new tab or device ends the user's previous room connection. A user is in at most one room at a time.
 - **Admin**: a site-wide role with access to `/admin`, bans, and moderation in any room.
 
 ## Stack at a glance

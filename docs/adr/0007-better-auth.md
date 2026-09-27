@@ -8,3 +8,5 @@ Use Better Auth with the Discord social provider, the Drizzle adapter (Postgres)
 ## Consequences
 - Auth tables are owned by Better Auth's schema and generated into the Drizzle schema.
 - The Discord username/avatar are stored at sign-in; the profile's "discord" field comes from there.
+
+> Amended by ADR 20: unauthenticated upgrades are accepted into a read-only lobby channel only.
