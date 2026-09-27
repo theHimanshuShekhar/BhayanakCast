@@ -1,4 +1,5 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { createFileRoute, Link, notFound, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { Icon, type IconComponent } from "~/components/icons";
 import { PastCard } from "~/components/room-cards";
@@ -7,11 +8,39 @@ import { Avatar, Btn } from "~/components/ui";
 import { useAppActions } from "~/lib/app-actions";
 import { useCurrentSession } from "~/lib/current-user";
 import { avatarFor, formatCotime } from "~/lib/format";
-import { PAST_ROOMS, profileById, topCoUsers, userIdOf } from "~/lib/mock-data";
+// TODO(#17): recent streams still come from mock past rooms.
+import { PAST_ROOMS } from "~/lib/mock-data";
+import { formatJoined, type Profile } from "~/lib/profiles";
+import { profileQuery } from "~/lib/profiles.queries";
 
 export const Route = createFileRoute("/profile/$userId")({
-  component: ProfilePage,
+  loader: async ({ context, params }) => {
+    const profile = await context.queryClient.ensureQueryData(profileQuery(params.userId));
+    if (!profile) throw notFound();
+  },
+  notFoundComponent: ProfileNotFound,
+  component: ProfileRoute,
 });
+
+function ProfileNotFound() {
+  return (
+    <div className="px-10 py-20 text-center">
+      <h1 className="m-0 mb-2 text-lg">user not found</h1>
+      <p className="m-0 mb-4 text-muted text-[12.5px]">no profile with this id</p>
+      <Link to="/" className="text-primary">
+        back
+      </Link>
+    </div>
+  );
+}
+
+function ProfileRoute() {
+  const { userId } = Route.useParams();
+  const { data: profile } = useSuspenseQuery(profileQuery(userId));
+  // The account can disappear after load (a later refetch).
+  if (!profile) return <ProfileNotFound />;
+  return <ProfilePage key={profile.id} profile={profile} />;
+}
 
 const STAT_TONE_CARD = {
   "": "border-border",
@@ -58,28 +87,15 @@ const StatCard = ({
   </div>
 );
 
-// TODO(ADR 19): favorites persist to the favorites table (keyed by user id) once server functions exist.
-const favorites = new Set([userIdOf("kodama_jpg"), userIdOf("bitreverb")]);
+// TODO(ADR 19, #18): favorites persist to the favorites table (keyed by user id).
+const favorites = new Set<string>();
 
-function ProfilePage() {
-  const { userId } = Route.useParams();
+function ProfilePage({ profile }: { profile: Profile }) {
+  const userId = profile.id;
   const navigate = useNavigate();
   const { openSettings } = useAppActions();
   const { user } = useCurrentSession();
   const [isFavorite, setIsFavorite] = useState(() => favorites.has(userId));
-  const profile = profileById(userId);
-
-  if (!profile) {
-    return (
-      <div className="px-10 py-20 text-center">
-        <h1 className="m-0 mb-2 text-lg">user not found</h1>
-        <p className="m-0 mb-4 text-muted text-[12.5px]">no profile with this id</p>
-        <Link to="/" className="text-primary">
-          back
-        </Link>
-      </div>
-    );
-  }
 
   const { username } = profile;
   const isSelf = user?.id === profile.id;
@@ -89,9 +105,8 @@ function ProfilePage() {
     setIsFavorite(favorites.has(userId));
   };
 
-  const { stats } = profile;
-  const coRaw = topCoUsers(username, 5);
-  const max = coRaw[0]?.seconds || 1;
+  const { stats, coUsers } = profile;
+  const max = coUsers[0]?.secondsTogether || 1;
   const av = avatarFor(username);
   const recent = PAST_ROOMS.filter((r) => r.streamer === username || r.members.includes(username));
 
@@ -137,14 +152,14 @@ function ProfilePage() {
                 <span className="text-[10px] tracking-[0.12em] uppercase text-subtle font-medium">
                   discord
                 </span>
-                <span className="text-fg-muted font-medium">{profile.discord}</span>
+                <span className="text-fg-muted font-medium">{profile.displayName}</span>
               </span>
               <span className="w-[3px] h-[3px] rounded-full bg-subtle" />
               <span className="inline-flex items-baseline gap-1.5">
                 <span className="text-[10px] tracking-[0.12em] uppercase text-subtle font-medium">
                   joined
                 </span>
-                <span className="text-fg-muted font-medium">{profile.joined}</span>
+                <span className="text-fg-muted font-medium">{formatJoined(profile.joinedAt)}</span>
               </span>
             </div>
           </div>
@@ -212,17 +227,17 @@ function ProfilePage() {
 
         <section className="mt-8">
           <SectionHead title="top co-users" sub="by time together" dot="success" />
-          {coRaw.length === 0 ? (
+          {coUsers.length === 0 ? (
             <div className="p-6 bg-surface border border-border rounded-[var(--radius)] text-center text-subtle text-[11.5px]">
               no shared time yet
             </div>
           ) : (
             <div className="flex flex-col bg-surface border border-border rounded-[var(--radius)] overflow-hidden">
-              {coRaw.map((co, i) => (
+              {coUsers.map((co, i) => (
                 <Link
-                  key={co.username}
+                  key={co.id}
                   to="/profile/$userId"
-                  params={{ userId: userIdOf(co.username) }}
+                  params={{ userId: co.id }}
                   className="group flex items-center gap-3 sm:gap-3.5 px-3 sm:px-4 py-3 border-b border-border-subtle text-left !text-fg transition-colors duration-[120ms] last:border-b-0 hover:bg-surface-2 hover:no-underline"
                 >
                   <span className="w-[22px] flex-shrink-0 text-[11px] font-bold text-subtle tracking-[0.06em] group-hover:text-primary transition-colors">
@@ -235,12 +250,12 @@ function ProfilePage() {
                   </div>
                   <div className="flex flex-col items-end gap-1.5 sm:min-w-[140px]">
                     <div className="text-[13px] font-bold text-primary tracking-[-0.01em]">
-                      {formatCotime(co.seconds)}
+                      {formatCotime(co.secondsTogether)}
                     </div>
                     <div className="w-20 sm:w-[120px] h-1 rounded-full bg-surface-3 overflow-hidden">
                       <span
                         className="block h-full rounded-full shadow-[0_0_8px_var(--color-primary-glow)] bg-[linear-gradient(90deg,var(--color-primary),color-mix(in_oklch,var(--color-primary)_40%,var(--color-success)))]"
-                        style={{ width: `${(co.seconds / max) * 100}%` }}
+                        style={{ width: `${(co.secondsTogether / max) * 100}%` }}
                       />
                     </div>
                   </div>

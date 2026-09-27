@@ -1,6 +1,6 @@
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Icon, type IconComponent } from "~/components/icons";
 import { LiveCard, PastCard, useSnapshots } from "~/components/room-cards";
 import { SignInButton } from "~/components/sign-in-button";
@@ -9,10 +9,12 @@ import { Avatar, Btn, Chip } from "~/components/ui";
 import { useAppActions } from "~/lib/app-actions";
 import { type SignInErrorSearch, validateSignInErrorSearch } from "~/lib/ban";
 import { useCurrentSession } from "~/lib/current-user";
-import { ONLINE_COUNT, PAST_ROOMS, USER_PROFILES, userIdOf } from "~/lib/mock-data";
+import { ONLINE_COUNT, PAST_ROOMS, USER_PROFILES } from "~/lib/mock-data";
+import { USER_SEARCH_QUERY_MAX, type UserSearchResult } from "~/lib/profiles";
+import { searchUsersQuery } from "~/lib/profiles.queries";
 import type { LiveRoomCard } from "~/lib/rooms";
 import { liveRoomsQuery, roomQuery } from "~/lib/rooms.queries";
-import type { PastRoom, UserProfile } from "~/lib/types";
+import type { PastRoom } from "~/lib/types";
 
 export const Route = createFileRoute("/")({
   // `join` is set when a visitor was sent here from a room URL; the shell then shows the
@@ -111,13 +113,13 @@ const UserResult = ({
   liveRoom,
   onOpen,
 }: {
-  user: UserProfile;
+  user: UserSearchResult;
   liveRoom: LiveRoomCard | undefined;
-  onOpen: (username: string) => void;
+  onOpen: (userId: string) => void;
 }) => (
   <button
     type="button"
-    onClick={() => onOpen(user.username)}
+    onClick={() => onOpen(user.id)}
     className="flex items-center gap-3 p-3 text-left bg-surface border border-border rounded-[var(--radius)] shadow-card cursor-pointer transition-[transform,border-color] duration-[120ms] hover:-translate-y-px hover:border-border-strong min-w-0"
   >
     <Avatar name={user.username} size="lg" ring={!!liveRoom} />
@@ -136,7 +138,7 @@ const UserResult = ({
             in <span className="text-fg-muted font-medium">{liveRoom.name}</span>
           </>
         ) : (
-          user.discord
+          user.displayName
         )}
       </div>
       <div className="flex gap-3 mt-1 text-[10.5px] text-subtle">
@@ -185,6 +187,16 @@ const SignInPanel = () => (
   </section>
 );
 
+/** `value`, once it has stopped changing for `ms`. */
+function useDebounced<T>(value: T, ms: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), ms);
+    return () => clearTimeout(timer);
+  }, [value, ms]);
+  return debounced;
+}
+
 function HomePage() {
   const navigate = useNavigate();
   const { openCreateRoom, promptSignIn } = useAppActions();
@@ -222,21 +234,26 @@ function HomePage() {
   const past = PAST_ROOMS.filter((r) =>
     matches({ name: r.name, people: [r.streamer, ...r.members] }),
   );
-  const users =
-    term && !term.startsWith("#")
-      ? Object.values(USER_PROFILES).filter(
-          (u) => u.username.toLowerCase().includes(term) || u.discord.toLowerCase().includes(term),
-        )
-      : [];
-  const liveRoomOf = (name: string) =>
-    rooms.find((r) => r.participants.some((p) => p.username === name));
+  // Users by Discord username, searched server-side once typing pauses. A #tag search is
+  // for rooms only.
+  const userTerm = useDebounced(
+    term.startsWith("#") ? "" : term.slice(0, USER_SEARCH_QUERY_MAX),
+    200,
+  );
+  const { data: foundUsers } = useQuery({
+    ...searchUsersQuery(userTerm),
+    enabled: userTerm !== "",
+    placeholderData: keepPreviousData,
+  });
+  const users = term && !term.startsWith("#") && userTerm ? (foundUsers ?? []) : [];
+  const liveRoomOf = (userId: string) =>
+    rooms.find((r) => r.participants.some((p) => p.id === userId));
 
   // Entering a room needs sign-in: visitors get the prompt and stay on home.
   const openRoom = (r: LiveRoomCard) =>
     user ? navigate({ to: "/room/$roomId", params: { roomId: r.id } }) : promptSignIn(r.name);
   const openPast = (r: PastRoom) => navigate({ to: "/past/$roomId", params: { roomId: r.id } });
-  const openProfile = (username: string) =>
-    navigate({ to: "/profile/$userId", params: { userId: userIdOf(username) } });
+  const openProfile = (userId: string) => navigate({ to: "/profile/$userId", params: { userId } });
 
   const sidebar = useMemo(() => {
     const P = Object.values(USER_PROFILES);
@@ -305,12 +322,7 @@ function HomePage() {
             />
             <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(240px,100%),1fr))]">
               {users.map((u) => (
-                <UserResult
-                  key={u.username}
-                  user={u}
-                  liveRoom={liveRoomOf(u.username)}
-                  onOpen={openProfile}
-                />
+                <UserResult key={u.id} user={u} liveRoom={liveRoomOf(u.id)} onOpen={openProfile} />
               ))}
             </div>
           </>

@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
-import { signIn } from "./auth";
+import { fakeDiscordId, signIn } from "./auth";
+import { createUser } from "./profiles";
 import { createRoomAs, uniqueRoomName } from "./rooms";
 
 test('"my profile" opens the signed-in user\'s own id URL', async ({ page, context }) => {
@@ -11,14 +12,16 @@ test('"my profile" opens the signed-in user\'s own id URL', async ({ page, conte
   await expect(page.getByRole("menu").getByText("self.viewer", { exact: true })).toBeVisible();
   await page.getByRole("menuitem", { name: /my profile/ }).click();
   await expect(page).toHaveURL(new RegExp(`/profile/${userId}$`));
-  // Profile content is still mock data (spec #2), so a real user has no profile yet.
-  await expect(page.getByRole("heading", { level: 1, name: "user not found" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "self.viewer" })).toBeVisible();
+  await expect(page.getByText("YOU", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /edit profile/ })).toBeVisible();
 });
 
-test("someone else's profile offers favorite, not edit", async ({ page, context }) => {
-  await signIn(context, { username: "nelly.jpg" });
-  await page.goto("/profile/usr_nellyjpg");
-  // Same username as the mock profile, different user id: not "you".
+test("someone else's profile offers favorite, not edit", async ({ page, context, browser }) => {
+  // Same username, different Discord account and user id: not "you".
+  await signIn(context, { username: "nelly.jpg", discordId: fakeDiscordId("nelly.jpg (me)") });
+  const namesake = await createUser(browser, "nelly.jpg");
+  await page.goto(`/profile/${namesake.id}`);
   await expect(page.getByRole("heading", { level: 1, name: "nelly.jpg" })).toBeVisible();
   await expect(page.getByText("YOU", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /edit profile/ })).toHaveCount(0);
