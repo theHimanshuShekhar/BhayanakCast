@@ -37,10 +37,11 @@ export default defineConfig({
       },
     },
   ],
+  // The prod build against an in-memory PGlite, with the test-only sign-in enabled (e2e/serve.ts).
   webServer: {
-    command: "pnpm build && pnpm start",
+    command: "pnpm build && node e2e/serve.ts",
     url: baseURL,
-    env: { PORT: String(PORT) },
+    env: { PORT: String(PORT), BETTER_AUTH_URL: baseURL, E2E_AUTH: "1" },
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
   },

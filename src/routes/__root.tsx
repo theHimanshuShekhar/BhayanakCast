@@ -8,12 +8,15 @@ import {
 } from "~/components/overlays";
 import { SideNav } from "~/components/sidenav";
 import { AppActionsContext } from "~/lib/app-actions";
-import { CURRENT_USER, CURRENT_USER_ADMIN, userIdOf } from "~/lib/mock-data";
+import { loadCurrentSession, useCurrentSession } from "~/lib/current-user";
+import { CURRENT_USER, userIdOf } from "~/lib/mock-data";
 import { createRoom, useLiveRooms } from "~/lib/rooms-store";
 import { SettingsProvider } from "~/lib/settings";
 import appCss from "~/styles/app.css?url";
 
 export const Route = createRootRoute({
+  // Runs on the server for SSR and again on each client navigation (via the server fn).
+  beforeLoad: async () => ({ session: await loadCurrentSession() }),
   head: () => ({
     meta: [
       { charSet: "utf-8" },
@@ -37,6 +40,7 @@ function RootComponent() {
 
 function AppShell() {
   const navigate = useNavigate();
+  const { user, role } = useCurrentSession();
   const rooms = useLiveRooms();
   const [createOpen, setCreateOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -57,16 +61,19 @@ function AppShell() {
         <div className="grid grid-cols-[64px_minmax(0,1fr)] max-sm:grid-cols-1 max-sm:grid-rows-[minmax(0,1fr)_auto] min-h-0 overflow-hidden">
           <SideNav
             liveCount={rooms.length}
-            isAdmin={CURRENT_USER_ADMIN}
+            isAdmin={role === "admin"}
             onCreate={() => setCreateOpen(true)}
             profileMenu={
-              <ProfileMenu
-                onOpenProfile={() =>
-                  navigate({ to: "/profile/$userId", params: { userId: userIdOf(CURRENT_USER) } })
-                }
-                onSettings={() => setSettingsOpen(true)}
-                onSignOut={() => setSignedOut(true)}
-              />
+              user && (
+                <ProfileMenu
+                  username={user.username}
+                  onOpenProfile={() =>
+                    navigate({ to: "/profile/$userId", params: { userId: userIdOf(CURRENT_USER) } })
+                  }
+                  onSettings={() => setSettingsOpen(true)}
+                  onSignOut={() => setSignedOut(true)}
+                />
+              )
             }
           />
           <main className="overflow-hidden min-h-0 relative">
