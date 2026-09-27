@@ -5,15 +5,22 @@ import {
   Scripts,
   useNavigate,
   useRouter,
+  useSearch,
 } from "@tanstack/react-router";
 import { type ReactNode, useMemo, useState } from "react";
-import { CreateRoomDialog, ProfileMenu, SettingsDialog } from "~/components/overlays";
+import {
+  CreateRoomDialog,
+  ProfileMenu,
+  SettingsDialog,
+  type SignInPrompt,
+  SignInPromptDialog,
+} from "~/components/overlays";
 import { SideNav } from "~/components/sidenav";
 import { SignInButton } from "~/components/sign-in-button";
 import { AppActionsContext } from "~/lib/app-actions";
 import { signOut } from "~/lib/auth-client";
 import { loadCurrentSession, useCurrentSession } from "~/lib/current-user";
-import { createRoom, useLiveRooms } from "~/lib/rooms-store";
+import { createRoom, findRoom, useLiveRooms } from "~/lib/rooms-store";
 import { SettingsProvider } from "~/lib/settings";
 import appCss from "~/styles/app.css?url";
 
@@ -48,6 +55,15 @@ function AppShell() {
   const rooms = useLiveRooms();
   const [createOpen, setCreateOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [prompt, setPrompt] = useState<SignInPrompt | null>(null);
+  // A visitor sent home from a room URL arrives with ?join=<roomId>, which opens the prompt.
+  const { join } = useSearch({ strict: false });
+  const joinPrompt: SignInPrompt | null =
+    !user && join ? { kind: "join", roomName: findRoom(join)?.name } : null;
+  const closePrompt = () => {
+    setPrompt(null);
+    if (join) navigate({ to: "/", replace: true });
+  };
 
   // End the session, then reload the session in router context and land on the public home.
   const signOutToHome = async () => {
@@ -58,10 +74,12 @@ function AppShell() {
 
   const actions = useMemo(
     () => ({
-      openCreateRoom: () => setCreateOpen(true),
+      // Visitors can't start a room, so they are asked to sign in instead of filling in the form.
+      openCreateRoom: () => (user ? setCreateOpen(true) : setPrompt({ kind: "create" })),
       openSettings: () => setSettingsOpen(true),
+      promptSignIn: (roomName?: string) => setPrompt({ kind: "join", roomName }),
     }),
-    [],
+    [user],
   );
 
   return (
@@ -71,7 +89,7 @@ function AppShell() {
           <SideNav
             liveCount={rooms.length}
             isAdmin={role === "admin"}
-            onCreate={() => setCreateOpen(true)}
+            onCreate={actions.openCreateRoom}
             profileMenu={
               user ? (
                 <ProfileMenu
@@ -103,6 +121,10 @@ function AppShell() {
           }}
         />
         <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+        <SignInPromptDialog
+          prompt={prompt ?? joinPrompt}
+          onOpenChange={(open) => !open && closePrompt()}
+        />
       </div>
     </AppActionsContext>
   );

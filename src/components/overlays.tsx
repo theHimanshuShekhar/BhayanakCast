@@ -9,6 +9,7 @@ import type { NewRoom } from "~/lib/rooms-store";
 import { useSettings } from "~/lib/settings";
 import type { RoomKind } from "~/lib/types";
 import { Icon } from "./icons";
+import { SignInButton } from "./sign-in-button";
 import { Avatar, Btn, fieldInput, fieldLabel, iconBtnCls, MonoCaps, Seg, Toggle } from "./ui";
 
 const tagBtn = (active: boolean) =>
@@ -297,6 +298,51 @@ export const SettingsDialog = ({
         on={settings.showChat}
         onChange={(showChat) => update({ showChat })}
       />
+    </Sheet>
+  );
+};
+
+/**
+ * What a visitor tried to do: enter a room (named when we know it) or start one.
+ * The shell opens the prompt instead of navigating or showing the create dialog.
+ */
+export type SignInPrompt = { kind: "join"; roomName?: string } | { kind: "create" };
+
+export const SignInPromptDialog = ({
+  prompt,
+  onOpenChange,
+}: {
+  prompt: SignInPrompt | null;
+  onOpenChange: (open: boolean) => void;
+}) => {
+  const create = prompt?.kind === "create";
+  const roomName = prompt?.kind === "join" ? prompt.roomName : undefined;
+  return (
+    <Sheet
+      open={prompt !== null}
+      onOpenChange={onOpenChange}
+      title={create ? "sign in to start a room" : "sign in to join"}
+      width="w-[min(400px,94vw)]"
+      footer={<Btn onClick={() => onOpenChange(false)}>not now</Btn>}
+    >
+      <div className="flex items-start gap-3">
+        <span className="w-10 h-10 shrink-0 rounded-xl grid place-items-center bg-surface-2 border border-border text-primary shadow-[var(--shadow-card),0_0_18px_var(--color-primary-glow)]">
+          {create ? <Icon.Broadcast size={18} /> : <Icon.Headset size={18} />}
+        </span>
+        <p className="m-0 text-[12.5px] text-muted leading-relaxed">
+          {create ? (
+            "Rooms are hosted by signed-in users. Sign in with Discord to start your own and invite your crew."
+          ) : roomName ? (
+            <>
+              <span className="text-fg font-semibold">{roomName}</span> is live. Sign in with
+              Discord to jump in, share your screen and chat.
+            </>
+          ) : (
+            "Sign in with Discord to join rooms, share your screen and chat."
+          )}
+        </p>
+      </div>
+      <SignInButton />
     </Sheet>
   );
 };

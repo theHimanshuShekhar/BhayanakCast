@@ -17,7 +17,7 @@ test("search filters rooms and surfaces users", async ({ page }) => {
 });
 
 test("start a room from the rail and land in it as host", async ({ page, context }) => {
-  await signIn(context, { discordId: "900000000000000101", username: "room.starter" });
+  await signIn(context, { discordId: "900000000000000103", username: "room.starter" });
   await page.goto("/");
   await page.getByRole("button", { name: "Start a Room" }).click();
   const dialog = page.getByRole("dialog");
