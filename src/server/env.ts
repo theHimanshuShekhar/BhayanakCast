@@ -30,6 +30,11 @@ const baseSchema = z.object({
   CLOUDFLARE_TURN_API_TOKEN: z.string().optional(),
   /** Open anonymous (lobby-only) realtime sockets allowed per client IP (ADR 20). */
   REALTIME_ANONYMOUS_SOCKETS_PER_IP: z.coerce.number().int().positive().default(20),
+  /**
+   * How long an empty room waits before it ends, in ms (ADR 14: 5 minutes, the default). Only
+   * e2e runs shorten it, so a test can watch a room end.
+   */
+  REALTIME_EMPTY_ROOM_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
   /** `1` enables the test-only sign-in outside tests (e2e). See `isTestSignInEnabled`. */
   E2E_AUTH: z.string().optional(),
 });

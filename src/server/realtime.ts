@@ -48,7 +48,13 @@ const authenticateFromSession = async (request: IncomingMessage): Promise<Caller
   callerFromSession(await getSessionFromRequest(request));
 
 export function attachRealtime(server: Server, options: RealtimeOptions = {}): RealtimeServer {
-  const hub = options.hub ?? new RoomHub({ clock: systemClock, store: createDbRoomStore(getDb()) });
+  const hub =
+    options.hub ??
+    new RoomHub({
+      clock: systemClock,
+      store: createDbRoomStore(getDb()),
+      emptyRoomTimeoutMs: env.REALTIME_EMPTY_ROOM_TIMEOUT_MS,
+    });
   const authenticate = options.authenticate ?? authenticateFromSession;
   const anonymousLimit = options.anonymousSocketsPerIp ?? env.REALTIME_ANONYMOUS_SOCKETS_PER_IP;
   /** Open anonymous sockets (and upgrades in progress) by client IP. */

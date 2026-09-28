@@ -255,9 +255,16 @@ export const lobbySnapshotMessage = z.object({
   online: z.number().int().min(0),
 });
 
-export const LOBBY_ROOM_CHANGES = ["created", "ended", "count", "streamers"] as const;
+/**
+ * `ended`: the room sat empty for 5 minutes and is a past stream now (ADR 14).
+ * `host`: its host changed (handover, or an empty room's joiner), so room cards' host is stale.
+ */
+export const LOBBY_ROOM_CHANGES = ["created", "ended", "count", "streamers", "host"] as const;
 
-/** A public live room that was created, ended, or whose participant count or streamers changed. */
+/**
+ * A public live room that was created or ended, or whose participant count, streamers or host
+ * changed.
+ */
 export const lobbyRoomChange = z.object({
   roomId,
   change: z.enum(LOBBY_ROOM_CHANGES),

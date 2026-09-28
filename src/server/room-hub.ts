@@ -65,6 +65,12 @@ export const RESTORE_STALE_AFTER_MS = CHECKPOINT_INTERVAL_MS + RECONNECT_GRACE_M
  * reconnecting…". Back in time, they keep host; otherwise it passes on (`#handOverHost`).
  */
 export const HOST_GRACE_MS = 30_000;
+/**
+ * How long an empty room waits for someone to join before it ends (ADR 14). It then ends at
+ * the time it became empty and becomes a past stream. `RoomHubDeps.emptyRoomTimeoutMs`
+ * overrides it (e2e runs use a short one).
+ */
+export const EMPTY_ROOM_TIMEOUT_MS = 5 * 60_000;
 
 /** How the hub talks to one socket. */
 export interface Transport {
@@ -83,6 +89,8 @@ export interface RoomHubDeps {
   store: RoomStore;
   /** Where unexpected failures are reported. Defaults to `console.error`. */
   log?: (message: string, error: unknown) => void;
+  /** Defaults to `EMPTY_ROOM_TIMEOUT_MS`. */
+  emptyRoomTimeoutMs?: number;
 }
 
 class HubConnection implements Connection {
@@ -137,6 +145,10 @@ interface LiveRoom {
   hostRecorded: boolean;
   /** Set while the host is away (ADR 14): until when, and the timer that hands host on. */
   hostGrace?: { until: Date; timer: Timer };
+  /** The latest time anyone left (a presence interval closed); where an emptied room ends. */
+  lastLeftAt?: Date;
+  /** Set while nobody is here (ADR 14): since when, and the timer that ends the room. */
+  empty?: { since: Date; timer: Timer };
 }
 
 /** A feed entry to log: the hub stamps its id and time. */
@@ -164,6 +176,7 @@ export class RoomHub {
   readonly #clock: Clock;
   readonly #store: RoomStore;
   readonly #log: (message: string, error: unknown) => void;
+  readonly #emptyRoomTimeoutMs: number;
   readonly #connections = new Set<HubConnection>();
   readonly #rooms = new Map<string, LiveRoom>();
   /** Open sockets per signed-in user id: the online users (ADR 20). */
@@ -182,6 +195,7 @@ export class RoomHub {
     this.#clock = deps.clock;
     this.#store = deps.store;
     this.#log = deps.log ?? ((message, error) => console.error(`[realtime] ${message}`, error));
+    this.#emptyRoomTimeoutMs = deps.emptyRoomTimeoutMs ?? EMPTY_ROOM_TIMEOUT_MS;
     // Restart recovery: the first thing on the queue, so joins wait for it.
     void this.#enqueue(() => this.#restore());
     this.#scheduleCheckpoint();
@@ -325,6 +339,8 @@ export class RoomHub {
         return this.#sendSnapshot(conn, roomId);
       }
 
+      // Joining an empty room keeps it from ending (ADR 14).
+      await this.#roomOccupied(room);
       const joinedAt = this.#clock.now();
       await this.#store.openPresence(roomId, user.id, joinedAt);
       const participant: LiveParticipant = {
@@ -419,8 +435,6 @@ export class RoomHub {
   async #removeParticipant(room: LiveRoom, participant: LiveParticipant, at: Date): Promise<void> {
     this.#cancelGrace(participant);
     room.participants.delete(participant.userId);
-    // Lifecycle (#31) keeps empty rooms around for 5 minutes; for now they're dropped.
-    if (room.participants.size === 0) this.#rooms.delete(room.id);
     this.#broadcast(room, { kind: "left", userId: participant.userId }, at);
     this.#feed(room, at, {
       kind: "left",
@@ -429,8 +443,60 @@ export class RoomHub {
     });
     await this.#store.closePresence(room.id, participant.userId, at);
     if (participant.media.share) await this.#store.closeStream(room.id, participant.userId, at);
+    if (!room.lastLeftAt || at > room.lastLeftAt) room.lastLeftAt = at;
     if (participant.userId === room.hostUserId) this.#hostGone(room);
+    if (room.participants.size === 0) await this.#roomEmptied(room, room.lastLeftAt);
     this.#lobbyRoomCount(room);
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // Room lifecycle (ADR 14): an empty room ends after `EMPTY_ROOM_TIMEOUT_MS`
+
+  /**
+   * Nobody is left in `room`, the last of them since `since`: record it (`rooms.lastEmptyAt`)
+   * and start the timer that ends the room unless someone joins first.
+   */
+  async #roomEmptied(room: LiveRoom, since: Date): Promise<void> {
+    this.#cancelEmpty(room);
+    await this.#store.markRoomEmpty(room.id, since);
+    const timer = this.#setTimer(this.#emptyRoomTimeoutMs, async () => {
+      if (room.empty?.timer !== timer || this.#rooms.get(room.id) !== room) return;
+      if (room.participants.size > 0) return;
+      await this.#endRoom(room, since);
+    });
+    room.empty = { since, timer };
+  }
+
+  /** Someone is joining `room`: if it was empty, it no longer ends. */
+  async #roomOccupied(room: LiveRoom): Promise<void> {
+    if (!room.empty) return;
+    this.#cancelEmpty(room);
+    await this.#store.markRoomOccupied(room.id);
+  }
+
+  #cancelEmpty(room: LiveRoom): void {
+    room.empty?.timer.cancel();
+    room.empty = undefined;
+  }
+
+  /**
+   * Nobody joined the empty `room` in time: it ends at `endedAt`, when it became empty, and is
+   * a past stream from now on. Its intervals close, stats roll up (ADR 11), and its chat and
+   * feed go with it (memory only, ADR 4 addendum).
+   */
+  async #endRoom(room: LiveRoom, endedAt: Date): Promise<void> {
+    this.#cancelEmpty(room);
+    this.#cancelHostGrace(room);
+    this.#rooms.delete(room.id);
+    room.chat = [];
+    room.feed = [];
+    await this.#store.closeHostInterval(room.id, endedAt);
+    if (await this.#store.endRoom(room.id, endedAt)) {
+      await this.#store.rollupEndedRoom(room.id, this.#clock.now());
+    }
+    if (!room.isPrivate) {
+      this.#lobbyChanged({ roomId: room.id, change: "ended", participantCount: 0 });
+    }
   }
 
   // -------------------------------------------------------------------------------------------
@@ -507,6 +573,14 @@ export class RoomHub {
     room.roles.set(userId, "host");
     room.hostUserId = userId;
     room.hostRecorded = true;
+    // Room cards show the host.
+    if (previous !== userId && !room.isPrivate) {
+      this.#lobbyChanged({
+        roomId: room.id,
+        change: "host",
+        participantCount: room.participants.size,
+      });
+    }
     return previous !== userId;
   }
 
@@ -517,7 +591,7 @@ export class RoomHub {
   #hostGone(room: LiveRoom): void {
     if (room.participants.size === 0) {
       // Empty: the host interval stays open until someone joins and takes host, or the room
-      // ends (#31: close it then with `RoomStore.closeHostInterval` at the end time).
+      // ends (`#endRoom` closes it at the end time).
       this.#cancelHostGrace(room);
       return;
     }
@@ -665,6 +739,9 @@ export class RoomHub {
       if (this.#rooms.has(stored.id)) continue;
       const room = this.#addRoom(stored);
       for (const presence of stored.presences) {
+        if (!room.lastLeftAt || presence.lastSeenAt > room.lastLeftAt) {
+          room.lastLeftAt = presence.lastSeenAt;
+        }
         if (now.getTime() - presence.lastSeenAt.getTime() > RESTORE_STALE_AFTER_MS) {
           await this.#store.closePresence(room.id, presence.userId, presence.lastSeenAt);
           if (presence.sharing) {
@@ -686,10 +763,13 @@ export class RoomHub {
       // Nobody has a socket yet, the host included (if they're here at all): the room waits
       // one host grace for them, as if they had just disconnected.
       this.#hostGone(room);
-      // Room ending (#31): a room restored with nobody to wait for (or whose restored people
-      // never return, via #removeParticipant) must end 5 minutes after boot at its last-seen
-      // time (ADR 14): `rooms.lastEmptyAt`, else the latest `presences[].lastSeenAt`.
-      if (room.participants.size === 0) this.#rooms.delete(room.id);
+      // A room restored with nobody to wait for ends unless someone joins in time, at its
+      // last-seen time (ADR 14): when it became empty, else when its last presence was seen,
+      // else (nobody ever came) when it was created. One whose restored people never return
+      // empties when their graces run out (#removeParticipant).
+      if (room.participants.size === 0) {
+        await this.#roomEmptied(room, stored.lastEmptyAt ?? room.lastLeftAt ?? stored.createdAt);
+      }
     }
   }
 

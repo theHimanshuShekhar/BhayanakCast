@@ -7,7 +7,8 @@
  * Later tickets grow this port rather than touching the DB from the hub: host intervals and
  * `rooms.hostUserId` (host lifecycle), stream intervals (media state: `openStream`,
  * `closeStream`, `checkpointStreams`), `lastEmptyAt`, room end
- * and `rollupEndedRoom` (room ending), `room_members` roles and kicks (moderation), live rooms
+ * and `rollupEndedRoom` (room ending: `markRoomEmpty`, `markRoomOccupied`, `endRoom`,
+ * `rollupEndedRoom`), `room_members` roles and kicks (moderation), live rooms
  * on boot and `last_seen_at` checkpoints (restart recovery: `loadLiveRooms`,
  * `checkpointPresence`).
  */
@@ -23,6 +24,7 @@ import {
 } from "../db/schema/index.ts";
 import type { RoomRole } from "../lib/realtime.ts";
 import type { SignedInCaller } from "./caller.ts";
+import { rollupEndedRoom } from "./stats.ts";
 import { roomVisibleTo } from "./visibility.ts";
 
 /** A live room as the hub needs it when someone joins. */
@@ -49,6 +51,9 @@ export interface OpenPresence {
 export interface RestoredRoom extends StoredRoom {
   /** Its open presence intervals, oldest first. */
   presences: OpenPresence[];
+  createdAt: Date;
+  /** When it last became empty, if it was empty when the last server stopped (ADR 14). */
+  lastEmptyAt: Date | null;
 }
 
 /** "`userId` was still in `roomId` at `at`", for the `last_seen_at` checkpoint (ADR 12). */
@@ -91,8 +96,23 @@ export interface RoomStore {
    * becomes a member (still approved, for a private room), the new one `host`.
    */
   setHost(roomId: string, userId: string, at: Date): Promise<void>;
-  /** Close the room's open host interval at `at`, if there is one (when the room ends). */
+  /**
+   * Close the room's open host interval at `at` (never before it started), if there is one
+   * (when the room ends).
+   */
   closeHostInterval(roomId: string, at: Date): Promise<void>;
+  /** The room became empty at `at` (ADR 14): `rooms.lastEmptyAt`. */
+  markRoomEmpty(roomId: string, at: Date): Promise<void>;
+  /** Someone joined the empty room: it's occupied again, so `lastEmptyAt` clears. */
+  markRoomOccupied(roomId: string): Promise<void>;
+  /**
+   * End the live room at `endedAt` (when it last became empty, ADR 14): it's a past stream from
+   * now on. A presence or stream interval still open in it closes too, at its last-seen time if
+   * that's earlier (host intervals: `closeHostInterval`). False if it wasn't live.
+   */
+  endRoom(roomId: string, endedAt: Date): Promise<boolean>;
+  /** Fold the ended room into the persistent stats (ADR 11); a no-op if already done. */
+  rollupEndedRoom(roomId: string, at: Date): Promise<void>;
 }
 
 export function createDbRoomStore(db: Db): RoomStore {
@@ -164,7 +184,13 @@ export function createDbRoomStore(db: Db): RoomStore {
 
     async loadLiveRooms() {
       const live = await db
-        .select({ id: rooms.id, hostUserId: rooms.hostUserId, isPrivate: rooms.isPrivate })
+        .select({
+          id: rooms.id,
+          hostUserId: rooms.hostUserId,
+          isPrivate: rooms.isPrivate,
+          createdAt: rooms.createdAt,
+          lastEmptyAt: rooms.lastEmptyAt,
+        })
         .from(rooms)
         .where(isNull(rooms.endedAt));
       if (live.length === 0) return [];
@@ -274,10 +300,45 @@ export function createDbRoomStore(db: Db): RoomStore {
     },
 
     async closeHostInterval(roomId, at) {
+      // Host can pass to someone in their reconnect grace, whose leave (and so the room's end)
+      // then dates from before they became host: that host interval lasted no time.
+      const end = sql`greatest(${hostIntervals.startedAt}, ${at.toISOString()}::timestamptz)`;
       await db
         .update(hostIntervals)
-        .set({ endedAt: at })
+        .set({ endedAt: end })
         .where(and(eq(hostIntervals.roomId, roomId), isNull(hostIntervals.endedAt)));
+    },
+
+    async markRoomEmpty(roomId, at) {
+      await db.update(rooms).set({ lastEmptyAt: at }).where(eq(rooms.id, roomId));
+    },
+
+    async markRoomOccupied(roomId) {
+      await db.update(rooms).set({ lastEmptyAt: null }).where(eq(rooms.id, roomId));
+    },
+
+    async endRoom(roomId, endedAt) {
+      return db.transaction(async (tx) => {
+        const [ended] = await tx
+          .update(rooms)
+          .set({ endedAt })
+          .where(and(eq(rooms.id, roomId), isNull(rooms.endedAt)))
+          .returning({ id: rooms.id });
+        if (!ended) return false;
+        const at = sql`${endedAt.toISOString()}::timestamptz`;
+        for (const table of [presenceIntervals, streamIntervals]) {
+          const end = sql`greatest(${table.startedAt}, least(${table.lastSeenAt}, ${at}))`;
+          await tx
+            .update(table)
+            .set({ endedAt: end, lastSeenAt: end })
+            .where(and(eq(table.roomId, roomId), isNull(table.endedAt)));
+        }
+        return true;
+      });
+    },
+
+    async rollupEndedRoom(roomId, at) {
+      await rollupEndedRoom(db, roomId, at);
     },
   };
 }
