@@ -29,6 +29,7 @@ const said = (id: string, text: string): ChatEntry => ({
 const snapshot: ServerMessage = {
   type: "room.snapshot",
   roomId: "r1",
+  name: "room",
   hostUserId: "a",
   participants: [person("a"), person("b")],
   chat: [said("c1", "earlier")],
@@ -52,6 +53,7 @@ describe("applyRoomMessage", () => {
     });
     expect(state).toEqual({
       roomId: "r1",
+      name: "room",
       hostUserId: "a",
       participants: [person("b"), person("c")],
       chat: [
@@ -170,6 +172,29 @@ describe("applyRoomMessage", () => {
       text: "b is the host now",
       at,
     });
+  });
+
+  it("follows moderation: roles, kicks and renames", () => {
+    const event = (e: Extract<ServerMessage, { type: "room.event" }>["event"]): ServerMessage => ({
+      type: "room.event",
+      roomId: "r1",
+      at,
+      event: e,
+    });
+    const ana = { userId: "a", username: "a" };
+    let state = applyRoomMessage(null, "r1", snapshot);
+    expect(state?.name).toBe("room");
+
+    state = applyRoomMessage(state, "r1", event({ kind: "roleChanged", userId: "b", role: "mod" }));
+    expect(state?.participants.map((p) => p.role)).toEqual(["member", "mod"]);
+
+    state = applyRoomMessage(state, "r1", event({ kind: "renamed", name: "new name", by: ana }));
+    expect(state?.name).toBe("new name");
+    expect(state?.chat.at(-1)?.text).toBe("a renamed the room to new name");
+
+    state = applyRoomMessage(state, "r1", event({ kind: "kicked", userId: "b", by: ana }));
+    expect(state?.participants.map((p) => p.userId)).toEqual(["a"]);
+    expect(state?.chat.at(-1)?.text).toBe("b was removed by a");
   });
 });
 

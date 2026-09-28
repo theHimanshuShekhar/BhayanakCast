@@ -42,6 +42,7 @@ import {
   type RoomRole,
   type ServerMessage,
 } from "../lib/realtime.ts";
+import { createRoomInput, ROOM_NAME_MAX } from "../lib/rooms.ts";
 import type { Caller, SignedInCaller } from "./caller.ts";
 import type { Clock, Timer } from "./clock.ts";
 import type { RoomAnnouncement } from "./room-announcements.ts";
@@ -124,6 +125,7 @@ interface LiveParticipant {
 
 interface LiveRoom {
   id: string;
+  name: string;
   hostUserId: string | null;
   isPrivate: boolean;
   roles: StoredRoom["roles"];
@@ -145,6 +147,22 @@ type NewFeedEntry = FeedEntry extends infer E
     ? Omit<E, "id" | "at">
     : never
   : never;
+
+/** Someone named in a room event or feed entry. */
+type FeedPerson = { userId: string; username: string };
+
+/** What a moderator can do in a room (ADR 15). */
+type ModPower = "kick" | "stopShare" | "setRole" | "rename";
+
+/** Which powers each room role has (ADR 15); an admin has them all in any room. */
+const ROOM_POWERS: Record<RoomRole, ReadonlySet<ModPower>> = {
+  host: new Set<ModPower>(["kick", "stopShare", "setRole", "rename"]),
+  mod: new Set<ModPower>(["kick", "stopShare"]),
+  member: new Set<ModPower>(),
+};
+
+/** Host and mods act only on people ranked below them; admins on anyone but themselves. */
+const ROLE_RANK: Record<RoomRole, number> = { member: 0, mod: 1, host: 2 };
 
 /**
  * What an anonymous (lobby-only) socket may send (ADR 20): the handshake and the heartbeat.
@@ -294,6 +312,10 @@ export class RoomHub {
       }
       await this.#leaveRoom(conn);
 
+      // Kicked is for good (ADR 15), admins included.
+      if (await this.#store.isKicked(roomId, user.id)) {
+        return this.#refuse(conn, "kicked", "You were removed from this room", message.type);
+      }
       const stored = await this.#store.findRoomFor(caller, roomId);
       if (!stored) return this.#refuse(conn, "not_found", "That room isn't live", message.type);
       const room = this.#rooms.get(roomId) ?? this.#addRoom(stored);
@@ -375,6 +397,14 @@ export class RoomHub {
     "media.state": (conn, message) => this.#announceMedia(conn, message),
 
     "reaction.send": (conn, message) => this.#react(conn, message),
+
+    "mod.kick": (conn, message) => this.#kick(conn, message),
+
+    "mod.stopShare": (conn, message) => this.#stopShare(conn, message),
+
+    "mod.setRole": (conn, message) => this.#setRole(conn, message),
+
+    "room.rename": (conn, message) => this.#rename(conn, message),
   };
 
   #dispatch(conn: HubConnection, message: ClientMessage): Promise<void> | void {
@@ -388,6 +418,7 @@ export class RoomHub {
   #addRoom(stored: StoredRoom): LiveRoom {
     const room: LiveRoom = {
       id: stored.id,
+      name: stored.name,
       hostUserId: stored.hostUserId,
       isPrivate: stored.isPrivate,
       roles: stored.roles,
@@ -414,19 +445,31 @@ export class RoomHub {
 
   /**
    * `participant` left `room` at `at` (now for an explicit leave; when their socket closed for
-   * an expired reconnect grace): tell everyone and close the presence interval at `at`.
+   * an expired reconnect grace): tell everyone and close the presence interval at `at`. With
+   * `kickedBy`, they didn't leave but were kicked (`mod.kick`), and everyone hears that instead.
    */
-  async #removeParticipant(room: LiveRoom, participant: LiveParticipant, at: Date): Promise<void> {
+  async #removeParticipant(
+    room: LiveRoom,
+    participant: LiveParticipant,
+    at: Date,
+    kickedBy?: FeedPerson,
+  ): Promise<void> {
     this.#cancelGrace(participant);
     room.participants.delete(participant.userId);
     // Lifecycle (#31) keeps empty rooms around for 5 minutes; for now they're dropped.
     if (room.participants.size === 0) this.#rooms.delete(room.id);
-    this.#broadcast(room, { kind: "left", userId: participant.userId }, at);
-    this.#feed(room, at, {
-      kind: "left",
-      userId: participant.userId,
-      username: participant.username,
-    });
+    const who = { userId: participant.userId, username: participant.username };
+    if (kickedBy) {
+      this.#broadcast(room, { kind: "kicked", userId: who.userId, by: kickedBy }, at);
+      this.#feed(room, at, { kind: "kicked", ...who, by: kickedBy });
+    } else {
+      this.#broadcast(room, { kind: "left", userId: participant.userId }, at);
+      this.#feed(room, at, {
+        kind: "left",
+        userId: participant.userId,
+        username: participant.username,
+      });
+    }
     await this.#store.closePresence(room.id, participant.userId, at);
     if (participant.media.share) await this.#store.closeStream(room.id, participant.userId, at);
     if (participant.userId === room.hostUserId) this.#hostGone(room);
@@ -725,6 +768,7 @@ export class RoomHub {
     this.#send(conn, {
       type: "room.snapshot",
       roomId,
+      name: room.name,
       hostUserId: room.hostUserId,
       participants: [...room.participants.values()].map((p) => this.#view(room, p)),
       chat: [...room.chat],
@@ -868,13 +912,15 @@ export class RoomHub {
 
   /**
    * Change `participant`'s media to `next`, opening or closing their stream interval (now, or
-   * a stopped share at `shareEndedAt`), and tell everyone in `room`, them included.
+   * a stopped share at `shareEndedAt`), and tell everyone in `room`, them included. `by`: the
+   * host, mod or admin who forced the change (`mod.stopShare`).
    */
   async #setMedia(
     room: LiveRoom,
     participant: LiveParticipant,
     next: MediaState,
     shareEndedAt?: Date,
+    by?: FeedPerson,
   ): Promise<void> {
     const was = participant.media;
     if (was.mic === next.mic && was.cam === next.cam && was.share === next.share) return;
@@ -886,7 +932,12 @@ export class RoomHub {
     participant.media = { ...next };
     this.#broadcast(
       room,
-      { kind: "stateChanged", userId: participant.userId, media: { ...next } },
+      {
+        kind: "stateChanged",
+        userId: participant.userId,
+        media: { ...next },
+        ...(by ? { by } : {}),
+      },
       at,
     );
     // Room cards show who is streaming.
@@ -899,7 +950,8 @@ export class RoomHub {
     }
     if (next.share !== was.share) {
       const who = { userId: participant.userId, username: participant.username };
-      this.#feed(room, at, { kind: next.share ? "shareStarted" : "shareStopped", ...who });
+      if (next.share) this.#feed(room, at, { kind: "shareStarted", ...who });
+      else this.#feed(room, at, { kind: "shareStopped", ...who, ...(by ? { by } : {}) });
     }
   }
 
@@ -963,6 +1015,159 @@ export class RoomHub {
   }
 
   // -------------------------------------------------------------------------------------------
+  // Moderation (ADR 15): kick, stop share, roles and rename, authorised against room roles
+
+  /**
+   * The sender and their room if they may use `power` there (their room role's powers, or any
+   * as an admin); otherwise refuse `re` and return nothing.
+   */
+  #moderator(
+    conn: HubConnection,
+    power: ModPower,
+    re: string,
+  ): { room: LiveRoom; actor: LiveParticipant } | undefined {
+    const userId = conn.caller.user?.id;
+    const room = conn.roomId ? this.#rooms.get(conn.roomId) : undefined;
+    const actor = userId ? room?.participants.get(userId) : undefined;
+    if (!room || !actor || actor.connection !== conn) {
+      this.#refuse(conn, "forbidden", "Join the room first", re);
+      return;
+    }
+    if (!isAdmin(conn) && !ROOM_POWERS[this.#roleOf(room, actor.userId)].has(power)) {
+      const who = ROOM_POWERS.mod.has(power) ? "the host or a mod" : "the host";
+      this.#refuse(conn, "forbidden", `Only ${who} can do that`, re);
+      return;
+    }
+    return { room, actor };
+  }
+
+  /**
+   * The participant `userId` in `room` if `actor` may act on them: someone else, ranked below
+   * the actor (anyone, for an admin), and not an admin unless the actor is one.
+   */
+  #target(
+    conn: HubConnection,
+    room: LiveRoom,
+    actor: LiveParticipant,
+    userId: string,
+    re: string,
+  ): LiveParticipant | undefined {
+    const target = room.participants.get(userId);
+    if (!target) {
+      this.#refuse(conn, "not_found", "They're not in this room", re);
+      return;
+    }
+    if (target.userId === actor.userId) {
+      this.#refuse(conn, "bad_request", "You can't do that to yourself", re);
+      return;
+    }
+    if (isAdmin(conn)) return target;
+    const role = this.#roleOf(room, target.userId);
+    if (ROLE_RANK[role] >= ROLE_RANK[this.#roleOf(room, actor.userId)]) {
+      this.#refuse(conn, "forbidden", `You can't moderate the ${role}`, re);
+      return;
+    }
+    if (target.connection.caller.role === "admin") {
+      this.#refuse(conn, "forbidden", "You can't moderate an admin", re);
+      return;
+    }
+    return target;
+  }
+
+  /** `mod.kick`: out now (no grace), for good. */
+  async #kick(conn: HubConnection, message: ClientMessageOf<"mod.kick">) {
+    const mod = this.#moderator(conn, "kick", message.type);
+    if (!mod) return;
+    const { room, actor } = mod;
+    const target = this.#target(conn, room, actor, message.userId, message.type);
+    if (!target) return;
+    const at = this.#clock.now();
+    // A kicked host isn't coming back: host passes on now, not after a host grace (ADR 14).
+    if (target.userId === room.hostUserId) {
+      this.#cancelHostGrace(room);
+      await this.#handOverHost(room, at);
+    }
+    await this.#store.kick(room.id, target.userId);
+    room.roles.delete(target.userId);
+    const theirs = target.connection;
+    if (theirs.roomId === room.id) theirs.roomId = null;
+    this.#refuse(theirs, "kicked", "You were removed from this room");
+    // Someone in their reconnect grace was last here when their socket closed.
+    await this.#removeParticipant(room, target, target.grace?.since ?? at, person(actor));
+  }
+
+  /** `mod.stopShare`: their share ends now, and every client stops showing it. */
+  async #stopShare(conn: HubConnection, message: ClientMessageOf<"mod.stopShare">) {
+    const mod = this.#moderator(conn, "stopShare", message.type);
+    if (!mod) return;
+    const { room, actor } = mod;
+    const target = this.#target(conn, room, actor, message.userId, message.type);
+    if (!target) return;
+    if (!target.media.share) {
+      return this.#refuse(conn, "bad_request", "They aren't sharing", message.type);
+    }
+    await this.#setMedia(room, target, { ...target.media, share: false }, undefined, person(actor));
+  }
+
+  /** `mod.setRole`: promote to mod or demote to member. */
+  async #setRole(conn: HubConnection, message: ClientMessageOf<"mod.setRole">) {
+    const mod = this.#moderator(conn, "setRole", message.type);
+    if (!mod) return;
+    const { room, actor } = mod;
+    const target = this.#target(conn, room, actor, message.userId, message.type);
+    if (!target) return;
+    if (target.userId === room.hostUserId) {
+      return this.#refuse(
+        conn,
+        "bad_request",
+        "The host stays host until it passes on",
+        message.type,
+      );
+    }
+    if (this.#roleOf(room, target.userId) === message.role) return;
+    await this.#store.setRole(room.id, target.userId, message.role);
+    if (message.role === "mod") room.roles.set(target.userId, "mod");
+    else room.roles.delete(target.userId);
+    const at = this.#clock.now();
+    this.#broadcast(room, { kind: "roleChanged", userId: target.userId, role: message.role }, at);
+    this.#feed(room, at, {
+      kind: "roleChanged",
+      ...person(target),
+      role: message.role,
+      by: person(actor),
+    });
+  }
+
+  /** `room.rename`: a new name, validated like a new room's. */
+  async #rename(conn: HubConnection, message: ClientMessageOf<"room.rename">) {
+    const mod = this.#moderator(conn, "rename", message.type);
+    if (!mod) return;
+    const { room, actor } = mod;
+    const parsed = createRoomInput.shape.name.safeParse(message.name);
+    if (!parsed.success) {
+      return this.#refuse(
+        conn,
+        "bad_request",
+        `Room names are 1 to ${ROOM_NAME_MAX} characters`,
+        message.type,
+      );
+    }
+    const name = parsed.data;
+    if (name === room.name) return;
+    await this.#store.renameRoom(room.id, name);
+    room.name = name;
+    this.#broadcast(room, { kind: "renamed", name, by: person(actor) }, this.#clock.now());
+    // Room cards show the name.
+    if (!room.isPrivate) {
+      this.#lobbyChanged({
+        roomId: room.id,
+        change: "renamed",
+        participantCount: room.participants.size,
+      });
+    }
+  }
+
+  // -------------------------------------------------------------------------------------------
   // Plumbing
 
   #own(connection: Connection): HubConnection {
@@ -1005,6 +1210,16 @@ export class RoomHub {
 
 function isSignedIn(caller: Caller): caller is SignedInCaller {
   return caller.user !== null;
+}
+
+/** A site admin: moderation powers in any room (ADR 15). */
+function isAdmin(conn: HubConnection): boolean {
+  return conn.caller.role === "admin";
+}
+
+/** Who `participant` is, for room events and the feed. */
+function person(participant: LiveParticipant): FeedPerson {
+  return { userId: participant.userId, username: participant.username };
 }
 
 /**
