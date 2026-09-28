@@ -1,53 +1,77 @@
-# Homelab deployment (ADR 9).
-#   docker compose up -d --build                    # app + db, app on 127.0.0.1:${APP_PORT}
-#   docker compose --profile tunnel up -d --build   # + Cloudflare Tunnel
-# In the Cloudflare dashboard, point the tunnel's public hostname at http://app:3000.
+# Homelab deployment (ADR 9): a git-backed Dockhand stack, like llm-gateway.
+# The homelab's shared cloudflared publishes https://cast.bhayanak.net -> http://${HOST_BIND}:${HOST_PORT},
+# so this stack has no tunnel of its own. Setup, env vars and checklist: docs/deploy.md.
+#   docker compose up -d --build
 
 services:
   app:
     build: .
-    env_file: .env
+    # Every app variable is listed here and filled by interpolation, because Dockhand's stack
+    # variables (or a local .env) feed interpolation, not the container. Unset ones arrive empty,
+    # which the app treats as unset; it refuses to start listing anything missing or invalid.
+    # E2E_AUTH is deliberately absent: the test-only sign-in must never reach production.
     environment:
       NODE_ENV: production
       PORT: "3000"
-      DATABASE_URL: postgres://${POSTGRES_USER:-bhayanakcast}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-bhayanakcast}
-    # Apply pending migrations, then start the server.
+      HOST: 0.0.0.0
+      DATABASE_URL: postgres://${POSTGRES_USER:-bhayanakcast}:${POSTGRES_PASSWORD:-}@db:5432/${POSTGRES_DB:-bhayanakcast}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-https://cast.bhayanak.net}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:-}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:-}
+      ADMIN_DISCORD_IDS: ${ADMIN_DISCORD_IDS:-}
+      TRUSTED_PROXY_IPS: ${TRUSTED_PROXY_IPS:-}
+      CLOUDFLARE_TURN_KEY_ID: ${CLOUDFLARE_TURN_KEY_ID:-}
+      CLOUDFLARE_TURN_API_TOKEN: ${CLOUDFLARE_TURN_API_TOKEN:-}
+      REALTIME_ANONYMOUS_SOCKETS_PER_IP: ${REALTIME_ANONYMOUS_SOCKETS_PER_IP:-}
+      REALTIME_EMPTY_ROOM_TIMEOUT_MS: ${REALTIME_EMPTY_ROOM_TIMEOUT_MS:-}
+    # Apply pending migrations, then start the server (the image's default command too).
     command: ["sh", "-c", "node src/db/migrate.ts && exec node server.prod.ts"]
     depends_on:
       db:
         condition: service_healthy
     ports:
-      # Loopback only: public traffic arrives through the tunnel.
-      - "127.0.0.1:${APP_PORT:-3000}:3000"
+      # LAN-only publish. HOST_BIND defaults to the dockhand LXC LAN IP; the shared cloudflared
+      # reaches the app here, and one hostname carries both pages and /ws.
+      - "${HOST_BIND:-10.1.1.160}:${HOST_PORT:-3000}:3000"
     restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - node -e "fetch('http://127.0.0.1:3000/api/auth/ok').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   db:
     image: postgres:17-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-bhayanakcast}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # No `:?` guard (Dockhand can't stop/redeploy stacks that use it); the postgres image
+      # itself refuses to initialise without a password.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
       POSTGRES_DB: ${POSTGRES_DB:-bhayanakcast}
+    # Local Docker volume, never the NAS CIFS share (ADR 9 addendum). Not published on any port.
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
       retries: 10
-      start_period: 10s
+      start_period: 20s
     restart: unless-stopped
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    profiles: ["tunnel"]
-    command: ["tunnel", "--no-autoupdate", "run"]
-    environment:
-      # Not `:?`-required: compose interpolates every service, even ones whose
-      # profile isn't active, and the tunnel is optional.
-      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
-    depends_on:
-      - app
-    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   pgdata:

@@ -257,7 +257,7 @@ describe("with the reconnect grace", () => {
 });
 
 describe("per-IP limit on anonymous sockets", () => {
-  it("refuses anonymous upgrades past the limit, by cf-connecting-ip or socket address", async () => {
+  it("refuses anonymous upgrades past the limit, by socket address", async () => {
     await start({ anonymousSocketsPerIp: 2 });
     const ana = await h.createUser("ana");
     const first = await h.connect(null);
@@ -266,6 +266,21 @@ describe("per-IP limit on anonymous sockets", () => {
 
     // Signed-in sockets aren't limited this way.
     expect(await h.upgradeStatus(ana)).toBe(101);
+
+    // A peer that isn't a trusted proxy can't dodge the limit with its own cf-connecting-ip.
+    expect(await h.upgradeStatus(null, { "cf-connecting-ip": "203.0.113.7" })).toBe(429);
+
+    // A closed socket frees its slot.
+    await first.close();
+    await h.settled();
+    await expect.poll(() => h.upgradeStatus(null)).toBe(101);
+  });
+
+  it("counts by cf-connecting-ip when the peer is a trusted proxy (the tunnel)", async () => {
+    await start({ anonymousSocketsPerIp: 2, trustedProxies: ["127.0.0.1", "::1"] });
+    const first = await h.connect(null);
+    await h.connect(null);
+    expect(await h.upgradeStatus(null)).toBe(429);
 
     // Behind Cloudflare the client IP comes from cf-connecting-ip.
     const cf = { "cf-connecting-ip": "203.0.113.7" };
