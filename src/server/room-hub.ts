@@ -27,6 +27,8 @@ import {
   type ClientMessageOf,
   type ClientMessageType,
   type ErrorCode,
+  FEED_HISTORY_SIZE,
+  type FeedEntry,
   IDLE_CLOSE_CODE,
   IDLE_TIMEOUT_MS,
   type LobbyRoomChange,
@@ -34,6 +36,7 @@ import {
   type MediaState,
   PROTOCOL_VERSION,
   parseClientMessage,
+  REACTION_RATE_LIMIT,
   type RoomEvent,
   type RoomParticipant,
   type RoomRole,
@@ -123,7 +126,16 @@ interface LiveRoom {
   participants: Map<string, LiveParticipant>;
   /** The last `CHAT_HISTORY_SIZE` chat messages, oldest first; memory only, gone with the room. */
   chat: ChatEntry[];
+  /** The last `FEED_HISTORY_SIZE` feed entries, newest first; memory only, gone with the room. */
+  feed: FeedEntry[];
 }
+
+/** A feed entry to log: the hub stamps its id and time. */
+type NewFeedEntry = FeedEntry extends infer E
+  ? E extends FeedEntry
+    ? Omit<E, "id" | "at">
+    : never
+  : never;
 
 /**
  * What an anonymous (lobby-only) socket may send (ADR 20): the handshake and the heartbeat.
@@ -151,6 +163,10 @@ export class RoomHub {
   #nextChatId = 1;
   /** Per user id, when (epoch ms) their recent accepted chat messages were sent. */
   readonly #chatSends = new Map<string, number[]>();
+  #nextReactionId = 1;
+  #nextFeedId = 1;
+  /** Per user id, when (epoch ms) their recent accepted reactions were sent. */
+  readonly #reactionSends = new Map<string, number[]>();
   #queue: Promise<void> = Promise.resolve();
 
   constructor(deps: RoomHubDeps) {
@@ -317,6 +333,7 @@ export class RoomHub {
         joinedAt,
         conn,
       );
+      this.#feed(room, joinedAt, { kind: "joined", userId: user.id, username: user.username });
       this.#lobbyRoomCount(room);
     },
 
@@ -331,6 +348,8 @@ export class RoomHub {
     "chat.send": (conn, message) => this.#chat(conn, message),
 
     "media.state": (conn, message) => this.#announceMedia(conn, message),
+
+    "reaction.send": (conn, message) => this.#react(conn, message),
   };
 
   #dispatch(conn: HubConnection, message: ClientMessage): Promise<void> | void {
@@ -349,6 +368,7 @@ export class RoomHub {
       roles: stored.roles,
       participants: new Map(),
       chat: [],
+      feed: [],
     };
     this.#rooms.set(room.id, room);
     return room;
@@ -376,6 +396,11 @@ export class RoomHub {
     // Lifecycle (#31) keeps empty rooms around for 5 minutes; for now they're dropped.
     if (room.participants.size === 0) this.#rooms.delete(room.id);
     this.#broadcast(room, { kind: "left", userId: participant.userId }, at);
+    this.#feed(room, at, {
+      kind: "left",
+      userId: participant.userId,
+      username: participant.username,
+    });
     await this.#store.closePresence(room.id, participant.userId, at);
     if (participant.media.share) await this.#store.closeStream(room.id, participant.userId, at);
     this.#lobbyRoomCount(room);
@@ -573,6 +598,7 @@ export class RoomHub {
       hostUserId: room.hostUserId,
       participants: [...room.participants.values()].map((p) => this.#view(room, p)),
       chat: [...room.chat],
+      feed: [...room.feed],
     });
   }
 
@@ -740,6 +766,69 @@ export class RoomHub {
         participantCount: room.participants.size,
       });
     }
+    if (next.share !== was.share) {
+      const who = { userId: participant.userId, username: participant.username };
+      this.#feed(room, at, { kind: next.share ? "shareStarted" : "shareStopped", ...who });
+    }
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // Reactions (never stored) and the feed (the last 50 per room, in memory only)
+
+  #react(conn: HubConnection, message: ClientMessageOf<"reaction.send">) {
+    const userId = conn.caller.user?.id;
+    const room = conn.roomId ? this.#rooms.get(conn.roomId) : undefined;
+    const participant = userId ? room?.participants.get(userId) : undefined;
+    if (!room || !participant || participant.connection !== conn) {
+      return this.#refuse(conn, "forbidden", "Join the room to react", message.type);
+    }
+    const target = room.participants.get(message.targetUserId);
+    if (!target) {
+      return this.#refuse(conn, "not_found", "They're not in this room", message.type);
+    }
+    const at = this.#clock.now();
+    if (!withinRateLimit(this.#reactionSends, participant.userId, REACTION_RATE_LIMIT, at)) {
+      return this.#refuse(
+        conn,
+        "rate_limited",
+        "You're reacting too fast; wait a moment",
+        message.type,
+      );
+    }
+
+    const out: ServerMessage = {
+      type: "reaction",
+      roomId: room.id,
+      reaction: {
+        id: `r${this.#nextReactionId++}`,
+        userId: participant.userId,
+        username: participant.username,
+        targetUserId: target.userId,
+        emoji: message.emoji,
+        at: at.toISOString(),
+      },
+    };
+    for (const p of room.participants.values()) this.#send(p.connection, out);
+    this.#feed(room, at, {
+      kind: "reaction",
+      userId: participant.userId,
+      username: participant.username,
+      emoji: message.emoji,
+      target: { userId: target.userId, username: target.username },
+    });
+  }
+
+  /**
+   * Log `entry` in `room`'s feed at `at` and send it to everyone there. Anything the feed
+   * should show (joins, leaves, reactions, shares, role and host changes, kicks) calls this
+   * once, after the change itself went out.
+   */
+  #feed(room: LiveRoom, at: Date, entry: NewFeedEntry): void {
+    const logged = { ...entry, id: `f${this.#nextFeedId++}`, at: at.toISOString() } as FeedEntry;
+    room.feed.unshift(logged);
+    if (room.feed.length > FEED_HISTORY_SIZE) room.feed.length = FEED_HISTORY_SIZE;
+    const out: ServerMessage = { type: "feed.entry", roomId: room.id, entry: logged };
+    for (const p of room.participants.values()) this.#send(p.connection, out);
   }
 
   // -------------------------------------------------------------------------------------------
@@ -785,4 +874,22 @@ export class RoomHub {
 
 function isSignedIn(caller: Caller): caller is SignedInCaller {
   return caller.user !== null;
+}
+
+/**
+ * Whether `key` may act at `at` under a sliding-window `limit` (at most `reactions` in any
+ * `windowMs`), recording the action if so. Refused attempts don't count.
+ */
+function withinRateLimit(
+  sends: Map<string, number[]>,
+  key: string,
+  limit: { reactions: number; windowMs: number },
+  at: Date,
+): boolean {
+  const since = at.getTime() - limit.windowMs;
+  const recent = (sends.get(key) ?? []).filter((t) => t > since);
+  const allowed = recent.length < limit.reactions;
+  if (allowed) recent.push(at.getTime());
+  sends.set(key, recent);
+  return allowed;
 }

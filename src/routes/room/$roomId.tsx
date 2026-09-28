@@ -4,16 +4,17 @@ import { createFileRoute, Link, notFound, redirect, useNavigate } from "@tanstac
 import { type ButtonHTMLAttributes, type ReactNode, useEffect, useMemo, useState } from "react";
 import { Icon } from "~/components/icons";
 import { RoomSide } from "~/components/room/side-panel";
-import { type ModAction, type Reaction, Tile } from "~/components/room/tile";
+import { type ModAction, Tile } from "~/components/room/tile";
 import { Btn, Chip } from "~/components/ui";
 import { useAppActions } from "~/lib/app-actions";
 import { useCurrentSession } from "~/lib/current-user";
 import { fmtMins, MAX_STREAMERS } from "~/lib/format";
-import { sendChat, useRoomLive } from "~/lib/room-live";
+import { type FeedEntry, REACTION_EMOJIS, type ReactionEmoji } from "~/lib/realtime";
+import { feedLine, sendChat, sendReaction, useRoomLive, useRoomReactions } from "~/lib/room-live";
 import { roomDetailFor, withRoster } from "~/lib/room-view";
 import { roomQuery } from "~/lib/rooms.queries";
 import { useSettings } from "~/lib/settings";
-import type { ActivityItem, ChatMessage, Participant, RoomDetail, RoomRole } from "~/lib/types";
+import type { ChatMessage, Participant, RoomDetail, RoomRole } from "~/lib/types";
 
 export const Route = createFileRoute("/room/$roomId")({
   // Visitors go home with the "sign in to join" prompt open. A UX guard only: the room
@@ -85,8 +86,6 @@ const DENSITY_CLS = {
   spacious: "gap-[18px] p-[22px] auto-rows-[minmax(180px,auto)]",
 } as const;
 
-const REACTIONS = ["🔥", "💯", "✨", "🎧", "⚡", "🫡"];
-
 const ControlBtn = ({
   state,
   className = "",
@@ -133,6 +132,7 @@ const useNotice = (error: { message: string } | null, ms = 4_000) => {
 };
 
 const NO_CHAT: ChatMessage[] = [];
+const NO_FEED: FeedEntry[] = [];
 
 function RoomPage({ detail, meId }: { detail: RoomDetail; meId: string | null }) {
   const navigate = useNavigate();
@@ -145,13 +145,14 @@ function RoomPage({ detail, meId }: { detail: RoomDetail; meId: string | null })
   useEffect(() => {
     if (roster) setParticipants((shown) => withRoster(shown, roster, meId));
   }, [roster, meId]);
-  // Chat (with its last-50 history) comes over the socket; the feed starts empty (spec #3).
+  // Chat and the feed (each with its recent history) and reactions come over the socket.
   const chat = live.room?.chat ?? NO_CHAT;
-  const [activity, setActivity] = useState<ActivityItem[]>([]);
+  const feed = live.room?.feed ?? NO_FEED;
+  const activity = useMemo(() => feed.map(feedLine), [feed]);
+  const reactions = useRoomReactions(detail.id);
   const [showViewers, setShowViewers] = useState(true);
   const [pinnedId, setPinnedId] = useState<string | null>(null);
   const [mutedIds, setMutedIds] = useState<Set<string>>(() => new Set());
-  const [reactions, setReactions] = useState<Reaction[]>([]);
   const [sideOpen, setSideOpen] = useState(false);
 
   const liveFor = useMinutesSince(detail.createdAt);
@@ -165,29 +166,19 @@ function RoomPage({ detail, meId }: { detail: RoomDetail; meId: string | null })
   const canStartShare = media.share || othersStreaming < MAX_STREAMERS;
   const mediaNotice = useNotice(live.mediaError);
 
-  const log = (who: string, what: string) =>
-    setActivity((a) => [{ who, what, when: "just now" }, ...a]);
-
   // TODO(ADR 1/2): these toggle real getUserMedia/getDisplayMedia tracks once the mesh lands.
   const toggleMic = () => setMedia({ ...media, mic: !media.mic });
   const toggleCam = () => setMedia({ ...media, cam: !media.cam });
   const toggleShare = () => setMedia({ ...media, share: !media.share });
 
-  const react = (emoji: string) => {
+  // Floats on the pinned tile, else the first streamer's, else the first on stage, else yours.
+  const react = (emoji: ReactionEmoji) => {
     const target =
       participants.find((p) => p.id === pinnedId) ??
       participants.find((p) => p.streaming) ??
       participants.find((p) => !p.viewerOnly) ??
       me;
-    if (!target) return;
-    const r: Reaction = {
-      id: Date.now() + Math.random(),
-      emoji,
-      dx: (Math.random() - 0.5) * 60,
-      participantId: target.id,
-    };
-    setReactions((rs) => [...rs, r]);
-    setTimeout(() => setReactions((rs) => rs.filter((x) => x.id !== r.id)), 2400);
+    if (target) sendReaction(emoji, target.userId);
   };
 
   // TODO(ADR 15): send as WebSocket commands; server authorises against the sender's role.
@@ -196,17 +187,14 @@ function RoomPage({ detail, meId }: { detail: RoomDetail; meId: string | null })
     if (!target) return;
     if (action === "kick") {
       setParticipants((ps) => ps.filter((p) => p.id !== id));
-      log(target.name, "was kicked");
       if (pinnedId === id) setPinnedId(null);
     } else if (action === "stopShare") {
       setParticipants((ps) =>
         ps.map((p) => (p.id === id ? { ...p, streaming: false, size: "s" } : p)),
       );
-      log(target.name, "had their share stopped");
     } else {
       const role: RoomRole = action === "promote" ? "mod" : "member";
       setParticipants((ps) => ps.map((p) => (p.id === id ? { ...p, role } : p)));
-      log(target.name, action === "promote" ? "was made a mod" : "is no longer a mod");
     }
   };
 
@@ -315,7 +303,7 @@ function RoomPage({ detail, meId }: { detail: RoomDetail; meId: string | null })
               layout={settings.layout}
               myRole={myRole}
               locallyMuted={mutedIds.has(p.id)}
-              reactions={reactions.filter((r) => r.participantId === p.id)}
+              reactions={reactions.filter((r) => r.targetUserId === p.userId)}
               onPin={(id) => setPinnedId((cur) => (cur === id ? null : id))}
               onToggleMute={toggleMute}
               onModerate={moderate}
@@ -381,7 +369,7 @@ function RoomPage({ detail, meId }: { detail: RoomDetail; meId: string | null })
               <Menu.Portal>
                 <Menu.Positioner side="top" sideOffset={10} className="z-[160] outline-0">
                   <Menu.Popup className="flex gap-1 p-1.5 bg-surface border border-border-strong rounded-full shadow-deep outline-0">
-                    {REACTIONS.map((e) => (
+                    {REACTION_EMOJIS.map((e) => (
                       <Menu.Item
                         key={e}
                         closeOnClick={false}

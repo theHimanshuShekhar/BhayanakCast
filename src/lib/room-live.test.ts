@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { ChatEntry, RoomParticipant, ServerMessage } from "./realtime";
-import { applyRoomMessage, CHAT_LINES_KEPT, type RoomLive } from "./room-live";
+import {
+  type ChatEntry,
+  FEED_HISTORY_SIZE,
+  type FeedEntry,
+  type RoomParticipant,
+  type ServerMessage,
+} from "./realtime";
+import { applyRoomMessage, CHAT_LINES_KEPT, feedLine, type RoomLive } from "./room-live";
 
 const person = (userId: string): RoomParticipant => ({
   userId,
@@ -26,6 +32,7 @@ const snapshot: ServerMessage = {
   hostUserId: "a",
   participants: [person("a"), person("b")],
   chat: [said("c1", "earlier")],
+  feed: [{ kind: "joined", id: "f1", at, userId: "b", username: "b" }],
 };
 
 describe("applyRoomMessage", () => {
@@ -52,6 +59,7 @@ describe("applyRoomMessage", () => {
         { id: `joined:c:${at}`, system: true, text: "c joined", at },
         { id: `left:a:${at}`, system: true, text: "a left", at },
       ],
+      feed: [{ kind: "joined", id: "f1", at, userId: "b", username: "b" }],
     });
   });
 
@@ -119,5 +127,66 @@ describe("applyRoomMessage", () => {
     });
     expect(next?.participants).toEqual([person("a"), { ...person("b"), media }]);
     expect(next?.chat).toBe(state?.chat);
+  });
+});
+
+describe("the feed", () => {
+  const entry = (id: string, userId = "a"): FeedEntry => ({
+    kind: "joined",
+    id,
+    at,
+    userId,
+    username: userId,
+  });
+
+  it("puts new entries first, keeping the latest, for this room only", () => {
+    let state = applyRoomMessage(null, "r1", snapshot);
+    state = applyRoomMessage(state, "r1", { type: "feed.entry", roomId: "r1", entry: entry("f2") });
+    expect(state?.feed.map((e) => e.id)).toEqual(["f2", "f1"]);
+    expect(
+      applyRoomMessage(state, "r1", { type: "feed.entry", roomId: "r2", entry: entry("x") }),
+    ).toBe(state);
+    expect(
+      applyRoomMessage(null, "r1", { type: "feed.entry", roomId: "r1", entry: entry("x") }),
+    ).toBeNull();
+
+    for (let i = 0; i < FEED_HISTORY_SIZE; i++) {
+      state = applyRoomMessage(state, "r1", {
+        type: "feed.entry",
+        roomId: "r1",
+        entry: entry(`n${i}`),
+      });
+    }
+    expect(state?.feed).toHaveLength(FEED_HISTORY_SIZE);
+    expect(state?.feed[0]?.id).toBe(`n${FEED_HISTORY_SIZE - 1}`);
+  });
+
+  it("says what happened in words", () => {
+    const base = { id: "f", at, userId: "a", username: "ana" };
+    const mod = { userId: "m", username: "mo" };
+    const words = (e: FeedEntry) => {
+      const { who, what } = feedLine(e);
+      return `${who} ${what}`;
+    };
+    expect(words({ ...base, kind: "joined" })).toBe("ana joined");
+    expect(words({ ...base, kind: "left" })).toBe("ana left");
+    expect(
+      words({ ...base, kind: "reaction", emoji: "🔥", target: { userId: "b", username: "bo" } }),
+    ).toBe("ana reacted 🔥 to bo");
+    expect(
+      words({ ...base, kind: "reaction", emoji: "✨", target: { userId: "a", username: "ana" } }),
+    ).toBe("ana reacted ✨");
+    expect(words({ ...base, kind: "shareStarted" })).toBe("ana started sharing");
+    expect(words({ ...base, kind: "shareStopped" })).toBe("ana stopped sharing");
+    expect(words({ ...base, kind: "shareStopped", by: mod })).toBe(
+      "ana had their share stopped by mo",
+    );
+    expect(words({ ...base, kind: "roleChanged", role: "mod", by: mod })).toBe(
+      "ana was made a mod by mo",
+    );
+    expect(words({ ...base, kind: "roleChanged", role: "member" })).toBe("ana is no longer a mod");
+    expect(words({ ...base, kind: "hostChanged" })).toBe("ana is now the host");
+    expect(words({ ...base, kind: "kicked", by: mod })).toBe("ana was removed by mo");
+    expect(feedLine({ ...base, kind: "joined" })).toMatchObject({ id: "f", at });
   });
 });

@@ -112,6 +112,7 @@ describe("join and leave", () => {
         { userId: ana.id, username: "ana", role: "host", joinedAt: T0, media: MEDIA_OFF },
       ],
       chat: [],
+      feed: [],
     });
 
     await h.advance(10 * SECOND);

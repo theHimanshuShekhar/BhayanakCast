@@ -39,7 +39,7 @@ test("the room marks the signed-in user, by id, as (you)", async ({ page, contex
   await expect(page.getByText("room.host (you)")).toHaveCount(0);
 });
 
-test("the room shows who is connected, with an empty chat and feed", async ({
+test("the room shows who is connected, with an empty chat and a feed of just their arrival", async ({
   page,
   context,
   browser,
@@ -73,5 +73,7 @@ test("the room shows who is connected, with an empty chat and feed", async ({
   await expect(people).toContainText("present.me (you)");
   await expect(people).not.toContainText("present.viewer");
   await page.getByRole("tab", { name: /feed/ }).click();
-  await expect(page.getByText("nothing has happened yet")).toBeVisible();
+  const feed = page.getByRole("tabpanel", { name: /feed/ });
+  await expect(feed).toContainText("present.me joined");
+  await expect(feed).not.toContainText("present.viewer");
 });

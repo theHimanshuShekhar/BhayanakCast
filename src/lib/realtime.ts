@@ -44,6 +44,13 @@ export const CHAT_MAX_LENGTH = 500;
 export const CHAT_HISTORY_SIZE = 50;
 /** Chat rate limit per user: at most `messages` in any `windowMs` (server clock). */
 export const CHAT_RATE_LIMIT = { messages: 5, windowMs: 5_000 } as const;
+/** The reactions anyone can float on someone's tile; the server refuses anything else. */
+export const REACTION_EMOJIS = ["🔥", "💯", "✨", "🎧", "⚡", "🫡"] as const;
+export type ReactionEmoji = (typeof REACTION_EMOJIS)[number];
+/** Reaction rate limit per user: at most `reactions` in any `windowMs` (server clock). */
+export const REACTION_RATE_LIMIT = { reactions: 5, windowMs: 3_000 } as const;
+/** How many recent feed entries a live room keeps in memory for joiners. */
+export const FEED_HISTORY_SIZE = 50;
 
 /** Someone's mic, camera and screen share, on or off. No media flows in this slice (spec #4). */
 export const mediaState = z.object({ mic: z.boolean(), cam: z.boolean(), share: z.boolean() });
@@ -72,6 +79,16 @@ export const chatSendMessage = z.object({ type: z.literal("chat.send"), text: z.
  * in the room as `stateChanged`.
  */
 export const mediaStateMessage = mediaState.extend({ type: z.literal("media.state") });
+/**
+ * Float `emoji` on `targetUserId`'s tile for everyone in the sender's room. The server refuses
+ * a target who isn't in the room (`not_found`) or a sender over `REACTION_RATE_LIMIT`
+ * (`rate_limited`). Reactions are never persisted; they only show in the room's feed.
+ */
+export const reactionSendMessage = z.object({
+  type: z.literal("reaction.send"),
+  emoji: z.enum(REACTION_EMOJIS),
+  targetUserId: z.string().min(1).max(64),
+});
 
 export const clientMessage = z.discriminatedUnion("type", [
   helloMessage,
@@ -80,6 +97,7 @@ export const clientMessage = z.discriminatedUnion("type", [
   pingMessage,
   chatSendMessage,
   mediaStateMessage,
+  reactionSendMessage,
 ]);
 export type ClientMessage = z.infer<typeof clientMessage>;
 export type ClientMessageType = ClientMessage["type"];
@@ -117,6 +135,64 @@ export const chatEntry = z.object({
 });
 export type ChatEntry = z.infer<typeof chatEntry>;
 
+/** Someone named in a feed entry. */
+const feedPerson = z.object({ userId: z.string(), username: z.string() });
+
+/** What every feed entry has: an id, when, and who it's about (by their name at the time). */
+const feedBase = {
+  /** Unique within the server process's lifetime. */
+  id: z.string(),
+  at: z.iso.datetime(),
+  userId: z.string(),
+  username: z.string(),
+};
+
+/**
+ * One line of a room's feed: what happened in the room, as the server logged it. Kept in
+ * memory for the room's life (the last `FEED_HISTORY_SIZE`), never persisted. Adding a kind:
+ * a member here, a `#feed(room, at, …)` call in the hub (src/server/room-hub.ts), and its
+ * words in `feedLine` (src/lib/room-live.ts).
+ */
+export const feedEntry = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("joined"), ...feedBase }),
+  z.object({ kind: z.literal("left"), ...feedBase }),
+  /** `username` reacted with `emoji` on `target`'s tile. */
+  z.object({
+    kind: z.literal("reaction"),
+    ...feedBase,
+    emoji: z.enum(REACTION_EMOJIS),
+    target: feedPerson,
+  }),
+  z.object({ kind: z.literal("shareStarted"), ...feedBase }),
+  /** `by`: the host or mod who force-stopped it, if it wasn't the streamer. */
+  z.object({ kind: z.literal("shareStopped"), ...feedBase, by: feedPerson.optional() }),
+  /** Promoted to mod or demoted to member, by `by`. */
+  z.object({
+    kind: z.literal("roleChanged"),
+    ...feedBase,
+    role: z.enum(["mod", "member"]),
+    by: feedPerson.optional(),
+  }),
+  /** Became the host. */
+  z.object({ kind: z.literal("hostChanged"), ...feedBase }),
+  /** Removed from the room by `by`. */
+  z.object({ kind: z.literal("kicked"), ...feedBase, by: feedPerson.optional() }),
+]);
+export type FeedEntry = z.infer<typeof feedEntry>;
+export type FeedKind = FeedEntry["kind"];
+
+/** A reaction as the server relays it. */
+export const reactionEntry = z.object({
+  /** Unique within the server process's lifetime. */
+  id: z.string(),
+  userId: z.string(),
+  username: z.string(),
+  targetUserId: z.string(),
+  emoji: z.enum(REACTION_EMOJIS),
+  at: z.iso.datetime(),
+});
+export type ReactionEntry = z.infer<typeof reactionEntry>;
+
 export const welcomeMessage = z.object({
   type: z.literal("welcome"),
   v: z.number().int(),
@@ -133,6 +209,8 @@ export const roomSnapshotMessage = z.object({
   participants: z.array(roomParticipant),
   /** The room's last `CHAT_HISTORY_SIZE` chat messages at most, oldest first. */
   chat: z.array(chatEntry),
+  /** The room's last `FEED_HISTORY_SIZE` feed entries at most, newest first. */
+  feed: z.array(feedEntry),
 });
 
 export const roomEvent = z.discriminatedUnion("kind", [
@@ -185,6 +263,20 @@ export const chatMessageMessage = z.object({
   message: chatEntry,
 });
 
+/** A reaction, sent to everyone in the room (the sender included, as confirmation). */
+export const reactionMessage = z.object({
+  type: z.literal("reaction"),
+  roomId,
+  reaction: reactionEntry,
+});
+
+/** A new feed entry, sent to everyone in the room. */
+export const feedEntryMessage = z.object({
+  type: z.literal("feed.entry"),
+  roomId,
+  entry: feedEntry,
+});
+
 export const ERROR_CODES = [
   /** Not valid JSON, not a known message, or not allowed at this point (e.g. before `hello`). */
   "bad_request",
@@ -226,6 +318,8 @@ export const serverMessage = z.discriminatedUnion("type", [
   roomSnapshotMessage,
   roomEventMessage,
   chatMessageMessage,
+  reactionMessage,
+  feedEntryMessage,
   errorMessage,
   pongMessage,
 ]);
