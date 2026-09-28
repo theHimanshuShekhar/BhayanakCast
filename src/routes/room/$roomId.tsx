@@ -10,8 +10,16 @@ import { useAppActions } from "~/lib/app-actions";
 import { useCurrentSession } from "~/lib/current-user";
 import { fmtMins, MAX_STREAMERS } from "~/lib/format";
 import { type FeedEntry, REACTION_EMOJIS, type ReactionEmoji } from "~/lib/realtime";
-import { feedLine, sendChat, sendReaction, useRoomLive, useRoomReactions } from "~/lib/room-live";
+import {
+  feedLine,
+  moderate,
+  sendChat,
+  sendReaction,
+  useRoomLive,
+  useRoomReactions,
+} from "~/lib/room-live";
 import { roomDetailFor, withRoster } from "~/lib/room-view";
+import { ROOM_NAME_MAX } from "~/lib/rooms";
 import { roomQuery } from "~/lib/rooms.queries";
 import { useSettings } from "~/lib/settings";
 import type { ChatMessage, Participant, RoomDetail, RoomRole } from "~/lib/types";
@@ -66,7 +74,7 @@ function RoomNotice({
 
 function RoomRoute() {
   const { roomId } = Route.useParams();
-  const { user } = useCurrentSession();
+  const { user, role } = useCurrentSession();
   const { data: room } = useSuspenseQuery(roomQuery(roomId));
   // It can end or disappear after load (a later refetch or socket invalidation).
   if (!room) return <RoomNotFound />;
@@ -76,7 +84,66 @@ function RoomRoute() {
       key={`${room.id}:${user?.id ?? ""}`}
       detail={roomDetailFor(room, user)}
       meId={user?.id ?? null}
+      admin={role === "admin"}
     />
+  );
+}
+
+/** The room's name, which the host or an admin can edit in place (`room.rename`). */
+function RoomName({ name, canRename }: { name: string; canRename: boolean }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  if (draft === null) {
+    return (
+      <>
+        <h1 className="m-0 text-[11.5px] text-fg font-semibold truncate">{name}</h1>
+        {canRename && (
+          <button
+            type="button"
+            className="text-[11px] text-muted hover:text-fg cursor-pointer"
+            onClick={() => setDraft(name)}
+          >
+            rename
+          </button>
+        )}
+      </>
+    );
+  }
+  const submit = () => {
+    const next = draft.trim();
+    if (next && next !== name) moderate({ type: "room.rename", name: next });
+    setDraft(null);
+  };
+  return (
+    <form
+      className="flex items-center gap-1.5 min-w-0"
+      onSubmit={(e) => {
+        e.preventDefault();
+        submit();
+      }}
+    >
+      <input
+        aria-label="Room name"
+        // biome-ignore lint/a11y/noAutofocus: opened by the rename button to type into at once
+        autoFocus
+        value={draft}
+        maxLength={ROOM_NAME_MAX}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") setDraft(null);
+        }}
+        className="h-6 min-w-0 w-56 px-2 rounded-md bg-surface border border-border text-[11.5px] text-fg outline-0 focus:border-primary"
+      />
+      <button type="submit" className="text-[11px] text-primary cursor-pointer">
+        save
+      </button>
+      <button
+        type="button"
+        className="text-[11px] text-muted hover:text-fg cursor-pointer"
+        onClick={() => setDraft(null)}
+      >
+        cancel
+      </button>
+    </form>
   );
 }
 
@@ -134,13 +201,24 @@ const useNotice = (error: { message: string } | null, ms = 4_000) => {
 const NO_CHAT: ChatMessage[] = [];
 const NO_FEED: FeedEntry[] = [];
 
-function RoomPage({ detail, meId }: { detail: RoomDetail; meId: string | null }) {
+function RoomPage({
+  detail,
+  meId,
+  admin,
+}: {
+  detail: RoomDetail;
+  meId: string | null;
+  /** A site admin: moderation in any room (ADR 15). */
+  admin: boolean;
+}) {
   const navigate = useNavigate();
   const { settings } = useSettings();
   const { openSettings } = useAppActions();
   // Starts from the loader's view; the realtime socket's snapshot and events take over.
   const [participants, setParticipants] = useState<Participant[]>(detail.participants);
-  const live = useRoomLive(detail.id);
+  const live = useRoomLive(detail.id, meId);
+  // The host can rename the room while we're here.
+  const roomName = live.room?.name ?? detail.name;
   const roster = live.room?.participants;
   useEffect(() => {
     if (roster) setParticipants((shown) => withRoster(shown, roster, meId));
@@ -165,6 +243,8 @@ function RoomPage({ detail, meId }: { detail: RoomDetail; meId: string | null })
   const othersStreaming = participants.filter((p) => p.streaming && !p.you).length;
   const canStartShare = media.share || othersStreaming < MAX_STREAMERS;
   const mediaNotice = useNotice(live.mediaError);
+  const moderationNotice = useNotice(live.moderationError);
+  const notice = moderationNotice ?? mediaNotice;
 
   // TODO(ADR 1/2): these toggle real getUserMedia/getDisplayMedia tracks once the mesh lands.
   const toggleMic = () => setMedia({ ...media, mic: !media.mic });
@@ -181,21 +261,14 @@ function RoomPage({ detail, meId }: { detail: RoomDetail; meId: string | null })
     if (target) sendReaction(emoji, target.userId);
   };
 
-  // TODO(ADR 15): send as WebSocket commands; server authorises against the sender's role.
-  const moderate = (id: string, action: ModAction) => {
+  // WebSocket commands (ADR 15): the server authorises them and broadcasts the result.
+  const onModerate = (id: string, action: ModAction) => {
     const target = participants.find((p) => p.id === id);
     if (!target) return;
-    if (action === "kick") {
-      setParticipants((ps) => ps.filter((p) => p.id !== id));
-      if (pinnedId === id) setPinnedId(null);
-    } else if (action === "stopShare") {
-      setParticipants((ps) =>
-        ps.map((p) => (p.id === id ? { ...p, streaming: false, size: "s" } : p)),
-      );
-    } else {
-      const role: RoomRole = action === "promote" ? "mod" : "member";
-      setParticipants((ps) => ps.map((p) => (p.id === id ? { ...p, role } : p)));
-    }
+    const userId = target.userId;
+    if (action === "kick") moderate({ type: "mod.kick", userId });
+    else if (action === "stopShare") moderate({ type: "mod.stopShare", userId });
+    else moderate({ type: "mod.setRole", userId, role: action === "promote" ? "mod" : "member" });
   };
 
   const toggleMute = (id: string) =>
@@ -228,10 +301,17 @@ function RoomPage({ detail, meId }: { detail: RoomDetail; meId: string | null })
       </RoomNotice>
     );
   }
+  if (live.error?.code === "kicked") {
+    return (
+      <RoomNotice title="you were removed from this room">
+        a host, mod or admin removed you from {roomName}, so you can't rejoin it.
+      </RoomNotice>
+    );
+  }
   if (live.error?.code === "room_full") {
     return (
       <RoomNotice title={`room full (${detail.capacity}/${detail.capacity})`} waiting>
-        you'll join {detail.name} automatically as soon as a spot frees up.
+        you'll join {roomName} automatically as soon as a spot frees up.
       </RoomNotice>
     );
   }
@@ -258,7 +338,7 @@ function RoomPage({ detail, meId }: { detail: RoomDetail; meId: string | null })
               home
             </Link>
             <span className="text-subtle">/</span>
-            <h1 className="m-0 text-[11.5px] text-fg font-semibold truncate">{detail.name}</h1>
+            <RoomName name={roomName} canRename={joined && (admin || myRole === "host")} />
           </nav>
           <div className="flex gap-1.5 items-center flex-shrink-0">
             {/* The socket dropped; the realtime client is reconnecting with backoff. */}
@@ -310,11 +390,12 @@ function RoomPage({ detail, meId }: { detail: RoomDetail; meId: string | null })
               p={p}
               layout={settings.layout}
               myRole={myRole}
+              admin={admin}
               locallyMuted={mutedIds.has(p.id)}
               reactions={reactions.filter((r) => r.targetUserId === p.userId)}
               onPin={(id) => setPinnedId((cur) => (cur === id ? null : id))}
               onToggleMute={toggleMute}
-              onModerate={moderate}
+              onModerate={onModerate}
             />
           ))}
         </div>
@@ -326,16 +407,17 @@ function RoomPage({ detail, meId }: { detail: RoomDetail; meId: string | null })
             </Btn>
           </div>
 
-          {/* A refused media change, e.g. a share start with 3 people already sharing. */}
+          {/* A refused media change (a share start with 3 people already sharing), a share a
+              moderator stopped, or a refused moderation command. */}
           <p
             role="status"
             className={
-              mediaNotice
+              notice
                 ? "absolute bottom-full mt-0 mb-2 px-3 py-1.5 rounded-full text-[11px] text-live-ink bg-surface border border-border shadow-card"
                 : "sr-only"
             }
           >
-            {mediaNotice}
+            {notice}
           </p>
           <div className="flex gap-2 max-sm:gap-1.5 p-1.5 bg-surface border border-border rounded-full shadow-card">
             <ControlBtn

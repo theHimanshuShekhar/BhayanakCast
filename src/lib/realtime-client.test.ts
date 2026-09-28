@@ -178,6 +178,7 @@ describe("RealtimeClient", () => {
     latest().serverSends({
       type: "room.snapshot",
       roomId: "r1",
+      name: "room",
       hostUserId: null,
       participants: [],
       chat: [],

@@ -163,6 +163,33 @@ describe("an empty room", () => {
     ]);
   });
 
+  it("ends normally after a kick and a rename", async () => {
+    const watcher = await h.connectAs(bo);
+    const a = await h.connectAs(ana);
+    await a.join(roomId);
+    const b = await h.connectAs(bo);
+    await b.join(roomId);
+    await a.waitForEvent("joined");
+    await h.advance(5 * SECOND);
+    a.send({ type: "mod.kick", userId: bo.id });
+    await a.waitForEvent("kicked");
+    a.send({ type: "room.rename", name: "renamed hang" });
+    await a.waitForEvent("renamed");
+    await h.advance(5 * SECOND);
+    a.send({ type: "room.leave" });
+    await h.advance(EMPTY_ROOM_TIMEOUT_MS);
+    expect(await roomRow()).toEqual({ lastEmptyAt: t(10), endedAt: t(10), rolledUp: true });
+    expect((await intervals(presenceIntervals)).sort()).toEqual([
+      ["ana", T0, t(10)],
+      ["bo", T0, t(5)],
+    ]);
+    expect(await roomChange(watcher, "ended")).toEqual({
+      roomId,
+      change: "ended",
+      participantCount: 0,
+    });
+  });
+
   it("closes an open stream interval at the end time and counts it", async () => {
     const a = await h.connectAs(ana);
     await a.join(roomId);

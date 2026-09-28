@@ -30,6 +30,7 @@ import { roomVisibleTo } from "./visibility.ts";
 /** A live room as the hub needs it when someone joins. */
 export interface StoredRoom {
   id: string;
+  name: string;
   hostUserId: string | null;
   /** Private rooms never reach the lobby channel (ADR 20). */
   isPrivate: boolean;
@@ -113,13 +114,29 @@ export interface RoomStore {
   endRoom(roomId: string, endedAt: Date): Promise<boolean>;
   /** Fold the ended room into the persistent stats (ADR 11); a no-op if already done. */
   rollupEndedRoom(roomId: string, at: Date): Promise<void>;
+  /** Whether `userId` was kicked from `roomId` (they can't rejoin it, ADR 15). */
+  isKicked(roomId: string, userId: string): Promise<boolean>;
+  /** Kick `userId` from `roomId` for good: `room_members.kicked`, back to a plain member. */
+  kick(roomId: string, userId: string): Promise<void>;
+  /**
+   * `userId`, present in `roomId`, is a mod or a plain member now (`room_members.role`); either
+   * way they stay approved, so a private room stays open to them.
+   */
+  setRole(roomId: string, userId: string, role: "mod" | "member"): Promise<void>;
+  /** Rename `roomId` (`name` already validated). */
+  renameRoom(roomId: string, name: string): Promise<void>;
 }
 
 export function createDbRoomStore(db: Db): RoomStore {
   return {
     async findRoomFor(caller, roomId) {
       const [room] = await db
-        .select({ id: rooms.id, hostUserId: rooms.hostUserId, isPrivate: rooms.isPrivate })
+        .select({
+          id: rooms.id,
+          name: rooms.name,
+          hostUserId: rooms.hostUserId,
+          isPrivate: rooms.isPrivate,
+        })
         .from(rooms)
         .where(and(eq(rooms.id, roomId), isNull(rooms.endedAt), roomVisibleTo(caller)));
       if (!room) return null;
@@ -186,6 +203,7 @@ export function createDbRoomStore(db: Db): RoomStore {
       const live = await db
         .select({
           id: rooms.id,
+          name: rooms.name,
           hostUserId: rooms.hostUserId,
           isPrivate: rooms.isPrivate,
           createdAt: rooms.createdAt,
@@ -339,6 +357,38 @@ export function createDbRoomStore(db: Db): RoomStore {
 
     async rollupEndedRoom(roomId, at) {
       await rollupEndedRoom(db, roomId, at);
+    },
+
+    async isKicked(roomId, userId) {
+      const [member] = await db
+        .select({ kicked: roomMembers.kicked })
+        .from(roomMembers)
+        .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)));
+      return member?.kicked ?? false;
+    },
+
+    async kick(roomId, userId) {
+      await db
+        .insert(roomMembers)
+        .values({ roomId, userId, role: "member", kicked: true })
+        .onConflictDoUpdate({
+          target: [roomMembers.roomId, roomMembers.userId],
+          set: { role: "member", kicked: true },
+        });
+    },
+
+    async setRole(roomId, userId, role) {
+      await db
+        .insert(roomMembers)
+        .values({ roomId, userId, role, approved: true })
+        .onConflictDoUpdate({
+          target: [roomMembers.roomId, roomMembers.userId],
+          set: { role, approved: true },
+        });
+    },
+
+    async renameRoom(roomId, name) {
+      await db.update(rooms).set({ name }).where(eq(rooms.id, roomId));
     },
   };
 }

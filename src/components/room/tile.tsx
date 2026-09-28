@@ -42,12 +42,29 @@ const menuItem =
 
 export type ModAction = "kick" | "stopShare" | "promote" | "demote";
 
+const RANK: Record<RoomRole, number> = { member: 0, mod: 1, host: 2 };
+
+/**
+ * What the viewer (`myRole`, `admin`) may do to `p` (ADR 15; the server decides): host and mods
+ * act on people below them, only the host changes roles, and an admin may do it all to anyone.
+ */
+export const moderationFor = (p: Participant, myRole: RoomRole, admin: boolean) => {
+  const any = !p.you && (admin || RANK[myRole] > RANK[p.role]);
+  const moderator = admin || myRole === "host" || myRole === "mod";
+  return {
+    kick: any && moderator,
+    stopShare: any && moderator && p.streaming,
+    setRole: any && (admin || myRole === "host") && p.role !== "host",
+  };
+};
+
 const displayName = (p: Participant) => (p.you ? `${p.name} (you)` : p.name);
 
 export const Tile = ({
   p,
   layout,
   myRole,
+  admin = false,
   locallyMuted,
   reactions,
   onPin,
@@ -57,6 +74,8 @@ export const Tile = ({
   p: Participant;
   layout: Settings["layout"];
   myRole: RoomRole;
+  /** The viewer is a site admin: moderation in any room. */
+  admin?: boolean;
   locallyMuted: boolean;
   reactions: Reaction[];
   onPin: (id: string) => void;
@@ -91,7 +110,8 @@ export const Tile = ({
       ? "shadow-[var(--shadow-pop),0_0_0_1px_color-mix(in_oklch,var(--color-live)_40%,transparent),0_0_26px_color-mix(in_oklch,var(--color-live)_25%,transparent)]"
       : "shadow-pop";
 
-  const canModerate = !p.you && p.role !== "host" && (myRole === "host" || myRole === "mod");
+  const can = moderationFor(p, myRole, admin);
+  const canModerate = can.kick || can.stopShare || can.setRole;
   const av = avatarFor(p.name);
 
   return (
@@ -181,12 +201,12 @@ export const Tile = ({
                 className="z-[160] outline-0"
               >
                 <Menu.Popup className="min-w-[170px] p-1 bg-surface border border-border-strong rounded-[var(--radius-sm)] shadow-deep outline-0">
-                  {p.streaming && (
+                  {can.stopShare && (
                     <Menu.Item className={menuItem} onClick={() => onModerate(p.id, "stopShare")}>
                       <Icon.Screen size={13} /> stop their share
                     </Menu.Item>
                   )}
-                  {myRole === "host" && (
+                  {can.setRole && (
                     <Menu.Item
                       className={menuItem}
                       onClick={() => onModerate(p.id, p.role === "mod" ? "demote" : "promote")}
@@ -194,13 +214,17 @@ export const Tile = ({
                       <Icon.Sparkle size={13} /> {p.role === "mod" ? "remove mod" : "make mod"}
                     </Menu.Item>
                   )}
-                  <Menu.Separator className="h-px bg-border-subtle my-1" />
-                  <Menu.Item
-                    className={`${menuItem} !text-live-ink`}
-                    onClick={() => onModerate(p.id, "kick")}
-                  >
-                    <Icon.Leave size={13} /> kick from room
-                  </Menu.Item>
+                  {can.kick && (
+                    <>
+                      <Menu.Separator className="h-px bg-border-subtle my-1" />
+                      <Menu.Item
+                        className={`${menuItem} !text-live-ink`}
+                        onClick={() => onModerate(p.id, "kick")}
+                      >
+                        <Icon.Leave size={13} /> kick from room
+                      </Menu.Item>
+                    </>
+                  )}
                 </Menu.Popup>
               </Menu.Positioner>
             </Menu.Portal>

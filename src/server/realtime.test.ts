@@ -107,6 +107,7 @@ describe("join and leave", () => {
     expect(await a.join(roomId)).toEqual({
       type: "room.snapshot",
       roomId,
+      name: expect.any(String),
       hostUserId: ana.id,
       participants: [
         { userId: ana.id, username: "ana", role: "host", joinedAt: T0, media: MEDIA_OFF },

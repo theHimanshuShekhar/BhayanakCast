@@ -90,6 +90,40 @@ export const reactionSendMessage = z.object({
   targetUserId: z.string().min(1).max(64),
 });
 
+const targetUserId = z.string().min(1).max(64);
+
+/**
+ * Moderation (ADR 15), in the sender's room, authorised against their role there: host and mods
+ * may kick and stop shares, only the host may change roles or rename, and an admin may do all
+ * of it in any room. Nobody acts on themselves, and host and mods act only on people below them
+ * (a mod on members; the host on mods and members; an admin on anyone, the host included), never
+ * on an admin unless they are one. Refusals: `forbidden` (not allowed), `not_found` (the target
+ * isn't in the room), `bad_request` (nothing to do: they aren't sharing, the host's role).
+ *
+ * `mod.kick`: the target leaves at once (no reconnect grace), is told `kicked`, and can't
+ * rejoin this room (`room_members.kicked`). Everyone else gets a `kicked` room event.
+ */
+export const modKickMessage = z.object({ type: z.literal("mod.kick"), userId: targetUserId });
+/**
+ * Force the target's share off: their stream interval closes, and everyone (them included)
+ * gets `stateChanged` with `share: false` and `by`, so every client stops showing it.
+ */
+export const modStopShareMessage = z.object({
+  type: z.literal("mod.stopShare"),
+  userId: targetUserId,
+});
+/** Make the target a mod or a plain member again (host or admin only); `roleChanged` for all. */
+export const modSetRoleMessage = z.object({
+  type: z.literal("mod.setRole"),
+  userId: targetUserId,
+  role: z.enum(["mod", "member"]),
+});
+/**
+ * Rename the sender's room (host or admin only). The server trims `name` and refuses it empty
+ * or longer than a room name may be (`bad_request`); everyone gets `renamed`.
+ */
+export const roomRenameMessage = z.object({ type: z.literal("room.rename"), name: z.string() });
+
 export const clientMessage = z.discriminatedUnion("type", [
   helloMessage,
   roomJoinMessage,
@@ -98,6 +132,10 @@ export const clientMessage = z.discriminatedUnion("type", [
   chatSendMessage,
   mediaStateMessage,
   reactionSendMessage,
+  modKickMessage,
+  modStopShareMessage,
+  modSetRoleMessage,
+  roomRenameMessage,
 ]);
 export type ClientMessage = z.infer<typeof clientMessage>;
 export type ClientMessageType = ClientMessage["type"];
@@ -204,6 +242,8 @@ export const welcomeMessage = z.object({
 export const roomSnapshotMessage = z.object({
   type: z.literal("room.snapshot"),
   roomId,
+  /** The room's name now (the host can rename it). */
+  name: z.string(),
   hostUserId: z.string().nullable(),
   /** In order of arrival. Includes the joiner. */
   participants: z.array(roomParticipant),
@@ -232,8 +272,22 @@ export const roomEvent = z.discriminatedUnion("kind", [
     hostUserId: z.string().nullable(),
     graceUntil: z.iso.datetime().nullable(),
   }),
-  /** Someone's media state changed; sent to them too, which confirms a share start. */
-  z.object({ kind: z.literal("stateChanged"), userId: z.string(), media: mediaState }),
+  /**
+   * Someone's media state changed; sent to them too, which confirms a share start. `by` is set
+   * when a host, mod or admin forced it (`mod.stopShare`): their own client turns the share off.
+   */
+  z.object({
+    kind: z.literal("stateChanged"),
+    userId: z.string(),
+    media: mediaState,
+    by: feedPerson.optional(),
+  }),
+  /** Promoted to mod or demoted to member (`mod.setRole`). */
+  z.object({ kind: z.literal("roleChanged"), userId: z.string(), role: z.enum(["mod", "member"]) }),
+  /** Removed by a host, mod or admin (`mod.kick`): gone from the room, like `left`. */
+  z.object({ kind: z.literal("kicked"), userId: z.string(), by: feedPerson }),
+  /** The room has a new name (`room.rename`). */
+  z.object({ kind: z.literal("renamed"), name: z.string(), by: feedPerson }),
 ]);
 export type RoomEvent = z.infer<typeof roomEvent>;
 
@@ -259,10 +313,18 @@ export const lobbySnapshotMessage = z.object({
  * `ended`: the room sat empty for 5 minutes and is a past stream now (ADR 14).
  * `host`: its host changed (handover, or an empty room's joiner), so room cards' host is stale.
  */
-export const LOBBY_ROOM_CHANGES = ["created", "ended", "count", "streamers", "host"] as const;
+export const LOBBY_ROOM_CHANGES = [
+  "created",
+  "ended",
+  "count",
+  "streamers",
+  "renamed",
+  "host",
+] as const;
 
 /**
- * A public live room that was created or ended, or whose participant count, streamers or host
+ * A public live room that was created, ended or renamed, or whose participant count, streamers
+ * or host
  * changed.
  */
 export const lobbyRoomChange = z.object({
@@ -316,6 +378,10 @@ export const ERROR_CODES = [
    * no longer in its room (ADR 21). It stays open for the lobby.
    */
   "taken_over",
+  /**
+   * Unprompted (no `re`): a host, mod or admin removed this connection from its room. As the
+   * answer to `room.join`: this user was kicked from that room and can't come back (ADR 15).
+   */
   "kicked",
   "banned",
   /** The server failed; the request may be retried. */
