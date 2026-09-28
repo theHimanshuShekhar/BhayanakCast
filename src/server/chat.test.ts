@@ -6,6 +6,7 @@ import {
   type TestClient,
   type TestUser,
 } from "./realtime-harness.ts";
+import { EMPTY_ROOM_TIMEOUT_MS } from "./room-hub.ts";
 
 let h: RealtimeHarness;
 let ana: TestUser;
@@ -159,11 +160,16 @@ describe("chat", () => {
     const again = await h.connectAs(ana);
     expect((await again.join(roomId)).chat).toHaveLength(3);
 
-    // The room is dropped from memory once empty, after the grace (#31 will keep it for
-    // 5 minutes, then end it).
-    await again.close();
-    await h.advance(30_000);
+    // An empty room keeps its history while it waits for someone (ADR 14)…
+    again.send({ type: "room.leave" });
+    await h.advance(60_000);
     const b = await h.connectAs(bo);
-    expect((await b.join(roomId)).chat).toEqual([]);
+    expect((await b.join(roomId)).chat).toHaveLength(3);
+
+    // …and it goes with the room when nobody joins in time: the room is a past stream now.
+    b.send({ type: "room.leave" });
+    await h.advance(EMPTY_ROOM_TIMEOUT_MS);
+    b.send({ type: "room.join", roomId });
+    expect(await b.waitFor("error")).toMatchObject({ code: "not_found", re: "room.join" });
   });
 });

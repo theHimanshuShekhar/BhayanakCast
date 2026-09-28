@@ -12,7 +12,7 @@ import {
   type TestClient,
   type TestUser,
 } from "./realtime-harness.ts";
-import { HOST_GRACE_MS } from "./room-hub.ts";
+import { EMPTY_ROOM_TIMEOUT_MS, HOST_GRACE_MS } from "./room-hub.ts";
 
 // Reactions and the room feed (#28).
 
@@ -227,11 +227,17 @@ describe("the feed", () => {
     const again = await h.connectAs(ana);
     expect((await again.join(roomId)).feed.map((e) => e.kind)).toEqual(["reaction", "joined"]);
 
-    // Dropped from memory once empty (#31 will keep empty rooms for 5 minutes, then end them).
+    // An empty room keeps its feed while it waits for someone (ADR 14)…
     await again.close();
-    await h.advance(30 * SECOND);
+    await h.advance(60 * SECOND);
     const b = await h.connectAs(bo);
-    expect((await b.join(roomId)).feed).toEqual([]);
+    expect((await b.join(roomId)).feed.map((e) => e.kind)).toContain("reaction");
+
+    // …and it goes with the room when nobody joins in time: the room is a past stream now.
+    b.send({ type: "room.leave" });
+    await h.advance(EMPTY_ROOM_TIMEOUT_MS);
+    b.send({ type: "room.join", roomId });
+    expect(await b.waitFor("error")).toMatchObject({ code: "not_found", re: "room.join" });
   });
 
   it("logs host changes, but not the host staying host", async () => {

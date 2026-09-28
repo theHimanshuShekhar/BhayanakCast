@@ -14,14 +14,14 @@ import { roomKeys } from "./rooms.queries";
 
 /**
  * The query keys to invalidate for a lobby `message`: the live list and home summary when a
- * public room was created or its count changed, every room read when one ended (past lists
- * too), and every room read on a fresh snapshot after a reconnect (`reconnected`), since
- * anything may have changed while the socket was down.
+ * public room was created or its count, streamers or host changed, every room read and the
+ * home summary when one ended (past lists too), and every room read on a fresh snapshot after
+ * a reconnect (`reconnected`), since anything may have changed while the socket was down.
  */
 export function lobbyInvalidations(message: ServerMessage, reconnected: boolean): QueryKey[] {
   if (message.type === "lobby.snapshot") return reconnected ? [roomKeys.all] : [];
   if (message.type !== "lobby.changed" || !message.room) return [];
-  if (message.room.change === "ended") return [roomKeys.all];
+  if (message.room.change === "ended") return [roomKeys.all, homeKeys.summary()];
   return [roomKeys.live(), homeKeys.summary()];
 }
 
