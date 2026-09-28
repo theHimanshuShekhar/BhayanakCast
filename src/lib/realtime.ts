@@ -45,6 +45,12 @@ export const CHAT_HISTORY_SIZE = 50;
 /** Chat rate limit per user: at most `messages` in any `windowMs` (server clock). */
 export const CHAT_RATE_LIMIT = { messages: 5, windowMs: 5_000 } as const;
 
+/** Someone's mic, camera and screen share, on or off. No media flows in this slice (spec #4). */
+export const mediaState = z.object({ mic: z.boolean(), cam: z.boolean(), share: z.boolean() });
+export type MediaState = z.infer<typeof mediaState>;
+/** Everything off: how everyone arrives (the lobby starts mic and camera off). */
+export const MEDIA_OFF: MediaState = { mic: false, cam: false, share: false };
+
 // ---------------------------------------------------------------------------------------------
 // Client → server
 
@@ -59,6 +65,13 @@ export const pingMessage = z.object({ type: z.literal("ping") });
  * time, sender and role itself.
  */
 export const chatSendMessage = z.object({ type: z.literal("chat.send"), text: z.string() });
+/**
+ * The sender's whole media state in their room, sent on each toggle and again after every
+ * (re)join. Turning `share` on is refused with `share_limit` when 3 others already share
+ * (`MAX_STREAMERS`, ADR 2); the rest of the state still applies. Changes come back to everyone
+ * in the room as `stateChanged`.
+ */
+export const mediaStateMessage = mediaState.extend({ type: z.literal("media.state") });
 
 export const clientMessage = z.discriminatedUnion("type", [
   helloMessage,
@@ -66,6 +79,7 @@ export const clientMessage = z.discriminatedUnion("type", [
   roomLeaveMessage,
   pingMessage,
   chatSendMessage,
+  mediaStateMessage,
 ]);
 export type ClientMessage = z.infer<typeof clientMessage>;
 export type ClientMessageType = ClientMessage["type"];
@@ -85,6 +99,8 @@ export const roomParticipant = z.object({
   role: z.enum(ROOM_ROLES),
   /** When this presence began (server clock), so "longest present" is the same for everyone. */
   joinedAt: z.iso.datetime(),
+  /** Their mic, camera and share, as they last announced them. */
+  media: mediaState,
 });
 export type RoomParticipant = z.infer<typeof roomParticipant>;
 
@@ -122,6 +138,8 @@ export const roomSnapshotMessage = z.object({
 export const roomEvent = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("joined"), participant: roomParticipant }),
   z.object({ kind: z.literal("left"), userId: z.string() }),
+  /** Someone's media state changed; sent to them too, which confirms a share start. */
+  z.object({ kind: z.literal("stateChanged"), userId: z.string(), media: mediaState }),
 ]);
 export type RoomEvent = z.infer<typeof roomEvent>;
 
@@ -143,9 +161,9 @@ export const lobbySnapshotMessage = z.object({
   online: z.number().int().min(0),
 });
 
-export const LOBBY_ROOM_CHANGES = ["created", "ended", "count"] as const;
+export const LOBBY_ROOM_CHANGES = ["created", "ended", "count", "streamers"] as const;
 
-/** A public live room that was created, ended, or whose participant count changed. */
+/** A public live room that was created, ended, or whose participant count or streamers changed. */
 export const lobbyRoomChange = z.object({
   roomId,
   change: z.enum(LOBBY_ROOM_CHANGES),

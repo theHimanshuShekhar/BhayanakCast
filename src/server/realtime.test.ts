@@ -1,7 +1,7 @@
 import { asc, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { presenceIntervals, rooms } from "../db/schema/index.ts";
-import { PROTOCOL_VERSION } from "../lib/realtime.ts";
+import { MEDIA_OFF, PROTOCOL_VERSION } from "../lib/realtime.ts";
 import { type RealtimeHarness, startRealtimeHarness, type TestUser } from "./realtime-harness.ts";
 
 let h: RealtimeHarness;
@@ -108,7 +108,9 @@ describe("join and leave", () => {
       type: "room.snapshot",
       roomId,
       hostUserId: ana.id,
-      participants: [{ userId: ana.id, username: "ana", role: "host", joinedAt: T0 }],
+      participants: [
+        { userId: ana.id, username: "ana", role: "host", joinedAt: T0, media: MEDIA_OFF },
+      ],
       chat: [],
     });
 
@@ -117,8 +119,8 @@ describe("join and leave", () => {
     const snapshot = await b.join(roomId);
     const boJoinedAt = "2026-09-01T12:00:10.000Z";
     expect(snapshot.participants).toEqual([
-      { userId: ana.id, username: "ana", role: "host", joinedAt: T0 },
-      { userId: bo.id, username: "bo", role: "member", joinedAt: boJoinedAt },
+      { userId: ana.id, username: "ana", role: "host", joinedAt: T0, media: MEDIA_OFF },
+      { userId: bo.id, username: "bo", role: "member", joinedAt: boJoinedAt, media: MEDIA_OFF },
     ]);
     expect(await a.waitForEvent("joined")).toEqual({
       type: "room.event",
@@ -126,7 +128,13 @@ describe("join and leave", () => {
       at: boJoinedAt,
       event: {
         kind: "joined",
-        participant: { userId: bo.id, username: "bo", role: "member", joinedAt: boJoinedAt },
+        participant: {
+          userId: bo.id,
+          username: "bo",
+          role: "member",
+          joinedAt: boJoinedAt,
+          media: MEDIA_OFF,
+        },
       },
     });
 

@@ -69,11 +69,16 @@ describe("roomDetailFor", () => {
 });
 
 describe("withRoster", () => {
-  const live = (person: { id: string; username: string }, role: RoomParticipant["role"]) => ({
+  const live = (
+    person: { id: string; username: string },
+    role: RoomParticipant["role"],
+    media: Partial<RoomParticipant["media"]> = {},
+  ): RoomParticipant => ({
     userId: person.id,
     username: person.username,
     role,
     joinedAt: "2026-09-27T10:00:00.000Z",
+    media: { mic: false, cam: false, share: false, ...media },
   });
 
   it("keeps who the server says is there, in place, and adds newcomers at the end", () => {
@@ -83,13 +88,47 @@ describe("withRoster", () => {
     ).participants;
     const next = withRoster(
       shown,
-      [live(me, "member"), live(host, "host"), live({ id: "u-new", username: "new" }, "member")],
+      [
+        live(me, "member"),
+        live(host, "host", { share: true }),
+        live({ id: "u-new", username: "new" }, "member"),
+      ],
       me.id,
     );
     expect(next.map((p) => [p.name, p.role, p.streaming, p.size, !!p.viewerOnly])).toEqual([
       ["host.discord", "host", true, "l", false],
       ["me.discord", "member", false, undefined, true],
       ["new", "member", false, "s", false],
+    ]);
+  });
+
+  it("follows everyone's mic, camera and share from the server", () => {
+    const shown = withRoster([], [live(host, "host"), live(me, "member")], me.id);
+    const next = withRoster(
+      shown,
+      [live(host, "host", { mic: true, share: true }), live(me, "member", { cam: true })],
+      me.id,
+    );
+    expect(
+      next.map((p) => [p.name, p.muted, p.camera, p.streaming, p.size, !!p.viewerOnly]),
+    ).toEqual([
+      ["host.discord", false, false, true, "l", false],
+      ["me.discord", true, true, false, "s", false],
+    ]);
+    // A second streamer gets a medium tile; stopping puts you back to a viewer.
+    const later = withRoster(
+      next,
+      [live(host, "host", { share: true }), live(me, "member", { share: true })],
+      me.id,
+    );
+    expect(later.map((p) => [p.streaming, p.size, p.screen])).toEqual([
+      [true, "l", "browser"],
+      [true, "m", "browser"],
+    ]);
+    const done = withRoster(later, [live(host, "host"), live(me, "member")], me.id);
+    expect(done.map((p) => [p.streaming, p.size, !!p.viewerOnly])).toEqual([
+      [false, "s", false],
+      [false, undefined, true],
     ]);
   });
 

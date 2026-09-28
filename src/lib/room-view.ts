@@ -55,9 +55,10 @@ export function roomDetailFor(room: LiveRoomCard, me: RoomPerson | null): RoomDe
 
 /**
  * The room's people once the realtime server says who is there (`room.snapshot` and
- * `room.event`): `roster` decides who is present and their name and role; people already
- * shown keep their place and local state (tile size, mic, camera), newcomers join at the end
- * on a small tile, and you (`meId`) as a viewer.
+ * `room.event`): `roster` decides who is present, their name and role, and their mic, camera
+ * and share. People already shown keep their place and tile, newcomers join at the end.
+ * Streamers get big tiles (the first one shown large); everyone else a small one, except you
+ * (`meId`), a viewer until you turn on your camera or share.
  */
 export function withRoster(
   shown: Participant[],
@@ -72,9 +73,8 @@ export function withRoster(
   const keptIds = new Set(kept.map((p) => p.userId));
   const added = roster
     .filter((p) => !keptIds.has(p.userId))
-    .map((p): Participant => {
-      const you = p.userId === meId;
-      return {
+    .map(
+      (p): Participant => ({
         id: p.userId,
         userId: p.userId,
         name: p.username,
@@ -83,9 +83,23 @@ export function withRoster(
         speaking: false,
         muted: true,
         camera: false,
-        ...(you ? { viewerOnly: true } : { size: "s" }),
-        you,
-      };
-    });
-  return [...kept, ...added];
+        you: p.userId === meId,
+      }),
+    );
+  const sharing = (p: Participant) => byUser.get(p.userId)?.media.share ?? false;
+  const people = [...kept, ...added];
+  let bigTileShown = people.some((p) => p.streaming && p.size === "l" && sharing(p));
+  return people.map(({ size, ...p }): Participant => {
+    const media = byUser.get(p.userId)?.media;
+    const camera = media?.cam ?? false;
+    const next: Participant = { ...p, muted: !media?.mic, camera, streaming: sharing(p) };
+    if (next.streaming) {
+      // A streamer keeps their tile; a new one gets the big tile if nobody has it yet.
+      const tile = p.streaming && size ? size : bigTileShown ? "m" : "l";
+      bigTileShown ||= tile === "l";
+      return { ...next, size: tile, screen: p.screen ?? "browser", viewerOnly: false };
+    }
+    if (p.you && !camera) return { ...next, viewerOnly: true };
+    return { ...next, size: "s", viewerOnly: false };
+  });
 }
