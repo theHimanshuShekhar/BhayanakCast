@@ -133,11 +133,27 @@ export const roomSnapshotMessage = z.object({
   participants: z.array(roomParticipant),
   /** The room's last `CHAT_HISTORY_SIZE` chat messages at most, oldest first. */
   chat: z.array(chatEntry),
+  /**
+   * Set while the host is away (the host grace, ADR 14): when host passes to someone else
+   * unless the host returns first. Absent otherwise.
+   */
+  hostGraceUntil: z.iso.datetime().optional(),
 });
 
 export const roomEvent = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("joined"), participant: roomParticipant }),
   z.object({ kind: z.literal("left"), userId: z.string() }),
+  /**
+   * The host role changed (ADR 14): `hostUserId` is the host now, and `graceUntil` is set
+   * while they're away (the host grace: "host reconnecting…") and null once they're back or
+   * host has passed on. A new host was a mod or member until now; the previous one is a
+   * member now.
+   */
+  z.object({
+    kind: z.literal("hostChanged"),
+    hostUserId: z.string().nullable(),
+    graceUntil: z.iso.datetime().nullable(),
+  }),
   /** Someone's media state changed; sent to them too, which confirms a share start. */
   z.object({ kind: z.literal("stateChanged"), userId: z.string(), media: mediaState }),
 ]);
