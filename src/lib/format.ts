@@ -76,5 +76,3 @@ export const ACCENTS = [
 
 export const ROOM_CAPACITY = 10;
 export const MAX_STREAMERS = 3;
-
-export const ciProof: number = "not a number";
