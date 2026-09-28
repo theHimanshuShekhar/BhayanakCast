@@ -1,21 +1,25 @@
 /**
  * The room page's live state from the realtime socket: `useRoomLive(roomId)` joins the room
- * while mounted and folds `room.snapshot`, `room.event` and `chat.message` messages into
- * `RoomLive` with `applyRoomMessage`. Later tickets extend `RoomLive` (feed, media state, host grace)
- * and the reducer, not the page.
+ * while mounted and folds `room.snapshot`, `room.event`, `chat.message` and `feed.entry`
+ * messages into `RoomLive` with `applyRoomMessage`. `useRoomReactions(roomId)` follows the
+ * reactions floating on tiles. Later tickets extend `RoomLive` (host grace, …) and the reducer,
+ * not the page.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   type ChatEntry,
+  FEED_HISTORY_SIZE,
+  type FeedEntry,
   MEDIA_OFF,
   type MediaState,
+  type ReactionEmoji,
   type RoomParticipant,
   type RoomRole,
   type ServerMessage,
   type ServerMessageOf,
 } from "./realtime";
 import { getRealtimeClient } from "./realtime-client";
-import type { ChatMessage } from "./types";
+import type { ActivityItem, ChatMessage } from "./types";
 
 /** Most chat lines (messages and system lines) the page keeps; older ones scroll away. */
 export const CHAT_LINES_KEPT = 200;
@@ -35,6 +39,49 @@ export interface RoomLive {
    * passes to someone else unless they return first.
    */
   hostGraceUntil?: string;
+  /**
+   * What happened in the room, newest first: the snapshot's recent entries, then new ones as
+   * the server logs them (at most `FEED_HISTORY_SIZE`).
+   */
+  feed: FeedEntry[];
+}
+
+const by = (who: { username: string } | undefined) => (who ? ` by ${who.username}` : "");
+
+/** A feed entry in words, for the feed tab: who it's about, and what happened. */
+export function feedLine(entry: FeedEntry): ActivityItem {
+  const item = (what: string): ActivityItem => ({
+    id: entry.id,
+    who: entry.username,
+    what,
+    at: entry.at,
+  });
+  switch (entry.kind) {
+    case "joined":
+      return item("joined");
+    case "left":
+      return item("left");
+    case "reaction":
+      return item(
+        entry.target.userId === entry.userId
+          ? `reacted ${entry.emoji}`
+          : `reacted ${entry.emoji} to ${entry.target.username}`,
+      );
+    case "shareStarted":
+      return item("started sharing");
+    case "shareStopped":
+      return item(entry.by ? `had their share stopped${by(entry.by)}` : "stopped sharing");
+    case "roleChanged":
+      return item(
+        entry.role === "mod"
+          ? `was made a mod${by(entry.by)}`
+          : `is no longer a mod${by(entry.by)}`,
+      );
+    case "hostChanged":
+      return item("is now the host");
+    case "kicked":
+      return item(`was removed${by(entry.by)}`);
+  }
 }
 
 const chatLine = (entry: ChatEntry): ChatMessage => ({
@@ -62,12 +109,17 @@ export function applyRoomMessage(
       hostUserId: message.hostUserId,
       participants: message.participants,
       chat: message.chat.map(chatLine),
+      feed: message.feed,
       ...(message.hostGraceUntil ? { hostGraceUntil: message.hostGraceUntil } : {}),
     };
   }
   if (message.type === "chat.message") {
     if (message.roomId !== roomId || !state) return state;
     return { ...state, chat: withLine(state.chat, chatLine(message.message)) };
+  }
+  if (message.type === "feed.entry") {
+    if (message.roomId !== roomId || !state) return state;
+    return { ...state, feed: [message.entry, ...state.feed].slice(0, FEED_HISTORY_SIZE) };
   }
   if (message.type !== "room.event" || message.roomId !== roomId || !state) return state;
   const { event, at } = message;
@@ -179,6 +231,50 @@ type RoomLiveState = Pick<RoomLiveResult, "room" | "error" | "chatError" | "medi
  */
 export function sendChat(text: string): boolean {
   return getRealtimeClient().send({ type: "chat.send", text });
+}
+
+/**
+ * Float `emoji` on `targetUserId`'s tile for everyone in the room. False (and nothing sent)
+ * while the socket is reconnecting. It floats here too when the server relays it back.
+ */
+export function sendReaction(emoji: ReactionEmoji, targetUserId: string): boolean {
+  return getRealtimeClient().send({ type: "reaction.send", emoji, targetUserId });
+}
+
+/** How long a reaction floats on a tile (the `bc-float` animation's length). */
+export const REACTION_FLOAT_MS = 2_400;
+
+/** A reaction floating on `targetUserId`'s tile, drifting `dx` pixels sideways. */
+export interface FloatingReaction {
+  id: string;
+  emoji: string;
+  targetUserId: string;
+  dx: number;
+}
+
+/** The reactions currently floating in `roomId`, as the server relays them. */
+export function useRoomReactions(roomId: string): FloatingReaction[] {
+  const [reactions, setReactions] = useState<FloatingReaction[]>([]);
+  useEffect(() => {
+    const timers = new Set<ReturnType<typeof setTimeout>>();
+    const unsubscribe = getRealtimeClient().subscribe((message) => {
+      if (message.type !== "reaction" || message.roomId !== roomId) return;
+      const { id, emoji, targetUserId } = message.reaction;
+      const floating = { id, emoji, targetUserId, dx: (Math.random() - 0.5) * 60 };
+      setReactions((rs) => [...rs, floating]);
+      const timer = setTimeout(() => {
+        timers.delete(timer);
+        setReactions((rs) => rs.filter((r) => r.id !== id));
+      }, REACTION_FLOAT_MS);
+      timers.add(timer);
+    });
+    return () => {
+      unsubscribe();
+      for (const timer of timers) clearTimeout(timer);
+      setReactions([]);
+    };
+  }, [roomId]);
+  return reactions;
 }
 
 /** Be in `roomId` over the realtime socket while mounted, and follow who is there. */

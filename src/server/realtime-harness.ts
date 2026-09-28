@@ -22,7 +22,7 @@
  * Messages are consumed in order per type: `waitFor(type)` returns the oldest unconsumed
  * message of that type, waiting up to `timeoutMs` for one. `pending()` lists what's unconsumed,
  * so `expect(client.pending()).toEqual([])` after `settled()` asserts nothing else arrived
- * (lobby traffic aside: see `pendingLobby()`).
+ * (lobby traffic and feed entries aside: see `pendingLobby()` and `pendingFeed()`).
  */
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -93,11 +93,14 @@ export interface TestClient {
   join(roomId: string): Promise<ServerMessageOf<"room.snapshot">>;
   /**
    * Messages received but not yet consumed by a `waitFor`, apart from lobby traffic
-   * (`lobby.*`), which every socket gets whenever anyone comes online or rooms change.
+   * (`lobby.*`), which every socket gets whenever anyone comes online or rooms change, and
+   * `feed.entry`, which echoes every join, leave and reaction (see `pendingFeed()`).
    */
   pending(): ServerMessage[];
   /** Unconsumed `lobby.*` messages, in order. */
   pendingLobby(): ServerMessage[];
+  /** Unconsumed `feed.entry` messages, in order. */
+  pendingFeed(): ServerMessage[];
   readonly isClosed: boolean;
   /** Wait until the socket is closed (by either side); resolves with the close code. */
   closed(): Promise<number>;
@@ -434,8 +437,9 @@ function wrap(ws: WebSocket, user: TestUser | null, heartbeat: boolean): Harness
       client.send({ type: "room.join", roomId });
       return client.waitFor("room.snapshot", (m) => m.roomId === roomId);
     },
-    pending: () => unconsumed.filter((m) => !isLobbyMessage(m)),
+    pending: () => unconsumed.filter((m) => !isLobbyMessage(m) && m.type !== "feed.entry"),
     pendingLobby: () => unconsumed.filter(isLobbyMessage),
+    pendingFeed: () => unconsumed.filter((m) => m.type === "feed.entry"),
     get isClosed() {
       return closed;
     },

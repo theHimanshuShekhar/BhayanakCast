@@ -350,16 +350,17 @@ export const RoomSide = ({
 
         <Tabs.Panel value="activity" className={panelCls}>
           {activity.length === 0 && <EmptyNote>nothing has happened yet.</EmptyNote>}
-          {activity.map((a, i) => (
+          {activity.map((a) => (
             <div
-              // biome-ignore lint/suspicious/noArrayIndexKey: append-only feed
-              key={i}
+              key={a.id}
               className="flex gap-2.5 py-2 border-t border-dashed border-border-subtle first:border-t-0"
             >
               <span className="w-[7px] h-[7px] mt-1.5 rounded-full bg-primary shadow-[0_0_8px_var(--color-primary-glow)] flex-shrink-0" />
               <div className="text-[11.5px] text-fg-muted leading-normal">
                 <span className="text-fg font-semibold">{a.who}</span> {a.what}
-                <span className="block mt-0.5 text-[10.5px] text-subtle">{a.when}</span>
+                <time dateTime={a.at} className="block mt-0.5 text-[10.5px] text-subtle">
+                  {hhmm(a.at)}
+                </time>
               </div>
             </div>
           ))}

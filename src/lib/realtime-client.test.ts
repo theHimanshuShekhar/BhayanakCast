@@ -181,6 +181,7 @@ describe("RealtimeClient", () => {
       hostUserId: null,
       participants: [],
       chat: [],
+      feed: [],
     });
     vi.advanceTimersByTime(15_000); // (within one ping interval: the socket stays up)
     expect(joins()).toBe(4);

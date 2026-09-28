@@ -6,7 +6,8 @@ import type { Participant, RoomRole, Settings } from "~/lib/types";
 import { Icon } from "../icons";
 import { Avatar, Chip, ScreenPlaceholder, Wave } from "../ui";
 
-export type Reaction = { id: number; emoji: string; dx: number; participantId: string };
+/** A reaction floating up the tile, drifting `dx` pixels sideways. */
+export type Reaction = { id: string; emoji: string; dx: number };
 
 const tileSpanDesktop = (p: Participant, layout: Settings["layout"], small: boolean) => {
   if (small) return "col-span-2 row-span-1";
@@ -67,7 +68,8 @@ export const Tile = ({
 
   if (p.viewerOnly) {
     return (
-      <div className={`${tileBase} ${span} shadow-pop`}>
+      // biome-ignore lint/a11y/useSemanticElements: a tile groups one person's view, not a form
+      <div role="group" aria-label={displayName(p)} className={`${tileBase} ${span} shadow-pop`}>
         <div className="flex items-center gap-2.5 px-3 py-2.5 h-full">
           <Avatar name={p.name} size="md" ring={p.speaking} />
           <div className="flex-1 min-w-0">
@@ -93,7 +95,13 @@ export const Tile = ({
   const av = avatarFor(p.name);
 
   return (
-    <div ref={ref} className={`${tileBase} ${span} ${ring}`}>
+    // biome-ignore lint/a11y/useSemanticElements: a tile groups one person's view, not a form
+    <div
+      ref={ref}
+      role="group"
+      aria-label={displayName(p)}
+      className={`${tileBase} ${span} ${ring}`}
+    >
       {p.streaming ? (
         <ScreenPlaceholder kind={p.screen ?? "browser"} />
       ) : (
@@ -232,6 +240,8 @@ const FloatingReactions = ({ reactions }: { reactions: Reaction[] }) =>
   reactions.map((r) => (
     <span
       key={r.id}
+      role="img"
+      aria-label={`reaction ${r.emoji}`}
       className="absolute bottom-4 left-1/2 z-[5] text-[22px] pointer-events-none animate-bc-float drop-shadow-[0_0_8px_var(--color-primary-glow)]"
       style={{ "--dx": `${r.dx}px` } as CSSProperties}
     >

@@ -53,6 +53,13 @@ export type RoomDetail = {
   participants: Participant[];
 };
 
-export type ActivityItem = { who: string; what: string; when: string };
+/** A line in the room's feed tab: `who` did `what` (src/lib/room-live.ts `feedLine`). */
+export type ActivityItem = {
+  id: string;
+  who: string;
+  what: string;
+  /** ISO timestamp, server clock. */
+  at: string;
+};
 
 export type Settings = UserSettings;
