@@ -26,6 +26,8 @@ export const CHAT_LINES_KEPT = 200;
 
 export interface RoomLive {
   roomId: string;
+  /** The room's name now: the host or an admin can rename it. */
+  name: string;
   hostUserId: string | null;
   /** In order of arrival. */
   participants: RoomParticipant[];
@@ -106,6 +108,7 @@ export function applyRoomMessage(
     if (message.roomId !== roomId) return state;
     return {
       roomId,
+      name: message.name,
       hostUserId: message.hostUserId,
       participants: message.participants,
       chat: message.chat.map(chatLine),
@@ -162,8 +165,63 @@ export function applyRoomMessage(
       };
     case "hostChanged":
       return withHost(state, event.hostUserId, event.graceUntil, at);
+    case "roleChanged":
+      return {
+        ...state,
+        participants: state.participants.map((p) =>
+          p.userId === event.userId ? { ...p, role: event.role } : p,
+        ),
+      };
+    case "kicked": {
+      const kicked = state.participants.find((p) => p.userId === event.userId);
+      return {
+        ...state,
+        participants: state.participants.filter((p) => p.userId !== event.userId),
+        chat: kicked
+          ? withLine(state.chat, {
+              id: `kicked:${event.userId}:${at}`,
+              system: true,
+              text: `${kicked.username} was removed by ${event.by.username}`,
+              at,
+            })
+          : state.chat,
+      };
+    }
+    case "renamed":
+      return {
+        ...state,
+        name: event.name,
+        chat: withLine(state.chat, {
+          id: `renamed:${at}`,
+          system: true,
+          text: `${event.by.username} renamed the room to ${event.name}`,
+          at,
+        }),
+      };
   }
 }
+
+/**
+ * Send a moderation command (ADR 15) for the room this page is in; the server checks the
+ * sender's role. False (and nothing sent) while the socket is reconnecting. The change shows up
+ * when the server broadcasts it; a refusal comes back as `moderationError`.
+ */
+export function moderate(
+  command:
+    | { type: "mod.kick"; userId: string }
+    | { type: "mod.stopShare"; userId: string }
+    | { type: "mod.setRole"; userId: string; role: "mod" | "member" }
+    | { type: "room.rename"; name: string },
+): boolean {
+  return getRealtimeClient().send(command);
+}
+
+const MODERATION_MESSAGES: ReadonlySet<string> = new Set([
+  "mod.kick",
+  "mod.stopShare",
+  "mod.setRole",
+  "room.rename",
+]);
 
 /** `state` with `hostUserId` as host (the previous one a member now), away until `graceUntil`. */
 function withHost(
@@ -201,7 +259,8 @@ export interface RoomLiveResult {
   /**
    * Why this page isn't (or is no longer) in the room, if it isn't: the server's refusal of its
    * join (`not_found`; `room_full`, which the realtime client keeps retrying until a snapshot
-   * clears it), or `taken_over` once the same user joined a room from another tab or device.
+   * clears it; `kicked`), `taken_over` once the same user joined a room from another tab or
+   * device, or `kicked` once a host, mod or admin removed them.
    */
   error: ServerMessageOf<"error"> | null;
   /**
@@ -219,11 +278,19 @@ export interface RoomLiveResult {
   media: MediaState;
   /** Turn this page's mic, camera or share on or off (announced to the room). */
   setMedia: (media: MediaState) => void;
-  /** The server's latest refusal of a media change (e.g. `share_limit`); a new object each time. */
+  /**
+   * The server's latest refusal of a media change (e.g. `share_limit`), or word that a host,
+   * mod or admin stopped this page's share; a new object each time.
+   */
   mediaError: ServerMessageOf<"error"> | null;
+  /** The server's latest refusal of a moderation command (`moderate`); a new object each time. */
+  moderationError: ServerMessageOf<"error"> | null;
 }
 
-type RoomLiveState = Pick<RoomLiveResult, "room" | "error" | "chatError" | "media" | "mediaError">;
+type RoomLiveState = Pick<
+  RoomLiveResult,
+  "room" | "error" | "chatError" | "media" | "mediaError" | "moderationError"
+>;
 
 /**
  * Send a chat message to the room this page is in. False (and nothing sent) while the socket
@@ -277,8 +344,11 @@ export function useRoomReactions(roomId: string): FloatingReaction[] {
   return reactions;
 }
 
-/** Be in `roomId` over the realtime socket while mounted, and follow who is there. */
-export function useRoomLive(roomId: string): RoomLiveResult {
+/**
+ * Be in `roomId` over the realtime socket while mounted, and follow who is there. `meId` (the
+ * signed-in user) lets the page hear that a host, mod or admin stopped its share.
+ */
+export function useRoomLive(roomId: string, meId: string | null = null): RoomLiveResult {
   const [result, setResult] = useState<RoomLiveState>({
     room: null,
     error: null,
@@ -286,6 +356,7 @@ export function useRoomLive(roomId: string): RoomLiveResult {
     // The lobby starts mic and camera off; nobody arrives sharing.
     media: MEDIA_OFF,
     mediaError: null,
+    moderationError: null,
   });
   // The media this page wants, re-announced after every (re)join: a reconnect keeps its share
   // (and stream interval) going, while a reloaded page arrives with everything off.
@@ -300,10 +371,17 @@ export function useRoomLive(roomId: string): RoomLiveResult {
     const client = getRealtimeClient();
     const unsubscribe = client.subscribe((message) => {
       if (message.type === "error") {
-        if (message.re === "room.join" || message.code === "taken_over") {
+        if (
+          message.re === "room.join" ||
+          message.code === "taken_over" ||
+          (message.code === "kicked" && !message.re)
+        ) {
           setResult((r) => ({ ...r, error: message }));
         }
         if (message.re === "chat.send") setResult((r) => ({ ...r, chatError: message }));
+        if (message.re && MODERATION_MESSAGES.has(message.re)) {
+          setResult((r) => ({ ...r, moderationError: message }));
+        }
         if (message.re === "media.state") {
           if (message.code === "share_limit") media.current = { ...media.current, share: false };
           setResult((r) => ({ ...r, media: media.current, mediaError: message }));
@@ -312,6 +390,23 @@ export function useRoomLive(roomId: string): RoomLiveResult {
       }
       if (message.type === "room.snapshot" && message.roomId === roomId) {
         client.send({ type: "media.state", ...media.current });
+      }
+      if (
+        message.type === "room.event" &&
+        message.roomId === roomId &&
+        message.event.kind === "stateChanged" &&
+        message.event.by &&
+        message.event.userId === meId &&
+        !message.event.media.share
+      ) {
+        // A host, mod or admin stopped this page's share: it stays off (ADR 15).
+        media.current = { ...media.current, share: false };
+        const stopped: ServerMessageOf<"error"> = {
+          type: "error",
+          code: "forbidden",
+          message: `${message.event.by.username} stopped your share`,
+        };
+        setResult((r) => ({ ...r, media: media.current, mediaError: stopped }));
       }
       setResult((r) => {
         const room = applyRoomMessage(r.room, roomId, message);
@@ -323,7 +418,7 @@ export function useRoomLive(roomId: string): RoomLiveResult {
       unsubscribe();
       client.leaveRoom(roomId);
     };
-  }, [roomId]);
+  }, [roomId, meId]);
   const setMedia = useCallback((next: MediaState) => {
     media.current = next;
     setResult((r) => ({ ...r, media: next }));

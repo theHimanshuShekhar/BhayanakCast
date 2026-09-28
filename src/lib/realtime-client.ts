@@ -242,8 +242,12 @@ export class RealtimeClient {
         },
         this.#fullRoomBackoff(this.#fullAttempt++),
       );
-    } else if (message.type === "error" && message.code === "taken_over") {
-      // This user joined a room elsewhere: never rejoin from here, even after a reconnect.
+    } else if (
+      message.type === "error" &&
+      (message.code === "taken_over" || message.code === "kicked")
+    ) {
+      // This user joined a room elsewhere, or was kicked from this one (ADR 15): never rejoin
+      // from here, even after a reconnect.
       this.#stopFullRetry();
       this.#roomId = null;
     } else if (
