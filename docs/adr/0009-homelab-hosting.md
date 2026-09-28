@@ -18,3 +18,6 @@ Deploy on the homelab as Docker Compose: `app` (TanStack Start Node server with 
 
 ## Addendum: one origin for pages and the socket (2026-09-28)
 The realtime WebSocket (`/ws`) runs on the same port and hostname as the app, so the single tunnel public hostname `cast.bhayanak.net` carries both HTTPS pages and `wss://…/ws`. No second tunnel route is needed. Don't override the tunnel's HTTP Host header: the socket's same-origin check compares the page's Origin with the Host it receives.
+
+## Addendum: client IP behind the tunnel (2026-09-28)
+The app is published on the LAN IP, so a LAN client can reach it directly and send its own `cf-connecting-ip`. The header is trusted only when the direct peer is listed in `TRUSTED_PROXY_IPS` (the shared cloudflared host; required in production); from anyone else the socket address is the client IP. This covers the per-IP limit on anonymous sockets (ADR 20) and Better Auth's rate limiter, which reads only headers, so the production server rewrites `cf-connecting-ip` to the resolved IP before any handler runs. `pnpm dev` doesn't rewrite it.

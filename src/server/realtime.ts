@@ -3,7 +3,8 @@
  * in the same process as SSR. A thin adapter: it authenticates the upgrade with the session
  * cookie (ADR 7), then hands frames and closes to the room hub (./room-hub.ts), which owns all
  * live state and the protocol (src/lib/realtime.ts). An upgrade without a valid session opens
- * an anonymous, lobby-only socket (ADR 20), at most `anonymousSocketsPerIp` per client IP.
+ * an anonymous, lobby-only socket (ADR 20), at most `anonymousSocketsPerIp` per client IP
+ * (`cf-connecting-ip` only from a trusted proxy, ./client-ip.ts).
  *
  * `ws` runs in no-server mode on the server's `upgrade` event and only takes upgrades on
  * `REALTIME_PATH`, leaving any others (Vite's HMR socket in dev) to their own listeners.
@@ -14,6 +15,7 @@ import { type WebSocket, WebSocketServer } from "ws";
 import { getDb } from "../db/client.ts";
 import { MAX_CLIENT_MESSAGE_BYTES, REALTIME_PATH } from "../lib/realtime.ts";
 import type { Caller } from "./caller.ts";
+import { CLIENT_IP_HEADER, createClientIpResolver } from "./client-ip.ts";
 import { systemClock } from "./clock.ts";
 import { env } from "./env.ts";
 import { onRoomAnnouncement } from "./room-announcements.ts";
@@ -34,6 +36,11 @@ export interface RealtimeOptions {
    * Defaults to `REALTIME_ANONYMOUS_SOCKETS_PER_IP`.
    */
   anonymousSocketsPerIp?: number;
+  /**
+   * Peers whose `cf-connecting-ip` names the client (./client-ip.ts); for anyone else the socket
+   * address is the client IP. Defaults to `TRUSTED_PROXY_IPS`.
+   */
+  trustedProxies?: readonly string[];
 }
 
 export interface RealtimeServer {
@@ -57,6 +64,9 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
     });
   const authenticate = options.authenticate ?? authenticateFromSession;
   const anonymousLimit = options.anonymousSocketsPerIp ?? env.REALTIME_ANONYMOUS_SOCKETS_PER_IP;
+  const clientIp = createClientIpResolver(options.trustedProxies ?? env.TRUSTED_PROXY_IPS, {
+    warn: (message) => console.warn(`[realtime] ${message}`),
+  });
   /** Open anonymous sockets (and upgrades in progress) by client IP. */
   const anonymousByIp = new Map<string, number>();
   const stopAnnouncements = onRoomAnnouncement((announcement) => {
@@ -94,7 +104,7 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
       return refuse(socket, 500, "Internal Server Error");
     }
     if (!caller.user) {
-      const ip = clientIp(request);
+      const ip = clientIp(request.socket.remoteAddress, request.headers[CLIENT_IP_HEADER]);
       const open = anonymousByIp.get(ip) ?? 0;
       if (open >= anonymousLimit) return refuse(socket, 429, "Too Many Requests");
       // Held until the TCP socket closes, whether the handshake completes or not.
@@ -142,16 +152,6 @@ function isSameOrigin(request: IncomingMessage): boolean {
   } catch {
     return false;
   }
-}
-
-/**
- * The client's IP: Cloudflare's `cf-connecting-ip` (ADR 9: behind the tunnel every socket comes
- * from cloudflared), else the socket's own address.
- */
-function clientIp(request: IncomingMessage): string {
-  const forwarded = request.headers["cf-connecting-ip"];
-  const ip = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-  return ip?.trim() || request.socket.remoteAddress || "unknown";
 }
 
 function refuse(socket: Duplex, status: number, text: string): void {

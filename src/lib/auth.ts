@@ -11,6 +11,7 @@ import { tanstackStartCookies } from "better-auth/tanstack-start";
 import { eq } from "drizzle-orm";
 import { type Db, getDb } from "../db/client.ts";
 import * as schema from "../db/schema/index.ts";
+import { CLIENT_IP_HEADER } from "../server/client-ip.ts";
 import { adminDiscordIds, type Env, env, isTestSignInEnabled } from "../server/env.ts";
 import { recordNewUser } from "../server/stats.ts";
 import { describeBan } from "./ban.ts";
@@ -84,8 +85,10 @@ export function createAuth(db: Db, config: AuthConfig) {
       max: 100,
     },
     advanced: {
-      // The app is only reachable through Cloudflare Tunnel (ADR 9), which sets this header.
-      ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] },
+      // Better Auth only sees headers, not the socket. The production server (server.prod.ts)
+      // rewrites this header to the resolved client IP before any handler runs, so it's only
+      // Cloudflare's value when the request came from a trusted proxy (src/server/client-ip.ts).
+      ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] },
     },
     databaseHooks: {
       user: {

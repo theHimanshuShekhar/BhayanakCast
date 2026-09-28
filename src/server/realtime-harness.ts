@@ -152,6 +152,8 @@ export interface RealtimeHarness {
 export interface RealtimeHarnessOptions {
   /** Passed to `attachRealtime`; the default is generous so tests' anonymous sockets fit. */
   anonymousSocketsPerIp?: number;
+  /** Passed to `attachRealtime`; the default trusts nobody's `cf-connecting-ip`. */
+  trustedProxies?: readonly string[];
 }
 
 export async function startRealtimeHarness(
@@ -175,6 +177,7 @@ export async function startRealtimeHarness(
       authenticate: async (request) =>
         callerFromSession(await resolveSession(auth, toHeaders(request))),
       anonymousSocketsPerIp: options.anonymousSocketsPerIp ?? 100,
+      trustedProxies: options.trustedProxies ?? [],
     });
     return { hub, realtime, kill: mortal.kill };
   }

@@ -5,11 +5,17 @@
  *
  * Run after `pnpm build` with `pnpm start` (Node runs this .ts file natively).
  */
-import { Server as HttpServer } from "node:http";
+import { Server as HttpServer, type IncomingMessage } from "node:http";
 import { fileURLToPath } from "node:url";
 import { serve } from "srvx";
 import { staticMiddleware } from "srvx/static";
 import { getDb } from "./src/db/client.ts";
+import {
+  CLIENT_IP_HEADER,
+  createClientIpResolver,
+  rewriteClientIpHeader,
+} from "./src/server/client-ip.ts";
+import { env } from "./src/server/env.ts";
 import { startMaintenance } from "./src/server/maintenance.ts";
 import { attachRealtime } from "./src/server/realtime.ts";
 
@@ -32,6 +38,19 @@ const httpServer = server.node?.server;
 if (!(httpServer instanceof HttpServer)) {
   throw new Error("Expected srvx to create a Node http.Server");
 }
+
+// Before srvx (and so Better Auth's rate limiter) reads any request, replace `cf-connecting-ip`
+// with the resolved client IP: Cloudflare's value only from a trusted proxy, else the socket
+// address (ADR 9: the app also listens on the LAN, where anyone could send the header).
+const resolveClientIp = createClientIpResolver(env.TRUSTED_PROXY_IPS, {
+  warn: (message) => console.warn(`[http] ${message}`),
+});
+httpServer.prependListener("request", (request: IncomingMessage) => {
+  rewriteClientIpHeader(
+    request,
+    resolveClientIp(request.socket.remoteAddress, request.headers[CLIENT_IP_HEADER]),
+  );
+});
 
 attachRealtime(httpServer);
 

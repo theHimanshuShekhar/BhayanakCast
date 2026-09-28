@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isTrustedProxyEntry } from "./client-ip.ts";
 
 /**
  * Server environment, validated once at startup.
@@ -28,6 +29,13 @@ const baseSchema = z.object({
   ADMIN_DISCORD_IDS: commaList,
   CLOUDFLARE_TURN_KEY_ID: z.string().optional(),
   CLOUDFLARE_TURN_API_TOKEN: z.string().optional(),
+  /**
+   * Peers (IPs or CIDR ranges, comma-separated) whose `cf-connecting-ip` header is trusted: the
+   * shared cloudflared host (ADR 9). For anyone else the socket address is the client IP.
+   */
+  TRUSTED_PROXY_IPS: commaList.refine((entries) => entries.every(isTrustedProxyEntry), {
+    error: "must be comma-separated IP addresses or CIDR ranges",
+  }),
   /** Open anonymous (lobby-only) realtime sockets allowed per client IP (ADR 20). */
   REALTIME_ANONYMOUS_SOCKETS_PER_IP: z.coerce.number().int().positive().default(20),
   /**
@@ -42,6 +50,10 @@ const baseSchema = z.object({
 const prodSchema = baseSchema.extend({
   // Fail fast: the test-only sign-in must never be reachable in production.
   E2E_AUTH: z.never({ error: "must not be set in production" }).optional(),
+  // Without it every tunnelled visitor shares the cloudflared host's IP for rate limits.
+  TRUSTED_PROXY_IPS: baseSchema.shape.TRUSTED_PROXY_IPS.refine((entries) => entries.length > 0, {
+    error: "is required in production: the cloudflared host's IP (see docs/deploy.md)",
+  }),
 });
 
 const devSchema = baseSchema.extend({
@@ -57,7 +69,12 @@ export type Env = z.infer<typeof baseSchema>;
 
 export function parseEnv(source: Record<string, string | undefined> = process.env): Env {
   const isProduction = source.NODE_ENV === "production";
-  const result = (isProduction ? prodSchema : devSchema).safeParse(source);
+  // An empty value counts as unset: docker-compose.yml passes every variable through as
+  // `${NAME:-}`, so an unset one arrives as "".
+  const present = Object.fromEntries(
+    Object.entries(source).filter(([, value]) => value !== undefined && value.trim() !== ""),
+  );
+  const result = (isProduction ? prodSchema : devSchema).safeParse(present);
   if (!result.success) {
     const issues = result.error.issues
       .map((issue) => `  - ${issue.path.join(".")}: ${issue.message}`)
