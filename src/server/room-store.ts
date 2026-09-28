@@ -14,6 +14,7 @@
 import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import {
+  hostIntervals,
   presenceIntervals,
   roomMembers,
   rooms,
@@ -83,6 +84,15 @@ export interface RoomStore {
   closeStream(roomId: string, userId: string, at: Date): Promise<void>;
   /** `checkpointPresence` for open stream intervals. */
   checkpointStreams(seen: PresenceSeen[]): Promise<void>;
+  /**
+   * `userId` holds the host role in `roomId` from `at` (ADRs 11, 14). Their host interval is
+   * open afterwards: one already open for them is kept (so this is idempotent), anyone else's
+   * closes at `at`. `rooms.hostUserId` and the `room_members` roles follow: the previous host
+   * becomes a member (still approved, for a private room), the new one `host`.
+   */
+  setHost(roomId: string, userId: string, at: Date): Promise<void>;
+  /** Close the room's open host interval at `at`, if there is one (when the room ends). */
+  closeHostInterval(roomId: string, at: Date): Promise<void>;
 }
 
 export function createDbRoomStore(db: Db): RoomStore {
@@ -226,6 +236,48 @@ export function createDbRoomStore(db: Db): RoomStore {
             .where(openStreamOf(roomId, userId));
         }
       });
+    },
+
+    async setHost(roomId, userId, at) {
+      await db.transaction(async (tx) => {
+        const openInRoom = and(eq(hostIntervals.roomId, roomId), isNull(hostIntervals.endedAt));
+        const [open] = await tx
+          .select({ userId: hostIntervals.userId })
+          .from(hostIntervals)
+          .where(openInRoom);
+        if (open?.userId !== userId) {
+          if (open) await tx.update(hostIntervals).set({ endedAt: at }).where(openInRoom);
+          await tx.insert(hostIntervals).values({ roomId, userId, startedAt: at });
+        }
+        const [room] = await tx
+          .select({ hostUserId: rooms.hostUserId })
+          .from(rooms)
+          .where(eq(rooms.id, roomId));
+        const previous = room?.hostUserId;
+        if (previous !== userId) {
+          await tx.update(rooms).set({ hostUserId: userId }).where(eq(rooms.id, roomId));
+        }
+        if (previous && previous !== userId) {
+          await tx
+            .update(roomMembers)
+            .set({ role: "member", approved: true })
+            .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, previous)));
+        }
+        await tx
+          .insert(roomMembers)
+          .values({ roomId, userId, role: "host", approved: true })
+          .onConflictDoUpdate({
+            target: [roomMembers.roomId, roomMembers.userId],
+            set: { role: "host", approved: true },
+          });
+      });
+    },
+
+    async closeHostInterval(roomId, at) {
+      await db
+        .update(hostIntervals)
+        .set({ endedAt: at })
+        .where(and(eq(hostIntervals.roomId, roomId), isNull(hostIntervals.endedAt)));
     },
   };
 }
