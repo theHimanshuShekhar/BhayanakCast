@@ -60,6 +60,11 @@ export const CHECKPOINT_INTERVAL_MS = 60_000;
  * one reconnect grace for their user to come back (restart recovery, ADR 4 addendum).
  */
 export const RESTORE_STALE_AFTER_MS = CHECKPOINT_INTERVAL_MS + RECONNECT_GRACE_MS;
+/**
+ * How long a room waits for its host once they disconnect or leave (ADR 14): "host
+ * reconnecting…". Back in time, they keep host; otherwise it passes on (`#handOverHost`).
+ */
+export const HOST_GRACE_MS = 30_000;
 
 /** How the hub talks to one socket. */
 export interface Transport {
@@ -128,6 +133,10 @@ interface LiveRoom {
   chat: ChatEntry[];
   /** The last `FEED_HISTORY_SIZE` feed entries, newest first; memory only, gone with the room. */
   feed: FeedEntry[];
+  /** `hostUserId`'s host interval is known to be open (`RoomStore.setHost` has run). */
+  hostRecorded: boolean;
+  /** Set while the host is away (ADR 14): until when, and the timer that hands host on. */
+  hostGrace?: { until: Date; timer: Timer };
 }
 
 /** A feed entry to log: the hub stamps its id and time. */
@@ -312,6 +321,7 @@ export class RoomHub {
         existing.connection.roomId = null;
         existing.connection = conn;
         conn.roomId = roomId;
+        if (await this.#hostBack(room, user.id)) this.#announceHost(room, this.#clock.now(), conn);
         return this.#sendSnapshot(conn, roomId);
       }
 
@@ -324,8 +334,14 @@ export class RoomHub {
         connection: conn,
         media: { ...MEDIA_OFF },
       };
+      // Whoever joins an empty (or hostless) room becomes its host (ADR 14).
+      const takesHost = room.participants.size === 0 || room.hostUserId === null;
       room.participants.set(user.id, participant);
       conn.roomId = roomId;
+      let back = false;
+      let newHost = false;
+      if (takesHost) newHost = await this.#takeHost(room, user.id, joinedAt);
+      else back = await this.#hostBack(room, user.id);
       this.#sendSnapshot(conn, roomId);
       this.#broadcast(
         room,
@@ -334,6 +350,15 @@ export class RoomHub {
         conn,
       );
       this.#feed(room, joinedAt, { kind: "joined", userId: user.id, username: user.username });
+      // Someone else's room, left empty or hostless, is theirs now.
+      if (newHost) {
+        this.#feed(room, joinedAt, {
+          kind: "hostChanged",
+          userId: user.id,
+          username: user.username,
+        });
+      }
+      if (back) this.#announceHost(room, joinedAt, conn);
       this.#lobbyRoomCount(room);
     },
 
@@ -369,6 +394,7 @@ export class RoomHub {
       participants: new Map(),
       chat: [],
       feed: [],
+      hostRecorded: false,
     };
     this.#rooms.set(room.id, room);
     return room;
@@ -403,6 +429,7 @@ export class RoomHub {
     });
     await this.#store.closePresence(room.id, participant.userId, at);
     if (participant.media.share) await this.#store.closeStream(room.id, participant.userId, at);
+    if (participant.userId === room.hostUserId) this.#hostGone(room);
     this.#lobbyRoomCount(room);
   }
 
@@ -425,6 +452,7 @@ export class RoomHub {
     if (!room || !participant || participant.connection !== conn) return;
     const since = this.#clock.now();
     this.#startGrace(room, participant, since);
+    if (participant.userId === room.hostUserId) this.#hostGone(room);
     // If the server dies during the grace, the interval closes here, not at an older checkpoint.
     await this.#store.checkpointPresence([
       { roomId: room.id, userId: participant.userId, at: since },
@@ -460,6 +488,105 @@ export class RoomHub {
       if (participant?.grace)
         await this.#removeParticipant(room, participant, participant.grace.since);
     }
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // Host lifecycle (ADRs 11, 14): host intervals, the 30s host grace, and handover
+
+  /**
+   * `userId` (present in `room`) is its host from `at`: persist it, opening their host interval
+   * (nothing to write for a host whose interval is already open). Callers tell the room.
+   * True if host moved to someone else (worth a feed entry), not just (re)confirmed.
+   */
+  async #takeHost(room: LiveRoom, userId: string, at: Date): Promise<boolean> {
+    this.#cancelHostGrace(room);
+    if (room.hostUserId === userId && room.hostRecorded) return false;
+    await this.#store.setHost(room.id, userId, at);
+    const previous = room.hostUserId;
+    if (previous && previous !== userId) room.roles.delete(previous);
+    room.roles.set(userId, "host");
+    room.hostUserId = userId;
+    room.hostRecorded = true;
+    return previous !== userId;
+  }
+
+  /**
+   * The host just disconnected from or left `room`: unless nobody is left (whoever joins next
+   * becomes host), start the host grace if it isn't running yet, and tell everyone.
+   */
+  #hostGone(room: LiveRoom): void {
+    if (room.participants.size === 0) {
+      // Empty: the host interval stays open until someone joins and takes host, or the room
+      // ends (#31: close it then with `RoomStore.closeHostInterval` at the end time).
+      this.#cancelHostGrace(room);
+      return;
+    }
+    if (room.hostGrace) return;
+    const at = this.#clock.now();
+    const timer = this.#setTimer(HOST_GRACE_MS, async (firedAt) => {
+      if (room.hostGrace?.timer !== timer || this.#rooms.get(room.id) !== room) return;
+      room.hostGrace = undefined;
+      await this.#handOverHost(room, firedAt);
+    });
+    room.hostGrace = { until: new Date(at.getTime() + HOST_GRACE_MS), timer };
+    this.#announceHost(room, at);
+  }
+
+  /**
+   * `userId` is (back) in `room`: if they're its host, the host grace ends and they keep host.
+   * True if a grace was running, so the caller tells the others.
+   */
+  async #hostBack(room: LiveRoom, userId: string): Promise<boolean> {
+    if (room.hostUserId !== userId) return false;
+    const wasAway = room.hostGrace !== undefined;
+    await this.#takeHost(room, userId, this.#clock.now());
+    return wasAway;
+  }
+
+  /**
+   * The host grace ran out: host passes to whoever has been present longest, mods first
+   * (ADR 14), preferring people with a socket over people in their reconnect grace. The old
+   * host doesn't get it back by returning later.
+   */
+  async #handOverHost(room: LiveRoom, at: Date): Promise<void> {
+    const isMod = (p: LiveParticipant) => room.roles.get(p.userId) === "mod";
+    const next = [...room.participants.values()]
+      .filter((p) => p.userId !== room.hostUserId)
+      .map((p, order) => ({ p, order }))
+      .sort(
+        (x, y) =>
+          Number(!!x.p.grace) - Number(!!y.p.grace) ||
+          Number(isMod(y.p)) - Number(isMod(x.p)) ||
+          x.p.joinedAt.getTime() - y.p.joinedAt.getTime() ||
+          x.order - y.order,
+      )[0]?.p;
+    const changed = next ? await this.#takeHost(room, next.userId, at) : false;
+    // With nobody else here, the old host (in their reconnect grace) simply stays host.
+    this.#announceHost(room, at);
+    if (next && changed) {
+      this.#feed(room, at, { kind: "hostChanged", userId: next.userId, username: next.username });
+    }
+    // A new host who is away themselves gets a host grace of their own.
+    if (next?.grace) this.#hostGone(room);
+  }
+
+  #cancelHostGrace(room: LiveRoom): void {
+    room.hostGrace?.timer.cancel();
+    room.hostGrace = undefined;
+  }
+
+  /** Tell everyone in `room` (but `except`) who the host is, and whether they're away. */
+  #announceHost(room: LiveRoom, at: Date, except?: HubConnection): void {
+    this.#broadcast(
+      room,
+      {
+        kind: "hostChanged",
+        hostUserId: room.hostUserId,
+        graceUntil: room.hostGrace?.until.toISOString() ?? null,
+      },
+      at,
+      except,
+    );
   }
 
   // -------------------------------------------------------------------------------------------
@@ -556,6 +683,9 @@ export class RoomHub {
         room.participants.set(participant.userId, participant);
         this.#startGrace(room, participant, presence.lastSeenAt);
       }
+      // Nobody has a socket yet, the host included (if they're here at all): the room waits
+      // one host grace for them, as if they had just disconnected.
+      this.#hostGone(room);
       // Room ending (#31): a room restored with nobody to wait for (or whose restored people
       // never return, via #removeParticipant) must end 5 minutes after boot at its last-seen
       // time (ADR 14): `rooms.lastEmptyAt`, else the latest `presences[].lastSeenAt`.
@@ -599,6 +729,7 @@ export class RoomHub {
       participants: [...room.participants.values()].map((p) => this.#view(room, p)),
       chat: [...room.chat],
       feed: [...room.feed],
+      ...(room.hostGrace ? { hostGraceUntil: room.hostGrace.until.toISOString() } : {}),
     });
   }
 

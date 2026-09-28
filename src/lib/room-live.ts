@@ -14,6 +14,7 @@ import {
   type MediaState,
   type ReactionEmoji,
   type RoomParticipant,
+  type RoomRole,
   type ServerMessage,
   type ServerMessageOf,
 } from "./realtime";
@@ -33,6 +34,11 @@ export interface RoomLive {
    * happen here. System lines are this page's own; history carries messages only.
    */
   chat: ChatMessage[];
+  /**
+   * Set while the host is away (the host grace, ADR 14: "host reconnecting…"): when host
+   * passes to someone else unless they return first.
+   */
+  hostGraceUntil?: string;
   /**
    * What happened in the room, newest first: the snapshot's recent entries, then new ones as
    * the server logs them (at most `FEED_HISTORY_SIZE`).
@@ -104,6 +110,7 @@ export function applyRoomMessage(
       participants: message.participants,
       chat: message.chat.map(chatLine),
       feed: message.feed,
+      ...(message.hostGraceUntil ? { hostGraceUntil: message.hostGraceUntil } : {}),
     };
   }
   if (message.type === "chat.message") {
@@ -153,7 +160,39 @@ export function applyRoomMessage(
           p.userId === event.userId ? { ...p, media: event.media } : p,
         ),
       };
+    case "hostChanged":
+      return withHost(state, event.hostUserId, event.graceUntil, at);
   }
+}
+
+/** `state` with `hostUserId` as host (the previous one a member now), away until `graceUntil`. */
+function withHost(
+  state: RoomLive,
+  hostUserId: string | null,
+  graceUntil: string | null,
+  at: string,
+): RoomLive {
+  const { hostGraceUntil: _, ...rest } = state;
+  const participants = state.participants.map((p): RoomParticipant => {
+    const role: RoomRole = p.userId === hostUserId ? "host" : p.role === "host" ? "member" : p.role;
+    return role === p.role ? p : { ...p, role };
+  });
+  const newHost =
+    hostUserId !== state.hostUserId ? participants.find((p) => p.userId === hostUserId) : undefined;
+  return {
+    ...rest,
+    hostUserId,
+    participants,
+    ...(graceUntil ? { hostGraceUntil: graceUntil } : {}),
+    chat: newHost
+      ? withLine(state.chat, {
+          id: `host:${newHost.userId}:${at}`,
+          system: true,
+          text: `${newHost.username} is the host now`,
+          at,
+        })
+      : state.chat,
+  };
 }
 
 export interface RoomLiveResult {

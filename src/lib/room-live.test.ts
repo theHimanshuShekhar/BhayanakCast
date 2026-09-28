@@ -128,6 +128,49 @@ describe("applyRoomMessage", () => {
     expect(next?.participants).toEqual([person("a"), { ...person("b"), media }]);
     expect(next?.chat).toBe(state?.chat);
   });
+
+  it("follows the host grace and handover, moving the host role", () => {
+    const hostChanged = (hostUserId: string, graceUntil: string | null): ServerMessage => ({
+      type: "room.event",
+      roomId: "r1",
+      at,
+      event: { kind: "hostChanged", hostUserId, graceUntil },
+    });
+    const until = "2026-09-27T10:00:30.000Z";
+    let state = applyRoomMessage(null, "r1", {
+      ...snapshot,
+      participants: [
+        { ...person("a"), role: "host" },
+        { ...person("b"), role: "mod" },
+        person("c"),
+      ],
+      hostGraceUntil: until,
+    });
+    expect(state?.hostGraceUntil).toBe(until);
+
+    // The host is back: the grace ends, nothing else changes.
+    state = applyRoomMessage(state, "r1", hostChanged("a", null));
+    expect(state).not.toHaveProperty("hostGraceUntil");
+    expect(state?.chat.map((m) => m.text)).toEqual(["earlier"]);
+
+    // Away again, then host passes to the mod.
+    state = applyRoomMessage(state, "r1", hostChanged("a", until));
+    expect(state?.hostGraceUntil).toBe(until);
+    state = applyRoomMessage(state, "r1", hostChanged("b", null));
+    expect(state).not.toHaveProperty("hostGraceUntil");
+    expect(state?.hostUserId).toBe("b");
+    expect(state?.participants.map((p) => [p.userId, p.role])).toEqual([
+      ["a", "member"],
+      ["b", "host"],
+      ["c", "member"],
+    ]);
+    expect(state?.chat.at(-1)).toEqual({
+      id: `host:b:${at}`,
+      system: true,
+      text: "b is the host now",
+      at,
+    });
+  });
 });
 
 describe("the feed", () => {

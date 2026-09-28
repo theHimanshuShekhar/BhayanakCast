@@ -12,6 +12,7 @@ import {
   type TestClient,
   type TestUser,
 } from "./realtime-harness.ts";
+import { HOST_GRACE_MS } from "./room-hub.ts";
 
 // Reactions and the room feed (#28).
 
@@ -231,6 +232,48 @@ describe("the feed", () => {
     await h.advance(30 * SECOND);
     const b = await h.connectAs(bo);
     expect((await b.join(roomId)).feed).toEqual([]);
+  });
+
+  it("logs host changes, but not the host staying host", async () => {
+    const a = await inRoom(ana);
+    const b = await inRoom(bo);
+    await a.waitForEvent("joined");
+
+    // ana drops and returns within the host grace: still host, nothing to log.
+    await a.close();
+    await h.settled();
+    await h.advance(10 * SECOND);
+    const again = await inRoom(ana);
+    await h.advance(HOST_GRACE_MS);
+    await h.settled();
+    expect(feedSeen(b).some((e) => e.kind === "hostChanged")).toBe(false);
+
+    // ana leaves for good: after the host grace, host passes to bo.
+    await again.close();
+    await h.settled();
+    await h.advance(HOST_GRACE_MS);
+    const { entry } = await b.waitFor("feed.entry", (m) => m.entry.kind === "hostChanged");
+    expect(gist(entry)).toEqual({
+      kind: "hostChanged",
+      at: t(10 + HOST_GRACE_MS / SECOND + HOST_GRACE_MS / SECOND),
+      userId: bo.id,
+      username: "bo",
+    });
+    await h.settled();
+    expect(feedSeen(b).filter((e) => e.kind === "hostChanged")).toHaveLength(1);
+  });
+
+  it("logs a joiner taking over an empty room as its new host", async () => {
+    const a = await inRoom(ana);
+    a.send({ type: "room.leave" });
+    await h.settled();
+    const b = await inRoom(bo);
+    const joined = await b.waitFor("feed.entry", (m) => m.entry.kind === "joined");
+    const host = await b.waitFor("feed.entry", (m) => m.entry.kind === "hostChanged");
+    expect(joined.entry.userId).toBe(bo.id);
+    expect(host.entry.userId).toBe(bo.id);
+    // The creator's own first join isn't a host change.
+    expect(feedSeen(a).some((e) => e.kind === "hostChanged")).toBe(false);
   });
 
   it("is lost on a server restart", async () => {

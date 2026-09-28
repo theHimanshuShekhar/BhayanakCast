@@ -269,6 +269,14 @@ function RoomPage({ detail, meId }: { detail: RoomDetail; meId: string | null })
                 </Chip>
               )}
             </span>
+            {/* The host is away: host passes on if they're not back by then (ADR 14). */}
+            <span role="status" className="contents">
+              {live.room?.hostGraceUntil && (
+                <Chip dot className="animate-bc-pulse">
+                  host reconnecting…
+                </Chip>
+              )}
+            </span>
             <Chip className="!bg-surface max-sm:!hidden">
               <Icon.Users size={11} /> {participants.length}/{detail.capacity}
             </Chip>
