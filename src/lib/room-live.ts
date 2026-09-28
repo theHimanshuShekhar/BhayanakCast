@@ -4,8 +4,15 @@
  * `RoomLive` with `applyRoomMessage`. Later tickets extend `RoomLive` (feed, media state, host grace)
  * and the reducer, not the page.
  */
-import { useEffect, useState } from "react";
-import type { ChatEntry, RoomParticipant, ServerMessage, ServerMessageOf } from "./realtime";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  type ChatEntry,
+  MEDIA_OFF,
+  type MediaState,
+  type RoomParticipant,
+  type ServerMessage,
+  type ServerMessageOf,
+} from "./realtime";
 import { getRealtimeClient } from "./realtime-client";
 import type { ChatMessage } from "./types";
 
@@ -87,6 +94,13 @@ export function applyRoomMessage(
           : state.chat,
       };
     }
+    case "stateChanged":
+      return {
+        ...state,
+        participants: state.participants.map((p) =>
+          p.userId === event.userId ? { ...p, media: event.media } : p,
+        ),
+      };
   }
 }
 
@@ -106,7 +120,19 @@ export interface RoomLiveResult {
   reconnecting: boolean;
   /** The server's latest refusal of a chat message (e.g. `rate_limited`); a new object each time. */
   chatError: ServerMessageOf<"error"> | null;
+  /**
+   * This page's own mic, camera and share: what it last asked for, so the controls answer at
+   * once. The room's participants carry what the server accepted. A refused share start
+   * (`share_limit`) turns `share` back off.
+   */
+  media: MediaState;
+  /** Turn this page's mic, camera or share on or off (announced to the room). */
+  setMedia: (media: MediaState) => void;
+  /** The server's latest refusal of a media change (e.g. `share_limit`); a new object each time. */
+  mediaError: ServerMessageOf<"error"> | null;
 }
+
+type RoomLiveState = Pick<RoomLiveResult, "room" | "error" | "chatError" | "media" | "mediaError">;
 
 /**
  * Send a chat message to the room this page is in. False (and nothing sent) while the socket
@@ -118,11 +144,17 @@ export function sendChat(text: string): boolean {
 
 /** Be in `roomId` over the realtime socket while mounted, and follow who is there. */
 export function useRoomLive(roomId: string): RoomLiveResult {
-  const [result, setResult] = useState<Omit<RoomLiveResult, "reconnecting">>({
+  const [result, setResult] = useState<RoomLiveState>({
     room: null,
     error: null,
     chatError: null,
+    // The lobby starts mic and camera off; nobody arrives sharing.
+    media: MEDIA_OFF,
+    mediaError: null,
   });
+  // The media this page wants, re-announced after every (re)join: a reconnect keeps its share
+  // (and stream interval) going, while a reloaded page arrives with everything off.
+  const media = useRef(MEDIA_OFF);
   const [reconnecting, setReconnecting] = useState(false);
   useEffect(() => {
     const client = getRealtimeClient();
@@ -137,7 +169,14 @@ export function useRoomLive(roomId: string): RoomLiveResult {
           setResult((r) => ({ ...r, error: message }));
         }
         if (message.re === "chat.send") setResult((r) => ({ ...r, chatError: message }));
+        if (message.re === "media.state") {
+          if (message.code === "share_limit") media.current = { ...media.current, share: false };
+          setResult((r) => ({ ...r, media: media.current, mediaError: message }));
+        }
         return;
+      }
+      if (message.type === "room.snapshot" && message.roomId === roomId) {
+        client.send({ type: "media.state", ...media.current });
       }
       setResult((r) => {
         const room = applyRoomMessage(r.room, roomId, message);
@@ -150,5 +189,11 @@ export function useRoomLive(roomId: string): RoomLiveResult {
       client.leaveRoom(roomId);
     };
   }, [roomId]);
-  return { ...result, reconnecting };
+  const setMedia = useCallback((next: MediaState) => {
+    media.current = next;
+    setResult((r) => ({ ...r, media: next }));
+    // While reconnecting it goes out with the re-join instead.
+    getRealtimeClient().send({ type: "media.state", ...next });
+  }, []);
+  return { ...result, reconnecting, setMedia };
 }

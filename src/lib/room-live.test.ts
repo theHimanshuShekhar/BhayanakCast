@@ -7,6 +7,7 @@ const person = (userId: string): RoomParticipant => ({
   username: userId,
   role: "member",
   joinedAt: "2026-09-27T10:00:00.000Z",
+  media: { mic: false, cam: false, share: false },
 });
 const at = "2026-09-27T10:00:00.000Z";
 
@@ -105,5 +106,18 @@ describe("applyRoomMessage", () => {
       event: { kind: "joined", participant: person("a") },
     });
     expect(next?.participants.map((p) => p.userId)).toEqual(["b", "a"]);
+  });
+
+  it("follows media state changes, adding no chat lines", () => {
+    const state = applyRoomMessage(null, "r1", snapshot);
+    const media = { mic: true, cam: false, share: true };
+    const next = applyRoomMessage(state, "r1", {
+      type: "room.event",
+      roomId: "r1",
+      at,
+      event: { kind: "stateChanged", userId: "b", media },
+    });
+    expect(next?.participants).toEqual([person("a"), { ...person("b"), media }]);
+    expect(next?.chat).toBe(state?.chat);
   });
 });

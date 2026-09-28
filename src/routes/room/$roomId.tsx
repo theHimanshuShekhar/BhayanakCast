@@ -120,6 +120,18 @@ const useMinutesSince = (iso: string) => {
   return Math.max(0, now - Date.parse(iso)) / 60_000;
 };
 
+/** `error`'s message for a few seconds after each new one, then null. */
+const useNotice = (error: { message: string } | null, ms = 4_000) => {
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!error) return;
+    setNotice(error.message);
+    const timer = setTimeout(() => setNotice(null), ms);
+    return () => clearTimeout(timer);
+  }, [error, ms]);
+  return notice;
+};
+
 const NO_CHAT: ChatMessage[] = [];
 
 function RoomPage({ detail, meId }: { detail: RoomDetail; meId: string | null }) {
@@ -146,32 +158,20 @@ function RoomPage({ detail, meId }: { detail: RoomDetail; meId: string | null })
 
   const me = participants.find((p) => p.you);
   const myRole: RoomRole = me?.role ?? "member";
-  const streamingCount = participants.filter((p) => p.streaming).length;
-  const canStartShare = !!me?.streaming || streamingCount < MAX_STREAMERS;
+  // The controls show what this page asked for; tiles show what the server accepted.
+  const { media, setMedia } = live;
+  const joined = live.room !== null;
+  const othersStreaming = participants.filter((p) => p.streaming && !p.you).length;
+  const canStartShare = media.share || othersStreaming < MAX_STREAMERS;
+  const mediaNotice = useNotice(live.mediaError);
 
   const log = (who: string, what: string) =>
     setActivity((a) => [{ who, what, when: "just now" }, ...a]);
 
-  const updateMe = (patch: Partial<Participant>) =>
-    setParticipants((ps) =>
-      ps.map((p) => {
-        if (!p.you) return p;
-        const next = { ...p, ...patch };
-        // anyone with a cam or share gets a stage tile; otherwise they collapse to a viewer chip
-        const onStage = next.streaming || next.camera;
-        return { ...next, viewerOnly: !onStage, size: next.streaming ? "l" : "s" };
-      }),
-    );
-
   // TODO(ADR 1/2): these toggle real getUserMedia/getDisplayMedia tracks once the mesh lands.
-  const toggleMic = () => updateMe({ muted: !me?.muted });
-  const toggleCam = () => updateMe({ camera: !me?.camera });
-  const toggleShare = () => {
-    if (!me) return;
-    const streaming = !me.streaming;
-    updateMe({ streaming, screen: "browser" });
-    log(me.name, streaming ? "started streaming" : "stopped streaming");
-  };
+  const toggleMic = () => setMedia({ ...media, mic: !media.mic });
+  const toggleCam = () => setMedia({ ...media, cam: !media.cam });
+  const toggleShare = () => setMedia({ ...media, share: !media.share });
 
   const react = (emoji: string) => {
     const target =
@@ -330,29 +330,42 @@ function RoomPage({ detail, meId }: { detail: RoomDetail; meId: string | null })
             </Btn>
           </div>
 
+          {/* A refused media change, e.g. a share start with 3 people already sharing. */}
+          <p
+            role="status"
+            className={
+              mediaNotice
+                ? "absolute bottom-full mt-0 mb-2 px-3 py-1.5 rounded-full text-[11px] text-live-ink bg-surface border border-border shadow-card"
+                : "sr-only"
+            }
+          >
+            {mediaNotice}
+          </p>
           <div className="flex gap-2 max-sm:gap-1.5 p-1.5 bg-surface border border-border rounded-full shadow-card">
             <ControlBtn
-              state={me?.camera ? "active" : "muted"}
+              state={media.cam ? "active" : "muted"}
               onClick={toggleCam}
-              aria-label={me?.camera ? "Turn camera off" : "Turn camera on"}
-              aria-pressed={!!me?.camera}
+              disabled={!joined}
+              aria-label={media.cam ? "Turn camera off" : "Turn camera on"}
+              aria-pressed={media.cam}
             >
-              {me?.camera ? <Icon.Cam size={16} /> : <Icon.CamOff size={16} />}
+              {media.cam ? <Icon.Cam size={16} /> : <Icon.CamOff size={16} />}
             </ControlBtn>
             <ControlBtn
-              state={me?.muted ? "muted" : "active"}
+              state={media.mic ? "active" : "muted"}
               onClick={toggleMic}
-              aria-label={me?.muted ? "Unmute mic" : "Mute mic"}
-              aria-pressed={!me?.muted}
+              disabled={!joined}
+              aria-label={media.mic ? "Mute mic" : "Unmute mic"}
+              aria-pressed={media.mic}
             >
-              {me?.muted ? <Icon.MicOff size={16} /> : <Icon.Mic size={16} />}
+              {media.mic ? <Icon.Mic size={16} /> : <Icon.MicOff size={16} />}
             </ControlBtn>
             <ControlBtn
-              state={me?.streaming ? "active" : undefined}
+              state={media.share ? "active" : undefined}
               onClick={toggleShare}
-              disabled={!canStartShare}
-              aria-label={me?.streaming ? "Stop sharing" : "Share screen"}
-              aria-pressed={!!me?.streaming}
+              disabled={!joined || !canStartShare}
+              aria-label={media.share ? "Stop sharing" : "Share screen"}
+              aria-pressed={media.share}
               title={canStartShare ? "Screen share" : `${MAX_STREAMERS} people are already sharing`}
               className="max-sm:hidden"
             >

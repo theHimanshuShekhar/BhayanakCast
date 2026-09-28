@@ -17,7 +17,7 @@
  * `#handlers` below (the type checker insists). Refusals go through `#refuse(conn, code, …)`.
  */
 
-import { ROOM_CAPACITY } from "../lib/format.ts";
+import { MAX_STREAMERS, ROOM_CAPACITY } from "../lib/format.ts";
 import {
   CHAT_HISTORY_SIZE,
   CHAT_MAX_LENGTH,
@@ -30,6 +30,8 @@ import {
   IDLE_CLOSE_CODE,
   IDLE_TIMEOUT_MS,
   type LobbyRoomChange,
+  MEDIA_OFF,
+  type MediaState,
   PROTOCOL_VERSION,
   parseClientMessage,
   type RoomEvent,
@@ -102,6 +104,14 @@ interface LiveParticipant {
   connection: HubConnection;
   /** Set while their socket is gone: since when, and the timer that ends their presence. */
   grace?: { since: Date; timer: Timer };
+  /** Mic, camera and share as last announced; a share has an open stream interval. */
+  media: MediaState;
+  /**
+   * Set when a new socket took over this presence (a return within the grace, a restart, a
+   * second tab): when the old one was lost. Until the new socket re-announces its media, the
+   * share is the old socket's; if the re-announcement drops it, it ended back then.
+   */
+  resumedAt?: Date;
 }
 
 interface LiveRoom {
@@ -280,6 +290,8 @@ export class RoomHub {
         // socket's close, or a return within the reconnect grace): the new socket takes over
         // the presence and its open interval, with no leave/join churn (takeover, ADR 21).
         if (existing.connection !== conn) this.#tellTakenOver(existing.connection);
+        // Its share carries on only if the new socket re-announces it (#announceMedia).
+        existing.resumedAt = existing.grace?.since ?? this.#clock.now();
         this.#cancelGrace(existing);
         existing.connection.roomId = null;
         existing.connection = conn;
@@ -294,6 +306,7 @@ export class RoomHub {
         username: user.username,
         joinedAt,
         connection: conn,
+        media: { ...MEDIA_OFF },
       };
       room.participants.set(user.id, participant);
       conn.roomId = roomId;
@@ -316,6 +329,8 @@ export class RoomHub {
     },
 
     "chat.send": (conn, message) => this.#chat(conn, message),
+
+    "media.state": (conn, message) => this.#announceMedia(conn, message),
   };
 
   #dispatch(conn: HubConnection, message: ClientMessage): Promise<void> | void {
@@ -362,6 +377,7 @@ export class RoomHub {
     if (room.participants.size === 0) this.#rooms.delete(room.id);
     this.#broadcast(room, { kind: "left", userId: participant.userId }, at);
     await this.#store.closePresence(room.id, participant.userId, at);
+    if (participant.media.share) await this.#store.closeStream(room.id, participant.userId, at);
     this.#lobbyRoomCount(room);
   }
 
@@ -388,6 +404,11 @@ export class RoomHub {
     await this.#store.checkpointPresence([
       { roomId: room.id, userId: participant.userId, at: since },
     ]);
+    if (participant.media.share) {
+      await this.#store.checkpointStreams([
+        { roomId: room.id, userId: participant.userId, at: since },
+      ]);
+    }
   }
 
   /** Keep `participant` in `room` for the reconnect grace, as gone since `since`. */
@@ -466,13 +487,18 @@ export class RoomHub {
   /** Write `last_seen_at = at` for everyone present with a socket (ADR 12). */
   async #checkpoint(at: Date): Promise<void> {
     const seen: PresenceSeen[] = [];
+    const streaming: PresenceSeen[] = [];
     for (const room of this.#rooms.values()) {
       for (const participant of room.participants.values()) {
         // Someone in grace was last seen when their socket closed, which #drop wrote.
-        if (!participant.grace) seen.push({ roomId: room.id, userId: participant.userId, at });
+        if (participant.grace) continue;
+        const mark = { roomId: room.id, userId: participant.userId, at };
+        seen.push(mark);
+        if (participant.media.share) streaming.push(mark);
       }
     }
     await this.#store.checkpointPresence(seen);
+    await this.#store.checkpointStreams(streaming);
   }
 
   /**
@@ -489,6 +515,9 @@ export class RoomHub {
       for (const presence of stored.presences) {
         if (now.getTime() - presence.lastSeenAt.getTime() > RESTORE_STALE_AFTER_MS) {
           await this.#store.closePresence(room.id, presence.userId, presence.lastSeenAt);
+          if (presence.sharing) {
+            await this.#store.closeStream(room.id, presence.userId, presence.lastSeenAt);
+          }
           continue;
         }
         const participant: LiveParticipant = {
@@ -496,6 +525,8 @@ export class RoomHub {
           username: presence.username,
           joinedAt: presence.startedAt,
           connection: this.#goneConnection(presence.userId, presence.username),
+          // Their share lasts until they re-announce on return, or ends with the grace.
+          media: { ...MEDIA_OFF, share: presence.sharing },
         };
         room.participants.set(participant.userId, participant);
         this.#startGrace(room, participant, presence.lastSeenAt);
@@ -529,6 +560,7 @@ export class RoomHub {
       username: participant.username,
       role: this.#roleOf(room, participant.userId),
       joinedAt: participant.joinedAt.toISOString(),
+      media: { ...participant.media },
     };
   }
 
@@ -645,6 +677,69 @@ export class RoomHub {
       room.chat.splice(0, room.chat.length - CHAT_HISTORY_SIZE);
     const out: ServerMessage = { type: "chat.message", roomId: room.id, message: entry };
     for (const p of room.participants.values()) this.#send(p.connection, out);
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // Media state (#29): mic/cam/share flags, the 3-streamer limit (ADR 2), stream intervals
+
+  async #announceMedia(conn: HubConnection, message: ClientMessageOf<"media.state">) {
+    const userId = conn.caller.user?.id;
+    const room = conn.roomId ? this.#rooms.get(conn.roomId) : undefined;
+    const participant = userId ? room?.participants.get(userId) : undefined;
+    if (!room || !participant || participant.connection !== conn) {
+      return this.#refuse(conn, "forbidden", "Join the room first", message.type);
+    }
+    const next: MediaState = { mic: message.mic, cam: message.cam, share: message.share };
+    if (next.share && !participant.media.share) {
+      const streamers = [...room.participants.values()].filter((p) => p.media.share).length;
+      if (streamers >= MAX_STREAMERS) {
+        next.share = false;
+        this.#refuse(
+          conn,
+          "share_limit",
+          `${MAX_STREAMERS} people are already sharing`,
+          message.type,
+        );
+      }
+    }
+    // The first announcement from a socket that took over: a share it doesn't carry on ended
+    // when the old socket was lost.
+    const shareEndedAt = participant.resumedAt;
+    participant.resumedAt = undefined;
+    await this.#setMedia(room, participant, next, shareEndedAt);
+  }
+
+  /**
+   * Change `participant`'s media to `next`, opening or closing their stream interval (now, or
+   * a stopped share at `shareEndedAt`), and tell everyone in `room`, them included.
+   */
+  async #setMedia(
+    room: LiveRoom,
+    participant: LiveParticipant,
+    next: MediaState,
+    shareEndedAt?: Date,
+  ): Promise<void> {
+    const was = participant.media;
+    if (was.mic === next.mic && was.cam === next.cam && was.share === next.share) return;
+    const at = this.#clock.now();
+    if (next.share && !was.share) await this.#store.openStream(room.id, participant.userId, at);
+    if (!next.share && was.share) {
+      await this.#store.closeStream(room.id, participant.userId, shareEndedAt ?? at);
+    }
+    participant.media = { ...next };
+    this.#broadcast(
+      room,
+      { kind: "stateChanged", userId: participant.userId, media: { ...next } },
+      at,
+    );
+    // Room cards show who is streaming.
+    if (next.share !== was.share && !room.isPrivate) {
+      this.#lobbyChanged({
+        roomId: room.id,
+        change: "streamers",
+        participantCount: room.participants.size,
+      });
+    }
   }
 
   // -------------------------------------------------------------------------------------------

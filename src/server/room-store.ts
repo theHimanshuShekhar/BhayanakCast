@@ -5,14 +5,21 @@
  * protocol tests (on PGlite).
  *
  * Later tickets grow this port rather than touching the DB from the hub: host intervals and
- * `rooms.hostUserId` (host lifecycle), stream intervals (media state), `lastEmptyAt`, room end
+ * `rooms.hostUserId` (host lifecycle), stream intervals (media state: `openStream`,
+ * `closeStream`, `checkpointStreams`), `lastEmptyAt`, room end
  * and `rollupEndedRoom` (room ending), `room_members` roles and kicks (moderation), live rooms
  * on boot and `last_seen_at` checkpoints (restart recovery: `loadLiveRooms`,
  * `checkpointPresence`).
  */
 import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
-import { presenceIntervals, roomMembers, rooms, user } from "../db/schema/index.ts";
+import {
+  presenceIntervals,
+  roomMembers,
+  rooms,
+  streamIntervals,
+  user,
+} from "../db/schema/index.ts";
 import type { RoomRole } from "../lib/realtime.ts";
 import type { SignedInCaller } from "./caller.ts";
 import { roomVisibleTo } from "./visibility.ts";
@@ -33,6 +40,8 @@ export interface OpenPresence {
   username: string;
   startedAt: Date;
   lastSeenAt: Date;
+  /** They also have an open stream interval in the room (they were sharing). */
+  sharing: boolean;
 }
 
 /** A live room as the hub reloads it on boot (ADR 4 restart addendum). */
@@ -62,6 +71,18 @@ export interface RoomStore {
   checkpointPresence(seen: PresenceSeen[]): Promise<void>;
   /** Every live room with its roles and open presence intervals, for the hub on boot. */
   loadLiveRooms(): Promise<RestoredRoom[]>;
+  /**
+   * Open a stream interval for `userId` in `roomId` at `at` (they started sharing). One left
+   * open by a crash is closed at its last-seen checkpoint first, like presence.
+   */
+  openStream(roomId: string, userId: string, at: Date): Promise<void>;
+  /**
+   * Close the user's open stream interval in `roomId` at `at` (never before it started), if
+   * there is one.
+   */
+  closeStream(roomId: string, userId: string, at: Date): Promise<void>;
+  /** `checkpointPresence` for open stream intervals. */
+  checkpointStreams(seen: PresenceSeen[]): Promise<void>;
 }
 
 export function createDbRoomStore(db: Db): RoomStore {
@@ -160,8 +181,58 @@ export function createDbRoomStore(db: Db): RoomStore {
       for (const { roomId, userId, role } of members) {
         if (role !== "member") restored.get(roomId)?.roles.set(userId, role);
       }
-      for (const { roomId, ...presence } of open) restored.get(roomId)?.presences.push(presence);
+      const streaming = await db
+        .select({ roomId: streamIntervals.roomId, userId: streamIntervals.userId })
+        .from(streamIntervals)
+        .where(and(inArray(streamIntervals.roomId, ids), isNull(streamIntervals.endedAt)));
+      const sharing = new Set(streaming.map((s) => `${s.roomId}:${s.userId}`));
+      for (const { roomId, ...presence } of open) {
+        restored
+          .get(roomId)
+          ?.presences.push({ ...presence, sharing: sharing.has(`${roomId}:${presence.userId}`) });
+      }
       return [...restored.values()];
+    },
+
+    async openStream(roomId, userId, at) {
+      await db.transaction(async (tx) => {
+        await tx
+          .update(streamIntervals)
+          .set({ endedAt: sql`${streamIntervals.lastSeenAt}` })
+          .where(openStreamOf(roomId, userId));
+        await tx.insert(streamIntervals).values({ roomId, userId, startedAt: at, lastSeenAt: at });
+      });
+    },
+
+    async closeStream(roomId, userId, at) {
+      // A restored streamer who never returns closes at their presence's last checkpoint,
+      // which can predate a share started since: that stream then lasted no time.
+      const end = sql`greatest(${streamIntervals.startedAt}, ${at.toISOString()}::timestamptz)`;
+      await db
+        .update(streamIntervals)
+        .set({ endedAt: end, lastSeenAt: end })
+        .where(openStreamOf(roomId, userId));
+    },
+
+    async checkpointStreams(seen) {
+      if (seen.length === 0) return;
+      await db.transaction(async (tx) => {
+        for (const { roomId, userId, at } of seen) {
+          await tx
+            .update(streamIntervals)
+            .set({
+              lastSeenAt: sql`greatest(${streamIntervals.lastSeenAt}, ${at.toISOString()}::timestamptz)`,
+            })
+            .where(openStreamOf(roomId, userId));
+        }
+      });
     },
   };
 }
+
+const openStreamOf = (roomId: string, userId: string) =>
+  and(
+    eq(streamIntervals.roomId, roomId),
+    eq(streamIntervals.userId, userId),
+    isNull(streamIntervals.endedAt),
+  );
