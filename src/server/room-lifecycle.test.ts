@@ -253,6 +253,40 @@ describe("an empty room", () => {
   });
 });
 
+describe("a room nobody enters", () => {
+  it("is empty from its creation, and ends 5 minutes later at that time", async () => {
+    const watcher = await h.connectAs(bo);
+    expect((await roomRow()).lastEmptyAt).toBe(T0);
+    await h.advance(EMPTY_ROOM_TIMEOUT_MS - SECOND);
+    expect((await roomRow()).endedAt).toBeNull();
+    await h.advance(SECOND);
+    expect(await roomRow()).toEqual({ lastEmptyAt: T0, endedAt: T0, rolledUp: true });
+    expect(await roomChange(watcher, "ended")).toEqual({
+      roomId,
+      change: "ended",
+      participantCount: 0,
+    });
+    const a = await h.connectAs(ana);
+    a.send({ type: "room.join", roomId });
+    expect((await a.waitFor("error")).code).toBe("not_found");
+  });
+
+  it("stays live once someone enters in time", async () => {
+    await h.advance(4 * 60 * SECOND);
+    const a = await h.connectAs(ana);
+    await a.join(roomId);
+    expect((await roomRow()).lastEmptyAt).toBeNull();
+    await h.advance(2 * EMPTY_ROOM_TIMEOUT_MS);
+    expect((await roomRow()).endedAt).toBeNull();
+  });
+
+  it("private or not", async () => {
+    const secret = await h.createRoom(ana, { isPrivate: true });
+    await h.advance(EMPTY_ROOM_TIMEOUT_MS);
+    expect((await roomRow(secret)).endedAt).toBe(T0);
+  });
+});
+
 describe("host changes reach the lobby", () => {
   it("on handover, but not when the creator first takes host", async () => {
     const watcher = await h.connectAs(bo);

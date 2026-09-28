@@ -254,6 +254,8 @@ export async function startRealtimeHarness(
         tags: [],
         ...input,
       });
+      // The hub hears of it (./room-announcements.ts) on its queue: let that land first.
+      await running.hub.idle();
       return id;
     },
     connect: (user, headers) => connect(user, headers),

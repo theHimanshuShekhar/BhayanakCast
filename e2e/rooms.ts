@@ -72,7 +72,23 @@ export interface NewRoom {
   isPrivate?: boolean;
 }
 
-/** Create a room through the create dialog on `page` (signed in) and return its id. */
+/**
+ * Go through the pre-join lobby on `page` (opening `/room/{roomId}` first if given) with mic
+ * and camera as they are (off unless the test turned them on), and wait until the room has
+ * let the page in (its controls are enabled once joined).
+ */
+export async function enterRoom(page: Page, roomId?: string): Promise<void> {
+  if (roomId) await page.goto(`/room/${roomId}`);
+  await page.getByRole("button", { name: "Enter room" }).click();
+  await expect(
+    page.getByRole("button", { name: /^(Turn camera on|Turn camera off)$/ }),
+  ).toBeEnabled();
+}
+
+/**
+ * Create a room through the create dialog on `page` (signed in), enter it through the lobby,
+ * and return its id.
+ */
 export async function createRoomOnPage(page: Page, room: NewRoom): Promise<string> {
   await hydrating(page).goto("/");
   // The rail's button; an empty home has a second "Start a Room" button.
@@ -84,6 +100,7 @@ export async function createRoomOnPage(page: Page, room: NewRoom): Promise<strin
   await expect(page.getByRole("heading", { name: room.name })).toBeVisible();
   const id = /\/room\/([^/?#]+)$/.exec(new URL(page.url()).pathname)?.[1];
   if (!id) throw new Error(`Not on a room page: ${page.url()}`);
+  await enterRoom(page);
   return id;
 }
 

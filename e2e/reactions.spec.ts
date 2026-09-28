@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { signIn } from "./auth";
 import { expect, newPage, test } from "./fixtures";
-import { createRoomOnPage, uniqueRoomName } from "./rooms";
+import { createRoomOnPage, enterRoom, uniqueRoomName } from "./rooms";
 
 // Reactions and the room feed over the realtime socket (#28).
 
@@ -21,7 +21,7 @@ test("a reaction floats on the target's tile for everyone and shows in the feed"
   try {
     await signIn(guestContext, { username: "rx.guest" });
     const guest = await newPage(guestContext);
-    await guest.goto(`/room/${roomId}`);
+    await enterRoom(guest, roomId);
     await expect(tile(page, "rx.guest")).toBeVisible();
     await expect(tile(guest, "rx.host")).toBeVisible();
 
@@ -42,7 +42,7 @@ test("a reaction floats on the target's tile for everyone and shows in the feed"
     // Someone arriving later sees what happened, newest first.
     await signIn(lateContext, { username: "rx.late" });
     const late = await newPage(lateContext);
-    await late.goto(`/room/${roomId}`);
+    await enterRoom(late, roomId);
     await late.getByRole("tab", { name: /feed/ }).click();
     await expect(feedPanel(late)).toContainText("rx.late joined");
     await expect(feedPanel(late)).toContainText("rx.guest reacted 🔥 to rx.host");

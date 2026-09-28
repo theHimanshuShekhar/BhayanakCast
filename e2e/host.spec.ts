@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { signIn } from "./auth";
 import { expect, newPage, test } from "./fixtures";
-import { createRoomOnPage, uniqueRoomName } from "./rooms";
+import { createRoomOnPage, enterRoom, uniqueRoomName } from "./rooms";
 
 /** The room's people tab, opened. */
 async function peopleTab(page: Page) {
@@ -31,7 +31,7 @@ test("when the host leaves, host passes to the other person after the 30s grace"
   try {
     await signIn(guestContext, { username: "hg.guest" });
     const guest = await newPage(guestContext);
-    await guest.goto(`/room/${roomId}`);
+    await enterRoom(guest, roomId);
     await peopleTab(guest);
     await expect(personIn(guest, "hg.lead")).toContainText("host");
     await expect(personIn(guest, "hg.guest (you)")).not.toContainText("host");

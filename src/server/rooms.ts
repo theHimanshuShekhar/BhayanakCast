@@ -125,7 +125,13 @@ export async function createRoom(
     return inserted;
   });
   // After the commit, so lists refetched on the lobby's word include the room.
-  announceRoom({ kind: "created", roomId: room.id, isPrivate: data.isPrivate });
+  announceRoom({
+    kind: "created",
+    roomId: room.id,
+    name: data.name,
+    hostUserId: hostId,
+    isPrivate: data.isPrivate,
+  });
   return room;
 }
 

@@ -1,25 +1,36 @@
 import { Menu } from "@base-ui/react/menu";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound, redirect, useNavigate } from "@tanstack/react-router";
-import { type ButtonHTMLAttributes, type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { Icon } from "~/components/icons";
+import { ControlBtn } from "~/components/room/control-btn";
+import { failureText, Lobby } from "~/components/room/lobby";
 import { RoomSide } from "~/components/room/side-panel";
 import { type ModAction, Tile } from "~/components/room/tile";
 import { Btn, Chip } from "~/components/ui";
 import { useAppActions } from "~/lib/app-actions";
 import { useCurrentSession } from "~/lib/current-user";
 import { fmtMins, MAX_STREAMERS } from "~/lib/format";
-import { type FeedEntry, REACTION_EMOJIS, type ReactionEmoji } from "~/lib/realtime";
+import { getLocalMedia, type LocalDeviceKind, useLocalMedia } from "~/lib/local-media";
+import {
+  type FeedEntry,
+  MEDIA_OFF,
+  type MediaState,
+  REACTION_EMOJIS,
+  type ReactionEmoji,
+} from "~/lib/realtime";
 import {
   feedLine,
+  markInRoom,
   moderate,
   sendChat,
   sendReaction,
   useRoomLive,
   useRoomReactions,
+  wasInRoom,
 } from "~/lib/room-live";
 import { roomDetailFor, withRoster } from "~/lib/room-view";
-import { ROOM_NAME_MAX } from "~/lib/rooms";
+import { type LiveRoomCard, ROOM_NAME_MAX } from "~/lib/rooms";
 import { roomQuery } from "~/lib/rooms.queries";
 import { useSettings } from "~/lib/settings";
 import type { ChatMessage, Participant, RoomDetail, RoomRole } from "~/lib/types";
@@ -77,14 +88,65 @@ function RoomRoute() {
   const { user, role } = useCurrentSession();
   const { data: room } = useSuspenseQuery(roomQuery(roomId));
   // It can end or disappear after load (a later refetch or socket invalidation).
-  if (!room) return <RoomNotFound />;
-  // key resets all room state when navigating between rooms or the signed-in user changes
+  if (!room) return <RoomGone roomId={roomId} />;
+  // key resets all room state (back to the lobby) when navigating between rooms or the
+  // signed-in user changes
+  return <RoomVisit key={`${room.id}:${user?.id ?? ""}`} room={room} admin={role === "admin"} />;
+}
+
+/** The room ended or vanished: this tab isn't in it any more. */
+function RoomGone({ roomId }: { roomId: string }) {
+  useEffect(() => markInRoom(roomId, false), [roomId]);
+  return <RoomNotFound />;
+}
+
+/**
+ * One visit to a room: the lobby first (pick and preview devices; nothing is sent to the room
+ * yet), then the room itself with what was chosen. A reload of a room this tab entered skips
+ * the lobby and rejoins at once, mic and camera off. The mic and camera are released, and the
+ * tab counts as having left, when the visit ends (back, leave, or navigating away; a reload
+ * never runs this).
+ */
+function RoomVisit({ room, admin }: { room: LiveRoomCard; admin: boolean }) {
+  const navigate = useNavigate();
+  const { user } = useCurrentSession();
+  const [entered, setEntered] = useState<MediaState | null>(null);
+  // Before the first paint after hydration, so a reload doesn't flash the lobby's controls.
+  useLayoutEffect(() => {
+    if (wasInRoom(room.id)) setEntered(MEDIA_OFF);
+  }, [room.id]);
+  useEffect(
+    () => () => {
+      getLocalMedia().release();
+      markInRoom(room.id, false);
+    },
+    [room.id],
+  );
+  if (!entered) {
+    return (
+      <Lobby
+        roomName={room.name}
+        host={room.host?.username ?? null}
+        people={room.participants.filter((p) => p.id !== user?.id).map((p) => p.username)}
+        capacity={room.capacity}
+        me={user?.username ?? ""}
+        onEnter={({ mic, cam }) => {
+          markInRoom(room.id, true);
+          setEntered({ mic, cam, share: false });
+        }}
+        onBack={() => {
+          markInRoom(room.id, false);
+          navigate({ to: "/" });
+        }}
+      />
+    );
+  }
   return (
     <RoomPage
-      key={`${room.id}:${user?.id ?? ""}`}
       detail={roomDetailFor(room, user)}
       meId={user?.id ?? null}
-      admin={role === "admin"}
+      admin={admin}
+      initialMedia={entered}
     />
   );
 }
@@ -153,29 +215,6 @@ const DENSITY_CLS = {
   spacious: "gap-[18px] p-[22px] auto-rows-[minmax(180px,auto)]",
 } as const;
 
-const ControlBtn = ({
-  state,
-  className = "",
-  children,
-  ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & { state?: "active" | "muted" }) => {
-  const st =
-    state === "active"
-      ? "bg-primary text-primary-ink border-transparent shadow-[0_0_18px_var(--color-primary-glow)]"
-      : state === "muted"
-        ? "bg-[color-mix(in_oklch,var(--color-live)_22%,var(--color-surface-2))] text-live-ink border-[color-mix(in_oklch,var(--color-live)_40%,transparent)]"
-        : "bg-surface-2 text-fg border-border hover:bg-surface-3";
-  return (
-    <button
-      type="button"
-      className={`w-10 h-10 rounded-full grid place-items-center border cursor-pointer transition-all duration-[120ms] disabled:opacity-45 disabled:cursor-not-allowed ${st} ${className}`}
-      {...rest}
-    >
-      {children}
-    </button>
-  );
-};
-
 /** Minutes since `iso`, ticking every 30s. */
 const useMinutesSince = (iso: string) => {
   const [now, setNow] = useState(() => Date.now());
@@ -205,18 +244,22 @@ function RoomPage({
   detail,
   meId,
   admin,
+  initialMedia,
 }: {
   detail: RoomDetail;
   meId: string | null;
   /** A site admin: moderation in any room (ADR 15). */
   admin: boolean;
+  /** The mic and camera as the lobby left them. */
+  initialMedia: MediaState;
 }) {
   const navigate = useNavigate();
   const { settings } = useSettings();
   const { openSettings } = useAppActions();
   // Starts from the loader's view; the realtime socket's snapshot and events take over.
   const [participants, setParticipants] = useState<Participant[]>(detail.participants);
-  const live = useRoomLive(detail.id, meId);
+  const live = useRoomLive(detail.id, meId, initialMedia);
+  const local = useLocalMedia();
   // The host can rename the room while we're here.
   const roomName = live.room?.name ?? detail.name;
   const roster = live.room?.participants;
@@ -242,14 +285,50 @@ function RoomPage({
   const joined = live.room !== null;
   const othersStreaming = participants.filter((p) => p.streaming && !p.you).length;
   const canStartShare = media.share || othersStreaming < MAX_STREAMERS;
+  // Why a mic or camera didn't turn on here (e.g. permission denied).
+  const [deviceError, setDeviceError] = useState<{ message: string } | null>(null);
   const mediaNotice = useNotice(live.mediaError);
   const moderationNotice = useNotice(live.moderationError);
-  const notice = moderationNotice ?? mediaNotice;
+  const deviceNotice = useNotice(deviceError, 8_000);
+  const notice = moderationNotice ?? deviceNotice ?? mediaNotice;
 
-  // TODO(ADR 1/2): these toggle real getUserMedia/getDisplayMedia tracks once the mesh lands.
-  const toggleMic = () => setMedia({ ...media, mic: !media.mic });
-  const toggleCam = () => setMedia({ ...media, cam: !media.cam });
+  // Mic and camera are real local tracks (src/lib/local-media.ts), announced once they're on.
+  // TODO(ADR 1/2): the mesh sends them, and share becomes a getDisplayMedia track.
+  const toggleDevice = async (kind: LocalDeviceKind) => {
+    const localMedia = getLocalMedia();
+    if (media[kind]) {
+      localMedia.disable(kind);
+      setMedia((m) => ({ ...m, [kind]: false }));
+      return;
+    }
+    const track = await localMedia.enable(kind);
+    const failure = localMedia.getSnapshot()[kind].failure;
+    if (track) setMedia((m) => ({ ...m, [kind]: true }));
+    else if (failure) setDeviceError({ message: failureText(kind, failure) });
+  };
+  const toggleMic = () => void toggleDevice("mic");
+  const toggleCam = () => void toggleDevice("cam");
   const toggleShare = () => setMedia({ ...media, share: !media.share });
+
+  // A device that stopped by itself (unplugged, or access revoked) is off for the room too.
+  const micLost = media.mic && local.mic.status === "off";
+  const camLost = media.cam && local.cam.status === "off";
+  useEffect(() => {
+    if (micLost) setMedia((m) => ({ ...m, mic: false }));
+    if (camLost) setMedia((m) => ({ ...m, cam: false }));
+  }, [micLost, camLost, setMedia]);
+
+  // Out of the room for good: stop broadcasting at once.
+  const out =
+    live.error?.code === "not_found" ||
+    live.error?.code === "taken_over" ||
+    live.error?.code === "kicked";
+  useEffect(() => {
+    if (!out) return;
+    getLocalMedia().release();
+    // Coming back (a reload) goes through the lobby, not straight back in.
+    markInRoom(detail.id, false);
+  }, [out, detail.id]);
 
   // Floats on the pinned tile, else the first streamer's, else the first on stage, else yours.
   const react = (emoji: ReactionEmoji) => {
@@ -316,7 +395,10 @@ function RoomPage({
     );
   }
 
-  const leave = () => navigate({ to: "/" });
+  const leave = () => {
+    markInRoom(detail.id, false);
+    navigate({ to: "/" });
+  };
   // Chat and the feed name people by username: resolve it to the user id of whoever has (or,
   // if removed since, had) that name here.
   const openProfile = (username: string) => {
@@ -423,7 +505,7 @@ function RoomPage({
             <ControlBtn
               state={media.cam ? "active" : "muted"}
               onClick={toggleCam}
-              disabled={!joined}
+              disabled={!joined || local.cam.status === "starting"}
               aria-label={media.cam ? "Turn camera off" : "Turn camera on"}
               aria-pressed={media.cam}
             >
@@ -432,7 +514,7 @@ function RoomPage({
             <ControlBtn
               state={media.mic ? "active" : "muted"}
               onClick={toggleMic}
-              disabled={!joined}
+              disabled={!joined || local.mic.status === "starting"}
               aria-label={media.mic ? "Mute mic" : "Unmute mic"}
               aria-pressed={media.mic}
             >

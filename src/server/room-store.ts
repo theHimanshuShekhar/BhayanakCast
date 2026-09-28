@@ -34,6 +34,8 @@ export interface StoredRoom {
   hostUserId: string | null;
   /** Private rooms never reach the lobby channel (ADR 20). */
   isPrivate: boolean;
+  /** Anyone has ever been in it (a presence interval exists); a new room hasn't. */
+  occupied: boolean;
   /** Room roles other than plain member, by user id (`room_members`). */
   roles: Map<string, Exclude<RoomRole, "member">>;
 }
@@ -127,6 +129,12 @@ export interface RoomStore {
   renameRoom(roomId: string, name: string): Promise<void>;
 }
 
+/**
+ * Whether anyone has ever been in the room (`rooms` row in scope). Spelled out: drizzle leaves
+ * columns unqualified inside a select list, and both tables have an `id`-like `room_id`/`id`.
+ */
+const everOccupied = sql<boolean>`exists (select 1 from "presence_intervals" as "seen" where "seen"."room_id" = "rooms"."id")`;
+
 export function createDbRoomStore(db: Db): RoomStore {
   return {
     async findRoomFor(caller, roomId) {
@@ -136,6 +144,7 @@ export function createDbRoomStore(db: Db): RoomStore {
           name: rooms.name,
           hostUserId: rooms.hostUserId,
           isPrivate: rooms.isPrivate,
+          occupied: everOccupied,
         })
         .from(rooms)
         .where(and(eq(rooms.id, roomId), isNull(rooms.endedAt), roomVisibleTo(caller)));
@@ -206,6 +215,7 @@ export function createDbRoomStore(db: Db): RoomStore {
           name: rooms.name,
           hostUserId: rooms.hostUserId,
           isPrivate: rooms.isPrivate,
+          occupied: everOccupied,
           createdAt: rooms.createdAt,
           lastEmptyAt: rooms.lastEmptyAt,
         })

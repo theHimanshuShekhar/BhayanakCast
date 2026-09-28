@@ -11,6 +11,9 @@
 export interface RoomAnnouncement {
   kind: "created";
   roomId: string;
+  name: string;
+  /** The creator, who is its host (until someone else has been in it without them, ADR 14). */
+  hostUserId: string;
   isPrivate: boolean;
 }
 

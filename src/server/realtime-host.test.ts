@@ -297,17 +297,6 @@ describe("empty rooms", () => {
     ).toEqual([]);
   });
 
-  it("include a new room someone else enters before its creator", async () => {
-    const b = await h.connectAs(bo);
-    expect((await b.join(roomId)).hostUserId).toBe(bo.id);
-    const a = await h.connectAs(ana);
-    expect(roster(await a.join(roomId))).toEqual([
-      ["bo", "host"],
-      ["ana", "member"],
-    ]);
-    expect(await hostRows()).toEqual([["bo", T0, null]]);
-  });
-
   it("don't include one whose lone host is in their reconnect grace: a joiner waits it out", async () => {
     const a = await h.connectAs(ana);
     await a.join(roomId);
@@ -329,6 +318,78 @@ describe("empty rooms", () => {
       ["ana", T0, t(30)],
       ["bo", t(30), null],
     ]);
+  });
+});
+
+describe("a new room someone else enters before its creator", () => {
+  it("stays the creator's through the host grace, and they keep host by coming in", async () => {
+    await h.advance(5 * SECOND);
+    const b = await h.connectAs(bo);
+    const snapshot = await b.join(roomId);
+    expect(snapshot.hostUserId).toBe(ana.id);
+    expect(snapshot.hostGraceUntil).toBe(t(35));
+    expect(roster(snapshot)).toEqual([["bo", "member"]]);
+    expect(await hostRows()).toEqual([]);
+
+    // ana was still in the pre-join lobby; she comes in within the grace.
+    await h.advance(20 * SECOND);
+    const a = await h.connectAs(ana);
+    expect(roster(await a.join(roomId))).toEqual([
+      ["bo", "member"],
+      ["ana", "host"],
+    ]);
+    expect((await b.waitForEvent("hostChanged")).event).toEqual({
+      kind: "hostChanged",
+      hostUserId: ana.id,
+      graceUntil: null,
+    });
+    await h.advance(60 * SECOND);
+    expect(await hostRows()).toEqual([["ana", t(25), null]]);
+    expect(await storedRoles()).toEqual({ host: "ana", roles: { ana: "host" } });
+  });
+
+  it("passes host to them once the grace runs out without the creator", async () => {
+    const b = await h.connectAs(bo);
+    await b.join(roomId);
+    await h.advance(30 * SECOND);
+    expect((await b.waitForEvent("hostChanged")).event).toEqual({
+      kind: "hostChanged",
+      hostUserId: bo.id,
+      graceUntil: null,
+    });
+    expect(await hostRows()).toEqual([["bo", t(30), null]]);
+    expect(await storedRoles()).toEqual({ host: "bo", roles: { ana: "member", bo: "host" } });
+
+    // The creator arriving later is a member.
+    const a = await h.connectAs(ana);
+    expect(roster(await a.join(roomId))).toEqual([
+      ["bo", "host"],
+      ["ana", "member"],
+    ]);
+  });
+
+  it("is settled by whoever comes next if the first visitor leaves before the creator", async () => {
+    const b = await h.connectAs(bo);
+    await b.join(roomId);
+    await h.advance(10 * SECOND);
+    b.send({ type: "room.leave" });
+    await h.advance(30 * SECOND);
+    // Once someone has been in it, the usual rule: whoever joins an empty room is host.
+    const c = await h.connectAs(cy);
+    const snapshot = await c.join(roomId);
+    expect(snapshot.hostUserId).toBe(cy.id);
+    expect(snapshot.hostGraceUntil).toBeUndefined();
+    expect(await hostRows()).toEqual([["cy", t(40), null]]);
+  });
+
+  it("follows the same rule after a restart", async () => {
+    await h.restart({ downFor: 5 * SECOND });
+    const b = await h.connectAs(bo);
+    const snapshot = await b.join(roomId);
+    expect(snapshot.hostUserId).toBe(ana.id);
+    expect(snapshot.hostGraceUntil).toBe(t(35));
+    await h.advance(30 * SECOND);
+    expect((await b.waitForEvent("hostChanged")).event.hostUserId).toBe(bo.id);
   });
 });
 
