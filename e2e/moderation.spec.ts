@@ -1,7 +1,7 @@
 import type { Browser, Page } from "@playwright/test";
 import { signIn } from "./auth";
 import { expect, newPage, test } from "./fixtures";
-import { createRoomOnPage, uniqueRoomName } from "./rooms";
+import { createRoomOnPage, enterRoom, uniqueRoomName } from "./rooms";
 
 // Moderation over the realtime socket (#32, ADR 15): kick, stop share, roles and rename.
 
@@ -10,8 +10,7 @@ async function joinAs(browser: Browser, username: string, roomId: string) {
   const context = await browser.newContext();
   await signIn(context, { username });
   const page = await newPage(context);
-  await page.goto(`/room/${roomId}`);
-  await expect(page.getByRole("button", { name: "Turn camera on" })).toBeEnabled();
+  await enterRoom(page, roomId);
   return { context, page };
 }
 
@@ -42,6 +41,7 @@ test("the host kicks someone, who is removed and can't come back", async ({
 
     // Coming back doesn't help.
     await guest.page.reload();
+    await guest.page.getByRole("button", { name: "Enter room" }).click();
     await expect(
       guest.page.getByRole("heading", { name: "you were removed from this room" }),
     ).toBeVisible();

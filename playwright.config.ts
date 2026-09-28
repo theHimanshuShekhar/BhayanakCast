@@ -54,9 +54,11 @@ export default defineConfig({
       ADMIN_DISCORD_IDS: E2E_ADMIN_DISCORD_ID,
       // Every test's visitor pages connect from 127.0.0.1 at once.
       REALTIME_ANONYMOUS_SOCKETS_PER_IP: "1000",
-      // Empty rooms end after 20s, not 5 minutes, so a test can watch one end
-      // (e2e/lifecycle.spec.ts). Long enough for a lone user's leave-and-come-back in other tests.
-      REALTIME_EMPTY_ROOM_TIMEOUT_MS: "20000",
+      // Empty rooms end after 60s, not 5 minutes, so a test can watch one end
+      // (e2e/lifecycle.spec.ts). A room is empty from its creation too (its creator is still in
+      // the pre-join lobby), and tests leave and revisit rooms: 60s leaves room to spare on a
+      // loaded machine.
+      REALTIME_EMPTY_ROOM_TIMEOUT_MS: "60000",
     },
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,

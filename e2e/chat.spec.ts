@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { signIn } from "./auth";
 import { expect, newPage, test } from "./fixtures";
-import { createRoomOnPage, uniqueRoomName } from "./rooms";
+import { createRoomOnPage, enterRoom, uniqueRoomName } from "./rooms";
 
 const chatPanel = (page: Page) => page.getByRole("tabpanel", { name: /chat/ });
 const composer = (page: Page) => page.getByRole("textbox", { name: "Chat message" });
@@ -20,7 +20,7 @@ test("two users chat live, with emoji, mentions and safe links; a late joiner se
   try {
     await signIn(guestContext, { username: "chat.guest" });
     const guest = await newPage(guestContext);
-    await guest.goto(`/room/${roomId}`);
+    await enterRoom(guest, roomId);
     const guestChat = chatPanel(guest);
     await expect(hostChat).toContainText("chat.guest joined");
 
@@ -57,7 +57,7 @@ test("two users chat live, with emoji, mentions and safe links; a late joiner se
     // Someone arriving later gets the history, then live messages.
     await signIn(lateContext, { username: "chat.late" });
     const late = await newPage(lateContext);
-    await late.goto(`/room/${roomId}`);
+    await enterRoom(late, roomId);
     const lateChat = chatPanel(late);
     await expect(lateChat).toContainText("hey @chat.guest see https://example.com/docs.");
     await expect(lateChat).toContainText("nice 😭 <b>really</b>!");

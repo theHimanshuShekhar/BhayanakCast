@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { signIn } from "./auth";
 import { expect, newPage, test } from "./fixtures";
-import { createRoomOnPage, uniqueRoomName } from "./rooms";
+import { createRoomOnPage, enterRoom, uniqueRoomName } from "./rooms";
 
 /** The room's people tab, opened. */
 async function peopleTab(page: Page) {
@@ -52,7 +52,7 @@ test("reloading the room page is not a leave and a join for everyone else", asyn
   try {
     const guestId = await signIn(guestContext, { username: "rc.guest" });
     const guest = await newPage(guestContext);
-    await guest.goto(`/room/${roomId}`);
+    await enterRoom(guest, roomId);
     await expect(hostPeople).toContainText("rc.guest");
     const guestEvents = () =>
       hostEvents.filter((e) => (e.event.userId ?? e.event.participant?.userId) === guestId);
@@ -62,6 +62,7 @@ test("reloading the room page is not a leave and a join for everyone else", asyn
 
     // Reload: the guest's old socket closes and a new one rejoins within the grace.
     const rejoined = nextSnapshot(guest);
+    // This tab was in the room, so the reload skips the lobby and rejoins at once.
     await guest.reload();
     await rejoined;
     await expect(await peopleTab(guest)).toContainText("rc.guest (you)");

@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { signIn } from "./auth";
 import { expect, newPage, test } from "./fixtures";
-import { createRoomAs, uniqueRoomName } from "./rooms";
+import { createRoomAs, enterRoom, uniqueRoomName } from "./rooms";
 
 // The lobby channel (ADR 20): a visitor's page follows online users and public rooms live.
 // Other tests connect and create rooms concurrently on the same server, so assert growth and
@@ -82,6 +82,7 @@ test("after signing in, the page's socket is authenticated without a reload", as
 
   // Only an authenticated socket may join a room.
   await page.getByRole("button", { name: `Join ${name}` }).click();
+  await enterRoom(page);
   await page.getByRole("tab", { name: /people/ }).click();
   await expect(page.getByRole("tabpanel", { name: /people/ })).toContainText("lobby.signer (you)");
   expect(await stillSameDocument(page)).toBe(true);

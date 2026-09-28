@@ -1,7 +1,7 @@
 import type { Browser, Page } from "@playwright/test";
 import { signIn } from "./auth";
 import { expect, newPage, test } from "./fixtures";
-import { createRoomOnPage, uniqueRoomName } from "./rooms";
+import { createRoomOnPage, enterRoom, uniqueRoomName } from "./rooms";
 
 // Mic/cam/share state over the realtime socket (#29). No real media yet: sharing is a flag.
 
@@ -13,8 +13,7 @@ async function joinAs(browser: Browser, username: string, roomId: string) {
   const context = await browser.newContext();
   await signIn(context, { username });
   const page = await newPage(context);
-  await page.goto(`/room/${roomId}`);
-  await expect(page.getByRole("button", { name: "Turn camera on" })).toBeEnabled();
+  await enterRoom(page, roomId);
   return { context, page };
 }
 

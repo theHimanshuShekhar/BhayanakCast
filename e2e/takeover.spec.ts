@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { signIn } from "./auth";
 import { expect, newPage, test } from "./fixtures";
-import { createRoomAs, createRoomOnPage, uniqueRoomName } from "./rooms";
+import { createRoomAs, createRoomOnPage, enterRoom, uniqueRoomName } from "./rooms";
 
 /** The room's people tab, opened. */
 async function peopleTab(page: Page) {
@@ -21,13 +21,13 @@ test("joining a room from a second tab takes over: the first tab is told and lea
   // A second tab of the same user opens another room: the first tab loses its room.
   const otherRoom = await createRoomAs(browser, "to.other", { name: uniqueRoomName("elsewhere") });
   const second = await newPage(context);
-  await second.goto(`/room/${otherRoom}`);
+  await enterRoom(second, otherRoom);
   await expect(await peopleTab(second)).toContainText("to.host (you)");
   const notice = page.getByRole("alert").filter({ hasText: "you joined from elsewhere" });
   await expect(notice).toBeVisible();
 
   // The second tab can come to the first room too; the first tab stays out of it.
-  await second.goto(`/room/${roomId}`);
+  await enterRoom(second, roomId);
   await expect(await peopleTab(second)).toContainText("to.host (you)");
   await expect(notice).toBeVisible();
 

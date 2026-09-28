@@ -136,6 +136,11 @@ interface LiveRoom {
   name: string;
   hostUserId: string | null;
   isPrivate: boolean;
+  /**
+   * Someone has been in it. Until then its creator stays host even while someone else is
+   * the first to enter (they get the host grace, ADR 14).
+   */
+  occupied: boolean;
   roles: StoredRoom["roles"];
   /** By user id, in order of arrival. */
   participants: Map<string, LiveParticipant>;
@@ -235,11 +240,27 @@ export class RoomHub {
     return conn;
   }
 
-  /** A room change made outside the hub (./room-announcements.ts), for the lobby. */
+  /**
+   * A room change made outside the hub (./room-announcements.ts). A created room is live and
+   * empty from now: it ends unless someone enters in time (ADR 14), even if its creator closes
+   * the page in the pre-join lobby.
+   */
   announce(announcement: RoomAnnouncement): Promise<void> {
-    return this.#enqueue(() => {
-      if (announcement.isPrivate) return;
-      this.#lobbyChanged({ roomId: announcement.roomId, change: "created", participantCount: 0 });
+    return this.#enqueue(async () => {
+      const { roomId, name, hostUserId, isPrivate } = announcement;
+      if (!this.#rooms.has(roomId)) {
+        const room = this.#addRoom({
+          id: roomId,
+          name,
+          hostUserId,
+          isPrivate,
+          occupied: false,
+          roles: new Map([[hostUserId, "host"]]),
+        });
+        await this.#roomEmptied(room, this.#clock.now());
+      }
+      if (isPrivate) return;
+      this.#lobbyChanged({ roomId, change: "created", participantCount: 0 });
     });
   }
 
@@ -333,6 +354,13 @@ export class RoomHub {
       const stored = await this.#store.findRoomFor(caller, roomId);
       if (!stored) return this.#refuse(conn, "not_found", "That room isn't live", message.type);
       const room = this.#rooms.get(roomId) ?? this.#addRoom(stored);
+      // A room known only from its creation announcement: the database is the fuller picture
+      // (e.g. roles given before anyone entered).
+      if (!room.occupied) {
+        room.name = stored.name;
+        room.hostUserId = stored.hostUserId;
+        room.roles = stored.roles;
+      }
       const existing = room.participants.get(user.id);
       // Capacity (ADRs 2, 21) counts everyone present, including those in reconnect grace.
       if (!existing && room.participants.size >= ROOM_CAPACITY) {
@@ -372,13 +400,19 @@ export class RoomHub {
         connection: conn,
         media: { ...MEDIA_OFF },
       };
-      // Whoever joins an empty (or hostless) room becomes its host (ADR 14).
-      const takesHost = room.participants.size === 0 || room.hostUserId === null;
+      // Whoever joins an empty (or hostless) room becomes its host (ADR 14), except that a new
+      // room's creator (maybe still in the pre-join lobby) gets the host grace to come in.
+      const awaitsCreator =
+        !room.occupied && room.hostUserId !== null && room.hostUserId !== user.id;
+      const takesHost =
+        !awaitsCreator && (room.participants.size === 0 || room.hostUserId === null);
+      room.occupied = true;
       room.participants.set(user.id, participant);
       conn.roomId = roomId;
       let back = false;
       let newHost = false;
       if (takesHost) newHost = await this.#takeHost(room, user.id, joinedAt);
+      else if (awaitsCreator) this.#startHostGrace(room, joinedAt);
       else back = await this.#hostBack(room, user.id);
       this.#sendSnapshot(conn, roomId);
       this.#broadcast(
@@ -437,6 +471,7 @@ export class RoomHub {
       name: stored.name,
       hostUserId: stored.hostUserId,
       isPrivate: stored.isPrivate,
+      occupied: stored.occupied,
       roles: stored.roles,
       participants: new Map(),
       chat: [],
@@ -501,6 +536,9 @@ export class RoomHub {
    */
   async #roomEmptied(room: LiveRoom, since: Date): Promise<void> {
     this.#cancelEmpty(room);
+    // Nobody is here to hand host to (e.g. a new room's first visitor left before its creator
+    // came): whoever joins next settles it.
+    this.#cancelHostGrace(room);
     await this.#store.markRoomEmpty(room.id, since);
     const timer = this.#setTimer(this.#emptyRoomTimeoutMs, async () => {
       if (room.empty?.timer !== timer || this.#rooms.get(room.id) !== room) return;
@@ -640,13 +678,19 @@ export class RoomHub {
     }
     if (room.hostGrace) return;
     const at = this.#clock.now();
+    this.#startHostGrace(room, at);
+    this.#announceHost(room, at);
+  }
+
+  /** Wait `HOST_GRACE_MS` from `at` for the absent host, then hand host on. Callers tell the room. */
+  #startHostGrace(room: LiveRoom, at: Date): void {
+    this.#cancelHostGrace(room);
     const timer = this.#setTimer(HOST_GRACE_MS, async (firedAt) => {
       if (room.hostGrace?.timer !== timer || this.#rooms.get(room.id) !== room) return;
       room.hostGrace = undefined;
       await this.#handOverHost(room, firedAt);
     });
     room.hostGrace = { until: new Date(at.getTime() + HOST_GRACE_MS), timer };
-    this.#announceHost(room, at);
   }
 
   /**

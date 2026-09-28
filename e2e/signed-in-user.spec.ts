@@ -1,7 +1,14 @@
 import { fakeDiscordId, signIn } from "./auth";
 import { expect, test } from "./fixtures";
 import { createUser } from "./profiles";
-import { createRoomAs, createUsers, minutesAgo, seedRoom, uniqueRoomName } from "./rooms";
+import {
+  createRoomAs,
+  createUsers,
+  enterRoom,
+  minutesAgo,
+  seedRoom,
+  uniqueRoomName,
+} from "./rooms";
 
 test('"my profile" opens the signed-in user\'s own id URL', async ({ page, context }) => {
   const userId = await signIn(context, {
@@ -32,7 +39,7 @@ test("the room marks the signed-in user, by id, as (you)", async ({ page, contex
   const name = uniqueRoomName("midnight speedrun club");
   const roomId = await createRoomAs(browser, "room.host", { name });
   await signIn(context, { username: "kodama_jpg" });
-  await page.goto(`/room/${roomId}`);
+  await enterRoom(page, roomId);
   await expect(page.getByRole("heading", { name })).toBeVisible();
   await expect(page.getByText("kodama_jpg (you)")).toHaveCount(1);
   // The host is someone else.
@@ -60,7 +67,7 @@ test("the room shows who is connected, with an empty chat and a feed of just the
     ],
   });
   await signIn(context, { username: "present.me" });
-  await page.goto(`/room/${roomId}`);
+  await enterRoom(page, roomId);
   await expect(page.getByRole("heading", { name })).toBeVisible();
   // Live since the room was created (a slow run may tick a minute over).
   await expect(page.getByText(/^LIVE · 2[01]m$/)).toBeVisible();

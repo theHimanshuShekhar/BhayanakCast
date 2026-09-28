@@ -276,8 +276,11 @@ export interface RoomLiveResult {
    * (`share_limit`) turns `share` back off.
    */
   media: MediaState;
-  /** Turn this page's mic, camera or share on or off (announced to the room). */
-  setMedia: (media: MediaState) => void;
+  /**
+   * Turn this page's mic, camera or share on or off (announced to the room): the new state, or
+   * a function of the latest one (for changes decided after an await).
+   */
+  setMedia: (media: MediaState | ((current: MediaState) => MediaState)) => void;
   /**
    * The server's latest refusal of a media change (e.g. `share_limit`), or word that a host,
    * mod or admin stopped this page's share; a new object each time.
@@ -347,20 +350,25 @@ export function useRoomReactions(roomId: string): FloatingReaction[] {
 /**
  * Be in `roomId` over the realtime socket while mounted, and follow who is there. `meId` (the
  * signed-in user) lets the page hear that a host, mod or admin stopped its share.
+ * `initialMedia` is the mic and camera chosen in the lobby, announced with the join.
  */
-export function useRoomLive(roomId: string, meId: string | null = null): RoomLiveResult {
+export function useRoomLive(
+  roomId: string,
+  meId: string | null = null,
+  initialMedia: MediaState = MEDIA_OFF,
+): RoomLiveResult {
   const [result, setResult] = useState<RoomLiveState>({
     room: null,
     error: null,
     chatError: null,
-    // The lobby starts mic and camera off; nobody arrives sharing.
-    media: MEDIA_OFF,
+    // What the lobby chose (mic and camera start off there); nobody arrives sharing.
+    media: { ...initialMedia, share: false },
     mediaError: null,
     moderationError: null,
   });
   // The media this page wants, re-announced after every (re)join: a reconnect keeps its share
-  // (and stream interval) going, while a reloaded page arrives with everything off.
-  const media = useRef(MEDIA_OFF);
+  // (and stream interval) going, while a reloaded page goes through the lobby again.
+  const media = useRef<MediaState>({ ...initialMedia, share: false });
   const [reconnecting, setReconnecting] = useState(false);
   useEffect(() => {
     const client = getRealtimeClient();
@@ -419,11 +427,38 @@ export function useRoomLive(roomId: string, meId: string | null = null): RoomLiv
       client.leaveRoom(roomId);
     };
   }, [roomId, meId]);
-  const setMedia = useCallback((next: MediaState) => {
+  const setMedia = useCallback((change: MediaState | ((current: MediaState) => MediaState)) => {
+    const next = typeof change === "function" ? change(media.current) : change;
+    if (next === media.current) return;
     media.current = next;
     setResult((r) => ({ ...r, media: next }));
     // While reconnecting it goes out with the re-join instead.
     getRealtimeClient().send({ type: "media.state", ...next });
   }, []);
   return { ...result, reconnecting, setMedia };
+}
+
+const enteredKey = (roomId: string) => `bc.entered.${roomId}`;
+
+/**
+ * This tab went through the lobby into `roomId` and hasn't left it since, so a reload goes
+ * straight back in (a reload within the reconnect grace isn't leaving, ADR 12). Per tab
+ * (sessionStorage); false wherever storage is unavailable.
+ */
+export function wasInRoom(roomId: string): boolean {
+  try {
+    return window.sessionStorage.getItem(enteredKey(roomId)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** Remember (on "Enter room") or forget (leave, back, kicked, taken over, ended) `roomId`. */
+export function markInRoom(roomId: string, inRoom: boolean): void {
+  try {
+    if (inRoom) window.sessionStorage.setItem(enteredKey(roomId), "1");
+    else window.sessionStorage.removeItem(enteredKey(roomId));
+  } catch {
+    // Blocked storage: a reload just shows the lobby again.
+  }
 }

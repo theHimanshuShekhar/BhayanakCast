@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { signIn } from "./auth";
 import { expect, newPage, test } from "./fixtures";
-import { createRoomOnPage, uniqueRoomName } from "./rooms";
+import { createRoomOnPage, enterRoom, uniqueRoomName } from "./rooms";
 
 /** The room's people tab, opened. */
 async function peopleTab(page: Page) {
@@ -24,7 +24,7 @@ test("two signed-in users in one room see each other arrive and leave", async ({
   try {
     await signIn(guestContext, { username: "rt.guest" });
     const guest = await newPage(guestContext);
-    await guest.goto(`/room/${roomId}`);
+    await enterRoom(guest, roomId);
     const guestPeople = await peopleTab(guest);
     await expect(guestPeople).toContainText("rt.host");
     await expect(guestPeople).toContainText("rt.guest (you)");
@@ -40,7 +40,7 @@ test("two signed-in users in one room see each other arrive and leave", async ({
 
     // Coming back works the same way; closing the tab counts as leaving once the 30s
     // reconnect grace runs out.
-    await guest.goto(`/room/${roomId}`);
+    await enterRoom(guest, roomId);
     await expect(hostPeople).toContainText("rt.guest");
     test.setTimeout(120_000);
     await guest.close();
