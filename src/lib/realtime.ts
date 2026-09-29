@@ -414,6 +414,12 @@ export const roomEvent = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("kicked"), userId: z.string(), by: feedPerson }),
   /** The room has a new name (`room.rename`). */
   z.object({ kind: z.literal("renamed"), name: z.string(), by: feedPerson }),
+  /**
+   * The room is over: `admin`, an admin ended it (ADR 6). Nobody is in it any more (their sockets
+   * stay open for the lobby) and it's a past stream: a join is refused `not_found`. Someone who
+   * was in their reconnect grace then gets this once instead, as the answer to their rejoin.
+   */
+  z.object({ kind: z.literal("ended"), reason: z.enum(["admin"]) }),
 ]);
 export type RoomEvent = z.infer<typeof roomEvent>;
 
@@ -436,7 +442,8 @@ export const lobbySnapshotMessage = z.object({
 });
 
 /**
- * `ended`: the room sat empty for 5 minutes and is a past stream now (ADR 14).
+ * `ended`: the room sat empty for 5 minutes (ADR 14) or an admin ended it, and is a past stream
+ * now.
  * `host`: its host changed (handover, or an empty room's joiner), so room cards' host is stale.
  */
 export const LOBBY_ROOM_CHANGES = [

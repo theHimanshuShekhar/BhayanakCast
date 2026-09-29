@@ -413,6 +413,7 @@ function RoomPage({
 
   // Out of the room for good: stop broadcasting at once.
   const out =
+    live.ended ||
     live.error?.code === "not_found" ||
     live.error?.code === "taken_over" ||
     live.error?.code === "kicked";
@@ -422,6 +423,10 @@ function RoomPage({
     // Coming back (a reload) goes through the lobby, not straight back in.
     markInRoom(detail.id, false);
   }, [out, detail.id]);
+  // An admin ended the room: home says so.
+  useEffect(() => {
+    if (live.ended) navigate({ to: "/", search: { ended: "admin" } });
+  }, [live.ended, navigate]);
 
   // Peer-to-peer media (ADR 1): every connection closes with the room (leave unmounts this).
   // Whose cameras are on screen here: the others are paused towards this page (ADR 2).

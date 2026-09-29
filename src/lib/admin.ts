@@ -4,7 +4,7 @@
  */
 import { z } from "zod";
 import { userIdInput } from "./profiles.ts";
-import type { RoomPerson } from "./rooms";
+import { type RoomPerson, roomIdInput } from "./rooms.ts";
 
 /** The dashboard's rolling window, in UTC days ending today (ADR 11 keeps rooms this long). */
 export const ADMIN_WINDOW_DAYS = 30;
@@ -163,3 +163,10 @@ export type UnbanUserInput = z.input<typeof unbanUserInput>;
 /** Promote a user to admin (`role: "admin"`) or demote an admin (`role: "user"`). */
 export const setUserRoleInput = userIdInput.extend({ role: z.enum(["admin", "user"]) });
 export type SetUserRoleInput = z.input<typeof setUserRoleInput>;
+
+// ---------------------------------------------------------------------------------------------
+// Ending rooms (spec #7)
+
+/** End a live room now. */
+export const endRoomInput = roomIdInput;
+export type EndRoomInput = z.input<typeof endRoomInput>;
