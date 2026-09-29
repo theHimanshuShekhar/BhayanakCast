@@ -251,6 +251,13 @@ export class RealtimeClient {
       this.#stopFullRetry();
       this.#roomId = null;
     } else if (
+      message.type === "room.event" &&
+      message.event.kind === "ended" &&
+      message.roomId === this.#roomId
+    ) {
+      // An admin ended the room: there's nothing to rejoin.
+      this.#roomId = null;
+    } else if (
       message.type === "lobby.changed" &&
       message.room?.roomId === this.#roomId &&
       (message.room.change === "ended" || message.room.participantCount < ROOM_CAPACITY)

@@ -1,5 +1,5 @@
-// Admin confirmation dialogs (spec #7): ban, unban, promote and demote, on the shared Base UI
-// Dialog sheet.
+// Admin confirmation dialogs (spec #7): ban, unban, promote, demote and end room, on the shared
+// Base UI Dialog sheet.
 import { useState } from "react";
 import { type AdminRole, BAN_REASON_MAX, type BanDuration, type BanUserInput } from "~/lib/admin";
 import { Sheet } from "./overlays";
@@ -224,6 +224,67 @@ export const SetRoleDialog = ({
           : "They lose the admin dashboard, bans, and moderation powers in other people's rooms."}
       </p>
       {failed && <Failed>{`couldn't ${verb} them. try again.`}</Failed>}
+    </Sheet>
+  );
+};
+
+/** A room a dialog acts on. */
+export interface RoomDialogTarget {
+  id: string;
+  name: string;
+}
+
+/** End `target` now: everyone in it is sent home and it becomes a past stream. */
+export const EndRoomDialog = ({
+  target,
+  onOpenChange,
+  onEnd,
+}: {
+  /** Null while closed. */
+  target: RoomDialogTarget | null;
+  onOpenChange: (open: boolean) => void;
+  onEnd: (roomId: string) => Promise<unknown>;
+}) => {
+  const [pending, setPending] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const close = (open: boolean) => {
+    if (open) return;
+    setFailed(false);
+    onOpenChange(false);
+  };
+  const submit = async () => {
+    if (!target || pending) return;
+    setPending(true);
+    setFailed(false);
+    try {
+      await onEnd(target.id);
+      close(false);
+    } catch {
+      setFailed(true);
+    } finally {
+      setPending(false);
+    }
+  };
+  return (
+    <Sheet
+      open={target !== null}
+      onOpenChange={close}
+      title={`end ${target?.name ?? ""}`}
+      width="w-[min(400px,94vw)]"
+      footer={
+        <>
+          <Btn onClick={() => close(false)}>cancel</Btn>
+          <Btn variant="danger" onClick={submit} disabled={pending}>
+            end room
+          </Btn>
+        </>
+      }
+    >
+      <p className="m-0 text-[12.5px] text-muted leading-relaxed">
+        Everyone in it is sent home and told an admin ended it, and it becomes a past stream. This
+        can't be undone.
+      </p>
+      {failed && <Failed>couldn't end the room. try again.</Failed>}
     </Sheet>
   );
 };

@@ -198,6 +198,9 @@ export function applyRoomMessage(
           at,
         }),
       };
+    case "ended":
+      // The page leaves (`RoomLiveResult.ended`); the last state stays until it does.
+      return state;
   }
 }
 
@@ -265,6 +268,8 @@ export interface RoomLiveResult {
    * device, or `kicked` once a host, mod or admin removed them.
    */
   error: ServerMessageOf<"error"> | null;
+  /** An admin ended the room (ADR 6): nobody is in it any more. */
+  ended: boolean;
   /**
    * The socket dropped and the client is reconnecting (with backoff). `room` is the last
    * known state until the server's fresh snapshot replaces it.
@@ -294,7 +299,7 @@ export interface RoomLiveResult {
 
 type RoomLiveState = Pick<
   RoomLiveResult,
-  "room" | "error" | "chatError" | "media" | "mediaError" | "moderationError"
+  "room" | "error" | "ended" | "chatError" | "media" | "mediaError" | "moderationError"
 >;
 
 /**
@@ -362,6 +367,7 @@ export function useRoomLive(
   const [result, setResult] = useState<RoomLiveState>({
     room: null,
     error: null,
+    ended: false,
     chatError: null,
     // What the lobby chose (mic and camera start off there); nobody arrives sharing.
     media: { ...initialMedia, share: false },
@@ -402,6 +408,14 @@ export function useRoomLive(
       }
       if (message.type === "room.snapshot" && message.roomId === roomId) {
         client.send({ type: "media.state", ...media.current });
+      }
+      if (
+        message.type === "room.event" &&
+        message.roomId === roomId &&
+        message.event.kind === "ended"
+      ) {
+        setResult((r) => ({ ...r, ended: true }));
+        return;
       }
       if (
         message.type === "room.event" &&

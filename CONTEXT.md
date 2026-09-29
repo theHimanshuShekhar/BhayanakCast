@@ -3,7 +3,7 @@
 Small-group live screen-sharing hangouts. Anyone signs in with Discord, starts or joins a **room**, and up to 3 people share their screens to up to 10 people over peer-to-peer WebRTC. Decisions live in [docs/adr](docs/adr/README.md). The UI source of truth is the claude.ai/design project `BhayanakCast.html`.
 
 ## Glossary
-- **Room**: a live hangout, capped at 10 people. It is *live* while occupied, *idle* while empty (up to 5 min), and then *ended*.
+- **Room**: a live hangout, capped at 10 people. It is *live* while occupied, *idle* while empty (up to 5 min), and then *ended*. An admin can end any live room at once, which sends everyone in it home.
 - **Past stream**: an ended room. Its recap is kept for 30 days.
 - **Host**: the room's owner role, which can transfer (ADR 14). **Mod**: a member promoted by the host. **Viewer/member**: everyone else in the room.
 - **Streamer**: a participant currently sharing their screen. At most 3 per room.

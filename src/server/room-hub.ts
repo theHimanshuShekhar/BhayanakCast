@@ -6,7 +6,8 @@
  *   await hub.disconnect(connection);                   // it closed
  *
  * An admin ban reaches it as `hub.disconnectUser(userId, notice)`, an admin role change as
- * `hub.setUserRole(userId, role)` (./live-hub.ts).
+ * `hub.setUserRole(userId, role)`, an admin ending a room as `hub.endRoomByAdmin(roomId)`
+ * (./live-hub.ts).
  *
  * The WebSocket layer (./realtime.ts) is a thin adapter over these; tests drive the same
  * calls through real sockets (./realtime-harness.ts). The hub never touches `Date`, timers or
@@ -247,6 +248,11 @@ export class RoomHub {
   readonly #reactionSends = new Map<string, number[]>();
   /** Per user id, when (epoch ms) their recent relayed signalling steps were sent. */
   readonly #signalSends = new Map<string, number[]>();
+  /**
+   * Per room an admin ended, who was in their reconnect grace then and so missed `ended`: their
+   * rejoin is answered with it (once). Memory only; admin ends are rare.
+   */
+  readonly #endedWhileAway = new Map<string, Set<string>>();
   #queue: Promise<void> = Promise.resolve();
 
   constructor(deps: RoomHubDeps) {
@@ -393,6 +399,43 @@ export class RoomHub {
     });
   }
 
+  /**
+   * An admin ended `roomId` (ADR 6): everyone in it is told `ended` and is out of it (their
+   * sockets stay open for the lobby), their intervals close now (or when their socket closed,
+   * for anyone in their reconnect grace), and the room ends now as an empty room would, knocks
+   * refused and stats rolled up. Anyone in their reconnect grace hears `ended` when they rejoin.
+   * A live room this hub doesn't hold (not loaded) ends in the database only, on the same queue
+   * as joins, so none can load it meanwhile. True if this call ended the room; false if it
+   * wasn't live (already ended, say by its empty-room timer, or unknown).
+   */
+  async endRoomByAdmin(roomId: string): Promise<boolean> {
+    let ended = false;
+    await this.#enqueue(async () => {
+      const at = this.#clock.now();
+      const room = this.#rooms.get(roomId);
+      if (!room) {
+        ended = await this.#endStoredRoom(roomId, at);
+        return;
+      }
+      this.#broadcast(room, { kind: "ended", reason: "admin" }, at);
+      const away = new Set<string>();
+      for (const participant of room.participants.values()) {
+        const leftAt = participant.grace?.since ?? at;
+        if (participant.grace) away.add(participant.userId);
+        this.#cancelGrace(participant);
+        participant.connection.roomId = null;
+        await this.#store.closePresence(room.id, participant.userId, leftAt);
+        if (participant.media.share) {
+          await this.#store.closeStream(room.id, participant.userId, leftAt);
+        }
+      }
+      if (away.size) this.#endedWhileAway.set(room.id, away);
+      room.participants.clear();
+      ended = await this.#endRoom(room, at);
+    });
+    return ended;
+  }
+
   /** Resolves once every queued operation (messages, disconnects, timers) has finished. */
   async idle(): Promise<void> {
     for (;;) {
@@ -438,6 +481,18 @@ export class RoomHub {
         return this.#sendSnapshot(conn, roomId);
       }
       await this.#leaveRoom(conn);
+
+      // Back from a reconnect grace during which an admin ended the room: tell them now.
+      const away = this.#endedWhileAway.get(roomId);
+      if (away?.delete(user.id)) {
+        if (away.size === 0) this.#endedWhileAway.delete(roomId);
+        return this.#send(conn, {
+          type: "room.event",
+          roomId,
+          at: this.#clock.now().toISOString(),
+          event: { kind: "ended", reason: "admin" },
+        });
+      }
 
       // Kicked is for good (ADR 15), admins included.
       if (await this.#store.isKicked(roomId, user.id)) {
@@ -674,11 +729,12 @@ export class RoomHub {
   }
 
   /**
-   * Nobody joined the empty `room` in time: it ends at `endedAt`, when it became empty, and is
-   * a past stream from now on. Its intervals close, stats roll up (ADR 11), and its chat and
-   * feed go with it (memory only, ADR 4 addendum).
+   * `room` ends at `endedAt` and is a past stream from now on: when it became empty if nobody
+   * joined in time, or now if an admin ended it (`endRoomByAdmin`). Its intervals close, stats
+   * roll up (ADR 11), and its chat and feed go with it (memory only, ADR 4 addendum). True if
+   * this ended it (it was still live in the database).
    */
-  async #endRoom(room: LiveRoom, endedAt: Date): Promise<void> {
+  async #endRoom(room: LiveRoom, endedAt: Date): Promise<boolean> {
     this.#cancelEmpty(room);
     this.#cancelHostGrace(room);
     this.#rooms.delete(room.id);
@@ -691,13 +747,22 @@ export class RoomHub {
       this.#refuse(knock.connection, "not_found", INVALID_INVITE, "knock.request");
     }
     room.knocks.clear();
-    await this.#store.closeHostInterval(room.id, endedAt);
-    if (await this.#store.endRoom(room.id, endedAt)) {
-      await this.#store.rollupEndedRoom(room.id, this.#clock.now());
-    }
+    const ended = await this.#endStoredRoom(room.id, endedAt);
     if (!room.isPrivate) {
       this.#lobbyChanged({ roomId: room.id, change: "ended", participantCount: 0 });
     }
+    return ended;
+  }
+
+  /**
+   * End `roomId` at `endedAt` in the database: its host interval and any open presence and
+   * stream intervals close, and its stats roll up. True if it was live until now.
+   */
+  async #endStoredRoom(roomId: string, endedAt: Date): Promise<boolean> {
+    await this.#store.closeHostInterval(roomId, endedAt);
+    if (!(await this.#store.endRoom(roomId, endedAt))) return false;
+    await this.#store.rollupEndedRoom(roomId, this.#clock.now());
+    return true;
   }
 
   // -------------------------------------------------------------------------------------------

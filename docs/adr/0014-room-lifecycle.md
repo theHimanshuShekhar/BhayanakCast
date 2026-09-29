@@ -12,3 +12,6 @@ Date: 2026-09-27 · Status: accepted
 - The server owns the timer. A server restart during the idle window ends the room at its last-empty time.
 - If the host leaves while others remain, whether by explicit leave or disconnect, there is a **30-second host grace period**. The host badge shows "reconnecting…" and mods keep their powers. If the host returns within 30s, they keep host. Otherwise host passes to the **longest-present member**, with mods preferred. The original host does not reclaim host if they return later.
 - **Never-occupied rooms (2026-09-28):** a new room starts with its creator as host, and the empty-room timer runs from creation. If someone else enters before the creator (who may still be in the pre-join lobby), the creator keeps host under the normal 30s host grace, and host hands over only if they don't arrive. A room nobody ever enters ends at its creation time.
+
+## Addendum: rooms an admin ends (2026-09-29)
+- An admin can end any live room at once (ADR 6 addendum). Such a room doesn't wait out the empty-room timer: its end time is **when the admin ended it** (`endedAt = now`), not when it last became empty. Everyone in it is sent home, their intervals close at that time (or when their socket closed, for anyone in their reconnect grace), and it becomes a past stream with its stats rolled up as for any ended room.
