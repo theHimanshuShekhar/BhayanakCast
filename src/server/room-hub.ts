@@ -5,7 +5,8 @@
  *   await hub.handle(connection, frame);                // it sent a frame (raw JSON)
  *   await hub.disconnect(connection);                   // it closed
  *
- * An admin ban reaches it as `hub.disconnectUser(userId, notice)` (./live-hub.ts).
+ * An admin ban reaches it as `hub.disconnectUser(userId, notice)`, an admin role change as
+ * `hub.setUserRole(userId, role)` (./live-hub.ts).
  *
  * The WebSocket layer (./realtime.ts) is a thin adapter over these; tests drive the same
  * calls through real sockets (./realtime-harness.ts). The hub never touches `Date`, timers or
@@ -19,6 +20,7 @@
  * `#handlers` below (the type checker insists). Refusals go through `#refuse(conn, code, …)`.
  */
 
+import type { AdminRole } from "../lib/admin.ts";
 import { MAX_STREAMERS, ROOM_CAPACITY } from "../lib/format.ts";
 import {
   BANNED_CLOSE_CODE,
@@ -106,7 +108,8 @@ export interface RoomHubDeps {
 
 class HubConnection implements Connection {
   readonly id: number;
-  readonly caller: Caller;
+  /** Replaced when an admin promotes or demotes the user (`setUserRole`). */
+  caller: Caller;
   readonly transport: Transport;
   /** Sent a valid `hello`. */
   greeted = false;
@@ -362,6 +365,30 @@ export class RoomHub {
           this.#log("closing a banned user's socket failed", error);
         }
         await this.#drop(conn);
+      }
+    });
+  }
+
+  /**
+   * An admin promoted `userId` to admin or demoted them (ADR 6 addendum): their open sockets
+   * gain or lose admin powers from their next message, without reconnecting. A new admin in a
+   * room gets the knocks already pending there, as a new mod would.
+   */
+  setUserRole(userId: string, role: AdminRole): Promise<void> {
+    return this.#enqueue(() => {
+      const inRooms = [...this.#rooms.values()].flatMap((room) => {
+        const participant = room.participants.get(userId);
+        return participant
+          ? [{ room, participant, approved: this.#approves(room, participant) }]
+          : [];
+      });
+      for (const conn of this.#connections) {
+        if (conn.caller.user?.id === userId) conn.caller = { ...conn.caller, role };
+      }
+      for (const { room, participant, approved } of inRooms) {
+        if (!approved) this.#sendPendingKnocks(room, participant);
+        // An approver may have arrived (promoted) or gone (demoted): knockers wait accordingly.
+        this.#updateKnockers(room);
       }
     });
   }

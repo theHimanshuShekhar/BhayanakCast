@@ -176,6 +176,40 @@ describe("knock and admit", () => {
     expect(await c.waitFor("knock.pending")).toMatchObject({ knock: { userId: bo.id } });
   });
 
+  it("sends knocks already pending to someone promoted to site admin, who can admit (#45)", async () => {
+    const a = await h.connectAs(ana);
+    await a.join(roomId);
+    await h.db
+      .insert(roomMembers)
+      .values({ roomId, userId: cy.id, role: "member", approved: true });
+    const c = await h.connectAs(cy);
+    await c.join(roomId);
+    const b = await knock(bo);
+    await a.waitFor("knock.pending");
+
+    await h.hub.setUserRole(cy.id, "admin");
+    expect(await c.waitFor("knock.pending")).toMatchObject({ knock: { userId: bo.id } });
+    // The host, an approver already, isn't told again.
+    await h.settled();
+    expect(a.received.filter((m) => m.type === "knock.pending")).toHaveLength(1);
+
+    c.send({ type: "knock.decide", userId: bo.id, admit: true });
+    await b.waitFor("knock.status", (m) => m.status === "approved");
+  });
+
+  it("tells a knocker waiting for the host when a site admin arrives or goes by role change", async () => {
+    await approve(cy.id);
+    const c = await h.connectAs(cy);
+    await c.join(roomId);
+    const b = await knock(bo, "waiting_for_host");
+
+    await h.hub.setUserRole(cy.id, "admin");
+    expect(await b.waitFor("knock.status")).toMatchObject({ status: "waiting" });
+
+    await h.hub.setUserRole(cy.id, "user");
+    expect(await b.waitFor("knock.status")).toMatchObject({ status: "waiting_for_host" });
+  });
+
   it("keeps the knock pending if the approval can't be stored", async () => {
     const a = await h.connectAs(ana);
     await a.join(roomId);

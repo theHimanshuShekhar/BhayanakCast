@@ -4,6 +4,7 @@
  * when this returns null).
  */
 import type { IncomingHttpHeaders, IncomingMessage } from "node:http";
+import { toAdminRole } from "../lib/admin.ts";
 import { type AuthSession, auth } from "../lib/auth.ts";
 import { isBanActive } from "../lib/ban.ts";
 import type { Caller } from "./caller.ts";
@@ -56,6 +57,6 @@ export function callerFromSession(session: Pick<AuthSession, "user"> | null): Ca
   const { id, name, discordUsername, role } = session.user;
   return {
     user: { id, username: discordUsername ?? name },
-    role: role === "admin" ? "admin" : "user",
+    role: toAdminRole(role),
   };
 }

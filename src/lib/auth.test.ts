@@ -96,6 +96,23 @@ describe("auth database hooks", () => {
     expect(await roleOf(existing.id)).toBe("admin");
   });
 
+  it("changes roles only through set-role, not the admin plugin's update-user (#45)", async () => {
+    const adminHeaders = cookiesFrom(await testSignInRequest("1000", "root"));
+    const target = await createDiscordUser("2000");
+    const update = (data: Record<string, unknown>) =>
+      auth.api.adminUpdateUser({ body: { userId: target.id, data }, headers: adminHeaders });
+
+    await expect(update({ role: "admin" })).rejects.toThrow(/set-role/);
+    expect(await roleOf(target.id)).toBe("user");
+    // Other fields still update.
+    await update({ name: "renamed" });
+    const [row] = await db.select({ name: user.name }).from(user).where(eq(user.id, target.id));
+    expect(row?.name).toBe("renamed");
+
+    await auth.api.setRole({ body: { userId: target.id, role: "admin" }, headers: adminHeaders });
+    expect(await roleOf(target.id)).toBe("admin");
+  });
+
   it("counts sign-ups in the daily platform stats", async () => {
     await createDiscordUser("2000");
     await createDiscordUser("2001");
