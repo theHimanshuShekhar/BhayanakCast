@@ -21,6 +21,7 @@ import { adminDiscordIds } from "~/server/env";
 import { getLiveHub } from "~/server/live-hub";
 import { getCaller } from "~/server/request-caller";
 import { toHeaders } from "~/server/session";
+import { getTurnUsageService } from "~/server/turn-usage";
 import {
   banUserInput,
   endRoomInput,
@@ -47,6 +48,10 @@ export const listAdminRecentRoomsFn = createServerFn({ method: "GET" }).handler(
 
 export const getAdminLeaderboardsFn = createServerFn({ method: "GET" }).handler(async () =>
   getAdminLeaderboards(getDb(), await getCaller()),
+);
+
+export const getTurnUsageFn = createServerFn({ method: "GET" }).handler(async () =>
+  getTurnUsageService().usage(await getCaller()),
 );
 
 export const listAdminUsersFn = createServerFn({ method: "GET" })

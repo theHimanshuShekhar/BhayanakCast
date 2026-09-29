@@ -7,6 +7,7 @@ import { ControlBtn } from "~/components/room/control-btn";
 import { KnockToasts } from "~/components/room/knock-toasts";
 import { failureText, Lobby } from "~/components/room/lobby";
 import { PeerAudio } from "~/components/room/peer-audio";
+import { QualityDebug } from "~/components/room/quality-debug";
 import { RoomSide } from "~/components/room/side-panel";
 import { isModerator, type ModAction, Tile } from "~/components/room/tile";
 import { Btn, Chip } from "~/components/ui";
@@ -692,6 +693,12 @@ function RoomPage({
             />
           ))}
         </div>
+        {import.meta.env.DEV && (
+          <QualityDebug
+            read={mesh.quality}
+            names={Object.fromEntries(participants.map((p) => [p.userId, p.name]))}
+          />
+        )}
         {Object.entries(mesh.remote).map(
           ([userId, tracks]) =>
             tracks.mic && (

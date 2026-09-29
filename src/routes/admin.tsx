@@ -40,12 +40,15 @@ import {
   adminOverviewQuery,
   adminRecentRoomsQuery,
   adminUsersQuery,
+  turnUsageQuery,
 } from "~/lib/admin.queries";
 import { useCurrentSession } from "~/lib/current-user";
 import { fmtAgo, fmtMins } from "~/lib/format";
 import type { LiveRoomCard } from "~/lib/rooms";
 import { roomKeys } from "~/lib/rooms.queries";
+import { TURN_FREE_TIER_GB } from "~/lib/turn-usage";
 import { useDebounced } from "~/lib/use-debounced";
+import { useMountedNow } from "~/lib/use-now";
 
 export const Route = createFileRoute("/admin")({
   // Visitors and non-admins go home. A UX guard only: admin server functions check the role themselves.
@@ -157,6 +160,16 @@ const EmptyRow = ({ cols, children }: { cols: number; children: ReactNode }) => 
   </tr>
 );
 
+/**
+ * Text relative to now for `iso`. A dash until mounted: the server's "now" and the browser's
+ * differ, and a text mismatch on hydration makes React render the whole page again, which
+ * wipes anything typed into it.
+ */
+const Since = ({ iso, format }: { iso: string; format: (iso: string, now: number) => string }) => {
+  const now = useMountedNow();
+  return now === null ? "—" : format(iso, now);
+};
+
 const LiveRoomsTable = ({ rooms }: { rooms: LiveRoomCard[] }) => {
   const queryClient = useQueryClient();
   const [endTarget, setEndTarget] = useState<RoomDialogTarget | null>(null);
@@ -195,7 +208,10 @@ const LiveRoomsTable = ({ rooms }: { rooms: LiveRoomCard[] }) => {
               </td>
               <td className={`${td} text-right`}>{r.streamCount}</td>
               <td className={`${td} text-right`}>
-                {fmtMins((Date.now() - Date.parse(r.createdAt)) / 60_000)}
+                <Since
+                  iso={r.createdAt}
+                  format={(iso, now) => fmtMins((now - Date.parse(iso)) / 60_000)}
+                />
               </td>
               <td className={td}>
                 <div className="flex justify-end gap-1.5">
@@ -283,6 +299,10 @@ const RecentRoomsTable = ({ rooms: rows }: { rooms: AdminRoomRow[] }) => {
     .sort((a, b) => {
       const av = a[sort.key];
       const bv = b[sort.key];
+      // Empty values last. Two empty ones tie: answering 1 for both orders (a comparator that
+      // contradicts itself) sorts differently in Node and Firefox, so the server and the browser
+      // rendered the live rooms in different orders and hydration failed.
+      if (av == null && bv == null) return 0;
       if (av == null) return 1;
       if (bv == null) return -1;
       if (typeof av === "number" && typeof bv === "number")
@@ -362,7 +382,7 @@ const RecentRoomsTable = ({ rooms: rows }: { rooms: AdminRoomRow[] }) => {
                 <td className={`${td} text-right`}>{r.joined}</td>
                 <td className={`${td} text-right !text-subtle`}>{fmtMins(r.durationMinutes)}</td>
                 <td className={`${td} text-right !text-subtle`}>
-                  {r.endedAt ? fmtAgo(r.endedAt) : "—"}
+                  {r.endedAt ? <Since iso={r.endedAt} format={fmtAgo} /> : "—"}
                 </td>
               </tr>
             ))}
@@ -511,7 +531,7 @@ const UsersTable = () => {
                   <BanStatus ban={u.ban} />
                 </td>
                 <td className={`${td} text-right !text-subtle`}>
-                  {u.lastSeenAt ? fmtAgo(u.lastSeenAt) : "—"}
+                  {u.lastSeenAt ? <Since iso={u.lastSeenAt} format={fmtAgo} /> : "—"}
                 </td>
                 <td className={`${td} text-right`}>
                   {u.hours.toFixed(1)}
@@ -659,6 +679,58 @@ const ChartCard = ({
   </div>
 );
 
+/**
+ * Relayed TURN egress this month against the free tier (ADR 3). Loaded on its own, not by the
+ * route loader, so a slow Cloudflare never holds up the rest of the dashboard.
+ */
+const TurnUsagePanel = () => {
+  const { data: usage, isError } = useQuery(turnUsageQuery());
+  const note = (text: string) => (
+    <div className={`${card} px-[18px] py-4 text-xs text-subtle`}>{text}</div>
+  );
+  if (isError || usage?.status === "unavailable") return note("usage unavailable");
+  if (!usage) return note("loading…");
+  if (usage.status === "not-configured") return note("not configured");
+  const bar = Math.min(100, usage.percent);
+  return (
+    <div className="grid grid-cols-[repeat(auto-fit,minmax(min(420px,100%),1fr))] gap-3.5">
+      <div className="flex flex-col gap-2.5">
+        <StatCard
+          label="relayed this month"
+          value={usage.totalGb.toFixed(1)}
+          unit={`GB of ${TURN_FREE_TIER_GB.toLocaleString("en-US")} GB · ${usage.percent.toFixed(1)}%`}
+          tone={usage.warning ? "live" : "accent"}
+        />
+        <div
+          role="progressbar"
+          aria-label="TURN free tier used"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(bar)}
+          className="h-2 rounded-full bg-surface-2 border border-border overflow-hidden"
+        >
+          <span className={barFill} style={{ width: `${bar}%` }} />
+        </div>
+        {usage.warning && (
+          <div role="alert" className="text-xs text-live-ink">
+            Relayed bandwidth is at {usage.percent.toFixed(0)}% of the free tier; past{" "}
+            {TURN_FREE_TIER_GB.toLocaleString("en-US")} GB Cloudflare charges $0.05/GB.
+          </div>
+        )}
+      </div>
+      <ChartCard title="relayed GB per day" legend={[["oklch(0.72 0.18 220)", "relayed GB"]]}>
+        <BarChart
+          label={`Relayed GB per day, ${usage.month}`}
+          data={usage.daily.map((d) => ({ date: d.day.slice(5), gb: d.gb }))}
+          xKey="date"
+          height={160}
+          series={[{ key: "gb", color: "oklch(0.72 0.18 220)" }]}
+        />
+      </ChartCard>
+    </div>
+  );
+};
+
 const windowStat = (count: WindowCount) => ({
   value: count.current,
   delta: percentChange(count),
@@ -758,6 +830,14 @@ function AdminPage() {
             />
           </ChartCard>
         </div>
+
+        <SectionHead
+          title="TURN usage"
+          sub={`relayed bandwidth · ${TURN_FREE_TIER_GB.toLocaleString("en-US")} GB free per month`}
+          size="sm"
+          className="mt-6"
+        />
+        <TurnUsagePanel />
 
         <SectionHead
           title="live rooms"

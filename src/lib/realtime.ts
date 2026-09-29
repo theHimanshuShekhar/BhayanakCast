@@ -98,6 +98,8 @@ const iceCandidate = z.object({
   usernameFragment: z.string().max(256).nullable().optional(),
 });
 const pcSession = z.string().min(1).max(64);
+/** The video codecs (MIME types) the sender can decode: the other side sends the best of them. */
+const videoCodecs = z.array(z.string().min(1).max(48)).max(16);
 
 /**
  * One WebRTC signalling step between two peers' connections (src/lib/mesh.ts), which the server
@@ -110,7 +112,7 @@ export const signalPayload = z.discriminatedUnion("kind", [
    * A new connection's first word when it has no offer yet: a peer that had one to the sender's
    * old page starts over, and one whose offer was lost sends it again.
    */
-  z.object({ kind: z.literal("hello"), session: pcSession }),
+  z.object({ kind: z.literal("hello"), session: pcSession, codecs: videoCodecs.optional() }),
   z.object({
     kind: z.literal("description"),
     session: pcSession,
@@ -118,6 +120,8 @@ export const signalPayload = z.discriminatedUnion("kind", [
     description: sessionDescription,
     /** Which of the sender's tracks each of its own transceivers (by `mid`) carries. */
     slots: z.record(z.string().max(32), z.enum(MEDIA_SLOTS)).optional(),
+    /** The sender's decodable video codecs (ADR 2: the pair uses the best both have). */
+    codecs: videoCodecs.optional(),
   }),
   z.object({
     kind: z.literal("candidate"),
