@@ -10,3 +10,7 @@ Date: 2026-09-27 · Status: accepted
 ## Consequences
 - No media ever reaches the server except these small stills.
 - If the streamer's tab is backgrounded and throttled, the thumbnail goes stale. The card's "updated Xm ago" shows this honestly.
+
+## Addendum: upload route and visibility (#39)
+- Uploads go through an API route (`POST /api/thumbnails/:roomId`, raw image body) rather than a server function, because the body is binary. The route checks the request's origin, requires sign-in, rate-limits per user, and caps the body at 100 KB (WebP or JPEG, checked against the file's own header).
+- `GET /api/thumbnails/:roomId/:userId` applies the room-visibility rule (ADR 16): a private room's thumbnails answer 404 to anyone not allowed in.

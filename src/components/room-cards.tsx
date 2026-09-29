@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { fmtAgo, fmtMins } from "~/lib/format";
 import type { LiveRoomCard, PastRoomCard, RoomPerson } from "~/lib/rooms";
+import { thumbnailUrl } from "~/lib/thumbnails";
 import type { Stream } from "~/lib/types";
 import { Icon } from "./icons";
 import { Avatar, AvatarStack, Chip, ScreenPlaceholder } from "./ui";
@@ -20,6 +21,22 @@ const MOSAIC_GRID: Record<number, string> = {
 
 const pill =
   "inline-flex items-center gap-1 px-2 py-[3px] rounded-full bg-black/55 backdrop-blur-[6px] text-[10px] text-white tracking-[0.04em]";
+
+// The streamer's real thumbnail, or the placeholder while there is none or it won't load.
+const StreamScreen = ({ stream, frame }: { stream: Stream; frame: number }) => {
+  const [failed, setFailed] = useState<string | null>(null);
+  if (!stream.thumbnail || failed === stream.thumbnail) {
+    return <ScreenPlaceholder kind={stream.screen} label={false} frame={frame} />;
+  }
+  return (
+    <img
+      src={stream.thumbnail}
+      alt={`${stream.user}'s screen`}
+      onError={() => setFailed(stream.thumbnail ?? null)}
+      className="absolute inset-0 w-full h-full object-cover"
+    />
+  );
+};
 
 export const StreamMosaic = ({
   streams,
@@ -47,8 +64,8 @@ export const StreamMosaic = ({
       >
         {list.map((s) => (
           <div key={s.user} className="relative min-w-0 min-h-0 overflow-hidden">
-            <ScreenPlaceholder kind={s.screen} label={false} frame={frame} />
-            {n > 1 && (
+            <StreamScreen stream={s} frame={frame} />
+            {(n > 1 || s.thumbnail) && (
               <span className="absolute bottom-1.5 left-1.5 z-[2] inline-flex items-center gap-1 max-w-[calc(100%-12px)] pl-0.5 pr-1.5 py-0.5 rounded-full bg-black/55 backdrop-blur-[6px] text-[9.5px] font-semibold text-white">
                 <Avatar name={s.user} size="sm" className="!w-3.5 !h-3.5 !text-[6px]" />
                 <span className="truncate">{s.user}</span>
@@ -103,9 +120,19 @@ export const useSnapshots = () => {
   return { frame, freshness: mins < 1 ? "updated just now" : `updated ${mins}m ago` };
 };
 
-/** Placeholder screens for shares until thumbnails land (ADR 10, spec #5). */
-export const placeholderStreams = (streamers: RoomPerson[]): Stream[] =>
-  streamers.map((s) => ({ user: s.username, screen: "browser" }));
+/**
+ * A room's shares for its mosaic: each streamer's thumbnail once they have one (`thumbnailAt`,
+ * in `roomId`), else a placeholder screen (ADR 10, spec #5).
+ */
+export const placeholderStreams = (
+  streamers: (RoomPerson & { thumbnailAt?: string | null })[],
+  roomId?: string,
+): Stream[] =>
+  streamers.map((s) => ({
+    user: s.username,
+    screen: "browser",
+    thumbnail: roomId && s.thumbnailAt ? thumbnailUrl(roomId, s.id, s.thumbnailAt) : undefined,
+  }));
 
 export const LiveCard = ({
   room,
@@ -131,7 +158,7 @@ export const LiveCard = ({
       className={`${cardBase} shadow-pop transition-[transform,border-color] duration-[160ms] ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-0.5 hover:border-[color-mix(in_oklch,var(--color-primary)_40%,var(--color-border))]`}
     >
       <StreamMosaic
-        streams={placeholderStreams(room.streamers)}
+        streams={placeholderStreams(room.streamers, room.id)}
         frame={snap?.frame}
         freshness={snap?.freshness}
       />

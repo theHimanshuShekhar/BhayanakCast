@@ -33,6 +33,11 @@ export interface RoomPerson {
   username: string;
 }
 
+/** Someone sharing their screen, with when their latest thumbnail was captured (ISO; null if none yet). */
+export interface Streamer extends RoomPerson {
+  thumbnailAt: string | null;
+}
+
 /** A live room as listed on home ("Live Now", search, "Filling Up") and opened by the room page. */
 export interface LiveRoomCard {
   id: string;
@@ -48,7 +53,7 @@ export interface LiveRoomCard {
   participantCount: number;
   capacity: number;
   /** People sharing their screen now (open stream intervals). */
-  streamers: RoomPerson[];
+  streamers: Streamer[];
   streamCount: number;
   /** ISO timestamp. */
   createdAt: string;
