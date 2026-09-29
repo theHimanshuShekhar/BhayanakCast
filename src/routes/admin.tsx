@@ -48,6 +48,7 @@ import type { LiveRoomCard } from "~/lib/rooms";
 import { roomKeys } from "~/lib/rooms.queries";
 import { TURN_FREE_TIER_GB } from "~/lib/turn-usage";
 import { useDebounced } from "~/lib/use-debounced";
+import { useMountedNow } from "~/lib/use-now";
 
 export const Route = createFileRoute("/admin")({
   // Visitors and non-admins go home. A UX guard only: admin server functions check the role themselves.
@@ -159,6 +160,16 @@ const EmptyRow = ({ cols, children }: { cols: number; children: ReactNode }) => 
   </tr>
 );
 
+/**
+ * Text relative to now for `iso`. A dash until mounted: the server's "now" and the browser's
+ * differ, and a text mismatch on hydration makes React render the whole page again, which
+ * wipes anything typed into it.
+ */
+const Since = ({ iso, format }: { iso: string; format: (iso: string, now: number) => string }) => {
+  const now = useMountedNow();
+  return now === null ? "—" : format(iso, now);
+};
+
 const LiveRoomsTable = ({ rooms }: { rooms: LiveRoomCard[] }) => {
   const queryClient = useQueryClient();
   const [endTarget, setEndTarget] = useState<RoomDialogTarget | null>(null);
@@ -197,7 +208,10 @@ const LiveRoomsTable = ({ rooms }: { rooms: LiveRoomCard[] }) => {
               </td>
               <td className={`${td} text-right`}>{r.streamCount}</td>
               <td className={`${td} text-right`}>
-                {fmtMins((Date.now() - Date.parse(r.createdAt)) / 60_000)}
+                <Since
+                  iso={r.createdAt}
+                  format={(iso, now) => fmtMins((now - Date.parse(iso)) / 60_000)}
+                />
               </td>
               <td className={td}>
                 <div className="flex justify-end gap-1.5">
@@ -285,6 +299,10 @@ const RecentRoomsTable = ({ rooms: rows }: { rooms: AdminRoomRow[] }) => {
     .sort((a, b) => {
       const av = a[sort.key];
       const bv = b[sort.key];
+      // Empty values last. Two empty ones tie: answering 1 for both orders (a comparator that
+      // contradicts itself) sorts differently in Node and Firefox, so the server and the browser
+      // rendered the live rooms in different orders and hydration failed.
+      if (av == null && bv == null) return 0;
       if (av == null) return 1;
       if (bv == null) return -1;
       if (typeof av === "number" && typeof bv === "number")
@@ -364,7 +382,7 @@ const RecentRoomsTable = ({ rooms: rows }: { rooms: AdminRoomRow[] }) => {
                 <td className={`${td} text-right`}>{r.joined}</td>
                 <td className={`${td} text-right !text-subtle`}>{fmtMins(r.durationMinutes)}</td>
                 <td className={`${td} text-right !text-subtle`}>
-                  {r.endedAt ? fmtAgo(r.endedAt) : "—"}
+                  {r.endedAt ? <Since iso={r.endedAt} format={fmtAgo} /> : "—"}
                 </td>
               </tr>
             ))}
@@ -513,7 +531,7 @@ const UsersTable = () => {
                   <BanStatus ban={u.ban} />
                 </td>
                 <td className={`${td} text-right !text-subtle`}>
-                  {u.lastSeenAt ? fmtAgo(u.lastSeenAt) : "—"}
+                  {u.lastSeenAt ? <Since iso={u.lastSeenAt} format={fmtAgo} /> : "—"}
                 </td>
                 <td className={`${td} text-right`}>
                   {u.hours.toFixed(1)}
