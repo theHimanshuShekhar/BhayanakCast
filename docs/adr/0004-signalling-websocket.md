@@ -28,3 +28,9 @@ The room's **feed** (joins, leaves, share starts and stops, role and host change
 ## Addendum: speaking is local, signalling is relayed opaquely (2026-09-29)
 - **Speaking** does not go over the socket, despite the presence list above. Each client measures it itself with WebAudio analysers on the audio it receives (and on its own mic), so rings and waves need no server round trip and nothing about speaking is sent or stored.
 - **Signalling** (`signal {to, payload}`) is relayed without being read, only between two current members of the same room, and rate-limited per sender (`SIGNAL_RATE_LIMIT`).
+
+## Addendum: client messages up to 64 KB (2026-09-29)
+Client messages were capped at 16 KB, but SDP offers outgrew it once screen sharing (#36) added the screen and share-audio tracks: one pair's connection carries up to eight m-sections (four slots each way), and Chromium's offer for all of them is about 24 KB, most of it the video codec list it offers per m-section. The cap (`MAX_CLIENT_MESSAGE_BYTES`, the `ws` `maxPayload`) is now **64 KB**.
+- The size is bounded: a connection is between two people, so an offer never has more than eight m-sections however full the room is. 64 KB leaves room for candidates gathered into a re-sent offer and for codecs that browser updates add.
+- Trimming the SDP instead (`setCodecPreferences`, header extensions) would decide which codecs each pair can use, which belongs to the per-pair codec preference (ADR 2), and Firefox can't trim header extensions.
+- The server's cost stays small: `ws` holds at most one message per socket while reading it, the payload is validated by zod and relayed to one peer, and signalling stays rate-limited per sender (`SIGNAL_RATE_LIMIT`). The worst case a sender can push through the relay rises from about 0.6 MB/s to 2.6 MB/s, only to people in their own room.

@@ -6,6 +6,7 @@ import type { Participant, RoomRole, Settings } from "~/lib/types";
 import { Icon } from "../icons";
 import { Avatar, Btn, Chip, ScreenPlaceholder, Wave } from "../ui";
 import { CameraVideo } from "./camera-video";
+import { ScreenVideo } from "./screen-video";
 
 /** A reaction floating up the tile, drifting `dx` pixels sideways. */
 export type Reaction = { id: string; emoji: string; dx: number };
@@ -74,6 +75,9 @@ export const Tile = ({
   volume = 1,
   cameraTrack,
   onCameraShown,
+  screenTrack,
+  shareVolume = 1,
+  onShareVolume,
   reactions,
   onPin,
   onToggleMute,
@@ -94,6 +98,12 @@ export const Tile = ({
   cameraTrack?: MediaStreamTrack | null;
   /** Stable: whether a peer's camera is on screen here (unshown ones are paused towards us). */
   onCameraShown?: (userId: string, shown: boolean) => void;
+  /** Their screen share (yours: your capture), shown while `p.streaming`. */
+  screenTrack?: MediaStreamTrack | null;
+  /** How loud their share's audio plays here, 0–1 (the viewer's own setting). */
+  shareVolume?: number;
+  /** Set when their share has audio: the share volume control. */
+  onShareVolume?: (id: string, volume: number) => void;
   reactions: Reaction[];
   onPin: (id: string) => void;
   onToggleMute: (id: string) => void;
@@ -156,7 +166,11 @@ export const Tile = ({
       className={`${tileBase} ${span} ${ring}`}
     >
       {p.streaming ? (
-        <ScreenPlaceholder kind={p.screen ?? "browser"} />
+        screenTrack ? (
+          <ScreenVideo userId={p.userId} name={p.name} track={screenTrack} />
+        ) : (
+          <ScreenPlaceholder kind={p.screen ?? "browser"} />
+        )
       ) : camera ? (
         <div className="flex-1 relative min-h-0 overflow-hidden bg-black">{camera}</div>
       ) : (
@@ -225,6 +239,19 @@ export const Tile = ({
             title="Volume for me"
             onChange={(e) => onVolume(p.id, Number(e.target.value))}
             className="w-16 h-[26px] cursor-pointer accent-[var(--color-primary)]"
+          />
+        )}
+        {!p.you && p.streaming && onShareVolume && (
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={shareVolume}
+            aria-label={`Share volume for ${p.name}`}
+            title="Share volume for me"
+            onChange={(e) => onShareVolume(p.id, Number(e.target.value))}
+            className="w-16 h-[26px] cursor-pointer accent-[var(--color-live)]"
           />
         )}
         <button

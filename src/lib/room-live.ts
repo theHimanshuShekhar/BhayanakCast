@@ -255,6 +255,32 @@ function withHost(
   };
 }
 
+/**
+ * How a share request (`requestShare`) went: the server `accepted` it; it `refused` it
+ * (`share_limit`), or the share was turned off first; or no answer came within
+ * `SHARE_ACK_TIMEOUT_MS` (`timeout`), and the share is off again.
+ */
+export type ShareAnswer = "accepted" | "refused" | "timeout";
+
+/**
+ * How long a share request waits for the server. The browser lets a page open its screen
+ * picker only for a few seconds after the user's click, so a later answer is no use.
+ */
+export const SHARE_ACK_TIMEOUT_MS = 3_000;
+
+/** An answer that `settle` gives once, or that is `timeout` after `timeoutMs`. */
+export function pendingShareAnswer(timeoutMs = SHARE_ACK_TIMEOUT_MS) {
+  let settle: (answer: ShareAnswer) => void = () => {};
+  const answer = new Promise<ShareAnswer>((resolve) => {
+    const timer = setTimeout(() => resolve("timeout"), timeoutMs);
+    settle = (value) => {
+      clearTimeout(timer);
+      resolve(value);
+    };
+  });
+  return { answer, settle };
+}
+
 export interface RoomLiveResult {
   /** Null until the server's snapshot arrives. */
   room: RoomLive | null;
@@ -283,6 +309,11 @@ export interface RoomLiveResult {
    * a function of the latest one (for changes decided after an await).
    */
   setMedia: (media: MediaState | ((current: MediaState) => MediaState)) => void;
+  /**
+   * Ask to start sharing (while not sharing): announced like `setMedia`. The screen is
+   * captured only once the server accepts it (ADR 2 addendum). See `ShareAnswer`.
+   */
+  requestShare: () => Promise<ShareAnswer>;
   /**
    * The server's latest refusal of a media change (e.g. `share_limit`), or word that a host,
    * mod or admin stopped this page's share; a new object each time.
@@ -371,6 +402,13 @@ export function useRoomLive(
   // The media this page wants, re-announced after every (re)join: a reconnect keeps its share
   // (and stream interval) going, while a reloaded page goes through the lobby again.
   const media = useRef<MediaState>({ ...initialMedia, share: false });
+  // Answers the pending `requestShare`, if any.
+  const shareAnswer = useRef<((answer: ShareAnswer) => void) | null>(null);
+  const answerShare = useCallback((answer: ShareAnswer) => {
+    const settle = shareAnswer.current;
+    shareAnswer.current = null;
+    settle?.(answer);
+  }, []);
   const [reconnecting, setReconnecting] = useState(false);
   useEffect(() => {
     const client = getRealtimeClient();
@@ -395,13 +433,29 @@ export function useRoomLive(
           setResult((r) => ({ ...r, moderationError: message }));
         }
         if (message.re === "media.state") {
-          if (message.code === "share_limit") media.current = { ...media.current, share: false };
+          if (message.code === "share_limit") {
+            media.current = { ...media.current, share: false };
+            answerShare("refused");
+          }
           setResult((r) => ({ ...r, media: media.current, mediaError: message }));
         }
         return;
       }
       if (message.type === "room.snapshot" && message.roomId === roomId) {
         client.send({ type: "media.state", ...media.current });
+        // Accepted before a reconnect, and the answer lost with the old socket.
+        if (message.participants.some((p) => p.userId === meId && p.media.share))
+          answerShare("accepted");
+      }
+      if (
+        message.type === "room.event" &&
+        message.roomId === roomId &&
+        message.event.kind === "stateChanged" &&
+        message.event.userId === meId &&
+        message.event.media.share &&
+        media.current.share
+      ) {
+        answerShare("accepted");
       }
       if (
         message.type === "room.event" &&
@@ -413,6 +467,7 @@ export function useRoomLive(
       ) {
         // A host, mod or admin stopped this page's share: it stays off (ADR 15).
         media.current = { ...media.current, share: false };
+        answerShare("refused");
         const stopped: ServerMessageOf<"error"> = {
           type: "error",
           code: "forbidden",
@@ -429,17 +484,39 @@ export function useRoomLive(
     return () => {
       unsubscribe();
       client.leaveRoom(roomId);
+      answerShare("refused");
     };
-  }, [roomId, meId]);
-  const setMedia = useCallback((change: MediaState | ((current: MediaState) => MediaState)) => {
-    const next = typeof change === "function" ? change(media.current) : change;
-    if (next === media.current) return;
-    media.current = next;
-    setResult((r) => ({ ...r, media: next }));
-    // While reconnecting it goes out with the re-join instead.
-    getRealtimeClient().send({ type: "media.state", ...next });
-  }, []);
-  return { ...result, reconnecting, setMedia };
+  }, [roomId, meId, answerShare]);
+  const setMedia = useCallback(
+    (change: MediaState | ((current: MediaState) => MediaState)) => {
+      const next = typeof change === "function" ? change(media.current) : change;
+      const current = media.current;
+      if (next.mic === current.mic && next.cam === current.cam && next.share === current.share) {
+        return;
+      }
+      media.current = next;
+      if (!next.share) answerShare("refused");
+      setResult((r) => ({ ...r, media: next }));
+      // While reconnecting it goes out with the re-join instead.
+      getRealtimeClient().send({ type: "media.state", ...next });
+    },
+    [answerShare],
+  );
+  const requestShare = useCallback(async () => {
+    // A request still pending is superseded.
+    answerShare("refused");
+    const { answer, settle } = pendingShareAnswer();
+    shareAnswer.current = settle;
+    setMedia((m) => ({ ...m, share: true }));
+    const result = await answer;
+    if (result === "timeout") {
+      if (shareAnswer.current === settle) shareAnswer.current = null;
+      // Too late to capture now: the share is off (the server ends it if it accepts later).
+      setMedia((m) => ({ ...m, share: false }));
+    }
+    return result;
+  }, [answerShare, setMedia]);
+  return { ...result, reconnecting, setMedia, requestShare };
 }
 
 const enteredKey = (roomId: string) => `bc.entered.${roomId}`;

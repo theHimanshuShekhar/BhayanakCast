@@ -16,7 +16,14 @@ import { fmtMins, MAX_STREAMERS } from "~/lib/format";
 import { inviteUrl } from "~/lib/invites";
 import { getInviteTokenFn } from "~/lib/invites.functions";
 import { decideKnock, usePendingKnocks } from "~/lib/knock-live";
-import { getLocalMedia, type LocalDeviceKind, useLocalMedia } from "~/lib/local-media";
+import {
+  getLocalMedia,
+  type LocalDeviceKind,
+  type ShareFailure,
+  shareHintFor,
+  useCanShare,
+  useLocalMedia,
+} from "~/lib/local-media";
 import {
   type FeedEntry,
   type KnockEntry,
@@ -36,7 +43,7 @@ import {
 } from "~/lib/room-live";
 import { useRoomMesh, useSpeakers } from "~/lib/room-media";
 import { roomDetailFor, withRoster } from "~/lib/room-view";
-import { type LiveRoomCard, ROOM_NAME_MAX } from "~/lib/rooms";
+import { type LiveRoomCard, ROOM_NAME_MAX, type RoomKind } from "~/lib/rooms";
 import { roomQuery } from "~/lib/rooms.queries";
 import { useSettings } from "~/lib/settings";
 import type { ChatMessage, Participant, RoomDetail, RoomRole } from "~/lib/types";
@@ -154,6 +161,7 @@ function RoomVisit({ room, admin }: { room: LiveRoomCard; admin: boolean }) {
   return (
     <RoomPage
       detail={roomDetailFor(room, user)}
+      kind={room.kind}
       meId={user?.id ?? null}
       admin={admin}
       isPrivate={room.isPrivate}
@@ -308,14 +316,28 @@ const NO_CHAT: ChatMessage[] = [];
 const NO_FEED: FeedEntry[] = [];
 const NO_KNOCKS: KnockEntry[] = [];
 
+/**
+ * Why a screen share didn't start (a cancelled picker, `denied`, needs no words). `late` also
+ * covers a server that didn't answer in time.
+ */
+const SHARE_FAILURE: Record<Exclude<ShareFailure, "denied">, string> = {
+  late: "couldn't start sharing — try again.",
+  missing: "there was nothing to share.",
+  busy: "couldn't share your screen. try again.",
+  unsupported: "this browser can't share its screen here.",
+};
+
 function RoomPage({
   detail,
+  kind,
   meId,
   admin,
   isPrivate,
   initialMedia,
 }: {
   detail: RoomDetail;
+  /** Tunes screen shares (ADR 2 addendum). */
+  kind: RoomKind;
   meId: string | null;
   /** A site admin: moderation in any room (ADR 15). */
   admin: boolean;
@@ -369,7 +391,7 @@ function RoomPage({
   const notice = moderationNotice ?? deviceNotice ?? mediaNotice ?? inviteNotice;
 
   // Mic and camera are real local tracks (src/lib/local-media.ts), announced once they're on;
-  // the mesh sends them. TODO(#36): share becomes a getDisplayMedia track.
+  // the mesh sends them.
   const toggleDevice = async (kind: LocalDeviceKind) => {
     const localMedia = getLocalMedia();
     if (media[kind]) {
@@ -384,15 +406,43 @@ function RoomPage({
   };
   const toggleMic = () => void toggleDevice("mic");
   const toggleCam = () => void toggleDevice("cam");
-  const toggleShare = () => setMedia({ ...media, share: !media.share });
+  // A share is announced first, and the screen captured once the server accepts it (at most
+  // 3 streamers); turning it off (here, or by a mod) stops the capture (the effect below).
+  // Until then it is pending: on for the room, with nothing captured yet.
+  const [sharePending, setSharePending] = useState(false);
+  const toggleShare = async () => {
+    if (media.share) {
+      setMedia((m) => ({ ...m, share: false }));
+      return;
+    }
+    setSharePending(true);
+    try {
+      const answer = await live.requestShare();
+      if (answer === "timeout") setDeviceError({ message: SHARE_FAILURE.late });
+      if (answer !== "accepted") return;
+      const localMedia = getLocalMedia();
+      if (await localMedia.startShare(shareHintFor(kind))) return;
+      const failure = localMedia.getSnapshot().share.failure;
+      if (failure && failure !== "denied") setDeviceError({ message: SHARE_FAILURE[failure] });
+    } finally {
+      setSharePending(false);
+    }
+  };
+  const canShare = useCanShare();
+  useEffect(() => {
+    if (!media.share) getLocalMedia().stopShare();
+  }, [media.share]);
 
-  // A device that stopped by itself (unplugged, or access revoked) is off for the room too.
+  // A device that stopped by itself (unplugged, or access revoked) is off for the room too;
+  // so is a share whose capture ended (the browser's own "stop sharing") or never started.
   const micLost = media.mic && local.mic.status === "off";
   const camLost = media.cam && local.cam.status === "off";
+  const shareLost = media.share && !sharePending && local.share.status === "off";
   useEffect(() => {
     if (micLost) setMedia((m) => ({ ...m, mic: false }));
     if (camLost) setMedia((m) => ({ ...m, cam: false }));
-  }, [micLost, camLost, setMedia]);
+    if (shareLost) setMedia((m) => ({ ...m, share: false }));
+  }, [micLost, camLost, shareLost, setMedia]);
 
   // Out of the room for good: stop broadcasting at once.
   const out =
@@ -424,11 +474,21 @@ function RoomPage({
     detail.id,
     meId,
     roster,
-    { mic: local.mic.track, cam: local.cam.track },
+    {
+      mic: local.mic.track,
+      cam: local.cam.track,
+      screen: local.share.track,
+      screenAudio: local.share.audio,
+    },
     shownCams,
     !out,
   );
   const [volumes, setVolumes] = useState<Record<string, number>>({});
+  const [shareVolumes, setShareVolumes] = useState<Record<string, number>>({});
+  const onShareVolume = useCallback(
+    (id: string, volume: number) => setShareVolumes((v) => ({ ...v, [id]: volume })),
+    [],
+  );
   const micTracks = useMemo(() => {
     const tracks: Record<string, MediaStreamTrack | undefined> = {};
     for (const [userId, theirs] of Object.entries(mesh.remote)) tracks[userId] = theirs.mic;
@@ -591,6 +651,9 @@ function RoomPage({
               onVolume={(id, volume) => setVolumes((v) => ({ ...v, [id]: volume }))}
               cameraTrack={p.you ? local.cam.track : mesh.remote[p.userId]?.cam}
               onCameraShown={onCameraShown}
+              screenTrack={p.you ? local.share.track : mesh.remote[p.userId]?.screen}
+              shareVolume={shareVolumes[p.id] ?? 1}
+              onShareVolume={mesh.shareAudio.has(p.userId) ? onShareVolume : undefined}
               reactions={reactions.filter((r) => r.targetUserId === p.userId)}
               onPin={(id) => setPinnedId((cur) => (cur === id ? null : id))}
               onToggleMute={toggleMute}
@@ -612,6 +675,23 @@ function RoomPage({
               />
             ),
         )}
+        {/* Only while the server says they're sharing: a stopped share is silent (ADR 15). */}
+        {people.map(({ userId, streaming }) => {
+          const track = mesh.remote[userId]?.screenAudio;
+          return (
+            streaming &&
+            track && (
+              <PeerAudio
+                key={`share:${userId}`}
+                userId={userId}
+                share
+                track={track}
+                volume={shareVolumes[userId] ?? 1}
+                muted={mutedIds.has(userId)}
+              />
+            )
+          );
+        })}
 
         <div className="relative flex items-center justify-center gap-2.5 px-[18px] py-3.5 max-sm:px-2 max-sm:py-2.5 bg-canvas border-t border-border-subtle">
           <div className="absolute left-[18px] flex gap-2 max-lg:hidden">
@@ -653,17 +733,22 @@ function RoomPage({
             >
               {media.mic ? <Icon.Mic size={16} /> : <Icon.MicOff size={16} />}
             </ControlBtn>
-            <ControlBtn
-              state={media.share ? "active" : undefined}
-              onClick={toggleShare}
-              disabled={!joined || !canStartShare}
-              aria-label={media.share ? "Stop sharing" : "Share screen"}
-              aria-pressed={media.share}
-              title={canStartShare ? "Screen share" : `${MAX_STREAMERS} people are already sharing`}
-              className="max-sm:hidden"
-            >
-              <Icon.Screen size={16} />
-            </ControlBtn>
+            {/* Hidden where the browser can't share its screen (mobile, ADR 17). */}
+            {canShare && (
+              <ControlBtn
+                state={media.share ? "active" : undefined}
+                onClick={() => void toggleShare()}
+                disabled={!joined || !canStartShare || local.share.status === "starting"}
+                aria-label={media.share ? "Stop sharing" : "Share screen"}
+                aria-pressed={media.share}
+                title={
+                  canStartShare ? "Screen share" : `${MAX_STREAMERS} people are already sharing`
+                }
+                className="max-sm:hidden"
+              >
+                <Icon.Screen size={16} />
+              </ControlBtn>
+            )}
             <Menu.Root>
               <Menu.Trigger
                 aria-label="Reactions"

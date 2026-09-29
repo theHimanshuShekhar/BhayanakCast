@@ -1,14 +1,26 @@
 import { describe, expect, it, vi } from "vitest";
 import { levelOf } from "./audio-level";
-import { DEVICES_STORAGE_KEY, LocalMedia, type LocalMediaOptions } from "./local-media";
+import {
+  DEVICES_STORAGE_KEY,
+  LocalMedia,
+  type LocalMediaOptions,
+  SHARE_AUDIO_CONSTRAINTS,
+  shareHintFor,
+} from "./local-media";
 
-type FakeTrack = MediaStreamTrack & { stopped: boolean; end: () => void; deviceId: string | null };
+type FakeTrack = MediaStreamTrack & {
+  stopped: boolean;
+  end: () => void;
+  deviceId: string | null;
+  contentHint: string;
+};
 
 function fakeTrack(kind: "audio" | "video", deviceId: string | null): FakeTrack {
   const ended = new Set<() => void>();
   const track = {
     kind,
     deviceId,
+    contentHint: "",
     stopped: false,
     stop() {
       track.stopped = true;
@@ -27,12 +39,22 @@ function fakeTrack(kind: "audio" | "video", deviceId: string | null): FakeTrack 
 const device = (kind: MediaDeviceKind, deviceId: string, label = "") =>
   ({ kind, deviceId, label, groupId: "" }) as MediaDeviceInfo;
 
-/** A fake `navigator.mediaDevices`: `fail` makes getUserMedia throw for a device id (or "any"). */
+/**
+ * A fake `navigator.mediaDevices`: `fail` makes getUserMedia throw for a device id (or "any").
+ * getDisplayMedia shares a screen, with audio unless `shareAudio` is false, or throws
+ * `shareFail`.
+ */
 function fakeDevices(
-  opts: { devices?: MediaDeviceInfo[]; fail?: Record<string, string> } = {},
+  opts: {
+    devices?: MediaDeviceInfo[];
+    fail?: Record<string, string>;
+    shareAudio?: boolean;
+    shareFail?: string;
+  } = {},
 ): NonNullable<LocalMediaOptions["mediaDevices"]> & {
   tracks: FakeTrack[];
   calls: MediaStreamConstraints[];
+  displayCalls: DisplayMediaStreamOptions[];
   fireDeviceChange: () => void;
   devices: MediaDeviceInfo[];
 } {
@@ -40,7 +62,20 @@ function fakeDevices(
   const fake = {
     tracks: [] as FakeTrack[],
     calls: [] as MediaStreamConstraints[],
+    displayCalls: [] as DisplayMediaStreamOptions[],
     devices: opts.devices ?? [],
+    async getDisplayMedia(options: DisplayMediaStreamOptions) {
+      fake.displayCalls.push(options);
+      if (opts.shareFail) throw new DOMException("nope", opts.shareFail);
+      const video = fakeTrack("video", null);
+      const audio = opts.shareAudio === false ? [] : [fakeTrack("audio", null)];
+      fake.tracks.push(video, ...audio);
+      return {
+        getAudioTracks: () => audio,
+        getVideoTracks: () => [video],
+        getTracks: () => [video, ...audio],
+      } as unknown as MediaStream;
+    },
     async getUserMedia(constraints: MediaStreamConstraints) {
       fake.calls.push(constraints);
       const wanted = (constraints.audio ?? constraints.video) as MediaTrackConstraints;
@@ -211,6 +246,103 @@ describe("LocalMedia", () => {
     expect(media.getSnapshot().devices.cam.map((d) => d.id)).toEqual(["c1", "c2"]);
     unsubscribe();
     expect(listener).toHaveBeenCalled();
+  });
+});
+
+describe("LocalMedia screen share", () => {
+  it("shares the screen and its audio, tuned for the room kind, with no voice processing", async () => {
+    const mediaDevices = fakeDevices();
+    const media = new LocalMedia({ mediaDevices });
+    expect(media.canShare()).toBe(true);
+    const pending = media.startShare("text");
+    expect(media.getSnapshot().share.status).toBe("starting");
+    const video = (await pending) as FakeTrack;
+    const [, audio] = mediaDevices.tracks as [FakeTrack, FakeTrack];
+    expect(mediaDevices.displayCalls[0]?.audio).toEqual(SHARE_AUDIO_CONSTRAINTS);
+    expect(SHARE_AUDIO_CONSTRAINTS).toEqual({
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+    });
+    expect(video.contentHint).toBe("text");
+    expect(audio.contentHint).toBe("music");
+    expect(media.getSnapshot().share).toEqual({
+      status: "on",
+      track: video,
+      audio,
+      failure: null,
+    });
+  });
+
+  it("shares without audio where the browser gives none", async () => {
+    const media = new LocalMedia({ mediaDevices: fakeDevices({ shareAudio: false }) });
+    await media.startShare("motion");
+    expect(media.getSnapshot().share).toMatchObject({ status: "on", audio: null });
+  });
+
+  it("stops both tracks when stopped, on release, and when the browser's own bar stops it", async () => {
+    const mediaDevices = fakeDevices();
+    const media = new LocalMedia({ mediaDevices });
+    await media.startShare("motion");
+    media.stopShare();
+    expect(mediaDevices.tracks.every((t) => t.stopped)).toBe(true);
+    expect(media.getSnapshot().share.status).toBe("off");
+
+    await media.startShare("motion");
+    media.release();
+    expect(mediaDevices.tracks.every((t) => t.stopped)).toBe(true);
+
+    const video = (await media.startShare("motion")) as FakeTrack;
+    video.end();
+    expect(media.getSnapshot().share).toMatchObject({ status: "off", track: null, audio: null });
+    expect(mediaDevices.tracks.at(-1)?.stopped).toBe(true);
+  });
+
+  it("drops a share picked after it was stopped", async () => {
+    const mediaDevices = fakeDevices();
+    const media = new LocalMedia({ mediaDevices });
+    const pending = media.startShare("detail");
+    media.stopShare();
+    expect(await pending).toBeNull();
+    expect(mediaDevices.tracks.every((t) => t.stopped)).toBe(true);
+    expect(media.getSnapshot().share.status).toBe("off");
+  });
+
+  it("doesn't open the picker once the user's click is too long ago, and says so", async () => {
+    const mediaDevices = fakeDevices();
+    const userActivation = { isActive: false };
+    const media = new LocalMedia({ mediaDevices, userActivation });
+    expect(await media.startShare("motion")).toBeNull();
+    expect(mediaDevices.displayCalls).toEqual([]);
+    expect(media.getSnapshot().share).toMatchObject({ status: "off", failure: "late" });
+
+    userActivation.isActive = true;
+    expect(await media.startShare("motion")).not.toBeNull();
+  });
+
+  it("stays off when the picker is cancelled, or the browser can't share", async () => {
+    const cancelled = new LocalMedia({
+      mediaDevices: fakeDevices({ shareFail: "NotAllowedError" }),
+    });
+    expect(await cancelled.startShare("motion")).toBeNull();
+    expect(cancelled.getSnapshot().share).toMatchObject({ status: "off", failure: "denied" });
+
+    const { getDisplayMedia: _, ...mobile } = fakeDevices();
+    const unsupported = new LocalMedia({ mediaDevices: mobile });
+    expect(unsupported.canShare()).toBe(false);
+    expect(await unsupported.startShare("motion")).toBeNull();
+    expect(unsupported.getSnapshot().share.failure).toBe("unsupported");
+  });
+});
+
+describe("shareHintFor", () => {
+  it("tunes games, films and art for motion, code for text, and the rest for detail", () => {
+    expect(shareHintFor("gaming")).toBe("motion");
+    expect(shareHintFor("watch")).toBe("motion");
+    expect(shareHintFor("art")).toBe("motion");
+    expect(shareHintFor("code")).toBe("text");
+    expect(shareHintFor("music")).toBe("detail");
+    expect(shareHintFor("chat")).toBe("detail");
   });
 });
 

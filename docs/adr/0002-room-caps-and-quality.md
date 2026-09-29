@@ -25,3 +25,12 @@ Under the P2P mesh (ADR 1), each streamer uploads one copy of their screen share
 
 ## Addendum: screen-share audio
 Screen shares request audio through `getDisplayMedia`. Where the browser provides it (tab audio in Chromium; system audio on Windows), it is sent as a separate Opus track at ~128 kbps stereo with voice-processing (AEC/NS/AGC) disabled. Each viewer has their own volume control per share.
+
+## Addendum: screen-share tuning (2026-09-29)
+- A share starts only once the server accepts it (at most 3 streamers); the browser's screen picker opens after that, and a share the user cancels there ends at once.
+- Browsers open the picker only within a few seconds of the user's click. The client waits at most 3 seconds for the server, and checks `navigator.userActivation` before opening the picker. If either is too late, the share ends and the user sees "couldn't start sharing — try again". A share the browser refuses otherwise (a cancelled picker) ends silently.
+- **A cancelled share still counts.** The room saw it as LIVE from the server's acceptance, so it keeps its stream interval (a few seconds long) and its "started sharing" and "stopped sharing" feed entries. Not recording it would need another protocol step: the client would confirm capture before the hub opens the interval, and everyone's LIVE tile would wait for that. That isn't worth it for a few seconds.
+- The share's video track gets a `contentHint` from the room kind: `motion` for gaming, watch-party and art rooms; `text` for code rooms; `detail` for music and chat rooms. Its sender's `degradationPreference` follows the hint: `maintain-framerate` for motion, `maintain-resolution` for detail and text.
+- Capture asks for at most 1920×1080 at 30 fps, the ladder's default; the per-peer ladder adapts from there. Its 1080p60 rung (#37) needs the capture frame rate raised.
+- Share audio is marked `music` and sent with `maxBitrate` 128 kbps. Browsers only encode stereo Opus at that rate when the receiving side asks for it, so the sender adds `stereo=1; maxaveragebitrate=128000` to the Opus parameters of its share-audio m-section in the remote description it applies. The mic stays at the browser's voice defaults.
+- Everyone plays a share only while the server says the person is sharing, so a share a host, mod or admin stopped disappears for every viewer even if media still arrives (ADR 15).

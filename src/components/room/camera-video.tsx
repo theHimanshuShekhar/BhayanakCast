@@ -3,6 +3,7 @@
 // hidden, collapsed, too small for the PiP, or scrolled away) is paused towards this page
 // (ADR 2 addendum).
 import { useEffect, useRef } from "react";
+import { useTrackSource } from "./use-track-source";
 
 export function CameraVideo({
   userId,
@@ -20,15 +21,7 @@ export function CameraVideo({
   onShown?: (userId: string, shown: boolean) => void;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
-
-  useEffect(() => {
-    const video = ref.current;
-    if (!video) return;
-    video.srcObject = new MediaStream([track]);
-    return () => {
-      video.srcObject = null;
-    };
-  }, [track]);
+  useTrackSource(ref, track);
 
   useEffect(() => {
     const video = ref.current;

@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CONNECT_TIMEOUT_MS, Mesh, type MeshEvent } from "./mesh";
+import {
+  CONNECT_TIMEOUT_MS,
+  degradationFor,
+  Mesh,
+  type MeshEvent,
+  SHARE_AUDIO_BITRATE,
+  withStereoOpus,
+} from "./mesh";
 import type { SignalPayload } from "./realtime";
 
 // The Mesh's negotiation (#34) against a fake RTCPeerConnection that keeps the signalling state
@@ -11,12 +18,33 @@ let nextPc = 0;
 
 class FakeTransceiver {
   mid: string | null = null;
-  readonly sender: { track: unknown; replaceTrack: (track: unknown) => Promise<void> };
-  constructor(track: unknown) {
+  /** What it receives; `sources` stands for the packets arriving lately. */
+  readonly receiver = {
+    track: null as unknown,
+    sources: [] as unknown[],
+    getSynchronizationSources() {
+      return this.sources;
+    },
+  };
+  readonly sender: {
+    track: unknown;
+    replaceTrack: (track: unknown) => Promise<void>;
+    getParameters: () => Partial<RTCRtpSendParameters>;
+    setParameters: (parameters: Partial<RTCRtpSendParameters>) => Promise<void>;
+  };
+  constructor(
+    track: unknown,
+    readonly init: RTCRtpTransceiverInit = {},
+  ) {
+    let parameters: Partial<RTCRtpSendParameters> = { encodings: init.sendEncodings ?? [{}] };
     const sender = {
       track,
       replaceTrack: async (next: unknown) => {
         sender.track = next;
+      },
+      getParameters: () => structuredClone(parameters),
+      setParameters: async (next: Partial<RTCRtpSendParameters>) => {
+        parameters = structuredClone(next);
       },
     };
     this.sender = sender;
@@ -49,8 +77,8 @@ class FakePC {
     this.configuration = configuration;
   }
 
-  addTransceiver(trackOrKind: unknown) {
-    const t = new FakeTransceiver(typeof trackOrKind === "string" ? null : trackOrKind);
+  addTransceiver(trackOrKind: unknown, init?: RTCRtpTransceiverInit) {
+    const t = new FakeTransceiver(typeof trackOrKind === "string" ? null : trackOrKind, init);
     this.transceivers.push(t);
     this.#needed = true;
     this.#maybeNegotiate();
@@ -101,11 +129,15 @@ class FakePC {
       const t = new FakeTransceiver(null);
       t.mid = mid;
       this.transceivers.push(t);
-      this.ontrack?.({ transceiver: t, track: { id: `track ${mid}` } });
+      t.receiver.track = { id: `track ${mid}` };
+      this.ontrack?.({ transceiver: t, track: t.receiver.track });
     }
     this.signalingState = "have-remote-offer";
   }
 
+  getReceivers() {
+    return this.transceivers.map((t) => t.receiver);
+  }
   async addIceCandidate() {}
   async getStats() {
     return this.stats;
@@ -169,7 +201,8 @@ function page(userId: string, network: Map<string, Mesh>, iceServers?: RTCIceSer
   return { mesh, events, pcs, tracks };
 }
 
-const track = (name: string) => ({ id: name }) as unknown as MediaStreamTrack;
+const track = (name: string, contentHint = "") =>
+  ({ id: name, contentHint }) as unknown as MediaStreamTrack;
 const everyone = [{ userId: "ana" }, { userId: "bo" }];
 
 /** ICE succeeds on every open connection of `pages` (the fake has no transport of its own). */
@@ -385,6 +418,48 @@ describe("Mesh", () => {
     connect(ana, bo);
     await settle();
     expect(sending(ana.pcs[0])).toContain(cam);
+  });
+
+  it("sends a share's screen tuned by its content hint, and its audio at 128 kbps", async () => {
+    const network = new Map<string, Mesh>();
+    const ana = page("ana", network);
+    const bo = page("bo", network);
+    for (const mesh of network.values()) mesh.join(everyone);
+    await settle();
+    const screen = track("ana screen", "text");
+    const screenAudio = track("ana share audio");
+    ana.mesh.setLocalTracks({ screen, screenAudio });
+    await settle();
+    expect(bo.tracks("ana")).toEqual(["mic", "screen", "screenAudio"]);
+    const own = (pc: FakePC | undefined, sent: MediaStreamTrack) =>
+      pc?.transceivers.find((t) => t.sender.track === sent);
+    expect(own(ana.pcs[0], screen)?.sender.getParameters().degradationPreference).toBe(
+      "maintain-resolution",
+    );
+    expect(own(ana.pcs[0], screenAudio)?.init.sendEncodings).toEqual([
+      { maxBitrate: SHARE_AUDIO_BITRATE },
+    ]);
+
+    // Another share, for smooth motion: the same transceiver, retuned.
+    const motion = track("ana screen 2", "motion");
+    ana.mesh.setLocalTracks({ screen: motion });
+    await settle();
+    expect(own(ana.pcs[0], motion)?.sender.getParameters().degradationPreference).toBe(
+      "maintain-framerate",
+    );
+
+    // Bo can tell whether its audio arrives: its track alone doesn't say.
+    const shareAudioIn = bo.pcs[0]?.getReceivers().at(-1);
+    expect(bo.mesh.receiving("ana", "screenAudio")).toBe(false);
+    shareAudioIn?.sources.push({ source: 1 });
+    expect(bo.mesh.receiving("ana", "screenAudio")).toBe(true);
+    expect(bo.mesh.receiving("ana", "cam")).toBe(false);
+
+    // Stopped: nothing is sent, and nothing renegotiated.
+    ana.mesh.setLocalTracks({ screen: null, screenAudio: null });
+    await settle();
+    expect(sending(ana.pcs[0])).toEqual([null, null, null, null]);
+    expect(bo.tracks("ana")).toEqual(["mic", "screen", "screenAudio"]);
   });
 
   it("closes a connection when its peer leaves, and every connection on close", async () => {
@@ -625,5 +700,47 @@ describe("Mesh ICE (ADR 3)", () => {
     await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS * 2);
     expect(bo.events).toHaveLength(events);
     expect(bo.pcs[1]?.iceRestarts).toBe(0);
+  });
+});
+
+describe("degradationFor", () => {
+  it("keeps resolution for detail and text, and frames for motion", () => {
+    expect(degradationFor("detail")).toBe("maintain-resolution");
+    expect(degradationFor("text")).toBe("maintain-resolution");
+    expect(degradationFor("motion")).toBe("maintain-framerate");
+  });
+});
+
+describe("withStereoOpus", () => {
+  const sdp = [
+    "v=0",
+    "o=- 1 2 IN IP4 127.0.0.1",
+    "m=audio 9 UDP/TLS/RTP/SAVPF 111 63",
+    "a=mid:0",
+    "a=rtpmap:111 opus/48000/2",
+    "a=fmtp:111 minptime=10;useinbandfec=1",
+    "m=video 9 UDP/TLS/RTP/SAVPF 96",
+    "a=mid:1",
+    "a=rtpmap:96 VP8/90000",
+    "m=audio 9 UDP/TLS/RTP/SAVPF 111",
+    "a=mid:3",
+    "a=rtpmap:111 opus/48000/2",
+    "a=fmtp:111 minptime=10;stereo=0;useinbandfec=1",
+    "",
+  ].join("\r\n");
+
+  it("asks for stereo at 128 kbps in the share audio's m-section only", () => {
+    const lines = sdp.split("\r\n");
+    lines[12] = "a=fmtp:111 minptime=10;useinbandfec=1;stereo=1;maxaveragebitrate=128000";
+    expect(withStereoOpus(sdp, new Set(["3"]))).toBe(lines.join("\r\n"));
+  });
+
+  it("adds Opus parameters where there were none, and leaves other SDP as it is", () => {
+    const bare = sdp.replace("a=fmtp:111 minptime=10;stereo=0;useinbandfec=1\r\n", "");
+    expect(withStereoOpus(bare, new Set(["3"]))).toContain(
+      "a=mid:3\r\na=rtpmap:111 opus/48000/2\r\na=fmtp:111 stereo=1;maxaveragebitrate=128000\r\n",
+    );
+    expect(withStereoOpus(sdp, new Set())).toBe(sdp);
+    expect(withStereoOpus(sdp, new Set(["1"]))).toBe(sdp);
   });
 });
