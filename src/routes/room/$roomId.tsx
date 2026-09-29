@@ -595,6 +595,8 @@ function RoomPage({
               onPin={(id) => setPinnedId((cur) => (cur === id ? null : id))}
               onToggleMute={toggleMute}
               onModerate={onModerate}
+              cantConnect={mesh.states[p.userId] === "failed"}
+              onRetry={() => mesh.retry(p.userId)}
             />
           ))}
         </div>
