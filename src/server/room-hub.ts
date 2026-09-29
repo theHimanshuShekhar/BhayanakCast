@@ -41,6 +41,7 @@ import {
   type RoomParticipant,
   type RoomRole,
   type ServerMessage,
+  SIGNAL_RATE_LIMIT,
 } from "../lib/realtime.ts";
 import { createRoomInput, ROOM_NAME_MAX } from "../lib/rooms.ts";
 import type { Caller, SignedInCaller } from "./caller.ts";
@@ -223,6 +224,8 @@ export class RoomHub {
   #nextFeedId = 1;
   /** Per user id, when (epoch ms) their recent accepted reactions were sent. */
   readonly #reactionSends = new Map<string, number[]>();
+  /** Per user id, when (epoch ms) their recent relayed signalling steps were sent. */
+  readonly #signalSends = new Map<string, number[]>();
   #queue: Promise<void> = Promise.resolve();
 
   constructor(deps: RoomHubDeps) {
@@ -477,6 +480,8 @@ export class RoomHub {
     "mod.setRole": (conn, message) => this.#setRole(conn, message),
 
     "room.rename": (conn, message) => this.#rename(conn, message),
+
+    signal: (conn, message) => this.#signal(conn, message),
 
     "knock.request": (conn, message) => this.#knock(conn, message),
 
@@ -1114,10 +1119,8 @@ export class RoomHub {
   // Reactions (never stored) and the feed (the last 50 per room, in memory only)
 
   #react(conn: HubConnection, message: ClientMessageOf<"reaction.send">) {
-    const userId = conn.caller.user?.id;
-    const room = conn.roomId ? this.#rooms.get(conn.roomId) : undefined;
-    const participant = userId ? room?.participants.get(userId) : undefined;
-    if (!room || !participant || participant.connection !== conn) {
+    const { room, participant } = this.#participantOf(conn);
+    if (!room || !participant) {
       return this.#refuse(conn, "forbidden", "Join the room to react", message.type);
     }
     const target = room.participants.get(message.targetUserId);
@@ -1125,7 +1128,8 @@ export class RoomHub {
       return this.#refuse(conn, "not_found", "They're not in this room", message.type);
     }
     const at = this.#clock.now();
-    if (!withinRateLimit(this.#reactionSends, participant.userId, REACTION_RATE_LIMIT, at)) {
+    const { reactions, windowMs } = REACTION_RATE_LIMIT;
+    if (!withinRateLimit(this.#reactionSends, participant.userId, reactions, windowMs, at)) {
       return this.#refuse(
         conn,
         "rate_limited",
@@ -1181,10 +1185,8 @@ export class RoomHub {
     power: ModPower,
     re: string,
   ): { room: LiveRoom; actor: LiveParticipant } | undefined {
-    const userId = conn.caller.user?.id;
-    const room = conn.roomId ? this.#rooms.get(conn.roomId) : undefined;
-    const actor = userId ? room?.participants.get(userId) : undefined;
-    if (!room || !actor || actor.connection !== conn) {
+    const { room, participant: actor } = this.#participantOf(conn);
+    if (!room || !actor) {
       this.#refuse(conn, "forbidden", "Join the room first", re);
       return;
     }
@@ -1324,6 +1326,36 @@ export class RoomHub {
   }
 
   // -------------------------------------------------------------------------------------------
+  // Signalling (ADR 1): relayed opaquely, only between two people in the same room
+
+  /**
+   * `signal`: pass the payload to `to`, stamped with the sender. Both must be in the room the
+   * sender is in over this connection, so someone who left, was kicked or was taken over can't
+   * reach anyone there. A recipient in their reconnect grace has no socket, so it's dropped.
+   * Over `SIGNAL_RATE_LIMIT` it's refused, so nobody can flood the room through the relay.
+   */
+  #signal(conn: HubConnection, message: ClientMessageOf<"signal">) {
+    const { room, participant: sender } = this.#participantOf(conn);
+    if (!room || !sender) {
+      return this.#refuse(conn, "forbidden", "Join the room first", message.type);
+    }
+    const target = room.participants.get(message.to);
+    if (!target || target === sender) {
+      return this.#refuse(conn, "not_found", "They're not in this room", message.type);
+    }
+    const { messages, windowMs } = SIGNAL_RATE_LIMIT;
+    if (!withinRateLimit(this.#signalSends, sender.userId, messages, windowMs, this.#clock.now())) {
+      return this.#refuse(conn, "rate_limited", "Too much signalling; wait a moment", message.type);
+    }
+    this.#send(target.connection, {
+      type: "signal",
+      roomId: room.id,
+      from: sender.userId,
+      payload: message.payload,
+    });
+  }
+
+  // -------------------------------------------------------------------------------------------
   // Private rooms (ADR 16): knock with the invite link, and the host, a mod or an admin admits
 
   /** `knock.request`: wait at the private room's door, or walk in if already allowed. */
@@ -1404,6 +1436,18 @@ export class RoomHub {
   // -------------------------------------------------------------------------------------------
   // Plumbing
 
+  /**
+   * The room this connection is in and its sender there, if they are in it over this connection
+   * (not one they left, were kicked from, or were taken over from); otherwise nothing.
+   */
+  #participantOf(conn: HubConnection): { room?: LiveRoom; participant?: LiveParticipant } {
+    const userId = conn.caller.user?.id;
+    const room = conn.roomId ? this.#rooms.get(conn.roomId) : undefined;
+    const participant = userId ? room?.participants.get(userId) : undefined;
+    if (!room || !participant || participant.connection !== conn) return {};
+    return { room, participant };
+  }
+
   #own(connection: Connection): HubConnection {
     if (!(connection instanceof HubConnection)) throw new Error("Not a hub connection");
     return connection;
@@ -1467,18 +1511,19 @@ function person(participant: LiveParticipant): FeedPerson {
 }
 
 /**
- * Whether `key` may act at `at` under a sliding-window `limit` (at most `reactions` in any
+ * Whether `key` may act at `at` under a sliding window (at most `max` actions in any
  * `windowMs`), recording the action if so. Refused attempts don't count.
  */
 function withinRateLimit(
   sends: Map<string, number[]>,
   key: string,
-  limit: { reactions: number; windowMs: number },
+  max: number,
+  windowMs: number,
   at: Date,
 ): boolean {
-  const since = at.getTime() - limit.windowMs;
+  const since = at.getTime() - windowMs;
   const recent = (sends.get(key) ?? []).filter((t) => t > since);
-  const allowed = recent.length < limit.reactions;
+  const allowed = recent.length < max;
   if (allowed) recent.push(at.getTime());
   sends.set(key, recent);
   return allowed;

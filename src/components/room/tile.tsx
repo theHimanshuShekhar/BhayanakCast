@@ -70,9 +70,11 @@ export const Tile = ({
   myRole,
   admin = false,
   locallyMuted,
+  volume = 1,
   reactions,
   onPin,
   onToggleMute,
+  onVolume,
   onModerate,
 }: {
   p: Participant;
@@ -81,9 +83,12 @@ export const Tile = ({
   /** The viewer is a site admin: moderation in any room. */
   admin?: boolean;
   locallyMuted: boolean;
+  /** How loud this person plays here, 0–1 (the viewer's own setting). */
+  volume?: number;
   reactions: Reaction[];
   onPin: (id: string) => void;
   onToggleMute: (id: string) => void;
+  onVolume?: (id: string, volume: number) => void;
   onModerate: (id: string, action: ModAction) => void;
 }) => {
   const ref = useRef<HTMLDivElement>(null);
@@ -182,6 +187,19 @@ export const Tile = ({
           >
             {locallyMuted ? <Icon.MicOff size={14} /> : <Icon.Headset size={14} />}
           </button>
+        )}
+        {!p.you && onVolume && (
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={volume}
+            aria-label={`Volume for ${p.name}`}
+            title="Volume for me"
+            onChange={(e) => onVolume(p.id, Number(e.target.value))}
+            className="w-16 h-[26px] cursor-pointer accent-[var(--color-primary)]"
+          />
         )}
         <button
           type="button"
