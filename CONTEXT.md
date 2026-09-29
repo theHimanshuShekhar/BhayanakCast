@@ -20,7 +20,8 @@ Small-group live screen-sharing hangouts. Anyone signs in with Discord, starts o
 - **Visitor**: someone not signed in. They can browse home, profiles and recaps, but must sign in to enter a room.
 - **Lobby**: the pre-join check before entering a room, where the user picks and previews devices. Mic and camera start off.
 - **Takeover**: joining from a new tab or device ends the user's previous room connection. A user is in at most one room at a time.
-- **Admin**: a site-wide role with access to `/admin`, bans, and moderation in any room.
+- **Admin**: a site-wide role with access to `/admin`, bans, and moderation in any room. Admins promote and demote each other from `/admin`.
+- **Env admin**: an admin listed in `ADMIN_DISCORD_IDS`. They're granted the role at every sign-in and can't be demoted.
 - **Ban**: a site-wide block an admin puts on a user, with a reason and an optional expiry. It signs them out and removes them from any live room at once. Admins can't be banned.
 - **Audit log**: the record of every admin action (who, what, on whom or which room, when). It is kept indefinitely.
 

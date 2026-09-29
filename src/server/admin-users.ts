@@ -1,14 +1,16 @@
 /**
- * Admin users table, bans and the audit log (spec #7, ADR 6 addendum). Like ./admin.ts, every
- * function takes the database and the caller explicitly and refuses anyone without the admin
- * role before doing anything.
+ * Admin users table, bans, admin roles and the audit log (spec #7, ADR 6 addendum). Like
+ * ./admin.ts, every function takes the database and the caller explicitly and refuses anyone
+ * without the admin role before doing anything.
  *
  * Bans go through Better Auth's admin plugin as the calling admin (it records the reason and
  * expiry and revokes the user's sessions), then the live realtime hub disconnects the user so
- * any room they're in sees them leave at once. Every action writes an `admin_actions` row
- * (kept indefinitely, ADR 6 and 11 addenda).
+ * any room they're in sees them leave at once. Promote and demote go through the plugin's
+ * set-role (whose hook in src/lib/auth.ts refuses to demote an env admin), then the hub updates
+ * the user's open sockets. Every action writes an `admin_actions` row (kept indefinitely, ADR 6
+ * and 11 addenda).
  */
-import { and, count, desc, eq, gt, isNull, max, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, isNull, max, notExists, or, sql } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import {
   type AdminActionKind,
@@ -26,6 +28,9 @@ import {
   banUserInput,
   type ListAdminUsersInput,
   listAdminUsersInput,
+  type SetUserRoleInput,
+  setUserRoleInput,
+  toAdminRole,
   type UnbanUserInput,
   unbanUserInput,
 } from "../lib/admin.ts";
@@ -44,14 +49,22 @@ export class BanAdminError extends Error {
   }
 }
 
-/** What banning and unbanning need besides the database. */
+/** Thrown for a role change that isn't allowed: demoting yourself, or promoting a banned user. */
+export class RoleChangeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RoleChangeError";
+  }
+}
+
+/** What banning, unbanning and role changes need besides the database. */
 export interface AdminUserDeps {
-  /** Better Auth, whose admin plugin bans and unbans. */
+  /** Better Auth, whose admin plugin bans, unbans and sets roles. */
   auth: Pick<typeof auth, "api">;
   /** The calling admin's request headers: the plugin checks their session itself. */
   headers: Headers;
   /** The live realtime hub (./live-hub.ts); null when none runs in this process. */
-  hub: Pick<RoomHub, "disconnectUser"> | null;
+  hub: Pick<RoomHub, "disconnectUser" | "setUserRole"> | null;
 }
 
 /** Log an admin action (who, what, on whom or which room, with what details). */
@@ -81,12 +94,14 @@ const bannedAt = (now: Date) =>
 
 /**
  * A page of users, newest first, whose username contains `q` (case-insensitive), with their
- * lifetime hours and when they were last in a room.
+ * lifetime hours and when they were last in a room. `envAdminIds` are the Discord ids in
+ * `ADMIN_DISCORD_IDS`, whose users are marked as env admins.
  */
 export async function listAdminUsers(
   db: Db,
   caller: Caller,
   input: ListAdminUsersInput,
+  envAdminIds: ReadonlySet<string>,
   now: Date = new Date(),
 ): Promise<AdminUsersPage> {
   requireAdmin(caller);
@@ -112,6 +127,7 @@ export async function listAdminUsers(
         username,
         createdAt: user.createdAt,
         role: user.role,
+        discordId: user.discordId,
         banned: user.banned,
         banReason: user.banReason,
         banExpires: user.banExpires,
@@ -133,11 +149,13 @@ export async function listAdminUsers(
       const ban: AdminBan | null = banInForce(row, now)
         ? { reason: row.banReason, expiresAt: row.banExpires?.toISOString() ?? null }
         : null;
+      const role = toAdminRole(row.role);
       return {
         id: row.id,
         username: row.username,
         joinedAt: row.createdAt.toISOString(),
-        role: row.role === "admin" ? "admin" : "user",
+        role,
+        envAdmin: role === "admin" && row.discordId !== null && envAdminIds.has(row.discordId),
         ban,
         lastSeenAt: row.lastSeenAt ? new Date(row.lastSeenAt).toISOString() : null,
         hours: secondsToHours((row.secondsStreamed ?? 0) + (row.secondsWatched ?? 0)),
@@ -207,4 +225,52 @@ export async function unbanUser(
     { userId },
     { reason: before.banReason, expiresAt: before.banExpires?.toISOString() ?? null },
   );
+}
+
+/**
+ * Promote a user to admin or demote an admin (ADR 6 addendum) through the admin plugin's
+ * set-role. Their open sockets gain or lose admin powers at once, and their next navigation
+ * sees the new role. Refused: demoting yourself or the last admin, promoting a banned user
+ * (admins can't be banned) and, by the set-role hook, demoting an env admin.
+ * Giving someone the role they already have does nothing and logs nothing.
+ */
+export async function setUserRole(
+  db: Db,
+  caller: Caller,
+  input: SetUserRoleInput,
+  deps: AdminUserDeps,
+  now: Date = new Date(),
+): Promise<void> {
+  requireAdmin(caller);
+  const { userId, role } = setUserRoleInput.parse(input);
+  if (role !== "admin" && userId === caller.user.id) {
+    throw new RoleChangeError("You can't demote yourself; ask another admin");
+  }
+  const [target] = await db
+    .select({ role: user.role, banned: user.banned, banExpires: user.banExpires })
+    .from(user)
+    .where(eq(user.id, userId));
+  if (target && toAdminRole(target.role) === role) return;
+  if (target && role === "admin" && banInForce(target, now)) {
+    throw new RoleChangeError("Banned users can't be admins; unban them first");
+  }
+  // Refuses an unknown user and (the hook in src/lib/auth.ts) demoting an env admin.
+  await deps.auth.api.setRole({ body: { userId, role }, headers: deps.headers });
+  if (role === "user") {
+    // Two admins demoting each other at once could leave none: whichever demote finds no admin
+    // left is undone, in one conditional statement, so at least one admin always remains.
+    const undone = await db
+      .update(user)
+      .set({ role: "admin" })
+      .where(
+        and(
+          eq(user.id, userId),
+          notExists(db.select({ id: user.id }).from(user).where(eq(user.role, "admin"))),
+        ),
+      )
+      .returning({ id: user.id });
+    if (undone.length) throw new RoleChangeError("They're the last admin, so they stay one");
+  }
+  await deps.hub?.setUserRole(userId, role);
+  await recordAdminAction(db, caller, role === "admin" ? "promote" : "demote", { userId });
 }

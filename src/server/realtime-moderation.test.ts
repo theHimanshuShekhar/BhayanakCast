@@ -360,4 +360,26 @@ describe("admins", () => {
     await h.settled();
     expect(b.pending()).toEqual([]);
   });
+
+  it("gain and lose their powers on open sockets when promoted or demoted (#45)", async () => {
+    const [a, b, c] = await inRoom([ana, bo, cy]);
+    expect(await refused(b, { type: "room.rename", name: "not yet" })).toMatchObject({
+      code: "forbidden",
+    });
+
+    await h.hub.setUserRole(bo.id, "admin");
+    b.send({ type: "room.rename", name: "renamed by a new admin" });
+    await a.waitForEvent("renamed");
+    // Now an admin, the host can't act on them either.
+    expect(await refused(a, { type: "mod.kick", userId: bo.id })).toMatchObject({
+      code: "forbidden",
+    });
+
+    await h.hub.setUserRole(bo.id, "user");
+    expect(await refused(b, { type: "mod.kick", userId: cy.id })).toMatchObject({
+      code: "forbidden",
+    });
+    await h.settled();
+    expect(c.received.some((m) => m.type === "error" && m.code === "kicked")).toBe(false);
+  });
 });

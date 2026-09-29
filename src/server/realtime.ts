@@ -73,7 +73,7 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
   const stopAnnouncements = onRoomAnnouncement((announcement) => {
     void hub.announce(announcement);
   });
-  // Admin server functions reach it here (a ban disconnects the user).
+  // Admin server functions reach it here (a ban disconnects the user; a role change updates them).
   const unregisterHub = registerLiveHub(hub);
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_CLIENT_MESSAGE_BYTES });
 

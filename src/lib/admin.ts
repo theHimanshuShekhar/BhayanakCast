@@ -87,7 +87,7 @@ export function percentChange({ current, previous }: WindowCount): number | null
 }
 
 // ---------------------------------------------------------------------------------------------
-// Users table, bans (spec #7)
+// Users table, bans, admin roles (spec #7)
 
 /** Rows per page of the users table. */
 export const ADMIN_USERS_PAGE_SIZE = 25;
@@ -109,12 +109,24 @@ export interface AdminBan {
   expiresAt: string | null;
 }
 
+/** A user's site-wide role. */
+export type AdminRole = "admin" | "user";
+
+/** The site-wide role a stored `user.role` stands for: anything but `admin` is a plain user. */
+export const toAdminRole = (role: string | null | undefined): AdminRole =>
+  role === "admin" ? "admin" : "user";
+
 export interface AdminUserRow {
   id: string;
   username: string;
   /** ISO timestamp of sign-up. */
   joinedAt: string;
-  role: "admin" | "user";
+  role: AdminRole;
+  /**
+   * An admin listed in `ADMIN_DISCORD_IDS` (ADR 6 addendum), which re-grants the role at every
+   * sign-in: they can't be demoted.
+   */
+  envAdmin: boolean;
   /** Null unless banned now (an expired ban no longer counts). */
   ban: AdminBan | null;
   /** When they were last in a room (ISO), from presence; null if not within the 30 days kept. */
@@ -147,3 +159,7 @@ export type BanUserInput = z.input<typeof banUserInput>;
 
 export const unbanUserInput = userIdInput;
 export type UnbanUserInput = z.input<typeof unbanUserInput>;
+
+/** Promote a user to admin (`role: "admin"`) or demote an admin (`role: "user"`). */
+export const setUserRoleInput = userIdInput.extend({ role: z.enum(["admin", "user"]) });
+export type SetUserRoleInput = z.input<typeof setUserRoleInput>;

@@ -1,6 +1,7 @@
-// Admin confirmation dialogs (spec #7): ban and unban, on the shared Base UI Dialog sheet.
+// Admin confirmation dialogs (spec #7): ban, unban, promote and demote, on the shared Base UI
+// Dialog sheet.
 import { useState } from "react";
-import { BAN_REASON_MAX, type BanDuration, type BanUserInput } from "~/lib/admin";
+import { type AdminRole, BAN_REASON_MAX, type BanDuration, type BanUserInput } from "~/lib/admin";
 import { Sheet } from "./overlays";
 import { Btn, fieldInput, fieldLabel, Seg } from "./ui";
 
@@ -162,6 +163,67 @@ export const UnbanUserDialog = ({
         They can sign in and join rooms again straight away.
       </p>
       {failed && <Failed>couldn't unban them. try again.</Failed>}
+    </Sheet>
+  );
+};
+
+/** Who a role change acts on, and the role they'd get. */
+export type RoleChangeTarget = DialogTarget & { role: AdminRole };
+
+/** Promote `target` to admin (`role: "admin"`) or demote them to a plain user. */
+export const SetRoleDialog = ({
+  target,
+  onOpenChange,
+  onSetRole,
+}: {
+  /** Null while closed. */
+  target: RoleChangeTarget | null;
+  onOpenChange: (open: boolean) => void;
+  onSetRole: (userId: string, role: AdminRole) => Promise<unknown>;
+}) => {
+  const [pending, setPending] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const promote = target?.role === "admin";
+  const verb = promote ? "promote" : "demote";
+  const close = (open: boolean) => {
+    if (open) return;
+    setFailed(false);
+    onOpenChange(false);
+  };
+  const submit = async () => {
+    if (!target || pending) return;
+    setPending(true);
+    setFailed(false);
+    try {
+      await onSetRole(target.id, target.role);
+      close(false);
+    } catch {
+      setFailed(true);
+    } finally {
+      setPending(false);
+    }
+  };
+  return (
+    <Sheet
+      open={target !== null}
+      onOpenChange={close}
+      title={`${verb} ${target?.username ?? ""}`}
+      width="w-[min(400px,94vw)]"
+      footer={
+        <>
+          <Btn onClick={() => close(false)}>cancel</Btn>
+          <Btn variant={promote ? "primary" : "danger"} onClick={submit} disabled={pending}>
+            {promote ? "make admin" : "remove admin"}
+          </Btn>
+        </>
+      }
+    >
+      <p className="m-0 text-[12.5px] text-muted leading-relaxed">
+        {promote
+          ? "They get the admin dashboard, bans, and moderation powers in every room."
+          : "They lose the admin dashboard, bans, and moderation powers in other people's rooms."}
+      </p>
+      {failed && <Failed>{`couldn't ${verb} them. try again.`}</Failed>}
     </Sheet>
   );
 };
