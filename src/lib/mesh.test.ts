@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { VideoCodecs } from "./codecs";
 import {
   CONNECT_TIMEOUT_MS,
   degradationFor,
@@ -8,6 +9,7 @@ import {
   SHARE_AUDIO_BITRATE,
   withStereoOpus,
 } from "./mesh";
+import { SCREEN_DEFAULT_RUNG, SCREEN_LADDER, UP_SAMPLES } from "./quality";
 import type { SignalPayload } from "./realtime";
 
 // The Mesh's negotiation (#34) against a fake RTCPeerConnection that keeps the signalling state
@@ -27,8 +29,16 @@ class FakeTransceiver {
       return this.sources;
     },
   };
+  /** What `setCodecPreferences` was last given. */
+  codecPreferences: { mimeType: string }[] = [];
+  setCodecPreferences(codecs: { mimeType: string }[]) {
+    this.codecPreferences = codecs;
+  }
   readonly sender: {
     track: unknown;
+    /** What `getStats()` answers. */
+    stats: Map<string, unknown>;
+    getStats: () => Promise<Map<string, unknown>>;
     replaceTrack: (track: unknown) => Promise<void>;
     getParameters: () => Partial<RTCRtpSendParameters>;
     setParameters: (parameters: Partial<RTCRtpSendParameters>) => Promise<void>;
@@ -40,6 +50,8 @@ class FakeTransceiver {
     let parameters: Partial<RTCRtpSendParameters> = { encodings: init.sendEncodings ?? [{}] };
     const sender = {
       track,
+      stats: new Map<string, unknown>(),
+      getStats: async () => sender.stats,
       replaceTrack: async (next: unknown) => {
         sender.track = next;
       },
@@ -177,7 +189,12 @@ const settle = async () => {
 };
 
 /** A page for `userId`, wired to the others through `network` (a relay that keeps order). */
-function page(userId: string, network: Map<string, Mesh>, iceServers?: RTCIceServer[]) {
+function page(
+  userId: string,
+  network: Map<string, Mesh>,
+  iceServers?: RTCIceServer[],
+  codecs?: VideoCodecs,
+) {
   const events: MeshEvent[] = [];
   const pcs: FakePC[] = [];
   const mesh = new Mesh({
@@ -185,6 +202,7 @@ function page(userId: string, network: Map<string, Mesh>, iceServers?: RTCIceSer
     send: (to: string, payload: SignalPayload) =>
       setTimeout(() => network.get(to)?.receive(userId, payload)),
     iceServers,
+    codecs,
     RTCPeerConnection: class extends FakePC {
       constructor(configuration?: RTCConfiguration) {
         super(configuration);
@@ -479,6 +497,243 @@ describe("Mesh", () => {
     ana.mesh.close();
     expect(ana.mesh.peers()).toEqual([]);
     expect(ana.pcs.map((pc) => pc.signalingState)).toEqual(["closed", "closed"]);
+  });
+});
+
+const trackWith = (name: string, settings: Partial<MediaTrackSettings> = {}, contentHint = "") =>
+  ({ id: name, contentHint, getSettings: () => settings }) as unknown as MediaStreamTrack;
+
+/** A video sender's stats, as `readSample` reads them. */
+const senderStats = (loss: number, codec = "video/VP9") =>
+  new Map<string, unknown>([
+    ["t", { id: "t", type: "transport", selectedCandidatePairId: "p" }],
+    ["p", { id: "p", type: "candidate-pair", availableOutgoingBitrate: 20_000_000 }],
+    ["o", { id: "o", type: "outbound-rtp", kind: "video", codecId: "c" }],
+    ["c", { id: "c", type: "codec", mimeType: codec }],
+    ["r", { id: "r", type: "remote-inbound-rtp", kind: "video", fractionLost: loss }],
+  ]);
+
+/** The transceiver of `pc` sending `sent`. */
+const carrying = (pc: FakePC | undefined, sent: MediaStreamTrack) =>
+  pc?.transceivers.find((t) => t.sender.track === sent);
+
+describe("Mesh quality ladder (ADR 2)", () => {
+  /** Ana shares a 1080p60 screen to bo and cy, all connected. */
+  async function sharing() {
+    const network = new Map<string, Mesh>();
+    const ana = page("ana", network);
+    const bo = page("bo", network);
+    const cy = page("cy", network);
+    const room = [{ userId: "ana" }, { userId: "bo" }, { userId: "cy" }];
+    for (const mesh of network.values()) mesh.join(room);
+    await settle();
+    const screen = trackWith("ana screen", { height: 1080, frameRate: 60 }, "motion");
+    ana.mesh.setLocalTracks({ screen });
+    await settle();
+    connect(ana, bo, cy);
+    await settle();
+    // Ana's connections are in the order she opened them: bo, cy.
+    const [toBo, toCy] = ana.pcs.map((pc) => carrying(pc, screen)) as [
+      FakeTransceiver,
+      FakeTransceiver,
+    ];
+    return { ana, bo, toBo, toCy };
+  }
+  const rungs = (mesh: Mesh) => mesh.quality().map((q) => q.screen?.rung);
+
+  it("starts each viewer's share at 1080p30, scaled from the capture", async () => {
+    const { ana, toBo, toCy } = await sharing();
+    for (const t of [toBo, toCy]) {
+      expect(t.sender.getParameters().encodings?.[0]).toMatchObject({
+        maxBitrate: SCREEN_LADDER[SCREEN_DEFAULT_RUNG]?.maxBitrate,
+        maxFramerate: 30,
+        scaleResolutionDownBy: 1,
+      });
+    }
+    expect(rungs(ana.mesh)).toEqual(["1080p30", "1080p30"]);
+    ana.mesh.close();
+  });
+
+  it("steps one viewer down on its own stats, and back up after a sustained good window", async () => {
+    const { ana, toBo, toCy } = await sharing();
+    toBo.sender.stats = senderStats(0.1);
+    toCy.sender.stats = senderStats(0);
+    // The bandwidth estimate is still ramping for the first readings, so nothing moves.
+    for (let i = 0; i < 2; i++) await ana.mesh.adjust();
+    expect(rungs(ana.mesh)).toEqual(["1080p30", "1080p30"]);
+    await ana.mesh.adjust();
+    await ana.mesh.adjust();
+    // Only bo, whose link is lossy, drops (900p30, scaled from the 1080p capture).
+    expect(ana.mesh.quality().map((q) => q.screen)).toEqual([
+      { rung: "900p30", codec: "video/VP9" },
+      { rung: "1080p30", codec: "video/VP9" },
+    ]);
+    expect(toBo.sender.getParameters().encodings?.[0]).toMatchObject({
+      maxBitrate: 2_200_000,
+      maxFramerate: 30,
+      scaleResolutionDownBy: 1080 / 900,
+    });
+    expect(toCy.sender.getParameters().encodings?.[0]?.maxBitrate).toBe(3_000_000);
+
+    // Clean again: it takes a full window to go back up.
+    toBo.sender.stats = senderStats(0);
+    for (let i = 0; i < UP_SAMPLES - 1; i++) await ana.mesh.adjust();
+    expect(rungs(ana.mesh)[0]).toBe("900p30");
+    await ana.mesh.adjust();
+    expect(rungs(ana.mesh)[0]).toBe("1080p30");
+    expect(toBo.sender.getParameters().encodings?.[0]?.maxBitrate).toBe(3_000_000);
+    // The room kind's degradation preference survives the retuning.
+    expect(toBo.sender.getParameters().degradationPreference).toBe("maintain-framerate");
+    ana.mesh.close();
+  });
+
+  it("reaches 1080p60 on a fast link and goes no higher, and a new share starts over", async () => {
+    const { ana, toBo } = await sharing();
+    toBo.sender.stats = senderStats(0);
+    for (let i = 0; i < 2 + UP_SAMPLES * 3; i++) await ana.mesh.adjust();
+    expect(rungs(ana.mesh)[0]).toBe("1080p60");
+    expect(toBo.sender.getParameters().encodings?.[0]).toMatchObject({ maxFramerate: 60 });
+
+    ana.mesh.setLocalTracks({ screen: trackWith("ana screen 2", { height: 1080, frameRate: 60 }) });
+    await settle();
+    expect(rungs(ana.mesh)[0]).toBe("1080p30");
+    ana.mesh.close();
+  });
+
+  it("caps a share at what its capture feeds, and drops the camera to 180p under pressure", async () => {
+    const network = new Map<string, Mesh>();
+    const ana = page("ana", network);
+    const bo = page("bo", network);
+    for (const mesh of network.values()) mesh.join(everyone);
+    await settle();
+    const screen = trackWith("small window", { height: 720, frameRate: 30 });
+    const cam = trackWith("cam", { height: 360, frameRate: 15 });
+    ana.mesh.setLocalTracks({ screen, cam });
+    await settle();
+    connect(ana, bo);
+    await settle();
+    const camera = carrying(ana.pcs[0], cam);
+    expect(ana.mesh.quality()[0]).toMatchObject({
+      screen: { rung: "720p30" },
+      cam: { rung: "360p15" },
+    });
+    expect(camera?.sender.getParameters().encodings?.[0]).toMatchObject({
+      maxBitrate: 500_000,
+      maxFramerate: 15,
+      scaleResolutionDownBy: 1,
+    });
+    for (const t of ana.pcs[0]?.transceivers ?? []) t.sender.stats = senderStats(0.2);
+    for (let i = 0; i < 4; i++) await ana.mesh.adjust();
+    // The screen is at its lowest rung already; the camera drops.
+    expect(ana.mesh.quality()[0]).toMatchObject({
+      screen: { rung: "720p30" },
+      cam: { rung: "180p15" },
+    });
+    expect(camera?.sender.getParameters().encodings?.[0]).toMatchObject({
+      maxBitrate: 150_000,
+      scaleResolutionDownBy: 2,
+    });
+    ana.mesh.close();
+  });
+
+  it("puts a sender's parameters right again on the next pass, and restarts its readings when its track resumes", async () => {
+    const { ana, bo, toBo } = await sharing();
+    toBo.sender.stats = senderStats(0.1);
+    // Something (a refused change, a resized capture) left the encoding off its rung.
+    const stale = toBo.sender.getParameters();
+    await toBo.sender.setParameters({
+      ...stale,
+      encodings: [{ ...stale.encodings?.[0], maxBitrate: 1, scaleResolutionDownBy: 3 }],
+    });
+    await ana.mesh.adjust();
+    await settle();
+    expect(toBo.sender.getParameters().encodings?.[0]).toMatchObject({
+      maxBitrate: 3_000_000,
+      scaleResolutionDownBy: 1,
+    });
+
+    // Warm-up is over after two more readings; a resumed track starts it again.
+    await ana.mesh.adjust();
+    bo.mesh.setVisible("ana", "screen", false);
+    await settle();
+    bo.mesh.setVisible("ana", "screen", true);
+    await settle();
+    for (let i = 0; i < 4; i++) await ana.mesh.adjust();
+    // 2 warm-up readings, then 2 lossy ones: one step down, not the two it would be without.
+    expect(rungs(ana.mesh)[0]).toBe("900p30");
+    ana.mesh.close();
+  });
+
+  it("leaves a pair that isn't connected alone", async () => {
+    const network = new Map<string, Mesh>();
+    const ana = page("ana", network);
+    page("bo", network);
+    for (const mesh of network.values()) mesh.join(everyone);
+    await settle();
+    ana.mesh.setLocalTracks({ screen: trackWith("s", { height: 1080, frameRate: 60 }) });
+    await settle();
+    let reads = 0;
+    for (const t of ana.pcs[0]?.transceivers ?? []) {
+      t.sender.getStats = async () => {
+        reads++;
+        return senderStats(0);
+      };
+    }
+    await ana.mesh.adjust();
+    expect(reads).toBe(0);
+    ana.mesh.close();
+  });
+});
+
+describe("Mesh codec choice (ADR 2)", () => {
+  const codec = (mimeType: string) => ({ mimeType, clockRate: 90_000 });
+  const chromium: VideoCodecs = {
+    send: [codec("video/VP8"), codec("video/AV1"), codec("video/VP9"), codec("video/rtx")],
+    receive: ["video/VP8", "video/AV1", "video/VP9"],
+  };
+  const firefox: VideoCodecs = {
+    send: [codec("video/VP8"), codec("video/VP9"), codec("video/rtx")],
+    receive: ["video/VP8", "video/VP9"],
+  };
+  const sender = (pc: FakePC | undefined) => pc?.transceivers.find((t) => t.sender.track);
+
+  it("tells peers what it can decode, and offers each the best codec both have", async () => {
+    const network = new Map<string, Mesh>();
+    const ana = page("ana", network, undefined, chromium);
+    const bo = page("bo", network, undefined, firefox);
+    for (const mesh of network.values()) mesh.join(everyone);
+    await settle();
+    ana.mesh.setLocalTracks({ screen: trackWith("s", { height: 1080, frameRate: 60 }) });
+    bo.mesh.setLocalTracks({ cam: trackWith("c", { height: 360, frameRate: 15 }) });
+    await settle();
+    // Ana (Chromium) leaves AV1 out for Bo (Firefox), who can't decode it.
+    expect(sender(ana.pcs[0])?.codecPreferences.map((c) => c.mimeType)).toEqual([
+      "video/VP9",
+      "video/VP8",
+      "video/rtx",
+    ]);
+    // Bo sends VP9 first, though Ana would take AV1.
+    expect(sender(bo.pcs[0])?.codecPreferences.map((c) => c.mimeType)).toEqual([
+      "video/VP9",
+      "video/VP8",
+      "video/rtx",
+    ]);
+  });
+
+  it("offers everything, best first, until the peer has said what it decodes", async () => {
+    const network = new Map<string, Mesh>();
+    const bo = page("bo", network, undefined, chromium);
+    // Ana (the polite side) isn't there to say anything.
+    bo.mesh.join(everyone);
+    bo.mesh.setLocalTracks({ screen: trackWith("s") });
+    await settle();
+    expect(sender(bo.pcs[0])?.codecPreferences.map((c) => c.mimeType)).toEqual([
+      "video/AV1",
+      "video/VP9",
+      "video/VP8",
+      "video/rtx",
+    ]);
+    bo.mesh.close();
   });
 });
 
