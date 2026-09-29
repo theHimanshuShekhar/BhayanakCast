@@ -23,10 +23,10 @@ const pill =
   "inline-flex items-center gap-1 px-2 py-[3px] rounded-full bg-black/55 backdrop-blur-[6px] text-[10px] text-white tracking-[0.04em]";
 
 // The streamer's real thumbnail, or the placeholder while there is none or it won't load.
-const StreamScreen = ({ stream, frame }: { stream: Stream; frame: number }) => {
+const StreamScreen = ({ stream }: { stream: Stream }) => {
   const [failed, setFailed] = useState<string | null>(null);
   if (!stream.thumbnail || failed === stream.thumbnail) {
-    return <ScreenPlaceholder kind={stream.screen} label={false} frame={frame} />;
+    return <ScreenPlaceholder kind={stream.screen} label={false} />;
   }
   return (
     <img
@@ -41,12 +41,10 @@ const StreamScreen = ({ stream, frame }: { stream: Stream; frame: number }) => {
 export const StreamMosaic = ({
   streams,
   cached = false,
-  frame = 0,
   freshness,
 }: {
   streams: Stream[];
   cached?: boolean;
-  frame?: number;
   freshness?: string;
 }) => {
   const list = streams.slice(0, 3);
@@ -59,12 +57,11 @@ export const StreamMosaic = ({
         </div>
       )}
       <div
-        key={frame}
         className={`absolute inset-0 grid gap-[2px] animate-bc-fade ${MOSAIC_GRID[n]} ${cached ? "saturate-[0.35] brightness-[0.8]" : ""}`}
       >
         {list.map((s) => (
           <div key={s.user} className="relative min-w-0 min-h-0 overflow-hidden">
-            <StreamScreen stream={s} frame={frame} />
+            <StreamScreen stream={s} />
             {(n > 1 || s.thumbnail) && (
               <span className="absolute bottom-1.5 left-1.5 z-[2] inline-flex items-center gap-1 max-w-[calc(100%-12px)] pl-0.5 pr-1.5 py-0.5 rounded-full bg-black/55 backdrop-blur-[6px] text-[9.5px] font-semibold text-white">
                 <Avatar name={s.user} size="sm" className="!w-3.5 !h-3.5 !text-[6px]" />
@@ -99,26 +96,27 @@ export const StreamMosaic = ({
   );
 };
 
-// Thumbnails refresh every 3 minutes (ADR 10); freshness label ticks every 20s.
-const SNAPSHOT_MS = 3 * 60 * 1000;
-export const useSnapshots = () => {
-  const [frame, setFrame] = useState(0);
-  const [at, setAt] = useState(() => Date.now());
+// Thumbnails come from the streamers every 3 minutes (ADR 10) and cards refetch when one
+// arrives; `now` ticks every 20s so the freshness labels age.
+export const useNow = () => {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const snap = setInterval(() => {
-      setFrame((f) => f + 1);
-      setAt(Date.now());
-    }, SNAPSHOT_MS);
     const clock = setInterval(() => setNow(Date.now()), 20000);
-    return () => {
-      clearInterval(snap);
-      clearInterval(clock);
-    };
+    return () => clearInterval(clock);
   }, []);
-  const mins = Math.max(0, Math.floor((now - at) / 60000));
-  return { frame, freshness: mins < 1 ? "updated just now" : `updated ${mins}m ago` };
+  return now;
 };
+
+/** The newest thumbnail's capture time (ISO) among `streamers`, or null if none has one. */
+export const newestThumbnail = (streamers: { thumbnailAt?: string | null }[]): string | null =>
+  streamers.reduce<string | null>(
+    (newest, s) => (s.thumbnailAt && (!newest || s.thumbnailAt > newest) ? s.thumbnailAt : newest),
+    null,
+  );
+
+/** A past stream's mosaic label: how old its newest thumbnail is, else when the room ended. */
+export const endedLabel = (newest: string | null, endedAt: string): string =>
+  newest ? `cached · ${fmtAgo(newest)}` : `ended · ${fmtAgo(endedAt)}`;
 
 /**
  * A room's shares for its mosaic: each streamer's thumbnail once they have one (`thumbnailAt`,
@@ -137,13 +135,14 @@ export const placeholderStreams = (
 export const LiveCard = ({
   room,
   onOpen,
-  snap,
+  now,
 }: {
   room: LiveRoomCard;
   onOpen: (room: LiveRoomCard) => void;
-  snap?: { frame: number; freshness: string };
+  now?: number;
 }) => {
   const hostName = room.host?.username ?? "no host";
+  const newest = newestThumbnail(room.streamers);
   const viewers = room.participants.filter((p) => p.id !== room.host?.id).length;
   const faces = room.participants.length
     ? room.participants.map((p) => p.username)
@@ -159,8 +158,7 @@ export const LiveCard = ({
     >
       <StreamMosaic
         streams={placeholderStreams(room.streamers, room.id)}
-        frame={snap?.frame}
-        freshness={snap?.freshness}
+        freshness={newest ? `updated ${fmtAgo(newest, now)}` : undefined}
       />
       <div className="flex items-center gap-2 min-w-0">
         <span className="text-[15px] font-bold tracking-[-0.005em] truncate">{room.name}</span>
@@ -202,6 +200,7 @@ export const PastCard = ({
   onOpen: (room: PastRoomCard) => void;
 }) => {
   const names = room.people.map((p) => p.username);
+  const newest = newestThumbnail(room.streamers);
   return (
     <button
       type="button"
@@ -210,9 +209,9 @@ export const PastCard = ({
       className={`${cardBase} shadow-card transition-[transform,border-color] duration-[120ms] hover:-translate-y-px hover:border-border-strong`}
     >
       <StreamMosaic
-        streams={placeholderStreams(room.streamers)}
+        streams={placeholderStreams(room.streamers, room.id)}
         cached
-        freshness={`ended · ${fmtAgo(room.endedAt)}`}
+        freshness={endedLabel(newest, room.endedAt)}
       />
       <div className="flex items-center gap-2 min-w-0">
         <span className="text-[13.5px] font-semibold truncate">{room.name}</span>

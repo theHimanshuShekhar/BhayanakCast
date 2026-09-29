@@ -1,12 +1,14 @@
 /**
  * Capture a thumbnail of this browser's own screen share and upload it (ADR 10). Runs when a
- * share starts. Best effort: a room card keeps its placeholder if any step fails.
+ * share starts and every 3 minutes while it lasts. Best effort: a room card keeps its
+ * placeholder (or its last thumbnail) if any step fails.
  */
 import {
   THUMBNAIL_HEIGHT,
   THUMBNAIL_MAX_BYTES,
   THUMBNAIL_WIDTH,
   thumbnailLayout,
+  thumbnailRefreshMs,
   thumbnailUploadUrl,
 } from "./thumbnails";
 
@@ -108,4 +110,25 @@ export async function uploadShareThumbnail(roomId: string, track: MediaStreamTra
   } catch {
     // Best effort.
   }
+}
+
+/** How often a share's thumbnail is captured again; an e2e build shortens it. */
+const REFRESH_MS = thumbnailRefreshMs(import.meta.env.VITE_THUMBNAIL_REFRESH_MS);
+
+/**
+ * Upload a thumbnail of `track` now and then every `intervalMs` while the track is live, until
+ * the returned function is called (the share stopped, or the page left the room). `upload` is
+ * a seam for tests.
+ */
+export function startThumbnailUploads(
+  roomId: string,
+  track: MediaStreamTrack,
+  upload: typeof uploadShareThumbnail = uploadShareThumbnail,
+  intervalMs: number = REFRESH_MS,
+): () => void {
+  void upload(roomId, track);
+  const timer = setInterval(() => {
+    if (track.readyState === "live") void upload(roomId, track);
+  }, intervalMs);
+  return () => clearInterval(timer);
 }

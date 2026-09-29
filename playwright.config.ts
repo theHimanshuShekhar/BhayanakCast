@@ -68,6 +68,9 @@ export default defineConfig({
       // the pre-join lobby), and tests leave and revisit rooms: 60s leaves room to spare on a
       // loaded machine.
       REALTIME_EMPTY_ROOM_TIMEOUT_MS: "60000",
+      // A share's thumbnail refreshes every 8s, not 3 minutes (e2e/thumbnails.spec.ts); Vite
+      // inlines it into the client at build time.
+      VITE_THUMBNAIL_REFRESH_MS: "8000",
     },
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,

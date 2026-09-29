@@ -4,7 +4,7 @@
  * routes in src/routes/api.thumbnails.*.ts stay thin and tests call these against PGlite. The
  * uploader is always the caller, never an id the client sends.
  */
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, or } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import { rooms, streamIntervals, thumbnails } from "../db/schema/index.ts";
 import {
@@ -14,6 +14,7 @@ import {
 } from "../lib/thumbnails.ts";
 import { type Caller, requireSignedIn } from "./caller.ts";
 import { withinRateLimit } from "./rate-limit.ts";
+import { endedWithinRetention } from "./rooms.ts";
 import { roomVisibleTo } from "./visibility.ts";
 
 /** Thrown when the caller isn't streaming in the room they upload to. */
@@ -105,23 +106,57 @@ export async function uploadThumbnail(
 }
 
 /**
- * `userId`'s latest thumbnail in `roomId`, or null if they have none or the room is hidden
- * from the caller (a private room's screens are for the people allowed in, ADR 16).
+ * `userId`'s latest thumbnail in `roomId`, or null if they have none, the room is hidden from
+ * the caller (a private room's screens are for the people allowed in, ADR 16) or it ended more
+ * than 30 days ago (ADR 11: about to be purged, so already gone). A past stream's last
+ * thumbnails are served like a live room's.
  */
 export async function getThumbnail(
   db: Db,
   caller: Caller,
   roomId: string,
   userId: string,
+  now: Date = new Date(),
 ): Promise<{ image: Uint8Array; mime: string; capturedAt: Date } | null> {
   const [row] = await db
     .select({ image: thumbnails.image, mime: thumbnails.mime, capturedAt: thumbnails.capturedAt })
     .from(thumbnails)
     .innerJoin(rooms, eq(rooms.id, thumbnails.roomId))
     .where(
-      and(eq(thumbnails.roomId, roomId), eq(thumbnails.userId, userId), roomVisibleTo(caller)),
+      and(
+        eq(thumbnails.roomId, roomId),
+        eq(thumbnails.userId, userId),
+        roomVisibleTo(caller),
+        or(isNull(rooms.endedAt), endedWithinRetention(now)),
+      ),
     );
   return row ?? null;
+}
+
+/** The entity tag of a thumbnail: its capture time, which changes with every upload. */
+export const thumbnailEtag = (capturedAt: Date): string => `"${capturedAt.getTime()}"`;
+
+/**
+ * The route's answer for a thumbnail: 304 when `ifNoneMatch` lists its ETag, else the image.
+ * `private`, because who may see it depends on the caller (ADR 16).
+ */
+export function thumbnailResponse(
+  thumbnail: { image: Uint8Array; mime: string; capturedAt: Date },
+  ifNoneMatch: string | null,
+): Response {
+  const etag = thumbnailEtag(thumbnail.capturedAt);
+  const headers = {
+    etag,
+    "cache-control": "private, max-age=60",
+    "x-content-type-options": "nosniff",
+  };
+  const tags = ifNoneMatch?.split(",").map((tag) => tag.trim().replace(/^W\//, ""));
+  if (tags?.includes(etag) || tags?.includes("*")) {
+    return new Response(null, { status: 304, headers });
+  }
+  return new Response(new Uint8Array(thumbnail.image), {
+    headers: { ...headers, "content-type": thumbnail.mime },
+  });
 }
 
 /** Uploads a user may make: a share refreshes every ~3 minutes, so this is generous. */

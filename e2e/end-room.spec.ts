@@ -1,23 +1,17 @@
-import type { Page } from "@playwright/test";
 import { E2E_ADMIN_DISCORD_ID, signIn } from "./auth";
 import { expect, newPage, test } from "./fixtures";
 import { createUser, uniqueUsername } from "./profiles";
-import { createRoomOnPage, enterRoom, minutesAgo, seedRoom, uniqueRoomName } from "./rooms";
+import {
+  createRoomOnPage,
+  endRoom,
+  enterRoom,
+  liveRoomRow,
+  minutesAgo,
+  seedRoom,
+  uniqueRoomName,
+} from "./rooms";
 
 // An admin ends a room from /admin (#46, ADR 6).
-
-const liveRow = (admin: Page, name: string) =>
-  admin.getByRole("table", { name: "live rooms" }).getByRole("row").filter({ hasText: name });
-
-/** On `admin` (at /admin), end the live room `name` through its confirmation dialog. */
-async function endRoom(admin: Page, name: string) {
-  await liveRow(admin, name)
-    .getByRole("button", { name: `End ${name}` })
-    .click();
-  const dialog = admin.getByRole("dialog", { name: `end ${name}` });
-  await dialog.getByRole("button", { name: "end room" }).click();
-  await expect(dialog).toHaveCount(0);
-}
 
 test("an admin ends a room two people are in: both land on home with the notice", async ({
   page,
@@ -39,9 +33,9 @@ test("an admin ends a room two people are in: both land on home with the notice"
     await signIn(adminContext, { discordId: E2E_ADMIN_DISCORD_ID, username: "admin_jpg" });
     const admin = await newPage(adminContext);
     await admin.goto("/admin");
-    await expect(liveRow(admin, name)).toContainText("2/10");
+    await expect(liveRoomRow(admin, name)).toContainText("2/10");
     await endRoom(admin, name);
-    await expect(liveRow(admin, name)).toHaveCount(0);
+    await expect(liveRoomRow(admin, name)).toHaveCount(0);
 
     for (const person of [page, guest]) {
       await expect(person).toHaveURL(/\/\?ended=admin$/);
@@ -81,7 +75,7 @@ test("an admin ends a live room the realtime server doesn't hold: it ends all th
   const admin = await newPage(context);
   await admin.goto("/admin");
   await endRoom(admin, name);
-  await expect(liveRow(admin, name)).toHaveCount(0);
+  await expect(liveRoomRow(admin, name)).toHaveCount(0);
 
   await admin.getByRole("textbox", { name: "Search rooms or hosts" }).fill(name);
   const recentRow = admin

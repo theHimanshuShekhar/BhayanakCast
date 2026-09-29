@@ -283,12 +283,24 @@ export class RoomHub {
   }
 
   /**
-   * A room change made outside the hub (./room-announcements.ts). A created room is live and
+   * A room change made outside the hub (./room-announcements.ts). A new thumbnail tells the
+   * lobby (public rooms only). A created room is live and
    * empty from now: it ends unless someone enters in time (ADR 14), even if its creator closes
    * the page in the pre-join lobby.
    */
   announce(announcement: RoomAnnouncement): Promise<void> {
     return this.#enqueue(async () => {
+      if (announcement.kind === "thumbnail") {
+        const room = this.#rooms.get(announcement.roomId);
+        if (room && !room.isPrivate) {
+          this.#lobbyChanged({
+            roomId: room.id,
+            change: "thumbnail",
+            participantCount: room.participants.size,
+          });
+        }
+        return;
+      }
       const { roomId, name, hostUserId, isPrivate } = announcement;
       if (!this.#rooms.has(roomId)) {
         const room = this.#addRoom({

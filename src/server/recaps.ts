@@ -11,9 +11,11 @@ import type { Recap, RecapPerson } from "../lib/recaps.ts";
 import type { Caller } from "./caller.ts";
 import { roomTimes } from "./intervals.ts";
 import {
+  capturedAtOf,
   endedWithinRetention,
   minutesBetween,
   selectRooms,
+  thumbnailTimes,
   toSummary,
   usernameOf,
 } from "./rooms.ts";
@@ -71,6 +73,7 @@ export async function getRecap(
   );
   if (!room?.endedAt) return null;
 
+  const captured = await thumbnailTimes(db, [roomId]);
   const byUser = new Map<string, RecapPerson & { firstMs: number }>();
   for (const row of await recapSpans(db, roomId)) {
     let person = byUser.get(row.userId);
@@ -84,6 +87,7 @@ export async function getRecap(
         streams: [],
         streamMinutes: row.streamedSecs / 60,
         watchMinutes: row.watchedSecs / 60,
+        thumbnailAt: capturedAtOf(captured, roomId, row.userId),
         firstMs: row.startMs,
       };
       byUser.set(row.userId, person);

@@ -118,6 +118,7 @@ describe("getRecap", () => {
         streams: [{ start: iso(0), end: iso(30) }],
         streamMinutes: 30,
         watchMinutes: 30,
+        thumbnailAt: null,
       },
       {
         id: "b",
@@ -131,6 +132,7 @@ describe("getRecap", () => {
         streams: [],
         streamMinutes: 0,
         watchMinutes: 35,
+        thumbnailAt: null,
       },
       {
         id: "c",
@@ -141,6 +143,7 @@ describe("getRecap", () => {
         streams: [],
         streamMinutes: 0,
         watchMinutes: 40,
+        thumbnailAt: null,
       },
     ]);
   });
@@ -282,7 +285,7 @@ describe("listPastRooms", () => {
           { id: "a", username: "a.discord" },
           { id: "b", username: "b.discord" },
         ],
-        streamers: [{ id: "b", username: "b.discord" }],
+        streamers: [{ id: "b", username: "b.discord", thumbnailAt: null }],
       }),
     ]);
   });
