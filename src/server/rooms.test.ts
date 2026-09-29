@@ -205,7 +205,7 @@ describe("listLiveRooms", () => {
         { id: "member", username: "member.discord" },
       ],
       streamCount: 1,
-      streamers: [{ id: "host", username: "host.discord" }],
+      streamers: [{ id: "host", username: "host.discord", thumbnailAt: null }],
     };
     const [room] = await listLiveRooms(db, visitor);
     expect(room).toMatchObject(peopleNow);

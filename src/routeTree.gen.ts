@@ -16,6 +16,8 @@ import { Route as PastRoomIdRouteImport } from './routes/past/$roomId'
 import { Route as ProfileUserIdRouteImport } from './routes/profile/$userId'
 import { Route as RoomRoomIdRouteImport } from './routes/room/$roomId'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as ApiThumbnailsRoomIdIndexRouteImport } from './routes/api/thumbnails/$roomId/index'
+import { Route as ApiThumbnailsRoomIdUserIdRouteImport } from './routes/api/thumbnails/$roomId/$userId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -52,6 +54,18 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiThumbnailsRoomIdIndexRoute =
+  ApiThumbnailsRoomIdIndexRouteImport.update({
+    id: '/api/thumbnails/$roomId/',
+    path: '/api/thumbnails/$roomId/',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiThumbnailsRoomIdUserIdRoute =
+  ApiThumbnailsRoomIdUserIdRouteImport.update({
+    id: '/api/thumbnails/$roomId/$userId',
+    path: '/api/thumbnails/$roomId/$userId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -61,6 +75,8 @@ export interface FileRoutesByFullPath {
   '/profile/$userId': typeof ProfileUserIdRoute
   '/room/$roomId': typeof RoomRoomIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/thumbnails/$roomId/$userId': typeof ApiThumbnailsRoomIdUserIdRoute
+  '/api/thumbnails/$roomId/': typeof ApiThumbnailsRoomIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -70,6 +86,8 @@ export interface FileRoutesByTo {
   '/profile/$userId': typeof ProfileUserIdRoute
   '/room/$roomId': typeof RoomRoomIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/thumbnails/$roomId/$userId': typeof ApiThumbnailsRoomIdUserIdRoute
+  '/api/thumbnails/$roomId': typeof ApiThumbnailsRoomIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -80,6 +98,8 @@ export interface FileRoutesById {
   '/profile/$userId': typeof ProfileUserIdRoute
   '/room/$roomId': typeof RoomRoomIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/thumbnails/$roomId/$userId': typeof ApiThumbnailsRoomIdUserIdRoute
+  '/api/thumbnails/$roomId/': typeof ApiThumbnailsRoomIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -91,6 +111,8 @@ export interface FileRouteTypes {
     | '/profile/$userId'
     | '/room/$roomId'
     | '/api/auth/$'
+    | '/api/thumbnails/$roomId/$userId'
+    | '/api/thumbnails/$roomId/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -100,6 +122,8 @@ export interface FileRouteTypes {
     | '/profile/$userId'
     | '/room/$roomId'
     | '/api/auth/$'
+    | '/api/thumbnails/$roomId/$userId'
+    | '/api/thumbnails/$roomId'
   id:
     | '__root__'
     | '/'
@@ -109,6 +133,8 @@ export interface FileRouteTypes {
     | '/profile/$userId'
     | '/room/$roomId'
     | '/api/auth/$'
+    | '/api/thumbnails/$roomId/$userId'
+    | '/api/thumbnails/$roomId/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -119,6 +145,8 @@ export interface RootRouteChildren {
   ProfileUserIdRoute: typeof ProfileUserIdRoute
   RoomRoomIdRoute: typeof RoomRoomIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiThumbnailsRoomIdUserIdRoute: typeof ApiThumbnailsRoomIdUserIdRoute
+  ApiThumbnailsRoomIdIndexRoute: typeof ApiThumbnailsRoomIdIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -172,6 +200,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/thumbnails/$roomId/': {
+      id: '/api/thumbnails/$roomId/'
+      path: '/api/thumbnails/$roomId'
+      fullPath: '/api/thumbnails/$roomId/'
+      preLoaderRoute: typeof ApiThumbnailsRoomIdIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/thumbnails/$roomId/$userId': {
+      id: '/api/thumbnails/$roomId/$userId'
+      path: '/api/thumbnails/$roomId/$userId'
+      fullPath: '/api/thumbnails/$roomId/$userId'
+      preLoaderRoute: typeof ApiThumbnailsRoomIdUserIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -183,6 +225,8 @@ const rootRouteChildren: RootRouteChildren = {
   ProfileUserIdRoute: ProfileUserIdRoute,
   RoomRoomIdRoute: RoomRoomIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiThumbnailsRoomIdUserIdRoute: ApiThumbnailsRoomIdUserIdRoute,
+  ApiThumbnailsRoomIdIndexRoute: ApiThumbnailsRoomIdIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

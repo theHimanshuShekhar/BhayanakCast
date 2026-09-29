@@ -28,6 +28,7 @@ import {
   roomMembers,
   rooms,
   streamIntervals,
+  thumbnails,
   user,
 } from "../db/schema/index.ts";
 import { ROOM_CAPACITY } from "../lib/format.ts";
@@ -168,16 +169,34 @@ async function peopleIn(
   return byRoom;
 }
 
+/** When each streamer's latest thumbnail was captured (ISO), keyed `roomId:userId`. */
+async function thumbnailTimes(db: Db, roomIds: string[]): Promise<Map<string, string>> {
+  if (roomIds.length === 0) return new Map();
+  const rows = await db
+    .select({
+      roomId: thumbnails.roomId,
+      userId: thumbnails.userId,
+      capturedAt: thumbnails.capturedAt,
+    })
+    .from(thumbnails)
+    .where(inArray(thumbnails.roomId, roomIds));
+  return new Map(rows.map((r) => [`${r.roomId}:${r.userId}`, r.capturedAt.toISOString()]));
+}
+
 /** Live room rows with the people in them now (open presence and stream intervals). */
 async function withPeopleNow(db: Db, rows: RoomRow[]): Promise<LiveRoomCard[]> {
   const ids = rows.map((row) => row.id);
-  const [present, streaming] = await Promise.all([
+  const [present, streaming, captured] = await Promise.all([
     peopleIn(db, presenceIntervals, ids, { openOnly: true }),
     peopleIn(db, streamIntervals, ids, { openOnly: true }),
+    thumbnailTimes(db, ids),
   ]);
   return rows.map((row) => {
     const participants = present.get(row.id) ?? [];
-    const streamers = streaming.get(row.id) ?? [];
+    const streamers = (streaming.get(row.id) ?? []).map((person) => ({
+      ...person,
+      thumbnailAt: captured.get(`${row.id}:${person.id}`) ?? null,
+    }));
     return {
       ...toSummary(row),
       participants,
