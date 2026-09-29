@@ -3,7 +3,7 @@ import { signIn } from "./auth";
 import { expect, newPage, test } from "./fixtures";
 import { createRoomOnPage, enterRoom, uniqueRoomName } from "./rooms";
 
-// Mic/cam/share state over the realtime socket (#29). No real media yet: sharing is a flag.
+// Mic/cam/share state over the realtime socket (#29); the shares themselves are e2e/share.spec.ts.
 
 /** The LIVE chip on a streamer's tile (not the room's "LIVE · 3m" header chip). */
 const liveTile = (page: Page) => page.getByText("LIVE", { exact: true });

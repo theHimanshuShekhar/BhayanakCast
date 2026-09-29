@@ -42,7 +42,11 @@ describe("roomDetailFor", () => {
 
   it("puts streamers first on big tiles, others on small ones, and you in the viewers", () => {
     const detail = roomDetailFor(
-      room({ participants: [viewer, host], streamers: [host], participantCount: 2 }),
+      room({
+        participants: [viewer, host],
+        streamers: [{ ...host, thumbnailAt: null }],
+        participantCount: 2,
+      }),
       me,
     );
     expect(
@@ -83,7 +87,11 @@ describe("withRoster", () => {
 
   it("keeps who the server says is there, in place, and adds newcomers at the end", () => {
     const shown = roomDetailFor(
-      room({ participants: [host, viewer], streamers: [host], participantCount: 2 }),
+      room({
+        participants: [host, viewer],
+        streamers: [{ ...host, thumbnailAt: null }],
+        participantCount: 2,
+      }),
       me,
     ).participants;
     const next = withRoster(

@@ -70,6 +70,8 @@ export function uniqueRoomName(base: string): string {
 export interface NewRoom {
   name: string;
   isPrivate?: boolean;
+  /** The create dialog's kind button, e.g. "Coding" (default: Gaming). */
+  kind?: string;
 }
 
 /**
@@ -95,6 +97,7 @@ export async function createRoomOnPage(page: Page, room: NewRoom): Promise<strin
   await page.getByRole("button", { name: "Start a Room" }).first().click();
   const dialog = page.getByRole("dialog", { name: "start a hang" });
   await dialog.getByLabel("room name").fill(room.name);
+  if (room.kind) await dialog.getByRole("button", { name: room.kind, exact: true }).click();
   if (room.isPrivate) await dialog.getByRole("switch").click();
   await dialog.getByRole("button", { name: /start hang/ }).click();
   await expect(page.getByRole("heading", { name: room.name })).toBeVisible();

@@ -22,8 +22,13 @@ export const PROTOCOL_VERSION = 1;
 /** The WebSocket endpoint's path on the app server. */
 export const REALTIME_PATH = "/ws";
 
-/** Largest client message the server reads, in bytes; bigger frames close the socket. */
-export const MAX_CLIENT_MESSAGE_BYTES = 16 * 1024;
+/**
+ * Largest client message the server reads, in bytes; bigger frames close the socket. The
+ * largest messages are SDP offers: Chromium's with all four slots both ways (mic, camera,
+ * screen, share audio: eight m-sections) is about 24 KB, so this leaves room for gathered
+ * candidates and codecs added by browser updates (ADR 4 addendum).
+ */
+export const MAX_CLIENT_MESSAGE_BYTES = 64 * 1024;
 
 const roomId = z.string().min(1).max(64);
 
@@ -64,7 +69,10 @@ export const FEED_HISTORY_SIZE = 50;
 /** A knock on a private room nobody decides within this long expires (ADR 16; server clock). */
 export const KNOCK_EXPIRY_MS = 10 * 60_000;
 
-/** Someone's mic, camera and screen share, on or off. No media flows in this slice (spec #4). */
+/**
+ * Someone's mic, camera and screen share, on or off, as announced. A share is on once the
+ * server accepts it (3 streamers at most); the browser captures the screen only after that.
+ */
 export const mediaState = z.object({ mic: z.boolean(), cam: z.boolean(), share: z.boolean() });
 export type MediaState = z.infer<typeof mediaState>;
 /** Everything off: how everyone arrives (the lobby starts mic and camera off). */
@@ -72,7 +80,7 @@ export const MEDIA_OFF: MediaState = { mic: false, cam: false, share: false };
 
 /**
  * The tracks one participant can send each peer, all over one connection per pair (ADR 1
- * addendum): the mic and camera now; screen and share audio in a later ticket (#36).
+ * addendum): the mic, the camera, the screen share and its tab or system audio.
  */
 export const MEDIA_SLOTS = ["mic", "cam", "screen", "screenAudio"] as const;
 export type MediaSlot = (typeof MEDIA_SLOTS)[number];
@@ -90,6 +98,8 @@ const iceCandidate = z.object({
   usernameFragment: z.string().max(256).nullable().optional(),
 });
 const pcSession = z.string().min(1).max(64);
+/** The video codecs (MIME types) the sender can decode: the other side sends the best of them. */
+const videoCodecs = z.array(z.string().min(1).max(48)).max(16);
 
 /**
  * One WebRTC signalling step between two peers' connections (src/lib/mesh.ts), which the server
@@ -102,7 +112,7 @@ export const signalPayload = z.discriminatedUnion("kind", [
    * A new connection's first word when it has no offer yet: a peer that had one to the sender's
    * old page starts over, and one whose offer was lost sends it again.
    */
-  z.object({ kind: z.literal("hello"), session: pcSession }),
+  z.object({ kind: z.literal("hello"), session: pcSession, codecs: videoCodecs.optional() }),
   z.object({
     kind: z.literal("description"),
     session: pcSession,
@@ -110,6 +120,8 @@ export const signalPayload = z.discriminatedUnion("kind", [
     description: sessionDescription,
     /** Which of the sender's tracks each of its own transceivers (by `mid`) carries. */
     slots: z.record(z.string().max(32), z.enum(MEDIA_SLOTS)).optional(),
+    /** The sender's decodable video codecs (ADR 2: the pair uses the best both have). */
+    codecs: videoCodecs.optional(),
   }),
   z.object({
     kind: z.literal("candidate"),

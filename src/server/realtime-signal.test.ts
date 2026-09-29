@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type ClientMessage, SIGNAL_RATE_LIMIT, type SignalPayload } from "../lib/realtime.ts";
+import {
+  type ClientMessage,
+  MAX_CLIENT_MESSAGE_BYTES,
+  SIGNAL_RATE_LIMIT,
+  type SignalPayload,
+} from "../lib/realtime.ts";
 import {
   type RealtimeHarness,
   startRealtimeHarness,
@@ -217,8 +222,39 @@ describe("signal", () => {
     expect(a.pending()).toEqual([]);
   });
 
+  it("relays an offer with all four slots both ways, and closes a socket sending more than the cap", async () => {
+    const [a, b] = await inRoom([ana, bo]);
+    // Chromium's offer for eight m-sections is about 24 KB (ADR 4 addendum).
+    const offer: SignalPayload = {
+      ...OFFER,
+      description: { type: "offer", sdp: `v=0\r\n${"a=x\r\n".repeat(6_000)}` },
+    };
+    a.send(signal(bo, offer));
+    expect((await b.waitFor("signal")).payload).toEqual(offer);
+
+    a.sendRaw("x".repeat(MAX_CLIENT_MESSAGE_BYTES + 1));
+    expect(await a.closed()).toBe(1009);
+  });
+
+  it("relays the video codecs each side can decode with its hello and descriptions", async () => {
+    const [a, b] = await inRoom([ana, bo]);
+    const codecs = ["video/AV1", "video/VP9", "video/H264", "video/VP8"];
+    a.send(signal(bo, { ...HELLO, codecs }));
+    expect((await b.waitFor("signal")).payload).toEqual({ ...HELLO, codecs });
+    a.send(signal(bo, { ...OFFER, codecs }));
+    expect((await b.waitFor("signal")).payload).toEqual({ ...OFFER, codecs });
+  });
+
   it("refuses a malformed payload", async () => {
     const [a] = await inRoom([ana, bo]);
+    a.sendRaw(
+      JSON.stringify({
+        type: "signal",
+        to: bo.id,
+        payload: { ...HELLO, codecs: ["x".repeat(49)] },
+      }),
+    );
+    expect(await a.waitFor("error")).toMatchObject({ code: "bad_request", re: "signal" });
     a.sendRaw(JSON.stringify({ type: "signal", to: bo.id, payload: { kind: "nonsense" } }));
     expect(await a.waitFor("error")).toMatchObject({ code: "bad_request", re: "signal" });
     a.sendRaw(

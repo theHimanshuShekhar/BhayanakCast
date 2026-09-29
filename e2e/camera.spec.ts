@@ -120,7 +120,8 @@ test("a camera plays for everyone, also over a share, and pauses towards a viewe
     await expect.poll(() => cameraPlays(two, hostId), { timeout: 15_000 }).toBe(true);
     await expect.poll(() => connectionsReceivingVideo(two), { timeout: 15_000 }).toBe(1);
 
-    // Camera off: gone from every tile, and no more frames to anyone.
+    // Share and camera off: gone from every tile, and no more frames to anyone.
+    await page.getByRole("button", { name: "Stop sharing" }).click();
     await page.getByRole("button", { name: "Turn camera off" }).click();
     for (const p of [page, two, three]) {
       await expect(p.locator("video[data-camera]")).toHaveCount(0);

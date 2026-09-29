@@ -1,14 +1,18 @@
-// A peer's received audio, playing: kept out of the tiles, so it plays whether or not their
-// tile is shown. Volume and mute are this viewer's own (per-tile local controls).
+// A peer's received audio (their mic, or their share's audio), playing: kept out of the tiles,
+// so it plays whether or not their tile is shown. Volume and mute are this viewer's own
+// (per-tile local controls).
 import { useEffect, useRef } from "react";
 
 export function PeerAudio({
   userId,
+  share = false,
   track,
   volume,
   muted,
 }: {
   userId: string;
+  /** Their share's audio, not their mic. */
+  share?: boolean;
   track: MediaStreamTrack;
   /** 0–1. */
   volume: number;
@@ -45,6 +49,14 @@ export function PeerAudio({
     audio.muted = muted;
   }, [volume, muted]);
 
-  // biome-ignore lint/a11y/useMediaCaption: live voice from a peer has no caption track to give
-  return <audio ref={ref} autoPlay data-peer={userId} className="hidden" />;
+  return (
+    // biome-ignore lint/a11y/useMediaCaption: live sound from a peer has no caption track to give
+    <audio
+      ref={ref}
+      autoPlay
+      data-peer={share ? undefined : userId}
+      data-share={share ? userId : undefined}
+      className="hidden"
+    />
+  );
 }

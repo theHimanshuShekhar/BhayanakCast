@@ -7,8 +7,8 @@ export type { RoomKind };
 export type ScreenKind = "ableton" | "fl-studio" | "cli" | "browser" | "game";
 export type RoomRole = "host" | "mod" | "member";
 
-/** A share on a room card; its screen is a placeholder until thumbnails land (spec #5). */
-export type Stream = { user: string; screen: ScreenKind };
+/** A share on a room card: its thumbnail's URL, or a placeholder screen while there is none. */
+export type Stream = { user: string; screen: ScreenKind; thumbnail?: string };
 
 export type Participant = {
   id: string;
