@@ -32,7 +32,7 @@ class FakePC {
   onnegotiationneeded: (() => void) | null = null;
   onicecandidate: unknown = null;
   ontrack: ((e: { transceiver: FakeTransceiver; track: unknown }) => void) | null = null;
-  onconnectionstatechange: unknown = null;
+  onconnectionstatechange: (() => void) | null = null;
   readonly transceivers: FakeTransceiver[] = [];
   configuration: RTCConfiguration;
   /** What `getStats()` answers. */
@@ -172,6 +172,18 @@ function page(userId: string, network: Map<string, Mesh>, iceServers?: RTCIceSer
 const track = (name: string) => ({ id: name }) as unknown as MediaStreamTrack;
 const everyone = [{ userId: "ana" }, { userId: "bo" }];
 
+/** ICE succeeds on every open connection of `pages` (the fake has no transport of its own). */
+function connect(...pages: { pcs: FakePC[] }[]) {
+  for (const pc of pages.flatMap((p) => p.pcs)) {
+    if (pc.signalingState === "closed") continue;
+    pc.connectionState = "connected";
+    pc.onconnectionstatechange?.();
+  }
+}
+
+/** What each of `pc`'s transceivers sends now. */
+const sending = (pc: FakePC | undefined) => pc?.transceivers.map((t) => t.sender.track);
+
 describe("Mesh", () => {
   it("connects each pair once, the impolite side offering first, and both send their mic", async () => {
     const network = new Map<string, Mesh>();
@@ -278,6 +290,101 @@ describe("Mesh", () => {
     expect([...ana.pcs, ...bo.pcs].map((pc) => pc.signalingState)).toEqual(["stable", "stable"]);
     expect(ana.tracks("bo")).toEqual(["mic"]);
     expect(bo.tracks("ana")).toEqual(["mic"]);
+  });
+
+  it("pauses a camera towards a peer that isn't showing it, and resumes it when shown", async () => {
+    const network = new Map<string, Mesh>();
+    const ana = page("ana", network);
+    const bo = page("bo", network);
+    const cy = page("cy", network);
+    const room = [...everyone, { userId: "cy" }];
+    for (const mesh of network.values()) mesh.join(room);
+    await settle();
+    connect(ana, bo, cy);
+    const cam = track("ana cam");
+    ana.mesh.setLocalTracks({ cam });
+    await settle();
+    // Ana's connections to bo and cy, in the order she opened them.
+    const [toBo, toCy] = ana.pcs;
+    expect(sending(toBo)).toContain(cam);
+
+    bo.mesh.setVisible("ana", "cam", false);
+    await settle();
+    expect(sending(toBo)).not.toContain(cam);
+    expect(sending(toCy)).toContain(cam);
+    // Only the track is swapped: bo keeps it (muted), and nothing was renegotiated.
+    expect(bo.tracks("ana")).toEqual(["mic", "cam"]);
+    // Both mics and ana's camera.
+    expect(toBo?.transceivers).toHaveLength(3);
+
+    // A new camera track goes to cy only while bo still hides it.
+    const next = track("ana cam 2");
+    ana.mesh.setLocalTracks({ cam: next });
+    await settle();
+    expect(sending(toBo)).not.toContain(next);
+    expect(sending(toCy)).toContain(next);
+
+    bo.mesh.setVisible("ana", "cam", true);
+    await settle();
+    expect(sending(toBo)).toContain(next);
+  });
+
+  it("tells a peer what it hides once connected, and again after they start over", async () => {
+    const network = new Map<string, Mesh>();
+    const ana = page("ana", network);
+    const bo = page("bo", network);
+    bo.mesh.setVisible("ana", "cam", false);
+    for (const mesh of network.values()) mesh.join(everyone);
+    await settle();
+    connect(ana, bo);
+    await settle();
+    // The camera starts after bo hid it: its transceiver to bo starts with no track.
+    const cam = track("ana cam");
+    ana.mesh.setLocalTracks({ cam });
+    await settle();
+    expect(bo.tracks("ana")).toEqual(["mic", "cam"]);
+    expect(sending(ana.pcs[0])).not.toContain(cam);
+
+    // Ana reloads: her new page is told again once connected.
+    ana.mesh.close();
+    const again = page("ana", network);
+    again.mesh.setLocalTracks({ cam });
+    again.mesh.join(everyone);
+    await settle();
+    expect(sending(again.pcs[0])).toContain(cam);
+    connect(again, bo);
+    await settle();
+    expect(sending(again.pcs[0])).not.toContain(cam);
+  });
+
+  it("resumes a camera shown again while the pair was down, even if that step was lost", async () => {
+    const network = new Map<string, Mesh>();
+    const ana = page("ana", network);
+    const bo = page("bo", network);
+    for (const mesh of network.values()) mesh.join(everyone);
+    await settle();
+    connect(ana, bo);
+    const cam = track("ana cam");
+    ana.mesh.setLocalTracks({ cam });
+    bo.mesh.setVisible("ana", "cam", false);
+    await settle();
+    expect(sending(ana.pcs[0])).not.toContain(cam);
+
+    // ICE drops, and bo's "shown" step never reaches ana (the server dropped it).
+    for (const pc of [...ana.pcs, ...bo.pcs]) {
+      pc.connectionState = "disconnected";
+      pc.onconnectionstatechange?.();
+    }
+    network.delete("ana");
+    bo.mesh.setVisible("ana", "cam", true);
+    await settle();
+    expect(sending(ana.pcs[0])).not.toContain(cam);
+
+    // Reconnected: bo says it all again, and ana resumes.
+    network.set("ana", ana.mesh);
+    connect(ana, bo);
+    await settle();
+    expect(sending(ana.pcs[0])).toContain(cam);
   });
 
   it("closes a connection when its peer leaves, and every connection on close", async () => {

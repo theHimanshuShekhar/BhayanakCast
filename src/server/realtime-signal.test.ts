@@ -55,6 +55,13 @@ const CANDIDATE: SignalPayload = {
   candidate: { candidate: "candidate:1 1 udp 1 127.0.0.1 5000 typ host", sdpMid: "0" },
 };
 const HELLO: SignalPayload = { kind: "hello", session: "pc-2" };
+const HIDDEN: SignalPayload = {
+  kind: "visibility",
+  session: "pc-2",
+  peerSession: "pc-1",
+  slot: "cam",
+  visible: false,
+};
 
 const signal = (to: TestUser, payload: SignalPayload = OFFER): ClientMessage => ({
   type: "signal",
@@ -92,6 +99,15 @@ describe("signal", () => {
       roomId,
       from: bo.id,
       payload: HELLO,
+    });
+
+    // A viewer no longer showing ana's camera tells her (#35): she pauses it towards them.
+    b.send(signal(ana, HIDDEN));
+    expect(await a.waitFor("signal")).toEqual({
+      type: "signal",
+      roomId,
+      from: bo.id,
+      payload: HIDDEN,
     });
 
     await h.settled();
@@ -204,6 +220,10 @@ describe("signal", () => {
   it("refuses a malformed payload", async () => {
     const [a] = await inRoom([ana, bo]);
     a.sendRaw(JSON.stringify({ type: "signal", to: bo.id, payload: { kind: "nonsense" } }));
+    expect(await a.waitFor("error")).toMatchObject({ code: "bad_request", re: "signal" });
+    a.sendRaw(
+      JSON.stringify({ type: "signal", to: bo.id, payload: { ...HIDDEN, slot: "everything" } }),
+    );
     expect(await a.waitFor("error")).toMatchObject({ code: "bad_request", re: "signal" });
   });
 });

@@ -19,7 +19,8 @@ const tagBtn = (active: boolean) =>
       : "bg-canvas border-border text-fg-muted hover:text-fg hover:border-border-strong"
   }`;
 
-const Sheet = ({
+/** A modal dialog on Base UI Dialog: title bar with close, scrolling body, footer actions. */
+export const Sheet = ({
   open,
   onOpenChange,
   title,

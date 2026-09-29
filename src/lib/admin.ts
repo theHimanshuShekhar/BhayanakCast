@@ -2,6 +2,8 @@
  * Admin dashboard, client-safe half: the views the admin server functions return
  * (src/server/admin.ts). No server-only imports.
  */
+import { z } from "zod";
+import { userIdInput } from "./profiles.ts";
 import type { RoomPerson } from "./rooms";
 
 /** The dashboard's rolling window, in UTC days ending today (ADR 11 keeps rooms this long). */
@@ -83,3 +85,65 @@ export function percentChange({ current, previous }: WindowCount): number | null
   if (previous === 0) return null;
   return Math.round(((current - previous) / previous) * 100);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Users table, bans (spec #7)
+
+/** Rows per page of the users table. */
+export const ADMIN_USERS_PAGE_SIZE = 25;
+export const ADMIN_USERS_QUERY_MAX = 64;
+export const BAN_REASON_MAX = 200;
+
+/** A page of the users table: `q` matches usernames; `banned` keeps only users banned now. */
+export const listAdminUsersInput = z.object({
+  q: z.string().trim().max(ADMIN_USERS_QUERY_MAX).default(""),
+  banned: z.boolean().default(false),
+  page: z.number().int().min(1).max(100_000).default(1),
+});
+export type ListAdminUsersInput = z.input<typeof listAdminUsersInput>;
+
+/** A ban in force. */
+export interface AdminBan {
+  reason: string | null;
+  /** ISO timestamp; null for a permanent ban. */
+  expiresAt: string | null;
+}
+
+export interface AdminUserRow {
+  id: string;
+  username: string;
+  /** ISO timestamp of sign-up. */
+  joinedAt: string;
+  role: "admin" | "user";
+  /** Null unless banned now (an expired ban no longer counts). */
+  ban: AdminBan | null;
+  /** When they were last in a room (ISO), from presence; null if not within the 30 days kept. */
+  lastSeenAt: string | null;
+  /** Lifetime hours in rooms: streamed plus watched. */
+  hours: number;
+}
+
+export interface AdminUsersPage {
+  users: AdminUserRow[];
+  /** Users matching the search, across all pages. */
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+/** How long a ban lasts, in seconds; null for good. */
+export const BAN_DURATIONS = {
+  "1d": 24 * 60 * 60,
+  "7d": 7 * 24 * 60 * 60,
+  permanent: null,
+} as const satisfies Record<string, number | null>;
+export type BanDuration = keyof typeof BAN_DURATIONS;
+
+export const banUserInput = userIdInput.extend({
+  reason: z.string().trim().min(1, "Give a reason").max(BAN_REASON_MAX),
+  duration: z.enum(Object.keys(BAN_DURATIONS) as [BanDuration, ...BanDuration[]]),
+});
+export type BanUserInput = z.input<typeof banUserInput>;
+
+export const unbanUserInput = userIdInput;
+export type UnbanUserInput = z.input<typeof unbanUserInput>;

@@ -1,8 +1,8 @@
 /**
  * The room page's peer-to-peer media (spec #4): `useRoomMesh` runs this page's Mesh (./mesh.ts)
  * while it is in the room, relays its signalling over the realtime socket, sends this page's
- * mic, and reports everyone else's tracks. `useSpeakers` measures who is
- * speaking (./speaking.ts).
+ * mic and camera, pauses the cameras this page isn't showing, and reports everyone else's
+ * tracks. `useSpeakers` measures who is speaking (./speaking.ts).
  *
  * Leaving (unmount) or losing the room (`active` false: taken over, kicked, the room gone)
  * closes every peer connection. The page's own tracks belong to ./local-media.ts, which the
@@ -32,25 +32,35 @@ export interface RoomMesh {
   retry: (userId: string) => void;
 }
 
+/** What this page sends everyone (null: nothing). */
+export interface OwnTracks {
+  mic: MediaStreamTrack | null;
+  cam: MediaStreamTrack | null;
+}
+
 /**
  * The Mesh for `roomId` as `meId` while `active`: it connects to everyone in `roster` (the
- * room's people from the socket) and sends them `mic` (null: nothing).
+ * room's people from the socket) and sends them `own`. Everyone else's camera is paused towards
+ * this page unless their user id is in `shownCams` (their camera is on screen here).
  */
 export function useRoomMesh(
   roomId: string,
   meId: string | null,
   roster: readonly RoomParticipant[] | undefined,
-  mic: MediaStreamTrack | null,
+  own: OwnTracks,
+  shownCams: ReadonlySet<string>,
   active: boolean,
 ): RoomMesh {
+  const { mic, cam } = own;
   const mesh = useRef<Mesh | null>(null);
   const [remote, setRemote] = useState<Record<string, PeerTracks>>({});
   const [states, setStates] = useState<Record<string, PeerState>>({});
   const [iceServers, setIceServers] = useState<RTCIceServer[] | null>(null);
   const iceReady = iceServers !== null;
-  // The latest roster, mic and ICE servers, for a Mesh made after they last changed.
-  const latest = useRef({ roster, mic, iceServers });
-  latest.current = { roster, mic, iceServers };
+  // The latest inputs (roster, tracks, shown cameras, ICE servers), for a Mesh made after they
+  // last changed.
+  const latest = useRef({ roster, mic, cam, shownCams, iceServers });
+  latest.current = { roster, mic, cam, shownCams, iceServers };
 
   useEffect(() => {
     if (!meId || !active) return;
@@ -95,8 +105,11 @@ export function useRoomMesh(
         current.receive(message.from, message.payload);
       }
     });
-    current.setLocalTracks({ mic: latest.current.mic });
-    if (latest.current.roster) current.join(latest.current.roster);
+    current.setLocalTracks({ mic: latest.current.mic, cam: latest.current.cam });
+    if (latest.current.roster) {
+      showCams(current, meId, latest.current.roster, latest.current.shownCams);
+      current.join(latest.current.roster);
+    }
     return () => {
       unsubscribeSocket();
       unsubscribeMesh();
@@ -112,6 +125,10 @@ export function useRoomMesh(
   }, [roster]);
 
   useEffect(() => {
+    if (mesh.current && meId && roster) showCams(mesh.current, meId, roster, shownCams);
+  }, [meId, roster, shownCams]);
+
+  useEffect(() => {
     mesh.current?.setLocalTracks({ mic });
   }, [mic]);
 
@@ -119,9 +136,25 @@ export function useRoomMesh(
     if (iceServers) mesh.current?.setIceServers(iceServers);
   }, [iceServers]);
 
+  useEffect(() => {
+    mesh.current?.setLocalTracks({ cam });
+  }, [cam]);
+
   const retry = useCallback((userId: string) => mesh.current?.retry(userId), []);
 
   return { remote, states, retry };
+}
+
+/** Tell `mesh` whose cameras (of everyone else in `roster`) this page is showing. */
+function showCams(
+  mesh: Mesh,
+  meId: string,
+  roster: readonly RoomParticipant[],
+  shown: ReadonlySet<string>,
+): void {
+  for (const { userId } of roster) {
+    if (userId !== meId) mesh.setVisible(userId, "cam", shown.has(userId));
+  }
 }
 
 /** Who (by the keys of `tracks`) is speaking now, from each audio track's level. */

@@ -244,10 +244,10 @@ export class RealtimeClient {
       );
     } else if (
       message.type === "error" &&
-      (message.code === "taken_over" || message.code === "kicked")
+      (message.code === "taken_over" || message.code === "kicked" || message.code === "banned")
     ) {
-      // This user joined a room elsewhere, or was kicked from this one (ADR 15): never rejoin
-      // from here, even after a reconnect.
+      // This user joined a room elsewhere, was kicked from this one (ADR 15) or was banned
+      // (ADR 6): never rejoin from here, even after a reconnect.
       this.#stopFullRetry();
       this.#roomId = null;
     } else if (

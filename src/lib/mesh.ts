@@ -6,6 +6,7 @@
  *   mesh.join(participants);                  // the room's people (a snapshot); again on any change
  *   mesh.receive(from, payload);              // each relayed `signal`
  *   mesh.setLocalTracks({ mic: track });      // what this page sends everyone (null: stop)
+ *   mesh.setVisible(peerId, "cam", false);    // this page isn't showing their camera now
  *   mesh.subscribe((event) => …);             // remote tracks and per-peer connection state
  *   mesh.close();                             // leave: every connection closed
  *
@@ -33,6 +34,11 @@
  * negotiated; if that fails too it is `failed` until `retry` starts it over. Once connected, its
  * selected candidate pair says whether it is `relayed` through TURN. `relayed`, and `failed`
  * after ICE was tried, come with the connection's anonymised ICE path.
+ *
+ * A camera this page isn't showing (a hidden or scrolled-away tile) is paused towards it, to save
+ * the sender's upload (ADR 2 addendum): `setVisible` tells that peer with a `visibility` step
+ * (over signalling, which needs no ICE; the whole state again whenever the pair connects, in
+ * case a step was lost), and the sender swaps in no track for this page alone until shown.
  *
  * Local tracks belong to the caller (./local-media.ts): the Mesh never stops them.
  */
@@ -105,7 +111,8 @@ const newSession = () => Math.random().toString(36).slice(2, 12);
 
 type Step =
   | Omit<Extract<SignalPayload, { kind: "description" }>, "session" | "peerSession">
-  | Omit<Extract<SignalPayload, { kind: "candidate" }>, "session" | "peerSession">;
+  | Omit<Extract<SignalPayload, { kind: "candidate" }>, "session" | "peerSession">
+  | Omit<Extract<SignalPayload, { kind: "visibility" }>, "session" | "peerSession">;
 
 interface Link {
   userId: string;
@@ -124,6 +131,8 @@ interface Link {
   own: Map<MediaSlot, RTCRtpTransceiver>;
   /** Which slot each of the peer's transceivers carries, by `mid`. */
   remoteSlots: Map<string, MediaSlot>;
+  /** Slots the peer isn't showing: sent to it as no track. */
+  paused: Set<MediaSlot>;
   tracks: Partial<Record<MediaSlot, MediaStreamTrack>>;
   /** Incoming steps, handled one at a time. */
   queue: Promise<void>;
@@ -144,6 +153,8 @@ export class Mesh {
   readonly #links = new Map<string, Link>();
   readonly #listeners = new Set<(event: MeshEvent) => void>();
   readonly #local: Partial<Record<MediaSlot, MediaStreamTrack | null>> = {};
+  /** Per peer, whether this page shows each slot of theirs it has said (kept across reconnects). */
+  readonly #shown = new Map<string, Map<MediaSlot, boolean>>();
   #closed = false;
 
   constructor(options: MeshOptions) {
@@ -202,6 +213,14 @@ export class Mesh {
       if (link.pc.signalingState === "have-local-offer") this.#sendDescription(link);
       return;
     }
+    if (payload.kind === "visibility") {
+      if (payload.visible === !link.paused.has(payload.slot)) return;
+      if (payload.visible) link.paused.delete(payload.slot);
+      else link.paused.add(payload.slot);
+      const transceiver = link.own.get(payload.slot);
+      if (transceiver) this.#sendSlot(link, payload.slot, transceiver);
+      return;
+    }
     const current = link;
     current.queue = current.queue
       .then(() => this.#handle(current, payload))
@@ -221,15 +240,8 @@ export class Mesh {
         // It gets the local tracks when it starts.
         if (!link.started) continue;
         const transceiver = link.own.get(slot);
-        if (transceiver) {
-          transceiver.sender
-            .replaceTrack(track)
-            .catch((error: unknown) =>
-              this.#log(`sending ${slot} to ${link.userId} failed`, error),
-            );
-        } else if (track) {
-          this.#addSlot(link, slot, track);
-        }
+        if (transceiver) this.#sendSlot(link, slot, transceiver);
+        else if (track) this.#addSlot(link, slot);
       }
     }
   }
@@ -247,6 +259,21 @@ export class Mesh {
   retry(userId: string): void {
     if (this.#closed || !this.#links.has(userId)) return;
     this.#startOver(userId);
+  }
+
+  /**
+   * Whether this page shows `userId`'s `slot` track now. Everything counts as shown until said
+   * otherwise; a hidden track is paused towards this page. The peer is told as soon as it has
+   * spoken to this side, and again whenever the pair connects.
+   */
+  setVisible(userId: string, slot: MediaSlot, visible: boolean): void {
+    if (this.#closed || userId === this.#selfId) return;
+    const shown = this.#shown.get(userId) ?? new Map<MediaSlot, boolean>();
+    if (shown.get(slot) === visible) return;
+    shown.set(slot, visible);
+    this.#shown.set(userId, shown);
+    const link = this.#links.get(userId);
+    if (link?.remoteSession) this.#signal(link, { kind: "visibility", slot, visible });
   }
 
   /** Everyone this page has a connection to. */
@@ -300,6 +327,7 @@ export class Mesh {
       ignoreOffer: false,
       own: new Map(),
       remoteSlots: new Map(),
+      paused: new Set(),
       tracks: {},
       queue: Promise.resolve(),
       restarted: false,
@@ -325,16 +353,29 @@ export class Mesh {
   #start(link: Link): void {
     if (link.started) return;
     link.started = true;
-    for (const slot of EAGER_SLOTS) this.#addSlot(link, slot, this.#local[slot] ?? null);
+    for (const slot of EAGER_SLOTS) this.#addSlot(link, slot);
     for (const [slot, track] of Object.entries(this.#local) as [MediaSlot, MediaStreamTrack][]) {
-      if (track && !link.own.has(slot)) this.#addSlot(link, slot, track);
+      if (track && !link.own.has(slot)) this.#addSlot(link, slot);
     }
   }
 
+  /** What to send `link`'s peer for `slot`: the local track, unless they aren't showing it. */
+  #outgoing(link: Link, slot: MediaSlot): MediaStreamTrack | null {
+    return link.paused.has(slot) ? null : (this.#local[slot] ?? null);
+  }
+
   /** Start sending `slot` to `link`'s peer over a transceiver of its own (renegotiates). */
-  #addSlot(link: Link, slot: MediaSlot, track: MediaStreamTrack | null): void {
+  #addSlot(link: Link, slot: MediaSlot): void {
+    const track = this.#outgoing(link, slot);
     const transceiver = link.pc.addTransceiver(track ?? SLOT_KIND[slot], { direction: "sendonly" });
     link.own.set(slot, transceiver);
+  }
+
+  /** Swap what `slot`'s transceiver sends `link`'s peer (no renegotiation). */
+  #sendSlot(link: Link, slot: MediaSlot, transceiver: RTCRtpTransceiver): void {
+    transceiver.sender
+      .replaceTrack(this.#outgoing(link, slot))
+      .catch((error: unknown) => this.#log(`sending ${slot} to ${link.userId} failed`, error));
   }
 
   #shut(link: Link): void {
@@ -363,7 +404,10 @@ export class Mesh {
     }
   }
 
-  async #handle(link: Link, payload: Exclude<SignalPayload, { kind: "hello" }>): Promise<void> {
+  async #handle(
+    link: Link,
+    payload: Exclude<SignalPayload, { kind: "hello" | "visibility" }>,
+  ): Promise<void> {
     if (!this.#current(link)) return;
     const pc = link.pc;
     if (payload.kind === "candidate") {
@@ -531,6 +575,13 @@ export class Mesh {
     if (state === link.state) return;
     link.state = state;
     this.#emit({ type: "state", userId: link.userId, state, ...(ice && { ice }) });
+    // Everything counts as shown on their side until told, and a step sent while the pair was
+    // down may have been dropped (their reconnect grace): all of it again.
+    if (state === "connected") {
+      for (const [slot, visible] of this.#shown.get(link.userId) ?? []) {
+        this.#signal(link, { kind: "visibility", slot, visible });
+      }
+    }
   }
 
   #emit(event: MeshEvent): void {

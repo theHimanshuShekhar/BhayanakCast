@@ -39,6 +39,8 @@ export const PING_INTERVAL_MS = 25_000;
 export const IDLE_TIMEOUT_MS = 60_000;
 /** The close code the server uses for a socket that went silent past `IDLE_TIMEOUT_MS`. */
 export const IDLE_CLOSE_CODE = 4000;
+/** The close code the server uses for the sockets of a user an admin banned (after `banned`). */
+export const BANNED_CLOSE_CODE = 4001;
 /** Longest chat message after trimming, in UTF-16 code units (what an input's maxLength counts). */
 export const CHAT_MAX_LENGTH = 500;
 /** How many recent chat messages a live room keeps in memory for joiners (ADR 4 addendum). */
@@ -68,7 +70,7 @@ export const MEDIA_OFF: MediaState = { mic: false, cam: false, share: false };
 
 /**
  * The tracks one participant can send each peer, all over one connection per pair (ADR 1
- * addendum): the mic now; camera, screen and share audio in later tickets (#35, #36).
+ * addendum): the mic and camera now; screen and share audio in a later ticket (#36).
  */
 export const MEDIA_SLOTS = ["mic", "cam", "screen", "screenAudio"] as const;
 export type MediaSlot = (typeof MEDIA_SLOTS)[number];
@@ -113,6 +115,17 @@ export const signalPayload = z.discriminatedUnion("kind", [
     peerSession: pcSession.optional(),
     /** Null: the sender finished gathering. */
     candidate: iceCandidate.nullable(),
+  }),
+  /**
+   * Whether the sender shows the recipient's `slot` track (their camera) right now. While it
+   * doesn't, the recipient stops sending that track to the sender (ADR 2 addendum).
+   */
+  z.object({
+    kind: z.literal("visibility"),
+    session: pcSession,
+    peerSession: pcSession.optional(),
+    slot: z.enum(MEDIA_SLOTS),
+    visible: z.boolean(),
   }),
 ]);
 export type SignalPayload = z.infer<typeof signalPayload>;
@@ -526,6 +539,10 @@ export const ERROR_CODES = [
    * answer to `room.join`: this user was kicked from that room and can't come back (ADR 15).
    */
   "kicked",
+  /**
+   * Unprompted (no `re`): an admin banned this user (ADR 6). `message` is the ban notice (its
+   * reason and end), and the server then closes every socket of theirs (`BANNED_CLOSE_CODE`).
+   */
   "banned",
   /** The server failed; the request may be retried. */
   "internal",
