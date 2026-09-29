@@ -16,3 +16,6 @@ Appearance settings are stored on the user's DB row, so they follow the user acr
 
 ## Addendum: profile URLs use the user id (2026-09-27)
 Profiles live at `/profile/$userId`, not the Discord username. Discord usernames can be renamed and later reused by someone else, so an id-keyed URL never points to the wrong person. The page shows the current Discord username.
+
+## Addendum: the room's "viewers" toggle hides everyone not sharing (2026-09-29)
+In the design, the room header's "viewers" toggle hides only the collapsed viewer-only tiles (people without video). With real cameras (#35) it hides everyone who isn't sharing their screen, camera tiles included, and keeps the streamers (with their camera picture-in-picture). A camera that isn't on screen is paused towards that viewer (ADR 2 addendum), so hiding them saves the senders' upload. Its tooltip reads "Show people who aren't sharing". A later design port should keep this behaviour.

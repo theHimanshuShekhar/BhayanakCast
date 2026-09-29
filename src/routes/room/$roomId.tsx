@@ -1,7 +1,7 @@
 import { Menu } from "@base-ui/react/menu";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound, redirect, useNavigate } from "@tanstack/react-router";
-import { type ReactNode, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { Icon } from "~/components/icons";
 import { ControlBtn } from "~/components/room/control-btn";
 import { KnockToasts } from "~/components/room/knock-toasts";
@@ -336,7 +336,7 @@ function RoomPage({
   const feed = live.room?.feed ?? NO_FEED;
   const activity = useMemo(() => feed.map(feedLine), [feed]);
   const reactions = useRoomReactions(detail.id);
-  const [showViewers, setShowViewers] = useState(true);
+  const [showNonSharers, setShowNonSharers] = useState(true);
   const [pinnedId, setPinnedId] = useState<string | null>(null);
   const [mutedIds, setMutedIds] = useState<Set<string>>(() => new Set());
   const [sideOpen, setSideOpen] = useState(false);
@@ -361,8 +361,7 @@ function RoomPage({
   const notice = moderationNotice ?? deviceNotice ?? mediaNotice ?? inviteNotice;
 
   // Mic and camera are real local tracks (src/lib/local-media.ts), announced once they're on;
-  // the mesh sends the mic. TODO(#35, #36): it sends the camera, and share becomes a
-  // getDisplayMedia track.
+  // the mesh sends them. TODO(#36): share becomes a getDisplayMedia track.
   const toggleDevice = async (kind: LocalDeviceKind) => {
     const localMedia = getLocalMedia();
     if (media[kind]) {
@@ -400,7 +399,27 @@ function RoomPage({
   }, [out, detail.id]);
 
   // Peer-to-peer media (ADR 1): every connection closes with the room (leave unmounts this).
-  const mesh = useRoomMesh(detail.id, meId, roster, local.mic.track, !out);
+  // Whose cameras are on screen here: the others are paused towards this page (ADR 2).
+  const [shownCams, setShownCams] = useState<ReadonlySet<string>>(() => new Set());
+  const onCameraShown = useCallback(
+    (userId: string, shown: boolean) =>
+      setShownCams((s) => {
+        if (s.has(userId) === shown) return s;
+        const next = new Set(s);
+        if (shown) next.add(userId);
+        else next.delete(userId);
+        return next;
+      }),
+    [],
+  );
+  const mesh = useRoomMesh(
+    detail.id,
+    meId,
+    roster,
+    { mic: local.mic.track, cam: local.cam.track },
+    shownCams,
+    !out,
+  );
   const [volumes, setVolumes] = useState<Record<string, number>>({});
   const micTracks = useMemo(() => {
     const tracks: Record<string, MediaStreamTrack | undefined> = {};
@@ -442,8 +461,10 @@ function RoomPage({
       return next;
     });
 
+  // Hiding everyone not sharing leaves the streamers: the others' cameras are paused towards
+  // this page (ADR 13 addendum).
   const stage = useMemo(() => {
-    const base = showViewers ? people : people.filter((p) => !p.viewerOnly);
+    const base = showNonSharers ? people : people.filter((p) => p.streaming);
     if (!pinnedId) return base;
     return [
       ...base
@@ -453,7 +474,7 @@ function RoomPage({
         .filter((p) => p.id !== pinnedId)
         .map((p) => (p.size === "l" ? { ...p, size: "m" as const } : p)),
     ];
-  }, [people, showViewers, pinnedId]);
+  }, [people, showNonSharers, pinnedId]);
 
   // The room ended or was hidden from us since the page loaded.
   if (live.error?.code === "not_found") return <RoomNotFound />;
@@ -532,15 +553,15 @@ function RoomPage({
             </Chip>
             <button
               type="button"
-              aria-pressed={showViewers}
-              title="Show participants without video"
-              className={`inline-flex items-center gap-2 h-7 px-2.5 rounded-lg border text-[11px] whitespace-nowrap cursor-pointer ${showViewers ? "bg-primary-soft border-[color-mix(in_oklch,var(--color-primary)_45%,transparent)] text-primary" : "bg-surface border-border text-fg-muted"}`}
-              onClick={() => setShowViewers((v) => !v)}
+              aria-pressed={showNonSharers}
+              title="Show people who aren't sharing"
+              className={`inline-flex items-center gap-2 h-7 px-2.5 rounded-lg border text-[11px] whitespace-nowrap cursor-pointer ${showNonSharers ? "bg-primary-soft border-[color-mix(in_oklch,var(--color-primary)_45%,transparent)] text-primary" : "bg-surface border-border text-fg-muted"}`}
+              onClick={() => setShowNonSharers((v) => !v)}
             >
               <span
-                className={`w-3 h-3 rounded-[3px] border grid place-items-center ${showViewers ? "bg-primary border-transparent text-primary-ink" : "border-border-strong"}`}
+                className={`w-3 h-3 rounded-[3px] border grid place-items-center ${showNonSharers ? "bg-primary border-transparent text-primary-ink" : "border-border-strong"}`}
               >
-                {showViewers && <Icon.Check size={10} />}
+                {showNonSharers && <Icon.Check size={10} />}
               </span>
               <span className="max-sm:sr-only">viewers</span>
             </button>
@@ -560,6 +581,8 @@ function RoomPage({
               locallyMuted={mutedIds.has(p.id)}
               volume={volumes[p.id] ?? 1}
               onVolume={(id, volume) => setVolumes((v) => ({ ...v, [id]: volume }))}
+              cameraTrack={p.you ? local.cam.track : mesh.remote[p.userId]?.cam}
+              onCameraShown={onCameraShown}
               reactions={reactions.filter((r) => r.targetUserId === p.userId)}
               onPin={(id) => setPinnedId((cur) => (cur === id ? null : id))}
               onToggleMute={toggleMute}

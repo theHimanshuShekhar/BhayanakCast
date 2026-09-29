@@ -68,7 +68,7 @@ export const MEDIA_OFF: MediaState = { mic: false, cam: false, share: false };
 
 /**
  * The tracks one participant can send each peer, all over one connection per pair (ADR 1
- * addendum): the mic now; camera, screen and share audio in later tickets (#35, #36).
+ * addendum): the mic and camera now; screen and share audio in a later ticket (#36).
  */
 export const MEDIA_SLOTS = ["mic", "cam", "screen", "screenAudio"] as const;
 export type MediaSlot = (typeof MEDIA_SLOTS)[number];
@@ -113,6 +113,17 @@ export const signalPayload = z.discriminatedUnion("kind", [
     peerSession: pcSession.optional(),
     /** Null: the sender finished gathering. */
     candidate: iceCandidate.nullable(),
+  }),
+  /**
+   * Whether the sender shows the recipient's `slot` track (their camera) right now. While it
+   * doesn't, the recipient stops sending that track to the sender (ADR 2 addendum).
+   */
+  z.object({
+    kind: z.literal("visibility"),
+    session: pcSession,
+    peerSession: pcSession.optional(),
+    slot: z.enum(MEDIA_SLOTS),
+    visible: z.boolean(),
   }),
 ]);
 export type SignalPayload = z.infer<typeof signalPayload>;
