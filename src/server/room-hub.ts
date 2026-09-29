@@ -34,6 +34,8 @@ import {
   type FeedEntry,
   IDLE_CLOSE_CODE,
   IDLE_TIMEOUT_MS,
+  KNOCK_EXPIRY_MS,
+  type KnockStatus,
   type LobbyRoomChange,
   MEDIA_OFF,
   type MediaState,
@@ -76,6 +78,9 @@ export const HOST_GRACE_MS = 30_000;
  * overrides it (e2e runs use a short one).
  */
 export const EMPTY_ROOM_TIMEOUT_MS = 5 * 60_000;
+
+/** A knock whose invite link doesn't open a live private room is refused with this. */
+const INVALID_INVITE = "This invite link is no longer valid";
 
 /** How the hub talks to one socket. */
 export interface Transport {
@@ -171,6 +176,15 @@ interface PendingKnock {
   at: Date;
   /** The socket that knocked (the latest, if they knocked again): where the answer goes. */
   connection: HubConnection;
+  /** What the knocker was last told while undecided. */
+  status: "waiting" | "waiting_for_host";
+  /** Ends the knock `KNOCK_EXPIRY_MS` after `at` (`expired`). */
+  expiry: Timer;
+  /**
+   * Set while its socket is gone: withdraws the knock unless they knock again within
+   * `RECONNECT_GRACE_MS` (as for participants, ADR 12).
+   */
+  grace?: Timer;
 }
 
 /** A feed entry to log: the hub stamps its id and time. */
@@ -522,6 +536,8 @@ export class RoomHub {
     "knock.request": (conn, message) => this.#knock(conn, message),
 
     "knock.decide": (conn, message) => this.#decideKnock(conn, message),
+
+    "knock.cancel": (conn) => this.#withdrawKnocks(conn),
   };
 
   #dispatch(conn: HubConnection, message: ClientMessage): Promise<void> | void {
@@ -591,6 +607,7 @@ export class RoomHub {
     if (participant.media.share) await this.#store.closeStream(room.id, participant.userId, at);
     if (!room.lastLeftAt || at > room.lastLeftAt) room.lastLeftAt = at;
     if (participant.userId === room.hostUserId) this.#hostGone(room);
+    this.#updateKnockers(room);
     if (room.participants.size === 0) await this.#roomEmptied(room, room.lastLeftAt);
     this.#lobbyRoomCount(room);
   }
@@ -639,6 +656,13 @@ export class RoomHub {
     this.#rooms.delete(room.id);
     room.chat = [];
     room.feed = [];
+    // Its invite link opens nothing now.
+    for (const knock of room.knocks.values()) {
+      knock.expiry.cancel();
+      knock.grace?.cancel();
+      this.#refuse(knock.connection, "not_found", INVALID_INVITE, "knock.request");
+    }
+    room.knocks.clear();
     await this.#store.closeHostInterval(room.id, endedAt);
     if (await this.#store.endRoom(room.id, endedAt)) {
       await this.#store.rollupEndedRoom(room.id, this.#clock.now());
@@ -661,6 +685,8 @@ export class RoomHub {
     // Online follows open sockets (ADR 20), so this is immediate; the room count waits out the
     // grace (#removeParticipant).
     this.#goOffline(conn);
+    // A knock outlives its socket for the reconnect grace (#holdKnocks).
+    this.#holdKnocks(conn);
     const room = conn.roomId ? this.#rooms.get(conn.roomId) : undefined;
     const userId = conn.caller.user?.id;
     const participant = room && userId ? room.participants.get(userId) : undefined;
@@ -668,6 +694,8 @@ export class RoomHub {
     const since = this.#clock.now();
     this.#startGrace(room, participant, since);
     if (participant.userId === room.hostUserId) this.#hostGone(room);
+    // An approver in their reconnect grace can't answer knocks.
+    this.#updateKnockers(room);
     // If the server dies during the grace, the interval closes here, not at an older checkpoint.
     await this.#store.checkpointPresence([
       { roomId: room.id, userId: participant.userId, at: since },
@@ -795,6 +823,7 @@ export class RoomHub {
     if (next && changed) {
       this.#feed(room, at, { kind: "hostChanged", userId: next.userId, username: next.username });
       this.#sendPendingKnocks(room, next);
+      this.#updateKnockers(room);
     }
     // A new host who is away themselves gets a host grace of their own.
     if (next?.grace) this.#hostGone(room);
@@ -970,7 +999,10 @@ export class RoomHub {
       ...(room.hostGrace ? { hostGraceUntil: room.hostGrace.until.toISOString() } : {}),
     });
     const participant = conn.caller.user && room.participants.get(conn.caller.user.id);
-    if (participant?.connection === conn) this.#sendPendingKnocks(room, participant);
+    if (participant?.connection !== conn) return;
+    this.#sendPendingKnocks(room, participant);
+    // They may be the first approver here (joined, or back from their reconnect grace).
+    this.#updateKnockers(room);
   }
 
   /** Send `event` to everyone in `room` except `except`. */
@@ -1324,6 +1356,8 @@ export class RoomHub {
     const at = this.#clock.now();
     this.#broadcast(room, { kind: "roleChanged", userId: target.userId, role: message.role }, at);
     this.#sendPendingKnocks(room, target);
+    // A promoted mod can answer knocks now; a demoted one may have been the last who could.
+    this.#updateKnockers(room);
     this.#feed(room, at, {
       kind: "roleChanged",
       ...person(target),
@@ -1401,9 +1435,7 @@ export class RoomHub {
     const stored = await this.#store.findInvitedRoom(message.inviteToken);
     // Every live room is in memory (created: `announce`; after a restart: `#restore`).
     const room = stored && this.#rooms.get(stored.id);
-    if (!room) {
-      return this.#refuse(conn, "not_found", "This invite link is no longer valid", message.type);
-    }
+    if (!room) return this.#refuse(conn, "not_found", INVALID_INVITE, message.type);
     const { id: userId, username } = caller.user;
     // Kicked is for good (ADR 15): the link doesn't bring them back, admins included.
     if (await this.#store.isKicked(room.id, userId)) {
@@ -1413,18 +1445,45 @@ export class RoomHub {
     if (await this.#store.findRoomFor(caller, room.id)) {
       return this.#send(conn, { type: "knock.status", roomId: room.id, status: "approved" });
     }
-    const knock: PendingKnock = {
-      userId,
-      username,
-      at: room.knocks.get(userId)?.at ?? this.#clock.now(),
-      connection: conn,
-    };
-    room.knocks.set(userId, knock);
-    this.#send(conn, { type: "knock.status", roomId: room.id, status: "waiting" });
+    // Knocking again (a reconnect within the grace, another tab) keeps the same knock, its time
+    // and its expiry, now answered on this socket. A tab it moved away from is told so.
+    let knock = room.knocks.get(userId);
+    if (knock) {
+      knock.grace?.cancel();
+      knock.grace = undefined;
+      if (knock.connection !== conn) {
+        this.#send(knock.connection, {
+          type: "knock.status",
+          roomId: room.id,
+          status: "elsewhere",
+        });
+      }
+      knock.connection = conn;
+    } else {
+      const fresh: PendingKnock = {
+        userId,
+        username,
+        at: this.#clock.now(),
+        connection: conn,
+        status: "waiting",
+        expiry: this.#setTimer(KNOCK_EXPIRY_MS, () => {
+          if (this.#rooms.get(room.id) === room && room.knocks.get(userId) === fresh) {
+            this.#endKnock(room, fresh, "expired");
+          }
+        }),
+      };
+      knock = fresh;
+      room.knocks.set(userId, knock);
+    }
+    knock.status = this.#knockerStatus(room);
+    this.#send(conn, { type: "knock.status", roomId: room.id, status: knock.status });
     this.#tellApprovers(room, knockPending(room, knock));
   }
 
-  /** `knock.decide`: admit (approved until the room ends) or deny a pending knock. */
+  /**
+   * `knock.decide`: admit (approved until the room ends) or deny a pending knock. The queue
+   * runs one decision at a time, so the first wins and a later one finds no knock.
+   */
   async #decideKnock(conn: HubConnection, message: ClientMessageOf<"knock.decide">) {
     const mod = this.#moderator(conn, "admit", message.type);
     if (!mod) return;
@@ -1433,15 +1492,74 @@ export class RoomHub {
     if (!knock) {
       return this.#refuse(conn, "not_found", "Nobody is knocking by that name", message.type);
     }
-    // Stays pending if the approval can't be stored.
-    if (message.admit) await this.#store.approve(room.id, knock.userId);
+    let status: KnockStatus = "denied";
+    if (message.admit) {
+      // Stays pending if the approval can't be stored.
+      await this.#store.approve(room.id, knock.userId);
+      // Approved all the same: they get in once a spot frees (ADR 21's cap holds).
+      status = room.participants.size >= ROOM_CAPACITY ? "room_full" : "approved";
+    }
+    this.#endKnock(room, knock, status);
+  }
+
+  /**
+   * `knock` is over: tell its knocker `status` (nothing if they withdrew it), and every approver
+   * present that it's gone.
+   */
+  #endKnock(room: LiveRoom, knock: PendingKnock, status?: KnockStatus): void {
+    knock.expiry.cancel();
+    knock.grace?.cancel();
     room.knocks.delete(knock.userId);
-    this.#send(knock.connection, {
-      type: "knock.status",
-      roomId: room.id,
-      status: message.admit ? "approved" : "denied",
-    });
+    if (status) this.#send(knock.connection, { type: "knock.status", roomId: room.id, status });
     this.#tellApprovers(room, { type: "knock.resolved", roomId: room.id, userId: knock.userId });
+  }
+
+  /** The knocks pending from `conn`, in their rooms. */
+  #knocksOf(conn: HubConnection): [LiveRoom, PendingKnock][] {
+    const userId = conn.caller.user?.id;
+    if (!userId) return [];
+    return [...this.#rooms.values()].flatMap((room): [LiveRoom, PendingKnock][] => {
+      const knock = room.knocks.get(userId);
+      return knock?.connection === conn ? [[room, knock]] : [];
+    });
+  }
+
+  /** `knock.cancel`: withdraw the knocks pending from `conn` now. */
+  #withdrawKnocks(conn: HubConnection): void {
+    for (const [room, knock] of this.#knocksOf(conn)) this.#endKnock(room, knock);
+  }
+
+  /**
+   * `conn` closed: its knocks stay pending (approvers see no change) for `RECONNECT_GRACE_MS`,
+   * then are withdrawn unless a `knock.request` from their user took them over.
+   */
+  #holdKnocks(conn: HubConnection): void {
+    for (const [room, knock] of this.#knocksOf(conn)) {
+      const timer = this.#setTimer(RECONNECT_GRACE_MS, () => {
+        if (knock.grace === timer && room.knocks.get(knock.userId) === knock) {
+          this.#endKnock(room, knock);
+        }
+      });
+      knock.grace = timer;
+    }
+  }
+
+  /** What a knocker on `room` waits for: an approver who is connected, or one to arrive. */
+  #knockerStatus(room: LiveRoom): PendingKnock["status"] {
+    for (const participant of room.participants.values()) {
+      if (!participant.grace && this.#approves(room, participant)) return "waiting";
+    }
+    return "waiting_for_host";
+  }
+
+  /** Approvers came or went in `room`: tell its knockers if that changes what they wait for. */
+  #updateKnockers(room: LiveRoom): void {
+    const status = this.#knockerStatus(room);
+    for (const knock of room.knocks.values()) {
+      if (knock.status === status) continue;
+      knock.status = status;
+      this.#send(knock.connection, { type: "knock.status", roomId: room.id, status });
+    }
   }
 
   /** Send `message` to everyone in `room` who may decide knocks: host, mods and admins. */
@@ -1526,7 +1644,6 @@ function isSignedIn(caller: Caller): caller is SignedInCaller {
   return caller.user !== null;
 }
 
-/** A site admin: moderation powers in any room (ADR 15). */
 /** `knock` as its approvers see it. */
 function knockPending(room: LiveRoom, knock: PendingKnock): ServerMessage {
   const { userId, username, at } = knock;
@@ -1537,6 +1654,7 @@ function knockPending(room: LiveRoom, knock: PendingKnock): ServerMessage {
   };
 }
 
+/** A site admin: moderation powers in any room (ADR 15). */
 function isAdmin(conn: HubConnection): boolean {
   return conn.caller.role === "admin";
 }

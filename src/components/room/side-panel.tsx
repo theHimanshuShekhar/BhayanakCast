@@ -1,11 +1,12 @@
 // Room sidebar — chat / people / feed tabs (Base UI Tabs). Ported from docs/design/prototype/room.jsx.
 import { Tabs } from "@base-ui/react/tabs";
+import { Link } from "@tanstack/react-router";
 import { type FormEvent, Fragment, type ReactNode, useEffect, useRef, useState } from "react";
 import { tokenizeChat } from "~/lib/chat-text";
-import { CHAT_MAX_LENGTH } from "~/lib/realtime";
+import { CHAT_MAX_LENGTH, type KnockEntry } from "~/lib/realtime";
 import type { ActivityItem, ChatMessage, Participant, RoomRole } from "~/lib/types";
 import { Icon } from "../icons";
-import { Avatar, Chip, IconBtn } from "../ui";
+import { Avatar, Btn, Chip, IconBtn } from "../ui";
 import { EmojiPicker } from "./emoji-picker";
 
 const ROLE_BADGE: Partial<Record<RoomRole, string>> = {
@@ -158,6 +159,43 @@ const ParticipantRow = ({
   </div>
 );
 
+/** Someone knocking (ADR 16), for the host, mods and admins: who, and admit or deny. */
+const KnockRow = ({
+  knock,
+  onDecide,
+}: {
+  knock: KnockEntry;
+  onDecide: (userId: string, admit: boolean) => void;
+}) => (
+  <div className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-surface">
+    <Link
+      to="/profile/$userId"
+      params={{ userId: knock.userId }}
+      className="flex flex-1 min-w-0 items-center gap-2.5 text-xs font-medium hover:text-primary-strong hover:underline underline-offset-2"
+    >
+      <Avatar name={knock.username} size="md" />
+      <span className="truncate">{knock.username}</span>
+    </Link>
+    <div className="flex gap-1 flex-shrink-0">
+      <Btn
+        size="sm"
+        variant="primary"
+        aria-label={`admit ${knock.username}`}
+        onClick={() => onDecide(knock.userId, true)}
+      >
+        admit
+      </Btn>
+      <Btn
+        size="sm"
+        aria-label={`deny ${knock.username}`}
+        onClick={() => onDecide(knock.userId, false)}
+      >
+        deny
+      </Btn>
+    </div>
+  </div>
+);
+
 const tabCls =
   "flex-1 h-8 text-[11px] rounded-lg inline-flex items-center justify-center gap-1.5 cursor-pointer text-muted hover:text-fg outline-0 focus-visible:outline-2 focus-visible:outline-primary data-active:bg-surface-2 data-active:text-fg data-active:shadow-card";
 const panelCls = "flex-1 min-h-0 overflow-auto px-3 py-2.5 outline-0";
@@ -172,6 +210,8 @@ export const RoomSide = ({
   onSend,
   canSend,
   onOpenProfile,
+  knocks,
+  onDecideKnock,
   open,
   onClose,
 }: {
@@ -185,6 +225,9 @@ export const RoomSide = ({
   /** False until the server has admitted us to the room; sending waits for that. */
   canSend: boolean;
   onOpenProfile: (username: string) => void;
+  /** Knocks pending on a private room, shown to those who can decide them; else empty. */
+  knocks: KnockEntry[];
+  onDecideKnock: (userId: string, admit: boolean) => void;
   open: boolean;
   onClose: () => void;
 }) => {
@@ -335,6 +378,14 @@ export const RoomSide = ({
         </Tabs.Panel>
 
         <Tabs.Panel value="people" className={panelCls}>
+          {knocks.length > 0 && (
+            <>
+              <GroupHead count={knocks.length}>waiting</GroupHead>
+              {knocks.map((k) => (
+                <KnockRow key={k.userId} knock={k} onDecide={onDecideKnock} />
+              ))}
+            </>
+          )}
           {groups.map(
             ([label, list]) =>
               list.length > 0 && (

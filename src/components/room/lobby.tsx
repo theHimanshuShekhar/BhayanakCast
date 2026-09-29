@@ -1,6 +1,6 @@
 // The pre-join lobby (CONTEXT.md): pick and preview mic and camera before entering a room.
 // Both start off, and the browser asks for permission only when one is first turned on.
-import { useEffect, useRef } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 import { watchAudioLevel } from "~/lib/audio-level";
 import {
   getLocalMedia,
@@ -50,17 +50,88 @@ export interface LobbyProps {
   onBack: () => void;
 }
 
-export function Lobby({ roomName, host, people, capacity, me, onEnter, onBack }: LobbyProps) {
+/** The local mic and camera as the device check shows them: on, or one still starting. */
+export function useDeviceState() {
   const local = useLocalMedia();
+  return {
+    local,
+    micOn: local.mic.status === "on",
+    camOn: local.cam.status === "on",
+    starting: local.mic.status === "starting" || local.cam.status === "starting",
+  };
+}
+
+export function Lobby({ roomName, host, people, capacity, me, onEnter, onBack }: LobbyProps) {
+  const { micOn, camOn, starting } = useDeviceState();
+  const full = people.length >= capacity;
+
+  return (
+    <DeviceCheck
+      kicker="about to join"
+      roomName={roomName}
+      subtitle={host && `hosted by ${host}`}
+      me={me}
+      info={
+        <div className="flex items-center gap-2.5 min-w-0">
+          {people.length > 0 && <AvatarStack names={people} max={4} />}
+          <p className="m-0 text-[12px] text-fg-muted min-w-0">
+            {people.length === 0
+              ? "nobody's inside yet. you'll be the first."
+              : `${peopleText(people)} ${people.length === 1 ? "is" : "are"} inside`}
+            <span className="text-muted">
+              {" "}
+              · {people.length}/{capacity}
+            </span>
+          </p>
+        </div>
+      }
+    >
+      <p className="m-0 text-[11px] text-muted">
+        you'll enter with the mic {micOn ? "on" : "muted"} and the camera {camOn ? "on" : "off"}.
+        {full && " the room is full: you'll get in as soon as a spot frees up."}
+      </p>
+
+      <div className="flex gap-2 mt-auto">
+        <Btn onClick={onBack}>back</Btn>
+        <Btn
+          variant="primary"
+          className="flex-1"
+          disabled={starting}
+          onClick={() => onEnter({ mic: micOn, cam: camOn })}
+        >
+          <Icon.Broadcast size={13} /> Enter room
+        </Btn>
+      </div>
+    </DeviceCheck>
+  );
+}
+
+export interface DeviceCheckProps {
+  /** Above the room's name ("about to join"). */
+  kicker: string;
+  roomName: string;
+  /** Under the room's name, if anything. */
+  subtitle?: string | null;
+  /** Your username, for the preview while the camera is off. */
+  me: string;
+  /** Between the room's name and the device pickers: who's inside, or where a knock stands. */
+  info: ReactNode;
+  /** Under the device pickers: what happens next, and the buttons. */
+  children: ReactNode;
+}
+
+/**
+ * The lobby's device check: the camera preview, mic and camera switches, mic meter and device
+ * pickers, beside the room's name. The lobby wraps it, and so does a private room's knock
+ * screen, so a knocker can set up while they wait.
+ */
+export function DeviceCheck({ kicker, roomName, subtitle, me, info, children }: DeviceCheckProps) {
+  const { local, micOn, camOn } = useDeviceState();
   const media = getLocalMedia();
-  const micOn = local.mic.status === "on";
-  const camOn = local.cam.status === "on";
-  const starting = local.mic.status === "starting" || local.cam.status === "starting";
   const toggle = (kind: LocalDeviceKind) => {
     if (local[kind].status === "off") void media.enable(kind);
     else media.disable(kind);
   };
-  const full = people.length >= capacity;
   const failures = (["cam", "mic"] as const).flatMap((kind) => {
     const failure = local[kind].failure;
     return failure ? [{ kind, text: failureText(kind, failure) }] : [];
@@ -121,45 +192,19 @@ export function Lobby({ roomName, host, people, capacity, me, onEnter, onBack }:
 
         <div className="flex flex-col gap-4 min-w-0">
           <div className="flex flex-col gap-1.5">
-            <MonoCaps>about to join</MonoCaps>
+            <MonoCaps>{kicker}</MonoCaps>
             <h1 id="lobby-title" className="m-0 text-lg font-semibold break-words">
               {roomName}
             </h1>
-            {host && <p className="m-0 text-[11.5px] text-muted">hosted by {host}</p>}
+            {subtitle && <p className="m-0 text-[11.5px] text-muted">{subtitle}</p>}
           </div>
 
-          <div className="flex items-center gap-2.5 min-w-0">
-            {people.length > 0 && <AvatarStack names={people} max={4} />}
-            <p className="m-0 text-[12px] text-fg-muted min-w-0">
-              {people.length === 0
-                ? "nobody's inside yet. you'll be the first."
-                : `${peopleText(people)} ${people.length === 1 ? "is" : "are"} inside`}
-              <span className="text-muted">
-                {" "}
-                · {people.length}/{capacity}
-              </span>
-            </p>
-          </div>
+          {info}
 
           <DevicePicker kind="mic" />
           <DevicePicker kind="cam" />
 
-          <p className="m-0 text-[11px] text-muted">
-            you'll enter with the mic {micOn ? "on" : "muted"} and the camera {camOn ? "on" : "off"}
-            .{full && " the room is full: you'll get in as soon as a spot frees up."}
-          </p>
-
-          <div className="flex gap-2 mt-auto">
-            <Btn onClick={onBack}>back</Btn>
-            <Btn
-              variant="primary"
-              className="flex-1"
-              disabled={starting}
-              onClick={() => onEnter({ mic: micOn, cam: camOn })}
-            >
-              <Icon.Broadcast size={13} /> Enter room
-            </Btn>
-          </div>
+          {children}
         </div>
       </section>
     </div>

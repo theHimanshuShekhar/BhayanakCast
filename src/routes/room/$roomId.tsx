@@ -15,10 +15,11 @@ import { useCurrentSession } from "~/lib/current-user";
 import { fmtMins, MAX_STREAMERS } from "~/lib/format";
 import { inviteUrl } from "~/lib/invites";
 import { getInviteTokenFn } from "~/lib/invites.functions";
+import { decideKnock, usePendingKnocks } from "~/lib/knock-live";
 import { getLocalMedia, type LocalDeviceKind, useLocalMedia } from "~/lib/local-media";
 import {
   type FeedEntry,
-  MEDIA_OFF,
+  type KnockEntry,
   type MediaState,
   REACTION_EMOJIS,
   type ReactionEmoji,
@@ -108,9 +109,10 @@ function RoomGone({ roomId }: { roomId: string }) {
 /**
  * One visit to a room: the lobby first (pick and preview devices; nothing is sent to the room
  * yet), then the room itself with what was chosen. A reload of a room this tab entered skips
- * the lobby and rejoins at once, mic and camera off. The mic and camera are released, and the
- * tab counts as having left, when the visit ends (back, leave, or navigating away; a reload
- * never runs this).
+ * the lobby and rejoins at once, mic and camera off; so does a knocker just admitted, with the
+ * mic and camera they turned on while waiting (src/routes/join/$inviteToken.tsx). The mic and
+ * camera are released, and the tab counts as having left, when the visit ends (back, leave, or
+ * navigating away; a reload never runs this).
  */
 function RoomVisit({ room, admin }: { room: LiveRoomCard; admin: boolean }) {
   const navigate = useNavigate();
@@ -118,7 +120,10 @@ function RoomVisit({ room, admin }: { room: LiveRoomCard; admin: boolean }) {
   const [entered, setEntered] = useState<MediaState | null>(null);
   // Before the first paint after hydration, so a reload doesn't flash the lobby's controls.
   useLayoutEffect(() => {
-    if (wasInRoom(room.id)) setEntered(MEDIA_OFF);
+    if (!wasInRoom(room.id)) return;
+    // Nothing is on after a reload.
+    const local = getLocalMedia().getSnapshot();
+    setEntered({ mic: local.mic.status === "on", cam: local.cam.status === "on", share: false });
   }, [room.id]);
   useEffect(
     () => () => {
@@ -301,6 +306,7 @@ const useNotice = (error: { message: string } | null, ms = 4_000) => {
 
 const NO_CHAT: ChatMessage[] = [];
 const NO_FEED: FeedEntry[] = [];
+const NO_KNOCKS: KnockEntry[] = [];
 
 function RoomPage({
   detail,
@@ -336,6 +342,8 @@ function RoomPage({
   const feed = live.room?.feed ?? NO_FEED;
   const activity = useMemo(() => feed.map(feedLine), [feed]);
   const reactions = useRoomReactions(detail.id);
+  // Knocks on a private room: the people tab's "waiting" group (and the toasts).
+  const knocks = usePendingKnocks(detail.id);
   const [showNonSharers, setShowNonSharers] = useState(true);
   const [pinnedId, setPinnedId] = useState<string | null>(null);
   const [mutedIds, setMutedIds] = useState<Set<string>>(() => new Set());
@@ -740,6 +748,8 @@ function RoomPage({
           onSend={sendChat}
           canSend={live.room !== null}
           onOpenProfile={openProfile}
+          knocks={isPrivate && joined && isModerator(myRole, admin) ? knocks : NO_KNOCKS}
+          onDecideKnock={decideKnock}
           open={sideOpen}
           onClose={() => setSideOpen(false)}
         />
