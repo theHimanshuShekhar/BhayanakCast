@@ -118,7 +118,10 @@ export interface RoomStore {
   rollupEndedRoom(roomId: string, at: Date): Promise<void>;
   /** Whether `userId` was kicked from `roomId` (they can't rejoin it, ADR 15). */
   isKicked(roomId: string, userId: string): Promise<boolean>;
-  /** Kick `userId` from `roomId` for good: `room_members.kicked`, back to a plain member. */
+  /**
+   * Kick `userId` from `roomId` for good: `room_members.kicked`, back to a plain member, and no
+   * longer approved into a private room (ADR 16).
+   */
   kick(roomId: string, userId: string): Promise<void>;
   /**
    * `userId`, present in `roomId`, is a mod or a plain member now (`room_members.role`); either
@@ -389,10 +392,10 @@ export function createDbRoomStore(db: Db): RoomStore {
     async kick(roomId, userId) {
       await db
         .insert(roomMembers)
-        .values({ roomId, userId, role: "member", kicked: true })
+        .values({ roomId, userId, role: "member", approved: false, kicked: true })
         .onConflictDoUpdate({
           target: [roomMembers.roomId, roomMembers.userId],
-          set: { role: "member", kicked: true },
+          set: { role: "member", approved: false, kicked: true },
         });
     },
 

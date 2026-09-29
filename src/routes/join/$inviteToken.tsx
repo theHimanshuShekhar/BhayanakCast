@@ -6,7 +6,7 @@ import { DeviceCheck, useDeviceState } from "~/components/room/lobby";
 import { SignInButton } from "~/components/sign-in-button";
 import { Btn, MonoCaps } from "~/components/ui";
 import { useCurrentSession } from "~/lib/current-user";
-import type { InvitedRoom } from "~/lib/invites";
+import { type InvitedRoom, invitePath } from "~/lib/invites";
 import { inviteQuery } from "~/lib/invites.queries";
 import { type KnockState, useKnock } from "~/lib/knock-live";
 import { getLocalMedia } from "~/lib/local-media";
@@ -30,7 +30,8 @@ function JoinRoute() {
     return (
       <KnockCard name={invite.name}>
         <p className="m-0 text-[12px] text-fg-muted">sign in to knock on this private room.</p>
-        <SignInButton />
+        {/* Back to this invite link once signed in, not home. */}
+        <SignInButton callbackURL={invitePath(inviteToken)} />
       </KnockCard>
     );
   }

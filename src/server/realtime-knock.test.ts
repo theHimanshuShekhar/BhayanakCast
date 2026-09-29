@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { roomMembers, rooms, user } from "../db/schema/index.ts";
 import { ROOM_CAPACITY } from "../lib/format.ts";
 import { type ClientMessage, KNOCK_EXPIRY_MS } from "../lib/realtime.ts";
+import { regenerateInviteToken } from "./invites.ts";
 import {
   type RealtimeHarness,
   startRealtimeHarness,
@@ -11,8 +12,9 @@ import {
 } from "./realtime-harness.ts";
 import { EMPTY_ROOM_TIMEOUT_MS, HOST_GRACE_MS, RECONNECT_GRACE_MS } from "./room-hub.ts";
 
-// Private rooms (#41, #42, ADR 16): knock with the invite link, and the host or a mod admits
-// or denies; a knock also ends when withdrawn, when its socket closes, or after 10 minutes.
+// Private rooms (#41, #42, #43, ADR 16): knock with the invite link, and the host or a mod
+// admits or denies; a knock also ends when withdrawn, when its socket closes, or after 10
+// minutes. The host can regenerate the link; a kick revokes the approval; admins walk in.
 
 let h: RealtimeHarness;
 let ana: TestUser;
@@ -575,5 +577,112 @@ describe("the knock queue (#42)", () => {
     expect(await b.waitFor("error")).toMatchObject({ code: "not_found", re: "knock.request" });
     await h.advance(KNOCK_EXPIRY_MS);
     expect(b.pending()).toEqual([]);
+  });
+});
+
+describe("the invite link's lifecycle (#43)", () => {
+  const asHost = () => ({ user: { id: ana.id, username: "ana" }, role: "user" as const });
+
+  it("refuses the old link once the host regenerates it; the new one opens the room", async () => {
+    const fresh = await regenerateInviteToken(h.db, asHost(), roomId, h.hub);
+    expect(fresh).toEqual(expect.any(String));
+    expect(fresh).not.toBe(inviteToken);
+
+    const b = await h.connectAs(bo);
+    expect(await refused(b, { type: "knock.request", inviteToken })).toMatchObject({
+      code: "not_found",
+      message: "This invite link is no longer valid",
+    });
+    b.send({ type: "knock.request", inviteToken: fresh ?? "" });
+    expect(await b.waitFor("knock.status")).toMatchObject({ roomId, status: "waiting_for_host" });
+  });
+
+  it("leaves approved members approved when the link is regenerated", async () => {
+    await approve(bo.id);
+    await regenerateInviteToken(h.db, asHost(), roomId, h.hub);
+    const b = await h.connectAs(bo);
+    expect((await b.join(roomId)).participants.map((p) => p.userId)).toEqual([bo.id]);
+  });
+
+  it("revokes a kicked member's approval, and their knock is refused with kicked", async () => {
+    const a = await h.connectAs(ana);
+    await a.join(roomId);
+    const b = await knock(bo);
+    await a.waitFor("knock.pending");
+    a.send({ type: "knock.decide", userId: bo.id, admit: true });
+    await b.waitFor("knock.status", (m) => m.status === "approved");
+    await b.join(roomId);
+    await a.waitForEvent("joined");
+    a.send({ type: "mod.kick", userId: bo.id });
+    await a.waitForEvent("kicked");
+    expect(await approvedRow(bo.id)).toBe(false);
+
+    const again = await h.connectAs(bo);
+    expect(await refused(again, { type: "knock.request", inviteToken })).toMatchObject({
+      code: "kicked",
+    });
+    expect(await refused(again, { type: "room.join", roomId })).toMatchObject({ code: "kicked" });
+  });
+
+  it("lets an admin join a private room directly, and answers their knock approved", async () => {
+    const admin = await h.createUser("root", { admin: true });
+    const r = await h.connectAs(admin);
+    expect((await r.join(roomId)).participants.map((p) => p.userId)).toEqual([admin.id]);
+    r.send({ type: "knock.request", inviteToken });
+    expect(await r.waitFor("knock.status")).toEqual({
+      type: "knock.status",
+      roomId,
+      status: "approved",
+    });
+    // Nobody was asked, and nothing was stored for them.
+    expect(await approvedRow(admin.id)).toBeNull();
+  });
+
+  it("ends knocks pending through the old link: invalid for the knocker, resolved for approvers", async () => {
+    const a = await h.connectAs(ana);
+    await a.join(roomId);
+    const b = await knock(bo);
+    await a.waitFor("knock.pending");
+
+    await regenerateInviteToken(h.db, asHost(), roomId, h.hub);
+    expect(await b.waitFor("error")).toMatchObject({
+      code: "not_found",
+      re: "knock.request",
+      message: "This invite link is no longer valid",
+    });
+    expect(await a.waitFor("knock.resolved")).toEqual({
+      type: "knock.resolved",
+      roomId,
+      userId: bo.id,
+    });
+    expect(await refused(a, { type: "knock.decide", userId: bo.id, admit: true })).toMatchObject({
+      code: "not_found",
+    });
+    // Nothing fires later for the ended knock.
+    await h.advance(KNOCK_EXPIRY_MS);
+    expect(b.pending()).toEqual([]);
+    expect(await approvedRow(bo.id)).toBeNull();
+  });
+
+  it("refuses a knocker reconnecting within the grace with the old link, leaving no knock", async () => {
+    const a = await h.connectAs(ana);
+    await a.join(roomId);
+    const b = await knock(bo);
+    await a.waitFor("knock.pending");
+    await b.close();
+    await h.settled();
+
+    await regenerateInviteToken(h.db, asHost(), roomId, h.hub);
+    await a.waitFor("knock.resolved");
+    const again = await h.connectAs(bo);
+    expect(await refused(again, { type: "knock.request", inviteToken })).toMatchObject({
+      code: "not_found",
+    });
+    // No ghost knock: a resync lists nothing pending, and the grace passing tells nobody.
+    a.send({ type: "room.join", roomId });
+    await a.waitFor("room.snapshot");
+    await h.advance(RECONNECT_GRACE_MS);
+    expect(a.pending().filter((m) => m.type.startsWith("knock."))).toEqual([]);
+    expect(again.pending()).toEqual([]);
   });
 });

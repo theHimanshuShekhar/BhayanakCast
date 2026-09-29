@@ -3,7 +3,8 @@ import { signIn } from "./auth";
 import { expect, newPage, test } from "./fixtures";
 import { createRoomOnPage, enterRoom, uniqueRoomName } from "./rooms";
 
-// Private rooms (#41, #42, ADR 16): copy the invite link, knock, and the host admits or denies.
+// Private rooms (#41, #42, #43, ADR 16): copy the invite link, knock, and the host admits or
+// denies; the host regenerates the link, and a visitor signs in from it.
 
 /**
  * Record what the page copies instead of touching the real clipboard, which needs permissions
@@ -178,5 +179,87 @@ test("with nobody to answer the knocker waits for the host; leaving withdraws th
     await expect(people).not.toContainText("waiting");
   } finally {
     await guestContext.close();
+  }
+});
+
+test("the host regenerates the invite link: the old link is no longer valid", async ({
+  page,
+  context,
+  browser,
+}) => {
+  await signIn(context, { username: "priv.regen.host" });
+  await fakeClipboard(context);
+  const name = uniqueRoomName("private regen");
+  await createRoomOnPage(page, { name, isPrivate: true });
+  const old = await copyInviteLink(page);
+
+  await page.getByRole("button", { name: "room info" }).click();
+  await page.getByRole("menuitem", { name: "regenerate invite link" }).click();
+  await expect(page.getByText("new invite link made: old links no longer work")).toBeVisible();
+  const fresh = await copyInviteLink(page);
+  expect(fresh).not.toBe(old);
+
+  const guestContext = await browser.newContext();
+  try {
+    const guest = await openInvite(guestContext, "priv.regen.guest", old);
+    await expect(
+      guest.getByRole("heading", { name: "this invite link is no longer valid" }),
+    ).toBeVisible();
+    await guest.goto(fresh);
+    await expect(guest.getByRole("heading", { name })).toBeVisible();
+    await expect(guest.getByRole("button", { name: "knock" })).toBeVisible();
+  } finally {
+    await guestContext.close();
+  }
+});
+
+test("a visitor signs in from the invite link and comes back to its knock screen", async ({
+  page,
+  context,
+  browser,
+}) => {
+  await signIn(context, { username: "priv.visit.host" });
+  await fakeClipboard(context);
+  const name = uniqueRoomName("private visit");
+  await createRoomOnPage(page, { name, isPrivate: true });
+  const link = await copyInviteLink(page);
+  const invitePath = new URL(link).pathname;
+
+  const visitorContext = await browser.newContext();
+  try {
+    const visitor = await newPage(visitorContext);
+    await visitor.route("https://discord.com/**", (route) =>
+      route.fulfill({ contentType: "text/html", body: "<h1>discord consent</h1>" }),
+    );
+    // Better Auth's answer, stood in for: the real endpoint's per-IP sign-in rate limit is
+    // shared by every test here (src/lib/auth.test.ts covers its redirect to the invite link).
+    let signInBody: unknown;
+    await visitor.route("**/api/auth/sign-in/social", (route) => {
+      signInBody = route.request().postDataJSON();
+      return route.fulfill({
+        json: { url: "https://discord.com/oauth2/authorize", redirect: true },
+      });
+    });
+    await visitor.goto(link);
+    await expect(visitor.getByRole("heading", { name })).toBeVisible();
+    await expect(visitor.getByRole("button", { name: "knock" })).toHaveCount(0);
+
+    // Discord is to send them back to this invite link, not home.
+    await visitor
+      .getByRole("region", { name })
+      .getByRole("button", { name: /sign in with discord/i })
+      .click();
+    await visitor.waitForURL("https://discord.com/**");
+    expect(signInBody).toMatchObject({ provider: "discord", callbackURL: invitePath });
+
+    // Discord's round trip, stood in for by the test sign-in, then its redirect.
+    await signIn(visitorContext, { username: "priv.visitor" });
+    await visitor.goto(invitePath);
+    await expect(visitor.getByRole("heading", { name })).toBeVisible();
+    await visitor.getByRole("button", { name: "knock" }).click();
+    await expect(visitor.getByText("waiting for the host to let you in")).toBeVisible();
+    await expect(knockToast(page, "priv.visitor")).toBeVisible();
+  } finally {
+    await visitorContext.close();
   }
 });

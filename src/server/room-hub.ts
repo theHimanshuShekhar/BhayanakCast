@@ -5,7 +5,8 @@
  *   await hub.handle(connection, frame);                // it sent a frame (raw JSON)
  *   await hub.disconnect(connection);                   // it closed
  *
- * An admin ban reaches it as `hub.disconnectUser(userId, notice)` (./live-hub.ts).
+ * An admin ban reaches it as `hub.disconnectUser(userId, notice)`, and a regenerated invite link
+ * as `hub.inviteRotated(roomId)` (./live-hub.ts).
  *
  * The WebSocket layer (./realtime.ts) is a thin adapter over these; tests drive the same
  * calls through real sockets (./realtime-harness.ts). The hub never touches `Date`, timers or
@@ -365,6 +366,17 @@ export class RoomHub {
     });
   }
 
+  /**
+   * The host regenerated `roomId`'s invite link (ADR 16): knocks pending through the old one end,
+   * their knockers told it's no longer valid, as when the room ends.
+   */
+  inviteRotated(roomId: string): Promise<void> {
+    return this.#enqueue(async () => {
+      const room = this.#rooms.get(roomId);
+      if (room) this.#invalidateKnocks(room);
+    });
+  }
+
   /** Resolves once every queued operation (messages, disconnects, timers) has finished. */
   async idle(): Promise<void> {
     for (;;) {
@@ -657,12 +669,7 @@ export class RoomHub {
     room.chat = [];
     room.feed = [];
     // Its invite link opens nothing now.
-    for (const knock of room.knocks.values()) {
-      knock.expiry.cancel();
-      knock.grace?.cancel();
-      this.#refuse(knock.connection, "not_found", INVALID_INVITE, "knock.request");
-    }
-    room.knocks.clear();
+    this.#invalidateKnocks(room);
     await this.#store.closeHostInterval(room.id, endedAt);
     if (await this.#store.endRoom(room.id, endedAt)) {
       await this.#store.rollupEndedRoom(room.id, this.#clock.now());
@@ -1512,6 +1519,14 @@ export class RoomHub {
     room.knocks.delete(knock.userId);
     if (status) this.#send(knock.connection, { type: "knock.status", roomId: room.id, status });
     this.#tellApprovers(room, { type: "knock.resolved", roomId: room.id, userId: knock.userId });
+  }
+
+  /** `room`'s invite link opens nothing now: every pending knock ends, refused as invalid. */
+  #invalidateKnocks(room: LiveRoom): void {
+    for (const knock of [...room.knocks.values()]) {
+      this.#endKnock(room, knock);
+      this.#refuse(knock.connection, "not_found", INVALID_INVITE, "knock.request");
+    }
   }
 
   /** The knocks pending from `conn`, in their rooms. */

@@ -1,5 +1,6 @@
 // The one "sign in with discord" entry point (ADR 6 visitors addendum): no sign-in
-// page, it goes straight to Discord's consent screen and comes back to home.
+// page, it goes straight to Discord's consent screen and comes back to home (or, from an
+// invite link, to that link: ADR 16).
 import { useState } from "react";
 import { signInWithDiscord } from "~/lib/auth-client";
 import { railBase, tipCls } from "./sidenav";
@@ -15,15 +16,21 @@ const DiscordMark = ({ size = 16 }: { size?: number }) => (
 );
 
 /**
- * Starts Better Auth's Discord social sign-in with the callback set to home.
- * `rail` fills the side rail's avatar slot; `block` is a full-width primary button.
+ * Starts Better Auth's Discord social sign-in with the callback set to `callbackURL` (home
+ * unless given). `rail` fills the side rail's avatar slot; `block` is a full-width primary button.
  */
-export const SignInButton = ({ variant = "block" }: { variant?: "rail" | "block" }) => {
+export const SignInButton = ({
+  variant = "block",
+  callbackURL = "/",
+}: {
+  variant?: "rail" | "block";
+  callbackURL?: string;
+}) => {
   const [pending, setPending] = useState(false);
   const start = async () => {
     setPending(true);
     // On success the browser leaves for Discord; only a failure lands back here.
-    const { error } = await signInWithDiscord("/").catch((e: unknown) => ({ error: e }));
+    const { error } = await signInWithDiscord(callbackURL).catch((e: unknown) => ({ error: e }));
     if (error) setPending(false);
   };
 
