@@ -61,10 +61,13 @@ const hhmm = (iso: string) => {
 
 const ChatLine = ({
   m,
+  image,
   me,
   onOpenProfile,
 }: {
   m: ChatMessage;
+  /** The sender's picture, if they're still in the room. */
+  image: string | null;
   me: string | null;
   onOpenProfile: (u: string) => void;
 }) => {
@@ -84,7 +87,7 @@ const ChatLine = ({
         aria-label={`View ${m.user}'s profile`}
         className="self-start rounded-full cursor-pointer"
       >
-        <Avatar name={m.user} size="sm" />
+        <Avatar name={m.user} image={image} size="sm" />
       </button>
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2">
@@ -133,7 +136,7 @@ const ParticipantRow = ({
       aria-label={`View ${p.name}'s profile`}
       className="rounded-full cursor-pointer hover:brightness-110"
     >
-      <Avatar name={p.name} size="md" ring={p.speaking} />
+      <Avatar name={p.name} image={p.image} size="md" ring={p.speaking} />
     </button>
     <div className="flex-1 min-w-0">
       <button
@@ -173,7 +176,7 @@ const KnockRow = ({
       params={{ userId: knock.userId }}
       className="flex flex-1 min-w-0 items-center gap-2.5 text-xs font-medium hover:text-primary-strong hover:underline underline-offset-2"
     >
-      <Avatar name={knock.username} size="md" />
+      <Avatar name={knock.username} image={knock.image} size="md" />
       <span className="truncate">{knock.username}</span>
     </Link>
     <div className="flex gap-1 flex-shrink-0">
@@ -241,6 +244,8 @@ export const RoomSide = ({
   /** Where to put the caret after the draft changes (an emoji was inserted). */
   const caret = useRef<number | null>(null);
   const me = participants.find((p) => p.you)?.name ?? null;
+  // Chat lines carry no picture; the sender's comes from the room's people.
+  const images = new Map(participants.map((p) => [p.userId, p.image]));
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: scroll on new messages / tab switch
   useEffect(() => {
@@ -335,7 +340,13 @@ export const RoomSide = ({
           <div className={panelCls} ref={chatRef} aria-live="polite">
             {chat.length === 0 && <EmptyNote>no messages yet. say hi!</EmptyNote>}
             {chat.map((m) => (
-              <ChatLine key={m.id} m={m} me={me} onOpenProfile={onOpenProfile} />
+              <ChatLine
+                key={m.id}
+                m={m}
+                image={m.system ? null : (images.get(m.userId) ?? null)}
+                me={me}
+                onOpenProfile={onOpenProfile}
+              />
             ))}
           </div>
           <div className="px-3 py-2.5 border-t border-border-subtle bg-canvas">

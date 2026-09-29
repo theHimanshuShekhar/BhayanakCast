@@ -65,9 +65,7 @@ export interface AdminRoomRow {
   endedAt: string | null;
 }
 
-export interface LeaderboardEntry {
-  id: string;
-  username: string;
+export interface LeaderboardEntry extends RoomPerson {
   hours: number;
 }
 
@@ -116,9 +114,7 @@ export type AdminRole = "admin" | "user";
 export const toAdminRole = (role: string | null | undefined): AdminRole =>
   role === "admin" ? "admin" : "user";
 
-export interface AdminUserRow {
-  id: string;
-  username: string;
+export interface AdminUserRow extends RoomPerson {
   /** ISO timestamp of sign-up. */
   joinedAt: string;
   role: AdminRole;

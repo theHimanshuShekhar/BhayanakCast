@@ -11,7 +11,7 @@ let roomId: string;
 
 beforeEach(async () => {
   h = await startRealtimeHarness();
-  ana = await h.createUser("ana");
+  ana = await h.createUser("ana", { image: ANA_IMAGE });
   bo = await h.createUser("bo");
   roomId = await h.createRoom(ana);
 });
@@ -21,6 +21,8 @@ afterEach(async () => {
 });
 
 const T0 = "2026-09-01T12:00:00.000Z";
+/** A Discord CDN picture stored for ana; everyone else has none. */
+const ANA_IMAGE = "https://cdn.discordapp.com/avatars/1234/abcd.png";
 const SECOND = 1_000;
 
 /** The room's presence intervals by start, then ana before bo. */
@@ -47,7 +49,7 @@ describe("upgrade", () => {
     expect(await a.waitFor("welcome")).toEqual({
       type: "welcome",
       v: PROTOCOL_VERSION,
-      user: { id: ana.id, username: "ana" },
+      user: { id: ana.id, username: "ana", image: ANA_IMAGE },
     });
   });
 
@@ -113,7 +115,14 @@ describe("join and leave", () => {
       name: expect.any(String),
       hostUserId: ana.id,
       participants: [
-        { userId: ana.id, username: "ana", role: "host", joinedAt: T0, media: MEDIA_OFF },
+        {
+          userId: ana.id,
+          username: "ana",
+          image: ANA_IMAGE,
+          role: "host",
+          joinedAt: T0,
+          media: MEDIA_OFF,
+        },
       ],
       chat: [],
       feed: [],
@@ -124,8 +133,22 @@ describe("join and leave", () => {
     const snapshot = await b.join(roomId);
     const boJoinedAt = "2026-09-01T12:00:10.000Z";
     expect(snapshot.participants).toEqual([
-      { userId: ana.id, username: "ana", role: "host", joinedAt: T0, media: MEDIA_OFF },
-      { userId: bo.id, username: "bo", role: "member", joinedAt: boJoinedAt, media: MEDIA_OFF },
+      {
+        userId: ana.id,
+        username: "ana",
+        image: ANA_IMAGE,
+        role: "host",
+        joinedAt: T0,
+        media: MEDIA_OFF,
+      },
+      {
+        userId: bo.id,
+        username: "bo",
+        image: null,
+        role: "member",
+        joinedAt: boJoinedAt,
+        media: MEDIA_OFF,
+      },
     ]);
     expect(await a.waitForEvent("joined")).toEqual({
       type: "room.event",
@@ -136,6 +159,7 @@ describe("join and leave", () => {
         participant: {
           userId: bo.id,
           username: "bo",
+          image: null,
           role: "member",
           joinedAt: boJoinedAt,
           media: MEDIA_OFF,

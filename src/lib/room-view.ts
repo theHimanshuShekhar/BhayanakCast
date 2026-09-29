@@ -33,6 +33,7 @@ export function roomDetailFor(room: LiveRoomCard, me: RoomPerson | null): RoomDe
       id: p.id,
       userId: p.id,
       name: p.username,
+      image: p.image,
       role: p.id === hostId ? "host" : "member",
       streaming: streaming.has(p.id),
       speaking: false,
@@ -68,7 +69,7 @@ export function withRoster(
   const byUser = new Map(roster.map((p) => [p.userId, p]));
   const kept = shown.flatMap((p): Participant[] => {
     const live = byUser.get(p.userId);
-    return live ? [{ ...p, name: live.username, role: live.role }] : [];
+    return live ? [{ ...p, name: live.username, image: live.image, role: live.role }] : [];
   });
   const keptIds = new Set(kept.map((p) => p.userId));
   const added = roster
@@ -78,6 +79,7 @@ export function withRoster(
         id: p.userId,
         userId: p.userId,
         name: p.username,
+        image: p.image,
         role: p.role,
         streaming: false,
         speaking: false,

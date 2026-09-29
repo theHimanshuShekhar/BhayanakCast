@@ -127,7 +127,7 @@ export interface RealtimeHarness {
   /** `ws://127.0.0.1:<port>/ws` */
   url: string;
   /** A signed-in user with a real session, via the test-only sign-in. */
-  createUser(username: string, options?: { admin?: boolean }): Promise<TestUser>;
+  createUser(username: string, options?: { admin?: boolean; image?: string }): Promise<TestUser>;
   /** A live public room hosted by `host` (through `createRoom`, like the create dialog). */
   createRoom(host: TestUser, input?: Partial<CreateRoomInput>): Promise<string>;
   /** Open a socket as `user` (null: no cookie) without the handshake. Rejects if refused. */
@@ -189,14 +189,14 @@ export async function startRealtimeHarness(
   const clients = new Set<HarnessClient>();
   let nextDiscordId = 100_000;
 
-  async function createUser(username: string, options: { admin?: boolean } = {}) {
+  async function createUser(username: string, options: { admin?: boolean; image?: string } = {}) {
     const discordId = String(nextDiscordId++);
     if (options.admin) adminDiscordIds.add(discordId);
     const response = await auth.handler(
       new Request(`${testEnv.BETTER_AUTH_URL}/api/auth/test/sign-in`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ discordId, username }),
+        body: JSON.stringify({ discordId, username, image: options.image }),
       }),
     );
     if (!response.ok) throw new Error(`Test sign-in failed: ${await response.text()}`);
@@ -250,7 +250,10 @@ export async function startRealtimeHarness(
     url,
     createUser,
     async createRoom(host, input = {}) {
-      const caller = { user: { id: host.id, username: host.username }, role: "user" as const };
+      const caller = {
+        user: { id: host.id, username: host.username, image: null },
+        role: "user" as const,
+      };
       const { id } = await createRoom(db, caller, {
         name: "test room",
         kind: "chat",

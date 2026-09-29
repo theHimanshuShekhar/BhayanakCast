@@ -14,6 +14,8 @@ export interface CurrentUser {
   id: string;
   /** Discord username; shown in the rail and used for avatar initials. */
   username: string;
+  /** Their Discord picture as stored at sign-in (null if none). */
+  image: string | null;
 }
 
 export interface CurrentSession {

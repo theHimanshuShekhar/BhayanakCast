@@ -44,7 +44,7 @@ import {
 } from "~/lib/admin.queries";
 import { useCurrentSession } from "~/lib/current-user";
 import { fmtAgo, fmtMins } from "~/lib/format";
-import type { LiveRoomCard } from "~/lib/rooms";
+import type { LiveRoomCard, RoomPerson } from "~/lib/rooms";
 import { roomKeys } from "~/lib/rooms.queries";
 import { TURN_FREE_TIER_GB } from "~/lib/turn-usage";
 import { useDebounced } from "~/lib/use-debounced";
@@ -144,10 +144,10 @@ const RoomCell = ({
   </div>
 );
 /** A room's host; null once their account is gone. */
-const UserCell = ({ name }: { name: string | null }) =>
-  name ? (
+const UserCell = ({ person }: { person: RoomPerson | null }) =>
+  person ? (
     <div className="inline-flex items-center gap-2 text-fg-muted">
-      <Avatar name={name} size="sm" /> {name}
+      <Avatar name={person.username} image={person.image} size="sm" /> {person.username}
     </div>
   ) : (
     <span className="text-subtle">—</span>
@@ -200,7 +200,7 @@ const LiveRoomsTable = ({ rooms }: { rooms: LiveRoomCard[] }) => {
                 <RoomCell live name={r.name} isPrivate={r.isPrivate} />
               </td>
               <td className={td}>
-                <UserCell name={r.host?.username ?? null} />
+                <UserCell person={r.host} />
               </td>
               <td className={`${td} text-right`}>
                 <b>{r.participantCount}</b>
@@ -367,7 +367,7 @@ const RecentRoomsTable = ({ rooms: rows }: { rooms: AdminRoomRow[] }) => {
                   <RoomCell live={r.status === "live"} name={r.name} isPrivate={r.isPrivate} />
                 </td>
                 <td className={td}>
-                  <UserCell name={r.host?.username ?? null} />
+                  <UserCell person={r.host} />
                 </td>
                 <td className={td}>
                   <span
@@ -521,7 +521,7 @@ const UsersTable = () => {
                     params={{ userId: u.id }}
                     className="inline-flex items-center gap-2 !text-fg font-medium hover:no-underline"
                   >
-                    <Avatar name={u.username} size="sm" /> {u.username}
+                    <Avatar name={u.username} image={u.image} size="sm" /> {u.username}
                   </Link>
                 </td>
                 <td className={`${td} !text-subtle`}>{fmtDate(u.joinedAt)}</td>
@@ -646,7 +646,13 @@ const TopUsersTable = ({ users, label }: { users: LeaderboardEntry[]; label: str
             <span className="row-span-2 text-[10.5px] font-bold text-subtle tracking-[0.05em] group-hover:text-primary">
               #{i + 1}
             </span>
-            <Avatar name={u.username} size="sm" ring={i === 0} className="row-span-2" />
+            <Avatar
+              name={u.username}
+              image={u.image}
+              size="sm"
+              ring={i === 0}
+              className="row-span-2"
+            />
             <span className="col-start-3 text-[12.5px] font-semibold text-fg">{u.username}</span>
             <span className="col-start-4 row-start-1 text-[13px] font-bold text-primary tracking-[-0.01em]">
               {u.hours.toFixed(1)}

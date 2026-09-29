@@ -44,6 +44,7 @@ export interface StoredRoom {
 export interface OpenPresence {
   userId: string;
   username: string;
+  image: string | null;
   startedAt: Date;
   lastSeenAt: Date;
   /** They also have an open stream interval in the room (they were sharing). */
@@ -244,6 +245,7 @@ export function createDbRoomStore(db: Db): RoomStore {
           roomId: presenceIntervals.roomId,
           userId: presenceIntervals.userId,
           username: sql<string>`coalesce(${user.discordUsername}, ${user.name})`,
+          image: user.image,
           startedAt: presenceIntervals.startedAt,
           lastSeenAt: presenceIntervals.lastSeenAt,
         })

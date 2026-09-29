@@ -1,7 +1,7 @@
 /**
  * Test-only sign-in (Better Auth plugin): `POST /api/auth/test/sign-in` with a
- * fake Discord id and username creates or reuses that user and sets a real
- * session cookie, so browser tests don't depend on Discord. Only registered
+ * fake Discord id and username (and, for a new user, a picture) creates or reuses that user
+ * and sets a real session cookie, so browser tests don't depend on Discord. Only registered
  * when `isTestSignInEnabled` allows it; production startup refuses the flag.
  * It goes through the normal user/session hooks, so admin env ids and bans apply.
  * `POST /api/auth/test/ban` bans or unbans a fake user by Discord id (test-only too).
@@ -112,10 +112,15 @@ export function testSignIn(db: Db) {
         TEST_SIGN_IN_PATH,
         {
           method: "POST",
-          body: z.object({ discordId: z.string().min(1), username: z.string().min(1) }),
+          body: z.object({
+            discordId: z.string().min(1),
+            username: z.string().min(1),
+            /** The picture a first sign-in stores, as Discord's sign-in would; none by default. */
+            image: z.string().optional(),
+          }),
         },
         async (ctx) => {
-          const { discordId, username } = ctx.body;
+          const { discordId, username, image } = ctx.body;
           const { adapter, internalAdapter } = ctx.context;
           const find = () =>
             adapter.findOne<User>({
@@ -129,6 +134,7 @@ export function testSignIn(db: Db) {
                 email: `${discordId}@discord.invalid`,
                 discordId,
                 discordUsername: username,
+                image,
               },
               { method: "test-sign-in" },
             );

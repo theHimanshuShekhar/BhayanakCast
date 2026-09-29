@@ -147,7 +147,7 @@ function PastStreamPage({ recap }: { recap: Recap }) {
               <span>hosted by</span>
               {recap.host ? (
                 <>
-                  <Avatar name={recap.host.username} size="sm" />
+                  <Avatar name={recap.host.username} image={recap.host.image} size="sm" />
                   <NameLink person={recap.host} className="text-fg-muted font-semibold" />
                 </>
               ) : (
@@ -196,7 +196,7 @@ function PastStreamPage({ recap }: { recap: Recap }) {
                 key={p.id}
                 className="flex items-center gap-3 sm:gap-3.5 px-3 sm:px-4 py-3 border-b border-border-subtle last:border-b-0"
               >
-                <Avatar name={p.username} size="md" ring={p.isHost} />
+                <Avatar name={p.username} image={p.image} size="md" ring={p.isHost} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <NameLink person={p} className="text-[13px] font-semibold" />
@@ -267,7 +267,7 @@ function PersonTimeline({ person: p, place }: { person: RecapPerson; place: Plac
       className="grid grid-cols-[100px_minmax(0,1fr)_52px] sm:grid-cols-[180px_minmax(0,1fr)_72px] gap-3 sm:gap-4 items-center px-3 sm:px-4 py-2.5 border-b border-border-subtle last:border-b-0 hover:bg-surface-2"
     >
       <div className="flex items-center gap-2 min-w-0">
-        <Avatar name={p.username} size="sm" />
+        <Avatar name={p.username} image={p.image} size="sm" />
         <NameLink person={p} className="text-xs font-medium" />
       </div>
       <div className="relative h-2.5 rounded-full bg-surface-3">

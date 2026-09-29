@@ -16,11 +16,12 @@ let db: Db;
 let close: () => Promise<void>;
 
 const visitor: Caller = { user: null, role: "visitor" };
-const asUser = (id: string): Caller => ({ user: { id, username: id }, role: "user" });
-const admin: Caller = { user: { id: "admin", username: "admin" }, role: "admin" };
+const asUser = (id: string): Caller => ({ user: { id, username: id, image: null }, role: "user" });
+const admin: Caller = { user: { id: "admin", username: "admin", image: null }, role: "admin" };
 const host = asUser("host");
 const member = asUser("member");
 const stranger = asUser("stranger");
+const AVATAR = "https://cdn.discordapp.com/avatars/1234/abcd.png";
 
 beforeEach(async () => {
   ({ db, close } = await createTestDb());
@@ -30,6 +31,7 @@ beforeEach(async () => {
       name: id,
       email: `${id}@discord.invalid`,
       discordUsername: `${id}.discord`,
+      image: id === "member" ? AVATAR : null,
       role: id === "admin" ? "admin" : "user",
     })),
   );
@@ -175,7 +177,7 @@ describe("listLiveRooms", () => {
     expect(await listLiveRooms(db, visitor)).toEqual([
       expect.objectContaining({
         id: newer,
-        host: { id: "member", username: "member.discord" },
+        host: { id: "member", username: "member.discord", image: AVATAR },
         capacity: 10,
         kind: "code",
         tags: ["rust"],
@@ -201,11 +203,11 @@ describe("listLiveRooms", () => {
     const peopleNow = {
       participantCount: 2,
       participants: [
-        { id: "host", username: "host.discord" },
-        { id: "member", username: "member.discord" },
+        { id: "host", username: "host.discord", image: null },
+        { id: "member", username: "member.discord", image: AVATAR },
       ],
       streamCount: 1,
-      streamers: [{ id: "host", username: "host.discord", thumbnailAt: null }],
+      streamers: [{ id: "host", username: "host.discord", image: null, thumbnailAt: null }],
     };
     const [room] = await listLiveRooms(db, visitor);
     expect(room).toMatchObject(peopleNow);

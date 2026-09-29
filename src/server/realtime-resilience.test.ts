@@ -15,7 +15,7 @@ let roomId: string;
 beforeEach(async () => {
   h = await startRealtimeHarness();
   ana = await h.createUser("ana");
-  bo = await h.createUser("bo");
+  bo = await h.createUser("bo", { image: BO_IMAGE });
   cy = await h.createUser("cy");
   roomId = await h.createRoom(ana);
 });
@@ -26,6 +26,8 @@ afterEach(async () => {
 
 const SECOND = 1_000;
 const T0 = "2026-09-01T12:00:00.000Z";
+/** A Discord CDN picture stored for bo; everyone else has none. */
+const BO_IMAGE = "https://cdn.discordapp.com/avatars/1234/abcd.png";
 /** T0 plus `s` seconds, as an ISO string. */
 const t = (s: number) => new Date(Date.parse(T0) + s * SECOND).toISOString();
 
@@ -247,9 +249,30 @@ describe("restart recovery", () => {
     // ana is back first: the room is as it was, roles included.
     const a2 = await h.connectAs(ana);
     expect((await a2.join(roomId)).participants).toEqual([
-      { userId: ana.id, username: "ana", role: "host", joinedAt: T0, media: MEDIA_OFF },
-      { userId: bo.id, username: "bo", role: "mod", joinedAt: t(1), media: MEDIA_OFF },
-      { userId: cy.id, username: "cy", role: "member", joinedAt: t(2), media: MEDIA_OFF },
+      {
+        userId: ana.id,
+        username: "ana",
+        image: null,
+        role: "host",
+        joinedAt: T0,
+        media: MEDIA_OFF,
+      },
+      {
+        userId: bo.id,
+        username: "bo",
+        image: BO_IMAGE,
+        role: "mod",
+        joinedAt: t(1),
+        media: MEDIA_OFF,
+      },
+      {
+        userId: cy.id,
+        username: "cy",
+        image: null,
+        role: "member",
+        joinedAt: t(2),
+        media: MEDIA_OFF,
+      },
     ]);
     await h.advance(10 * SECOND);
     const b2 = await h.connectAs(bo);
@@ -287,7 +310,14 @@ describe("restart recovery", () => {
 
     const a = await h.connectAs(ana);
     expect((await a.join(roomId)).participants).toEqual([
-      { userId: ana.id, username: "ana", role: "host", joinedAt: t(670), media: MEDIA_OFF },
+      {
+        userId: ana.id,
+        username: "ana",
+        image: null,
+        role: "host",
+        joinedAt: t(670),
+        media: MEDIA_OFF,
+      },
     ]);
     expect((await presenceRows()).map((r) => [r.who, r.startedAt, r.endedAt])).toEqual([
       ["ana", T0, t(60)],

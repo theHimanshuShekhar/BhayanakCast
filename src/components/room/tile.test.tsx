@@ -10,6 +10,7 @@ const bo: Participant = {
   id: "bo",
   userId: "bo",
   name: "bo",
+  image: null,
   role: "member",
   streaming: true,
   speaking: false,

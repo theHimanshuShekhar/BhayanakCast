@@ -250,6 +250,7 @@ async function topBy(
       id: user.id,
       name: user.name,
       discordUsername: user.discordUsername,
+      image: user.image,
       seconds: column,
     })
     .from(userStats)
@@ -260,6 +261,7 @@ async function topBy(
   return rows.map((row) => ({
     id: row.id,
     username: usernameOf(row),
+    image: row.image,
     hours: secondsToHours(row.seconds),
   }));
 }

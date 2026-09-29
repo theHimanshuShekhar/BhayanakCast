@@ -64,7 +64,12 @@ export const StreamMosaic = ({
             <StreamScreen stream={s} />
             {(n > 1 || s.thumbnail) && (
               <span className="absolute bottom-1.5 left-1.5 z-[2] inline-flex items-center gap-1 max-w-[calc(100%-12px)] pl-0.5 pr-1.5 py-0.5 rounded-full bg-black/55 backdrop-blur-[6px] text-[9.5px] font-semibold text-white">
-                <Avatar name={s.user} size="sm" className="!w-3.5 !h-3.5 !text-[6px]" />
+                <Avatar
+                  name={s.user}
+                  image={s.image}
+                  size="sm"
+                  className="!w-3.5 !h-3.5 !text-[6px]"
+                />
                 <span className="truncate">{s.user}</span>
               </span>
             )}
@@ -128,6 +133,7 @@ export const placeholderStreams = (
 ): Stream[] =>
   streamers.map((s) => ({
     user: s.username,
+    image: s.image,
     screen: "browser",
     thumbnail: roomId && s.thumbnailAt ? thumbnailUrl(roomId, s.id, s.thumbnailAt) : undefined,
   }));
@@ -144,11 +150,7 @@ export const LiveCard = ({
   const hostName = room.host?.username ?? "no host";
   const newest = newestThumbnail(room.streamers);
   const viewers = room.participants.filter((p) => p.id !== room.host?.id).length;
-  const faces = room.participants.length
-    ? room.participants.map((p) => p.username)
-    : room.host
-      ? [room.host.username]
-      : [];
+  const faces = room.participants.length ? room.participants : room.host ? [room.host] : [];
   return (
     <button
       type="button"
@@ -169,7 +171,7 @@ export const LiveCard = ({
         )}
       </div>
       <div className="flex items-center gap-2.5 w-full">
-        <AvatarStack names={faces} max={4} size="md" />
+        <AvatarStack people={faces} max={4} size="md" />
         <div className="flex-1 min-w-0">
           <div className="text-xs font-semibold">{hostName}</div>
           <div className="text-[10.5px] text-muted">
@@ -199,7 +201,6 @@ export const PastCard = ({
   room: PastRoomCard;
   onOpen: (room: PastRoomCard) => void;
 }) => {
-  const names = room.people.map((p) => p.username);
   const newest = newestThumbnail(room.streamers);
   return (
     <button
@@ -222,7 +223,7 @@ export const PastCard = ({
         )}
       </div>
       <div className="flex items-center gap-2.5 w-full">
-        <AvatarStack names={names} max={3} size="md" />
+        <AvatarStack people={room.people} max={3} size="md" />
         <div className="flex-1 min-w-0">
           <div className="text-xs font-semibold truncate">{room.host?.username ?? "no host"}</div>
           <div className="text-[10.5px] text-muted">Host</div>
@@ -230,7 +231,7 @@ export const PastCard = ({
       </div>
       <div className={`${cardFoot} gap-2.5 text-[10.5px] w-full`}>
         <span className="inline-flex items-center gap-1">
-          <Icon.Users size={11} /> {names.length} joined
+          <Icon.Users size={11} /> {room.people.length} joined
         </span>
         <span className="inline-flex items-center gap-1">
           <Icon.Clock size={11} /> lasted {fmtMins(room.durationMinutes)}

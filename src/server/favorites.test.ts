@@ -9,7 +9,7 @@ let db: Db;
 let close: () => Promise<void>;
 
 const visitor: Caller = { user: null, role: "visitor" };
-const asUser = (id: string): Caller => ({ user: { id, username: id }, role: "user" });
+const asUser = (id: string): Caller => ({ user: { id, username: id, image: null }, role: "user" });
 const fan = asUser("fan");
 const other = asUser("other");
 

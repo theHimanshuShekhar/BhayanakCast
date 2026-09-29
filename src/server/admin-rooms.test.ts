@@ -26,7 +26,7 @@ let db: Db;
 let close: () => Promise<void>;
 let endRoomByAdmin: ReturnType<typeof vi.fn<RoomHub["endRoomByAdmin"]>>;
 
-const admin: Caller = { user: { id: "admin", username: "admin_jpg" }, role: "admin" };
+const admin: Caller = { user: { id: "admin", username: "admin_jpg", image: null }, role: "admin" };
 const noHub: AdminRoomDeps = { hub: null };
 
 beforeEach(async () => {
@@ -99,7 +99,7 @@ describe("endRoom", () => {
     const deps = { hub: { endRoomByAdmin } };
     for (const caller of [
       { user: null, role: "visitor" },
-      { user: { id: "ana", username: "ana" }, role: "user" },
+      { user: { id: "ana", username: "ana", image: null }, role: "user" },
       { user: null, role: "admin" },
     ] satisfies Caller[]) {
       await expect(endRoom(db, caller, { roomId }, deps, at(12))).rejects.toBeInstanceOf(

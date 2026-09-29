@@ -43,12 +43,12 @@ async function createDiscordUser(discordId: string) {
   );
 }
 
-function testSignInRequest(discordId: string, username: string) {
+function testSignInRequest(discordId: string, username: string, image?: string) {
   return auth.handler(
     new Request(`${testEnv.BETTER_AUTH_URL}/api/auth/test/sign-in`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ discordId, username }),
+      body: JSON.stringify({ discordId, username, image }),
     }),
   );
 }
@@ -262,6 +262,17 @@ describe("image column", () => {
     // Refused whole: nothing of that request applied.
     expect(await rowOf()).toEqual({ name: "renamed", image: null });
   });
+
+  it("keeps the Discord picture a user signed in with, whatever they send", async () => {
+    const stored = "https://cdn.discordapp.com/avatars/4101/abcd.png";
+    const signedIn = await testSignInRequest("4101", "kodama_jpg", stored);
+    const { userId } = (await signedIn.clone().json()) as { userId: string };
+    for (const image of [stored, "https://cdn.discordapp.com/avatars/4101/other.png", null]) {
+      expect((await updateUserRequest(signedIn, { image })).status).toBe(403);
+    }
+    const [row] = await db.select({ image: user.image }).from(user).where(eq(user.id, userId));
+    expect(row?.image).toBe(stored);
+  });
 });
 
 describe("bans", () => {
@@ -332,15 +343,16 @@ describe("bans", () => {
   });
 
   describe("Discord sign-in", () => {
-    const discordProfile = {
-      id: "5000",
-      username: "discord_user",
-      global_name: null,
-      avatar: null,
-      discriminator: "0",
-    };
+    let discordProfile: Record<string, string | null>;
 
     beforeEach(() => {
+      discordProfile = {
+        id: "5000",
+        username: "discord_user",
+        global_name: null,
+        avatar: null,
+        discriminator: "0",
+      };
       // Stand in for Discord's token and user endpoints.
       const realFetch = globalThis.fetch;
       vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -385,6 +397,23 @@ describe("bans", () => {
       expect(response.headers.get("location")).toBe("/");
       const signedIn = await resolveSession(auth, cookiesFrom(response));
       expect(signedIn?.user.discordUsername).toBe("discord_user");
+    });
+
+    it("stores the Discord picture, or Discord's default one, and refreshes it on the next sign-in", async () => {
+      // Sign-in is rate limited per IP, and other tests here sign in from the default one.
+      let signIns = 0;
+      const imageOf = async () => {
+        const response = await completeDiscordSignIn({ ip: `10.56.0.${++signIns}` });
+        return (await resolveSession(auth, cookiesFrom(response)))?.user.image;
+      };
+      // No custom picture: Discord's default avatar for the id (5000 >> 22 = 0, one of 6).
+      expect(await imageOf()).toBe("https://cdn.discordapp.com/embed/avatars/0.png");
+
+      discordProfile.avatar = "abc123";
+      expect(await imageOf()).toBe("https://cdn.discordapp.com/avatars/5000/abc123.png");
+
+      discordProfile.avatar = "a_abc123";
+      expect(await imageOf()).toBe("https://cdn.discordapp.com/avatars/5000/a_abc123.gif");
     });
 
     it("returns to the invite link signed in from, not home (ADR 16)", async () => {

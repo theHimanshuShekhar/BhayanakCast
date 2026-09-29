@@ -72,7 +72,7 @@ beforeEach(async () => {
   ({ db, close } = await createTestDb());
   auth = createAuth(db, { env: testEnv, adminDiscordIds: ENV_ADMINS });
   const signedIn = await signIn(ADMIN_DISCORD_ID, "admin_jpg");
-  admin = { user: { id: signedIn.id, username: "admin_jpg" }, role: "admin" };
+  admin = { user: { id: signedIn.id, username: "admin_jpg", image: null }, role: "admin" };
   adminHeaders = signedIn.headers;
   targetId = (await signIn("2000", "spammer")).id;
   disconnectUser = vi.fn(async () => {});
@@ -102,7 +102,10 @@ const auditRows = () =>
     .orderBy(adminActions.at);
 
 describe("admin user functions refuse non-admins", () => {
-  const plainUser = (): Caller => ({ user: { id: targetId, username: "spammer" }, role: "user" });
+  const plainUser = (): Caller => ({
+    user: { id: targetId, username: "spammer", image: null },
+    role: "user",
+  });
   const calls: [string, (caller: Caller) => Promise<unknown>][] = [
     ["listAdminUsers", (caller) => listAdminUsers(db, caller, {}, ENV_ADMINS)],
     [
@@ -290,7 +293,10 @@ describe("setUserRole", () => {
     const other = await signIn("3000", "other_admin");
     await setUserRole(db, admin, { userId: other.id, role: "admin" }, deps);
     setHubRole.mockClear();
-    const otherAdmin: Caller = { user: { id: other.id, username: "other_admin" }, role: "admin" };
+    const otherAdmin: Caller = {
+      user: { id: other.id, username: "other_admin", image: null },
+      role: "admin",
+    };
 
     await expect(
       setUserRole(
@@ -308,7 +314,10 @@ describe("setUserRole", () => {
   it("refuses to demote yourself, so an admin always remains", async () => {
     const other = await signIn("3000", "other_admin");
     await setUserRole(db, admin, { userId: other.id, role: "admin" }, deps);
-    const otherAdmin: Caller = { user: { id: other.id, username: "other_admin" }, role: "admin" };
+    const otherAdmin: Caller = {
+      user: { id: other.id, username: "other_admin", image: null },
+      role: "admin",
+    };
 
     await expect(
       setUserRole(
@@ -439,6 +448,7 @@ describe("listAdminUsers", () => {
     expect(byId.get("bo")).toEqual({
       id: "bo",
       username: "bo",
+      image: null,
       joinedAt: minutesAgo(999).toISOString(),
       role: "user",
       envAdmin: false,

@@ -124,7 +124,7 @@ export const Tile = ({
       <div role="group" aria-label={displayName(p)} className={`${tileBase} ${span} shadow-pop`}>
         {cantConnectState}
         <div className="flex items-center gap-2.5 px-3 py-2.5 h-full">
-          <Avatar name={p.name} size="md" ring={p.speaking} />
+          <Avatar name={p.name} image={p.image} size="md" ring={p.speaking} />
           <div className="flex-1 min-w-0">
             <div className="text-xs font-semibold truncate">{displayName(p)}</div>
             <div className="text-[10.5px] text-muted">viewer</div>
@@ -177,7 +177,7 @@ export const Tile = ({
         <div className="flex-1 relative min-h-0 overflow-hidden grid place-items-center bg-[oklch(0.22_0.02_260)]">
           <div className="absolute inset-0 bg-[repeating-linear-gradient(135deg,oklch(0.26_0.02_260)_0,oklch(0.26_0.02_260)_12px,oklch(0.20_0.02_260)_12px,oklch(0.20_0.02_260)_24px)]" />
           <div className="relative z-[1] flex flex-col items-center gap-2.5">
-            <Avatar name={p.name} size="lg" ring={p.speaking} />
+            <Avatar name={p.name} image={p.image} size="lg" ring={p.speaking} />
             <div className="text-[10px] tracking-[0.14em] px-2 py-[3px] rounded-full text-[oklch(0.85_0.01_260)] bg-black/45 border border-white/12">
               {p.camera ? "CAM · NO SHARE" : "AUDIO ONLY"}
             </div>
@@ -312,7 +312,7 @@ export const Tile = ({
           className="absolute bottom-2.5 right-2.5 z-[3] w-14 aspect-[4/3] hidden @[300px]:grid rounded-lg overflow-hidden border border-border-strong shadow-pop place-items-center"
           style={{ background: `linear-gradient(135deg, ${av.c1}, ${av.c2})` }}
         >
-          {camera || <Avatar name={p.name} size="sm" />}
+          {camera || <Avatar name={p.name} image={p.image} size="sm" />}
         </div>
       )}
 
@@ -322,7 +322,7 @@ export const Tile = ({
         <span
           className={`inline-flex items-center gap-2 max-w-full py-[5px] pl-[5px] pr-[9px] rounded-full text-[11px] font-semibold truncate ${glassPill}`}
         >
-          <Avatar name={p.name} size="sm" />
+          <Avatar name={p.name} image={p.image} size="sm" />
           <span className="inline-flex items-center gap-1.5">
             {displayName(p)}
             {p.speaking ? <Wave on /> : p.muted ? <Icon.MicOff size={12} /> : null}

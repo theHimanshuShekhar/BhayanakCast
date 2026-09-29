@@ -30,7 +30,7 @@ function recapSpans(db: Db, roomId: string) {
       union all
       select 'stream' as kind, user_id, s, e from st
     )
-    select sp.kind, sp.user_id, sp.s, sp.e, u.name, u.discord_username,
+    select sp.kind, sp.user_id, sp.s, sp.e, u.name, u.discord_username, u.image,
            coalesce(pr.secs, 0) as present_secs,
            coalesce(sd.secs, 0) as streamed_secs,
            coalesce(w.secs, 0) as watched_secs
@@ -48,6 +48,7 @@ function recapSpans(db: Db, roomId: string) {
       userId: sql<string>`recap.user_id`,
       name: sql<string>`recap.name`,
       discordUsername: sql<string | null>`recap.discord_username`,
+      image: sql<string | null>`recap.image`,
       startMs: epochMs("s"),
       endMs: epochMs("e"),
       presentSecs: sql<number>`recap.present_secs`.mapWith(Number),
@@ -81,6 +82,7 @@ export async function getRecap(
       person = {
         id: row.userId,
         username: usernameOf(row),
+        image: row.image,
         isHost: row.userId === room.hostId,
         presence: [],
         presenceMinutes: row.presentSecs / 60,

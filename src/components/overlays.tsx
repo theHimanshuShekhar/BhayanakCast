@@ -252,7 +252,7 @@ export const SettingsDialog = ({
         <>
           <MonoCaps>profile</MonoCaps>
           <div className="flex items-center gap-3 -mt-2">
-            <Avatar name={user.username} size="lg" ring />
+            <Avatar name={user.username} image={user.image} size="lg" ring />
             <div className="flex-1 min-w-0 text-[11px] text-muted">
               discord <span className="text-fg-muted font-medium">{user.username}</span>
             </div>
@@ -375,11 +375,13 @@ const menuItem =
 
 export const ProfileMenu = ({
   username,
+  image,
   onOpenProfile,
   onSettings,
   onSignOut,
 }: {
   username: string;
+  image: string | null;
   onOpenProfile: () => void;
   onSettings: () => void;
   onSignOut: () => void;
@@ -389,13 +391,13 @@ export const ProfileMenu = ({
       className="w-9 h-9 p-0 rounded-[10px] bg-transparent grid place-items-center cursor-pointer"
       aria-label="Account menu"
     >
-      <Avatar name={username} size="md" ring />
+      <Avatar name={username} image={image} size="md" ring />
     </Menu.Trigger>
     <Menu.Portal>
       <Menu.Positioner side="right" align="end" sideOffset={14} className="z-[150] outline-0">
         <Menu.Popup className="w-[260px] bg-surface border border-border-strong rounded-[var(--radius)] shadow-deep overflow-hidden outline-0 origin-[var(--transform-origin)] transition-[scale,opacity] duration-100 data-starting-style:opacity-0 data-starting-style:scale-[0.98] data-ending-style:opacity-0">
           <div className="flex items-center gap-2.5 px-3 py-3 border-b border-border-subtle bg-canvas">
-            <Avatar name={username} size="lg" ring />
+            <Avatar name={username} image={image} size="lg" ring />
             <div className="flex-1 min-w-0">
               <div className="font-semibold text-[13px]">{username}</div>
               <div className="text-[11px] text-muted">· connected via discord</div>

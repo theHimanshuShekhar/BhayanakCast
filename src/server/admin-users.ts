@@ -125,6 +125,7 @@ export async function listAdminUsers(
       .select({
         id: user.id,
         username,
+        image: user.image,
         createdAt: user.createdAt,
         role: user.role,
         discordId: user.discordId,
@@ -153,6 +154,7 @@ export async function listAdminUsers(
       return {
         id: row.id,
         username: row.username,
+        image: row.image,
         joinedAt: row.createdAt.toISOString(),
         role,
         envAdmin: role === "admin" && row.discordId !== null && envAdminIds.has(row.discordId),

@@ -59,6 +59,7 @@ const roomColumns = {
   hostId: user.id,
   hostName: user.name,
   hostDiscordUsername: user.discordUsername,
+  hostImage: user.image,
 };
 
 /** Rooms with their host, the base of every room read. Add the WHERE per use. */
@@ -95,6 +96,7 @@ export function toSummary(row: RoomRow): RoomSummary {
         ? {
             id: row.hostId,
             username: usernameOf({ name: row.hostName, discordUsername: row.hostDiscordUsername }),
+            image: row.hostImage,
           }
         : null,
     capacity: ROOM_CAPACITY,
@@ -155,6 +157,7 @@ async function peopleIn(
       id: user.id,
       name: user.name,
       discordUsername: user.discordUsername,
+      image: user.image,
     })
     .from(table)
     .innerJoin(user, eq(user.id, table.userId))
@@ -163,7 +166,7 @@ async function peopleIn(
     .orderBy(asc(firstStart), asc(user.id));
   for (const row of rows) {
     const people = byRoom.get(row.roomId) ?? [];
-    people.push({ id: row.id, username: usernameOf(row) });
+    people.push({ id: row.id, username: usernameOf(row), image: row.image });
     byRoom.set(row.roomId, people);
   }
   return byRoom;

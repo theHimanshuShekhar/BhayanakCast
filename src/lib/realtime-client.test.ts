@@ -41,7 +41,11 @@ class FakeSocket extends EventTarget {
   /** Open, then welcome after the client's hello. */
   handshake() {
     this.serverOpens();
-    this.serverSends({ type: "welcome", v: PROTOCOL_VERSION, user: { id: "u", username: "u" } });
+    this.serverSends({
+      type: "welcome",
+      v: PROTOCOL_VERSION,
+      user: { id: "u", username: "u", image: null },
+    });
   }
 }
 

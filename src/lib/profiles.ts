@@ -4,6 +4,7 @@
  * (ADR 13 addendum); the page shows the current Discord username.
  */
 import { z } from "zod";
+import type { RoomPerson } from "./rooms.ts";
 
 /** How many co-users a profile lists (top by time together). */
 export const PROFILE_CO_USERS = 5;
@@ -27,16 +28,12 @@ export interface ProfileStats {
   peakViewers: number;
 }
 
-export interface CoUser {
-  id: string;
-  username: string;
+export interface CoUser extends RoomPerson {
   secondsTogether: number;
 }
 
-export interface Profile {
-  id: string;
-  /** Discord username (falls back to the display name if Discord never sent one). */
-  username: string;
+/** `username` is the Discord username (the display name if Discord never sent one). */
+export interface Profile extends RoomPerson {
   /** Discord display name. */
   displayName: string;
   /** ISO timestamp of the account's creation. */
@@ -47,9 +44,7 @@ export interface Profile {
 }
 
 /** A home search result card. */
-export interface UserSearchResult {
-  id: string;
-  username: string;
+export interface UserSearchResult extends RoomPerson {
   displayName: string;
   stats: Pick<ProfileStats, "hoursStreamed" | "hoursWatched">;
 }

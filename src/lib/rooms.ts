@@ -31,6 +31,8 @@ export const roomIdInput = z.object({ roomId: z.string().min(1).max(64) });
 export interface RoomPerson {
   id: string;
   username: string;
+  /** Their Discord picture as stored at sign-in (null if none). */
+  image: string | null;
 }
 
 /** Someone sharing their screen, with when their latest thumbnail was captured (ISO; null if none yet). */

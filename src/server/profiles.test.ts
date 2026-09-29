@@ -10,13 +10,20 @@ let close: () => Promise<void>;
 
 const visitor: Caller = { user: null, role: "visitor" };
 const JOINED = new Date("2024-03-05T12:00:00Z");
+const AVATAR = "https://cdn.discordapp.com/avatars/1234/abcd.png";
 
-async function addUser(id: string, discordUsername: string | null, name = `${id} display`) {
+async function addUser(
+  id: string,
+  discordUsername: string | null,
+  name = `${id} display`,
+  image: string | null = null,
+) {
   await db.insert(user).values({
     id,
     name,
     email: `${id}@discord.invalid`,
     discordUsername,
+    image,
     createdAt: JOINED,
   });
 }
@@ -37,7 +44,7 @@ afterEach(async () => {
 
 describe("getProfile", () => {
   it("returns username, join date and stats converted to hours", async () => {
-    await addUser("u1", "kodama_jpg", "kodama");
+    await addUser("u1", "kodama_jpg", "kodama", AVATAR);
     await db.insert(userStats).values({
       userId: "u1",
       secondsStreamed: 5400,
@@ -50,6 +57,7 @@ describe("getProfile", () => {
     expect(await getProfile(db, visitor, "u1")).toEqual({
       id: "u1",
       username: "kodama_jpg",
+      image: AVATAR,
       displayName: "kodama",
       joinedAt: JOINED.toISOString(),
       stats: {
@@ -85,7 +93,9 @@ describe("getProfile", () => {
 
   it("lists the top 5 co-users by time together from either side of the pair", async () => {
     // "m" sorts between the others, so it is userB of some pairs and userA of others.
-    for (const id of ["a", "b", "c", "m", "x", "y", "z"]) await addUser(id, `${id}.discord`);
+    for (const id of ["a", "b", "c", "m", "x", "y", "z"]) {
+      await addUser(id, `${id}.discord`, undefined, id === "b" ? AVATAR : null);
+    }
     await addCotime("m", "a", 100);
     await addCotime("m", "b", 600);
     await addCotime("m", "c", 300);
@@ -97,16 +107,16 @@ describe("getProfile", () => {
 
     const profile = await getProfile(db, visitor, "m");
     expect(profile?.coUsers).toEqual([
-      { id: "b", username: "b.discord", secondsTogether: 600 },
-      { id: "x", username: "x.discord", secondsTogether: 500 },
+      { id: "b", username: "b.discord", image: AVATAR, secondsTogether: 600 },
+      { id: "x", username: "x.discord", image: null, secondsTogether: 500 },
       // Ties by id.
-      { id: "c", username: "c.discord", secondsTogether: 300 },
-      { id: "y", username: "y.discord", secondsTogether: 300 },
-      { id: "a", username: "a.discord", secondsTogether: 100 },
+      { id: "c", username: "c.discord", image: null, secondsTogether: 300 },
+      { id: "y", username: "y.discord", image: null, secondsTogether: 300 },
+      { id: "a", username: "a.discord", image: null, secondsTogether: 100 },
     ]);
     // Co-time is symmetric: the other side sees the same pair.
     expect((await getProfile(db, visitor, "z"))?.coUsers).toEqual([
-      { id: "m", username: "m.discord", secondsTogether: 50 },
+      { id: "m", username: "m.discord", image: null, secondsTogether: 50 },
     ]);
   });
 
@@ -125,7 +135,7 @@ describe("searchUsers", () => {
   beforeEach(async () => {
     await addUser("u1", "kodama_jpg");
     await addUser("u2", "nelly.jpg");
-    await addUser("u3", "bitreverb");
+    await addUser("u3", "bitreverb", undefined, AVATAR);
     await addUser("u4", "jpg");
     await addUser("u5", null, "no discord jpg");
   });
@@ -144,6 +154,7 @@ describe("searchUsers", () => {
       {
         id: "u3",
         username: "bitreverb",
+        image: AVATAR,
         displayName: "u3 display",
         stats: { hoursStreamed: 2, hoursWatched: 0.5 },
       },

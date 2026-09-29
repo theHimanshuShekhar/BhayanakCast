@@ -11,8 +11,8 @@ let db: Db;
 let close: () => Promise<void>;
 
 const visitor: Caller = { user: null, role: "visitor" };
-const asUser = (id: string): Caller => ({ user: { id, username: id }, role: "user" });
-const admin: Caller = { user: { id: "admin", username: "admin" }, role: "admin" };
+const asUser = (id: string): Caller => ({ user: { id, username: id, image: null }, role: "user" });
+const admin: Caller = { user: { id: "admin", username: "admin", image: null }, role: "admin" };
 const host = asUser("host");
 
 beforeEach(async () => {
