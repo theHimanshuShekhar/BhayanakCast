@@ -475,7 +475,7 @@ describe("signing in", () => {
       // Their anonymous socket closes as the authenticated one opens: still one person.
       cookie = ana.cookie; // signed in (e.g. in another tab)
       client.restart();
-      await expect.poll(welcomes).toEqual([null, { id: ana.id, username: "ana" }]);
+      await expect.poll(welcomes).toEqual([null, { id: ana.id, username: "ana", image: null }]);
       await expect.poll(probe).toBe(3);
       await expect.poll(observed).toBe(2);
 

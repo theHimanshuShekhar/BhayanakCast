@@ -12,7 +12,7 @@ import {
 } from "./ice.ts";
 
 const visitor: Caller = { user: null, role: "visitor" };
-const asUser = (id: string): Caller => ({ user: { id, username: id }, role: "user" });
+const asUser = (id: string): Caller => ({ user: { id, username: id, image: null }, role: "user" });
 
 /** A TURN provider that mints numbered credentials, or fails while `failing`. */
 function fakeTurn() {

@@ -26,8 +26,9 @@ let db: Db;
 let close: () => Promise<void>;
 
 const visitor: Caller = { user: null, role: "visitor" };
-const asUser = (id: string): Caller => ({ user: { id, username: id }, role: "user" });
-const admin: Caller = { user: { id: "admin", username: "admin" }, role: "admin" };
+const asUser = (id: string): Caller => ({ user: { id, username: id, image: null }, role: "user" });
+const admin: Caller = { user: { id: "admin", username: "admin", image: null }, role: "admin" };
+const AVATAR = "https://cdn.discordapp.com/avatars/1234/abcd.png";
 
 beforeEach(async () => {
   ({ db, close } = await createTestDb());
@@ -37,6 +38,7 @@ beforeEach(async () => {
       name: id,
       email: `${id}@discord.invalid`,
       discordUsername: `${id}.discord`,
+      image: id === "b" ? AVATAR : null,
     })),
   );
 });
@@ -112,6 +114,7 @@ describe("getRecap", () => {
       {
         id: "a",
         username: "a.discord",
+        image: null,
         isHost: true,
         presence: [{ start: iso(0), end: iso(60) }],
         presenceMinutes: 60,
@@ -123,6 +126,7 @@ describe("getRecap", () => {
       {
         id: "b",
         username: "b.discord",
+        image: AVATAR,
         isHost: false,
         presence: [
           { start: iso(10), end: iso(40) },
@@ -137,6 +141,7 @@ describe("getRecap", () => {
       {
         id: "c",
         username: "c.discord",
+        image: null,
         isHost: false,
         presence: [{ start: iso(20), end: iso(60) }],
         presenceMinutes: 40,
@@ -277,15 +282,15 @@ describe("listPastRooms", () => {
     expect(await listPastRooms(db, visitor, {}, NOW)).toEqual([
       expect.objectContaining({
         id: "r1",
-        host: { id: "a", username: "a.discord" },
+        host: { id: "a", username: "a.discord", image: null },
         createdAt: iso(0),
         endedAt: iso(45),
         durationMinutes: 45,
         people: [
-          { id: "a", username: "a.discord" },
-          { id: "b", username: "b.discord" },
+          { id: "a", username: "a.discord", image: null },
+          { id: "b", username: "b.discord", image: AVATAR },
         ],
-        streamers: [{ id: "b", username: "b.discord", thumbnailAt: null }],
+        streamers: [{ id: "b", username: "b.discord", image: AVATAR, thumbnailAt: null }],
       }),
     ]);
   });

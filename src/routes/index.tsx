@@ -153,7 +153,7 @@ const UserResult = ({
     onClick={() => onOpen(user.id)}
     className="flex items-center gap-3 p-3 text-left bg-surface border border-border rounded-[var(--radius)] shadow-card cursor-pointer transition-[transform,border-color] duration-[120ms] hover:-translate-y-px hover:border-border-strong min-w-0"
   >
-    <Avatar name={user.username} size="lg" ring={!!liveRoom} />
+    <Avatar name={user.username} image={user.image} size="lg" ring={!!liveRoom} />
     <div className="flex-1 min-w-0">
       <div className="flex items-center gap-2">
         <span className="text-[13px] font-semibold truncate">{user.username}</span>
@@ -424,7 +424,7 @@ function HomePage() {
               onClick={() => openRoom(r)}
               className="w-[calc(100%+1rem)] flex items-center gap-2.5 p-2 -mx-2 rounded-lg cursor-pointer text-left hover:bg-surface"
             >
-              <Avatar name={r.host?.username ?? r.name} size="md" />
+              <Avatar name={r.host?.username ?? r.name} image={r.host?.image ?? null} size="md" />
               <div className="flex-1 min-w-0">
                 <div className="text-xs font-medium truncate">{r.name}</div>
                 <div className="text-[10.5px] text-muted">{r.host?.username ?? "no host"}</div>

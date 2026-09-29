@@ -40,6 +40,7 @@ export async function getProfile(db: Db, _caller: Caller, userId: string): Promi
     .select({
       id: user.id,
       username,
+      image: user.image,
       displayName: user.name,
       createdAt: user.createdAt,
       ...statColumns,
@@ -51,6 +52,7 @@ export async function getProfile(db: Db, _caller: Caller, userId: string): Promi
   return {
     id: row.id,
     username: row.username,
+    image: row.image,
     displayName: row.displayName,
     joinedAt: row.createdAt.toISOString(),
     stats: {
@@ -68,7 +70,12 @@ export async function getProfile(db: Db, _caller: Caller, userId: string): Promi
 async function topCoUsers(db: Db, userId: string): Promise<CoUser[]> {
   const other = sql`case when ${userCotime.userA} = ${userId} then ${userCotime.userB} else ${userCotime.userA} end`;
   return db
-    .select({ id: user.id, username, secondsTogether: userCotime.secondsTogether })
+    .select({
+      id: user.id,
+      username,
+      image: user.image,
+      secondsTogether: userCotime.secondsTogether,
+    })
     .from(userCotime)
     .innerJoin(user, eq(user.id, other))
     .where(
@@ -98,6 +105,7 @@ export async function searchUsers(
     .select({
       id: user.id,
       username,
+      image: user.image,
       displayName: user.name,
       secondsStreamed: userStats.secondsStreamed,
       secondsWatched: userStats.secondsWatched,
@@ -115,6 +123,7 @@ export async function searchUsers(
   return rows.map((row) => ({
     id: row.id,
     username: row.username,
+    image: row.image,
     displayName: row.displayName,
     stats: {
       hoursStreamed: secondsToHours(row.secondsStreamed ?? 0),

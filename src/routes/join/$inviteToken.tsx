@@ -133,6 +133,7 @@ function KnockScreen({ invite, inviteToken }: { invite: InvitedRoom; inviteToken
       kicker="private room"
       roomName={invite.name}
       me={user?.username ?? ""}
+      meImage={user?.image ?? null}
       info={
         <p role="status" className="m-0 text-[12px] text-fg-muted">
           {state.status === "error" ? state.message : KNOCK_TEXT[state.status]}

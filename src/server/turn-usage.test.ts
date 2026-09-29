@@ -10,8 +10,8 @@ import {
 } from "./turn-usage.ts";
 
 const visitor: Caller = { user: null, role: "visitor" };
-const plainUser: Caller = { user: { id: "a", username: "a" }, role: "user" };
-const admin: Caller = { user: { id: "admin", username: "admin" }, role: "admin" };
+const plainUser: Caller = { user: { id: "a", username: "a", image: null }, role: "user" };
+const admin: Caller = { user: { id: "admin", username: "admin", image: null }, role: "admin" };
 
 const GB = 1_000_000_000;
 

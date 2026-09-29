@@ -54,9 +54,9 @@ export function getSessionFromRequest(source: HeaderSource): Promise<AuthSession
 /** The caller a resolved session (or its absence) stands for. */
 export function callerFromSession(session: Pick<AuthSession, "user"> | null): Caller {
   if (!session) return { user: null, role: "visitor" };
-  const { id, name, discordUsername, role } = session.user;
+  const { id, name, discordUsername, image, role } = session.user;
   return {
-    user: { id, username: discordUsername ?? name },
+    user: { id, username: discordUsername ?? name, image: image ?? null },
     role: toAdminRole(role),
   };
 }

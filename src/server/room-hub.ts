@@ -133,6 +133,8 @@ class HubConnection implements Connection {
 interface LiveParticipant {
   userId: string;
   username: string;
+  /** Their Discord picture as stored at sign-in, for room views (null if none). */
+  image: string | null;
   joinedAt: Date;
   /** Their socket; a closed one while they're in the reconnect grace. */
   connection: HubConnection;
@@ -181,6 +183,7 @@ interface LiveRoom {
 interface PendingKnock {
   userId: string;
   username: string;
+  image: string | null;
   at: Date;
   /** The socket that knocked (the latest, if they knocked again): where the answer goes. */
   connection: HubConnection;
@@ -493,7 +496,7 @@ export class RoomHub {
       this.#send(conn, {
         type: "welcome",
         v: PROTOCOL_VERSION,
-        user: user ? { id: user.id, username: user.username } : null,
+        user: user ? { id: user.id, username: user.username, image: user.image } : null,
       });
       this.#send(conn, { type: "lobby.snapshot", online: this.#onlineCount() });
     },
@@ -584,6 +587,7 @@ export class RoomHub {
       const participant: LiveParticipant = {
         userId: user.id,
         username: user.username,
+        image: user.image,
         joinedAt,
         connection: conn,
         media: { ...MEDIA_OFF },
@@ -1055,8 +1059,13 @@ export class RoomHub {
         const participant: LiveParticipant = {
           userId: presence.userId,
           username: presence.username,
+          image: presence.image,
           joinedAt: presence.startedAt,
-          connection: this.#goneConnection(presence.userId, presence.username),
+          connection: this.#goneConnection({
+            id: presence.userId,
+            username: presence.username,
+            image: presence.image,
+          }),
           // Their share lasts until they re-announce on return, or ends with the grace.
           media: { ...MEDIA_OFF, share: presence.sharing },
         };
@@ -1077,10 +1086,10 @@ export class RoomHub {
   }
 
   /** A stand-in, already-closed socket for someone restored from the DB with none yet. */
-  #goneConnection(userId: string, username: string): HubConnection {
+  #goneConnection(user: SignedInCaller["user"]): HubConnection {
     const conn = new HubConnection(
       this.#nextId++,
-      { user: { id: userId, username }, role: "user" },
+      { user, role: "user" },
       { send: () => {}, close: () => {} },
     );
     conn.closed = true;
@@ -1096,6 +1105,7 @@ export class RoomHub {
     return {
       userId: participant.userId,
       username: participant.username,
+      image: participant.image,
       role: this.#roleOf(room, participant.userId),
       joinedAt: participant.joinedAt.toISOString(),
       media: { ...participant.media },
@@ -1587,7 +1597,7 @@ export class RoomHub {
     // Every live room is in memory (created: `announce`; after a restart: `#restore`).
     const room = stored && this.#rooms.get(stored.id);
     if (!room) return this.#refuse(conn, "not_found", INVALID_INVITE, message.type);
-    const { id: userId, username } = caller.user;
+    const { id: userId, username, image } = caller.user;
     // Kicked is for good (ADR 15): the link doesn't bring them back, admins included.
     if (await this.#store.isKicked(room.id, userId)) {
       return this.#refuse(conn, "kicked", "You were removed from this room", message.type);
@@ -1614,6 +1624,7 @@ export class RoomHub {
       const fresh: PendingKnock = {
         userId,
         username,
+        image,
         at: this.#clock.now(),
         connection: conn,
         status: "waiting",
@@ -1805,11 +1816,11 @@ function isSignedIn(caller: Caller): caller is SignedInCaller {
 
 /** `knock` as its approvers see it. */
 function knockPending(room: LiveRoom, knock: PendingKnock): ServerMessage {
-  const { userId, username, at } = knock;
+  const { userId, username, image, at } = knock;
   return {
     type: "knock.pending",
     roomId: room.id,
-    knock: { userId, username, at: at.toISOString() },
+    knock: { userId, username, image, at: at.toISOString() },
   };
 }
 

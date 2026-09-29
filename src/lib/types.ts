@@ -8,12 +8,20 @@ export type ScreenKind = "ableton" | "fl-studio" | "cli" | "browser" | "game";
 export type RoomRole = "host" | "mod" | "member";
 
 /** A share on a room card: its thumbnail's URL, or a placeholder screen while there is none. */
-export type Stream = { user: string; screen: ScreenKind; thumbnail?: string };
+export type Stream = {
+  user: string;
+  /** The streamer's Discord picture as stored at sign-in (null if none). */
+  image: string | null;
+  screen: ScreenKind;
+  thumbnail?: string;
+};
 
 export type Participant = {
   id: string;
   userId: string;
   name: string;
+  /** Their Discord picture as stored at sign-in (null if none). */
+  image: string | null;
   role: RoomRole;
   streaming: boolean;
   speaking: boolean;

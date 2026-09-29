@@ -5,6 +5,8 @@ export interface FakeDiscordUser {
   /** Defaults to `fakeDiscordId(username)`: a user of this test alone. */
   discordId?: string;
   username: string;
+  /** The picture Discord's sign-in would store (a Discord CDN URL); none by default. */
+  image?: string;
 }
 
 /**
@@ -46,8 +48,8 @@ export function postTestAuth(
 
 /** Test-only sign-in without asserting success (e.g. to see a banned user refused). */
 export function trySignIn(context: BrowserContext, user: FakeDiscordUser): Promise<APIResponse> {
-  const { username, discordId = fakeDiscordId(username) } = user;
-  return postTestAuth(context, "sign-in", { discordId, username });
+  const { username, discordId = fakeDiscordId(username), image } = user;
+  return postTestAuth(context, "sign-in", { discordId, username, image });
 }
 
 /**

@@ -22,8 +22,8 @@ let db: Db;
 let close: () => Promise<void>;
 
 const visitor: Caller = { user: null, role: "visitor" };
-const plainUser: Caller = { user: { id: "a", username: "a" }, role: "user" };
-const admin: Caller = { user: { id: "admin", username: "admin" }, role: "admin" };
+const plainUser: Caller = { user: { id: "a", username: "a", image: null }, role: "user" };
+const admin: Caller = { user: { id: "admin", username: "admin", image: null }, role: "admin" };
 
 const HOUR = 3600;
 const now = new Date("2026-09-27T12:00:00Z");
@@ -227,7 +227,7 @@ describe("listAdminRecentRooms", () => {
       id: "live",
       name: "live",
       isPrivate: true,
-      host: { id: "a", username: "a_user" },
+      host: { id: "a", username: "a_user", image: null },
       status: "live",
       peak: 3,
       joined: 3,
@@ -256,14 +256,14 @@ describe("getAdminLeaderboards", () => {
     ]);
     expect(await getAdminLeaderboards(db, admin)).toEqual({
       streamed: [
-        { id: "b", username: "b_user", hours: 5 },
-        { id: "c", username: "c_user", hours: 3 },
-        { id: "a", username: "a_user", hours: 1 },
+        { id: "b", username: "b_user", image: null, hours: 5 },
+        { id: "c", username: "c_user", image: null, hours: 3 },
+        { id: "a", username: "a_user", image: null, hours: 1 },
       ],
       watched: [
-        { id: "c", username: "c_user", hours: 7 },
-        { id: "b", username: "b_user", hours: 2 },
-        { id: "admin", username: "admin_user", hours: 1 },
+        { id: "c", username: "c_user", image: null, hours: 7 },
+        { id: "b", username: "b_user", image: null, hours: 2 },
+        { id: "admin", username: "admin_user", image: null, hours: 1 },
       ],
     });
   });

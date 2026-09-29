@@ -302,6 +302,8 @@ export type RoomRole = (typeof ROOM_ROLES)[number];
 export const roomParticipant = z.object({
   userId: z.string(),
   username: z.string(),
+  /** Their Discord picture as stored at sign-in (null if none); chat and feed look it up here. */
+  image: z.string().nullable(),
   role: z.enum(ROOM_ROLES),
   /** When this presence began (server clock), so "longest present" is the same for everyone. */
   joinedAt: z.iso.datetime(),
@@ -385,7 +387,7 @@ export const welcomeMessage = z.object({
   type: z.literal("welcome"),
   v: z.number().int(),
   /** Null for an anonymous (lobby-only) socket (ADR 20). */
-  user: z.object({ id: z.string(), username: z.string() }).nullable(),
+  user: z.object({ id: z.string(), username: z.string(), image: z.string().nullable() }).nullable(),
 });
 
 /** Everything about the room the joiner needs, sent to them on join. Later fields are added. */
@@ -536,6 +538,8 @@ export const feedEntryMessage = z.object({
 export const knockEntry = z.object({
   userId: z.string(),
   username: z.string(),
+  /** Their Discord picture as stored at sign-in (null if none). */
+  image: z.string().nullable(),
   /** When they knocked (server clock). */
   at: z.iso.datetime(),
 });

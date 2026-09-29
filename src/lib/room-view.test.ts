@@ -3,9 +3,9 @@ import type { RoomParticipant } from "./realtime";
 import { roomDetailFor, withRoster } from "./room-view";
 import type { LiveRoomCard } from "./rooms";
 
-const host = { id: "u-host", username: "host.discord" };
-const viewer = { id: "u-viewer", username: "viewer.discord" };
-const me = { id: "u-me", username: "me.discord" };
+const host = { id: "u-host", username: "host.discord", image: null };
+const viewer = { id: "u-viewer", username: "viewer.discord", image: null };
+const me = { id: "u-me", username: "me.discord", image: null };
 
 const room = (overrides: Partial<LiveRoomCard> = {}): LiveRoomCard => ({
   id: "room-1",
@@ -70,19 +70,47 @@ describe("roomDetailFor", () => {
     const detail = roomDetailFor(room({ host: null }), me);
     expect(detail).toMatchObject({ host: null, hostId: null });
   });
+
+  it("carries everyone's picture, the signed-in user's included", () => {
+    const pictured = { ...viewer, image: "https://cdn.discordapp.com/avatars/1/a.png" };
+    const mine = { ...me, image: "https://cdn.discordapp.com/avatars/2/b.png" };
+    const detail = roomDetailFor(room({ participants: [pictured], participantCount: 1 }), mine);
+    expect(detail.participants.map((p) => [p.userId, p.image])).toEqual([
+      ["u-viewer", pictured.image],
+      ["u-me", mine.image],
+    ]);
+  });
 });
 
 describe("withRoster", () => {
   const live = (
-    person: { id: string; username: string },
+    person: { id: string; username: string; image: string | null },
     role: RoomParticipant["role"],
     media: Partial<RoomParticipant["media"]> = {},
   ): RoomParticipant => ({
     userId: person.id,
     username: person.username,
+    image: person.image,
     role,
     joinedAt: "2026-09-27T10:00:00.000Z",
     media: { mic: false, cam: false, share: false, ...media },
+  });
+
+  it("takes each person's picture from the server, newcomers' too", () => {
+    const shown = roomDetailFor(
+      room({ participants: [viewer], participantCount: 1 }),
+      me,
+    ).participants;
+    const image = "https://cdn.discordapp.com/avatars/1/a.png";
+    const next = withRoster(
+      shown,
+      [live({ ...me, image }, "member"), live({ id: "u-new", username: "new", image }, "member")],
+      me.id,
+    );
+    expect(next.map((p) => [p.userId, p.image])).toEqual([
+      ["u-me", image],
+      ["u-new", image],
+    ]);
   });
 
   it("keeps who the server says is there, in place, and adds newcomers at the end", () => {
@@ -99,7 +127,7 @@ describe("withRoster", () => {
       [
         live(me, "member"),
         live(host, "host", { share: true }),
-        live({ id: "u-new", username: "new" }, "member"),
+        live({ id: "u-new", username: "new", image: null }, "member"),
       ],
       me.id,
     );

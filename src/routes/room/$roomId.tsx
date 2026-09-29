@@ -146,9 +146,10 @@ function RoomVisit({ room, admin }: { room: LiveRoomCard; admin: boolean }) {
       <Lobby
         roomName={room.name}
         host={room.host?.username ?? null}
-        people={room.participants.filter((p) => p.id !== user?.id).map((p) => p.username)}
+        people={room.participants.filter((p) => p.id !== user?.id)}
         capacity={room.capacity}
         me={user?.username ?? ""}
+        meImage={user?.image ?? null}
         onEnter={({ mic, cam }) => {
           markInRoom(room.id, true);
           setEntered({ mic, cam, share: false });

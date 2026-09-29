@@ -24,11 +24,13 @@ let roomId: string;
 let inviteToken: string;
 
 const T0 = "2026-09-01T12:00:00.000Z";
+/** A Discord CDN picture stored for bo; everyone else has none. */
+const BO_IMAGE = "https://cdn.discordapp.com/avatars/1234/abcd.png";
 
 beforeEach(async () => {
   h = await startRealtimeHarness();
   ana = await h.createUser("ana");
-  bo = await h.createUser("bo");
+  bo = await h.createUser("bo", { image: BO_IMAGE });
   cy = await h.createUser("cy");
   roomId = await h.createRoom(ana, { name: "ana's secret", isPrivate: true });
   inviteToken = await tokenOf(roomId);
@@ -89,7 +91,7 @@ describe("knock and admit", () => {
     expect(await a.waitFor("knock.pending")).toEqual({
       type: "knock.pending",
       roomId,
-      knock: { userId: bo.id, username: "bo", at: T0 },
+      knock: { userId: bo.id, username: "bo", image: BO_IMAGE, at: T0 },
     });
     expect(await approvedRow(bo.id)).toBeNull();
 
@@ -615,7 +617,10 @@ describe("the knock queue (#42)", () => {
 });
 
 describe("the invite link's lifecycle (#43)", () => {
-  const asHost = () => ({ user: { id: ana.id, username: "ana" }, role: "user" as const });
+  const asHost = () => ({
+    user: { id: ana.id, username: "ana", image: null },
+    role: "user" as const,
+  });
 
   it("refuses the old link once the host regenerates it; the new one opens the room", async () => {
     const fresh = await regenerateInviteToken(h.db, asHost(), roomId, h.hub);

@@ -27,7 +27,7 @@ let db: Db;
 let close: () => Promise<void>;
 
 const visitor: Caller = { user: null, role: "visitor" };
-const asUser = (id: string): Caller => ({ user: { id, username: id }, role: "user" });
+const asUser = (id: string): Caller => ({ user: { id, username: id, image: null }, role: "user" });
 
 /** A file that starts like a WebP, `size` bytes long. */
 const webp = (size = 64, fill = 1) => {
@@ -189,7 +189,7 @@ describe("getThumbnail visibility (ADR 16)", () => {
   });
 
   it("serves a private room's thumbnail only to the host, approved members and admins", async () => {
-    const admin: Caller = { user: { id: "admin", username: "admin" }, role: "admin" };
+    const admin: Caller = { user: { id: "admin", username: "admin", image: null }, role: "admin" };
     for (const caller of [asUser("a"), asUser("c"), admin]) {
       expect(await getThumbnail(db, caller, "p1", "a")).not.toBeNull();
     }

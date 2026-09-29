@@ -18,6 +18,7 @@ import {
 const person = (userId: string): RoomParticipant => ({
   userId,
   username: userId,
+  image: null,
   role: "member",
   joinedAt: "2026-09-27T10:00:00.000Z",
   media: { mic: false, cam: false, share: false },

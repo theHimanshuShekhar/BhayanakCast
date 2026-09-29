@@ -1,7 +1,8 @@
 // Shared primitives ported from docs/design/prototype/components.jsx + overlays.jsx.
 import { Switch as BaseSwitch } from "@base-ui/react/switch";
-import type { ButtonHTMLAttributes, CSSProperties, ReactNode } from "react";
-import { avatarFor, initials, SCREEN_KINDS } from "~/lib/format";
+import { type ButtonHTMLAttributes, type CSSProperties, type ReactNode, useState } from "react";
+import { avatarFor, discordAvatarUrl, initials, SCREEN_KINDS } from "~/lib/format";
+import type { RoomPerson } from "~/lib/rooms";
 import type { ScreenKind } from "~/lib/types";
 
 const SIZE_CLS = {
@@ -11,47 +12,81 @@ const SIZE_CLS = {
   xl: "w-[84px] h-[84px] text-[28px]",
 } as const;
 type AvatarSize = keyof typeof SIZE_CLS;
+/** The picture size to ask Discord for at each avatar size: about twice the pixels shown. */
+const IMAGE_PX: Record<AvatarSize, number> = { sm: 64, md: 64, lg: 128, xl: 256 };
 
+/**
+ * A person's Discord picture (`image`, as stored at sign-in) when it's a usable Discord CDN URL
+ * that loads, else gradient initials seeded by `name`. The stored URL can go stale until their
+ * next sign-in, so a picture that fails to load falls back to initials too.
+ */
 export const Avatar = ({
   name,
+  image,
   size = "md",
   ring = false,
   className = "",
 }: {
   name: string;
+  image: string | null;
   size?: AvatarSize;
   ring?: boolean;
   className?: string;
 }) => {
   const { c1, c2 } = avatarFor(name || "??");
+  const src = discordAvatarUrl(image, IMAGE_PX[size]);
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const shown = src !== failedSrc ? src : null;
   const ringCls = ring
     ? "shadow-[0_0_0_2px_var(--color-primary),0_0_12px_var(--color-primary-glow)]"
     : "shadow-[inset_0_0_0_1px_oklch(0_0_0/0.15)]";
+  // Inset shadows (this one, and the separator AvatarStack adds between overlapping avatars)
+  // are painted under a picture; an overlay repeats them on top. A ring is outside the circle.
+  const overlayCls =
+    shown && !ring
+      ? "relative after:absolute after:inset-0 after:rounded-full after:content-[''] after:pointer-events-none after:[box-shadow:inherit]"
+      : "";
   return (
     <span
-      className={`inline-grid place-items-center rounded-full text-white font-bold flex-shrink-0 leading-none ${SIZE_CLS[size]} ${ringCls} ${className}`}
+      className={`inline-grid place-items-center rounded-full text-white font-bold flex-shrink-0 leading-none ${SIZE_CLS[size]} ${ringCls} ${overlayCls} ${className}`}
       style={{ background: `linear-gradient(135deg, ${c1}, ${c2})` }}
     >
-      {initials(name || "??")}
+      {shown ? (
+        <img
+          src={shown}
+          alt=""
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          className="block w-full h-full rounded-full object-cover"
+          onError={() => setFailedSrc(src)}
+          // A picture that failed before hydration never fires React's onError.
+          ref={(img) => {
+            if (img?.complete && img.naturalWidth === 0) setFailedSrc(src);
+          }}
+        />
+      ) : (
+        initials(name || "??")
+      )}
     </span>
   );
 };
 
+/** Overlapping avatars of `people`, at most `max` and then "+N". */
 export const AvatarStack = ({
-  names,
+  people,
   max = 3,
   size = "sm",
 }: {
-  names: string[];
+  people: RoomPerson[];
   max?: number;
   size?: AvatarSize;
 }) => {
-  const visible = names.slice(0, max);
-  const rest = Math.max(0, names.length - max);
+  const visible = people.slice(0, max);
+  const rest = Math.max(0, people.length - max);
   return (
     <span className="inline-flex [&>*+*]:-ml-2 [&>*+*]:shadow-[0_0_0_2px_var(--color-bg)_inset,0_0_0_1px_oklch(0_0_0/0.15)_inset]">
-      {visible.map((n) => (
-        <Avatar key={n} name={n} size={size} />
+      {visible.map((p) => (
+        <Avatar key={p.id} name={p.username} image={p.image} size={size} />
       ))}
       {rest > 0 && (
         <span

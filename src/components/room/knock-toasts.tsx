@@ -11,6 +11,7 @@ import { getRealtimeClient } from "~/lib/realtime-client";
 interface KnockToastData {
   userId: string;
   username: string;
+  image: string | null;
 }
 
 const toastId = (userId: string) => `knock:${userId}`;
@@ -36,7 +37,7 @@ function KnockFeed({ roomId }: { roomId: string }) {
     () =>
       getRealtimeClient().subscribe((message) => {
         if (message.type === "knock.pending" && message.roomId === roomId) {
-          const { userId, username } = message.knock;
+          const { userId, username, image } = message.knock;
           // The same knock again (they reconnected) updates its toast in place.
           toasts.add({
             id: toastId(userId),
@@ -44,7 +45,7 @@ function KnockFeed({ roomId }: { roomId: string }) {
             // Stays until handled. Default (polite) priority: a high one is hidden from
             // assistive tech until focused, and with it the admit and deny buttons.
             timeout: 0,
-            data: { userId, username },
+            data: { userId, username, image },
           });
         } else if (message.type === "knock.resolved" && message.roomId === roomId) {
           toasts.close(toastId(message.userId));
@@ -69,7 +70,7 @@ function KnockToastList() {
         className="flex flex-col gap-2.5 p-3 bg-surface border border-border-strong rounded-[var(--radius)] shadow-deep outline-0 transition-[opacity,translate] duration-150 data-starting-style:opacity-0 data-starting-style:-translate-y-1 data-ending-style:opacity-0"
       >
         <div className="flex items-center gap-2.5 min-w-0">
-          <Avatar name={knocker.username} />
+          <Avatar name={knocker.username} image={knocker.image} />
           <Toast.Title className="m-0 text-[12.5px] text-fg font-medium truncate" />
           {/* Out of the way; the knock stays in the people tab's "waiting" group. */}
           <Toast.Close

@@ -5,8 +5,18 @@ import type { KnockEntry } from "./realtime";
 const knocking: KnockState = { status: "knocking" };
 
 describe("applyPendingKnock", () => {
-  const bo: KnockEntry = { userId: "u-bo", username: "bo", at: "2026-09-01T12:00:00.000Z" };
-  const cy: KnockEntry = { userId: "u-cy", username: "cy", at: "2026-09-01T12:01:00.000Z" };
+  const bo: KnockEntry = {
+    userId: "u-bo",
+    username: "bo",
+    image: null,
+    at: "2026-09-01T12:00:00.000Z",
+  };
+  const cy: KnockEntry = {
+    userId: "u-cy",
+    username: "cy",
+    image: null,
+    at: "2026-09-01T12:01:00.000Z",
+  };
   const pending = (knock: KnockEntry, roomId = "r1") =>
     ({ type: "knock.pending", roomId, knock }) as const;
   const resolved = (userId: string, roomId = "r1") =>

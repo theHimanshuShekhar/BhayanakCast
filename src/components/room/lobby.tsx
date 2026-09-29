@@ -8,6 +8,7 @@ import {
   type LocalTrackFailure,
   useLocalMedia,
 } from "~/lib/local-media";
+import type { RoomPerson } from "~/lib/rooms";
 import { Icon } from "../icons";
 import { Avatar, AvatarStack, Btn, fieldInput, fieldLabel, MonoCaps } from "../ui";
 import { ControlBtn } from "./control-btn";
@@ -41,10 +42,11 @@ export interface LobbyProps {
   /** The host's username, if they have one. */
   host: string | null;
   /** Who is inside now (not counting you). */
-  people: string[];
+  people: RoomPerson[];
   capacity: number;
-  /** Your username, for the preview while the camera is off. */
+  /** Your username and picture, for the preview while the camera is off. */
   me: string;
+  meImage: string | null;
   /** Enter with the mic and camera as they are now. */
   onEnter: (media: { mic: boolean; cam: boolean }) => void;
   onBack: () => void;
@@ -61,7 +63,16 @@ export function useDeviceState() {
   };
 }
 
-export function Lobby({ roomName, host, people, capacity, me, onEnter, onBack }: LobbyProps) {
+export function Lobby({
+  roomName,
+  host,
+  people,
+  capacity,
+  me,
+  meImage,
+  onEnter,
+  onBack,
+}: LobbyProps) {
   const { micOn, camOn, starting } = useDeviceState();
   const full = people.length >= capacity;
 
@@ -71,13 +82,14 @@ export function Lobby({ roomName, host, people, capacity, me, onEnter, onBack }:
       roomName={roomName}
       subtitle={host && `hosted by ${host}`}
       me={me}
+      meImage={meImage}
       info={
         <div className="flex items-center gap-2.5 min-w-0">
-          {people.length > 0 && <AvatarStack names={people} max={4} />}
+          {people.length > 0 && <AvatarStack people={people} max={4} />}
           <p className="m-0 text-[12px] text-fg-muted min-w-0">
             {people.length === 0
               ? "nobody's inside yet. you'll be the first."
-              : `${peopleText(people)} ${people.length === 1 ? "is" : "are"} inside`}
+              : `${peopleText(people.map((p) => p.username))} ${people.length === 1 ? "is" : "are"} inside`}
             <span className="text-muted">
               {" "}
               · {people.length}/{capacity}
@@ -112,8 +124,9 @@ export interface DeviceCheckProps {
   roomName: string;
   /** Under the room's name, if anything. */
   subtitle?: string | null;
-  /** Your username, for the preview while the camera is off. */
+  /** Your username and picture, for the preview while the camera is off. */
   me: string;
+  meImage: string | null;
   /** Between the room's name and the device pickers: who's inside, or where a knock stands. */
   info: ReactNode;
   /** Under the device pickers: what happens next, and the buttons. */
@@ -125,7 +138,15 @@ export interface DeviceCheckProps {
  * pickers, beside the room's name. The lobby wraps it, and so does a private room's knock
  * screen, so a knocker can set up while they wait.
  */
-export function DeviceCheck({ kicker, roomName, subtitle, me, info, children }: DeviceCheckProps) {
+export function DeviceCheck({
+  kicker,
+  roomName,
+  subtitle,
+  me,
+  meImage,
+  info,
+  children,
+}: DeviceCheckProps) {
   const { local, micOn, camOn } = useDeviceState();
   const media = getLocalMedia();
   const toggle = (kind: LocalDeviceKind) => {
@@ -150,7 +171,7 @@ export function DeviceCheck({ kicker, roomName, subtitle, me, info, children }: 
             ) : (
               <div className="absolute inset-0 grid place-items-center">
                 <div className="flex flex-col items-center gap-2.5">
-                  <Avatar name={me} size="xl" />
+                  <Avatar name={me} image={meImage} size="xl" />
                   <span className="text-[11.5px] text-muted">
                     {local.cam.status === "starting" ? "starting camera…" : "camera is off"}
                   </span>

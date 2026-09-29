@@ -29,6 +29,30 @@ export const initials = (name: string) => {
   return ((first[0] ?? "") + (last[0] ?? "")).toUpperCase();
 };
 
+const DISCORD_CDN = "cdn.discordapp.com";
+
+/**
+ * The URL to load for someone's stored Discord picture at `px` pixels a side, or null when
+ * there is none we may load. Only Discord's own CDN is used (https, that host, no credentials):
+ * a picture is shown to everyone who sees the person, so any other URL would let its owner log
+ * their viewers' IPs. Discord serves the picture at the `size` asked for, so the rail doesn't
+ * pull the 1024px original.
+ */
+export const discordAvatarUrl = (image: string | null | undefined, px: number): string | null => {
+  if (!image) return null;
+  let url: URL;
+  try {
+    url = new URL(image);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" || url.hostname !== DISCORD_CDN) return null;
+  if (url.username || url.password || url.port) return null;
+  url.hash = "";
+  url.searchParams.set("size", String(px));
+  return url.toString();
+};
+
 export const formatCotime = (seconds: number) => {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);

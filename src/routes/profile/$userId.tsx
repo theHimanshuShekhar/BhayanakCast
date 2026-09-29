@@ -155,7 +155,7 @@ function ProfilePage({ profile }: { profile: Profile }) {
       <div className="px-4 sm:px-8 pb-12 max-w-[1100px] mx-auto">
         <div className="relative z-[1] flex flex-wrap items-start gap-x-6 gap-y-3 pb-6 border-b border-border-subtle">
           <div className="relative -mt-12 flex-shrink-0 p-1.5 bg-canvas border border-border-strong rounded-[20px] shadow-pop">
-            <Avatar name={username} size="xl" ring />
+            <Avatar name={username} image={profile.image} size="xl" ring />
             {isSelf && (
               <span className="absolute -bottom-2 left-1/2 -translate-x-1/2 text-[9px] font-bold tracking-[0.12em] px-1.5 py-0.5 rounded-md bg-primary text-primary-ink shadow-[0_0_12px_var(--color-primary-glow)]">
                 YOU
@@ -269,7 +269,7 @@ function ProfilePage({ profile }: { profile: Profile }) {
                   <span className="w-[22px] flex-shrink-0 text-[11px] font-bold text-subtle tracking-[0.06em] group-hover:text-primary transition-colors">
                     #{i + 1}
                   </span>
-                  <Avatar name={co.username} size="md" ring={i === 0} />
+                  <Avatar name={co.username} image={co.image} size="md" ring={i === 0} />
                   <div className="flex-1 min-w-0">
                     <div className="text-[13px] font-semibold text-fg">{co.username}</div>
                     <div className="text-[10.5px] text-subtle tracking-[0.04em]">time together</div>

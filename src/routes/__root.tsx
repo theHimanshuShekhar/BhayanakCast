@@ -120,6 +120,7 @@ function AppShell() {
               user ? (
                 <ProfileMenu
                   username={user.username}
+                  image={user.image}
                   onOpenProfile={() =>
                     navigate({ to: "/profile/$userId", params: { userId: user.id } })
                   }
