@@ -48,7 +48,9 @@ async function stat(page: Page, label: string): Promise<number> {
 }
 
 // Every test shares one database: assert growth by at least what this test seeded, and
-// find this test's rows by their unique names, never exact totals.
+// find this test's rows by their unique names, never exact totals. Only monotonic totals
+// (users, lifetime hours) get a growth check: other tests' rooms end at any moment, so
+// "live now" can drop while this test runs. This test's own live row proves that wiring.
 test("an admin sees real platform numbers, rooms and leaderboards", async ({
   page,
   context,
@@ -60,7 +62,6 @@ test("an admin sees real platform numbers, rooms and leaderboards", async ({
   const usersBefore = await stat(page, "total users");
   const newUsersBefore = await stat(page, "new users (30d)");
   const streamedBefore = await stat(page, "hours streamed");
-  const liveBefore = await stat(page, "live now");
 
   const streamer = await createUser(browser, uniqueUsername("admin.streamer"), {
     stats: { secondsStreamed: 100_000 * HOUR, secondsWatched: 90_000 * HOUR },
@@ -80,7 +81,10 @@ test("an admin sees real platform numbers, rooms and leaderboards", async ({
   expect(await stat(page, "total users")).toBeGreaterThanOrEqual(usersBefore + 2);
   expect(await stat(page, "new users (30d)")).toBeGreaterThanOrEqual(newUsersBefore + 2);
   expect(await stat(page, "hours streamed")).toBeGreaterThanOrEqual(streamedBefore + 99_999);
-  expect(await stat(page, "live now")).toBeGreaterThanOrEqual(liveBefore + 1);
+  // This test's room is live throughout, whatever other tests' rooms do: it's seeded straight
+  // into the database after the server started, and nobody joins it, so the realtime hub never
+  // tracks it and its empty-room timer can't end it.
+  expect(await stat(page, "live now")).toBeGreaterThanOrEqual(1);
 
   // Private rooms included: admins see every room.
   const liveRow = page
