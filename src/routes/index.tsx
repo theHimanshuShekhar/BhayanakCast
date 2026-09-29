@@ -1,6 +1,6 @@
 import { keepPreviousData, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { Icon, type IconComponent } from "~/components/icons";
 import { LiveCard, PastCard, useSnapshots } from "~/components/room-cards";
 import { SignInButton } from "~/components/sign-in-button";
@@ -15,6 +15,7 @@ import { USER_SEARCH_QUERY_MAX, type UserSearchResult } from "~/lib/profiles";
 import { searchUsersQuery } from "~/lib/profiles.queries";
 import type { LiveRoomCard, PastRoomCard } from "~/lib/rooms";
 import { liveRoomsQuery, pastRoomsQuery, roomQuery } from "~/lib/rooms.queries";
+import { useDebounced } from "~/lib/use-debounced";
 
 export const Route = createFileRoute("/")({
   // `join` is set when a visitor was sent here from a room URL; the shell then shows the
@@ -211,16 +212,6 @@ const SignInPanel = () => (
     </div>
   </section>
 );
-
-/** `value`, once it has stopped changing for `ms`. */
-function useDebounced<T>(value: T, ms: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), ms);
-    return () => clearTimeout(timer);
-  }, [value, ms]);
-  return debounced;
-}
 
 function HomePage() {
   const navigate = useNavigate();
