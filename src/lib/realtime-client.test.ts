@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PING_INTERVAL_MS, PROTOCOL_VERSION, type ServerMessage } from "./realtime";
-import { RealtimeClient, type RealtimeStatus } from "./realtime-client";
+import { getVisitorId, RealtimeClient, type RealtimeStatus } from "./realtime-client";
 
 /** Just enough of the browser WebSocket for the client, driven by the test. */
 class FakeSocket extends EventTarget {
@@ -51,11 +51,26 @@ const latest = (): FakeSocket => {
   return socket;
 };
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** The hello a client sends, whatever its visitor id. */
+const HELLO = { type: "hello", v: PROTOCOL_VERSION, visitorId: expect.stringMatching(UUID) };
+
+/** A localStorage that holds what it's given. */
+function fakeStorage(initial: Record<string, string> = {}): Storage {
+  const items = new Map(Object.entries(initial));
+  return {
+    getItem: (key) => items.get(key) ?? null,
+    setItem: (key, value) => void items.set(key, String(value)),
+  } as Storage;
+}
+
 let client: RealtimeClient;
 let statuses: RealtimeStatus[];
 
 beforeEach(() => {
   vi.useFakeTimers();
+  vi.stubGlobal("localStorage", fakeStorage());
   FakeSocket.instances = [];
   client = new RealtimeClient("ws://test/ws", {
     WebSocket: FakeSocket as unknown as typeof WebSocket,
@@ -69,13 +84,14 @@ beforeEach(() => {
 afterEach(() => {
   client.stop();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe("RealtimeClient", () => {
   it("pings every interval once welcomed, while the server answers", () => {
     client.start();
     latest().handshake();
-    expect(latest().sent).toEqual([{ type: "hello", v: PROTOCOL_VERSION }]);
+    expect(latest().sent).toEqual([HELLO]);
 
     for (let i = 0; i < 3; i++) {
       vi.advanceTimersByTime(PING_INTERVAL_MS);
@@ -101,10 +117,7 @@ describe("RealtimeClient", () => {
     const second = latest();
     expect(second).not.toBe(first);
     second.handshake();
-    expect(second.sent).toEqual([
-      { type: "hello", v: PROTOCOL_VERSION },
-      { type: "room.join", roomId: "r1" },
-    ]);
+    expect(second.sent).toEqual([HELLO, { type: "room.join", roomId: "r1" }]);
     expect(statuses).toEqual(["connecting", "open", "reconnecting", "open"]);
   });
 
@@ -198,7 +211,7 @@ describe("RealtimeClient", () => {
       first.close();
       vi.advanceTimersByTime(1_000);
       latest().handshake();
-      expect(latest().sent).toEqual([{ type: "hello", v: PROTOCOL_VERSION }]);
+      expect(latest().sent).toEqual([HELLO]);
     },
   );
 
@@ -215,7 +228,7 @@ describe("RealtimeClient", () => {
     first.close();
     vi.advanceTimersByTime(1_000);
     latest().handshake();
-    expect(latest().sent).toEqual([{ type: "hello", v: PROTOCOL_VERSION }]);
+    expect(latest().sent).toEqual([HELLO]);
   });
 
   it("is closed, not reconnecting, once stopped", () => {
@@ -225,5 +238,48 @@ describe("RealtimeClient", () => {
     expect(client.status).toBe("closed");
     vi.advanceTimersByTime(60_000);
     expect(FakeSocket.instances).toHaveLength(1);
+  });
+});
+
+describe("the visitor id", () => {
+  const sentId = () => (latest().sent[0] as { visitorId?: string }).visitorId;
+
+  it("is made once, kept in localStorage and sent in every hello", () => {
+    client.start();
+    latest().serverOpens();
+    const id = sentId();
+    expect(id).toBeDefined();
+    expect(localStorage.getItem("bc_visitor_id")).toBe(id);
+
+    latest().close();
+    vi.advanceTimersByTime(1_000);
+    latest().serverOpens();
+    expect(sentId()).toBe(id);
+  });
+
+  it("is the one another tab of the browser stored", () => {
+    const stored = "2f1d5c3e-8a47-4b8e-9d0a-6c1f0e7b3a52";
+    vi.stubGlobal("localStorage", fakeStorage({ bc_visitor_id: stored }));
+    client.start();
+    latest().serverOpens();
+    expect(sentId()).toBe(stored);
+  });
+
+  it("replaces a stored value that isn't a UUID", () => {
+    const storage = fakeStorage({ bc_visitor_id: "not-an-id" });
+    vi.stubGlobal("localStorage", storage);
+    const id = getVisitorId();
+    expect(id).not.toBe("not-an-id");
+    expect(storage.getItem("bc_visitor_id")).toBe(id);
+  });
+
+  it("falls back to one id for the page when localStorage throws", () => {
+    const blocked = () => {
+      throw new DOMException("blocked", "SecurityError");
+    };
+    vi.stubGlobal("localStorage", { getItem: blocked, setItem: blocked });
+    const id = getVisitorId();
+    expect(id).toMatch(UUID);
+    expect(getVisitorId()).toBe(id);
   });
 });

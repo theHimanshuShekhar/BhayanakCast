@@ -115,6 +115,8 @@ class HubConnection implements Connection {
   readonly transport: Transport;
   /** Sent a valid `hello`. */
   greeted = false;
+  /** Which visitor this anonymous socket counts as online (`#visitors`), once greeted. */
+  visitorKey: string | null = null;
   closed = false;
   /** The room this connection is in, if any. */
   roomId: string | null = null;
@@ -239,6 +241,12 @@ export class RoomHub {
   readonly #rooms = new Map<string, LiveRoom>();
   /** Open sockets per signed-in user id: the online users (ADR 20). */
   readonly #online = new Map<string, number>();
+  /**
+   * Greeted anonymous sockets per visitor key: the online visitors (ADR 20 addendum). The key
+   * is the browser's `visitorId`, or the connection's own when it sent none. Memory only, never
+   * logged or sent to a client.
+   */
+  readonly #visitors = new Map<string, number>();
   #nextId = 1;
   #nextChatId = 1;
   /** Per user id, when (epoch ms) their recent accepted chat messages were sent. */
@@ -272,11 +280,7 @@ export class RoomHub {
     this.#connections.add(conn);
     const userId = caller.user?.id;
     if (userId) {
-      void this.#enqueue(() => {
-        const sockets = this.#online.get(userId) ?? 0;
-        this.#online.set(userId, sockets + 1);
-        if (sockets === 0) this.#lobbyChanged();
-      });
+      void this.#enqueue(() => this.#countOnline(this.#online, userId));
     }
     this.#armIdle(conn);
     return conn;
@@ -482,14 +486,16 @@ export class RoomHub {
           message.type,
         );
       }
-      conn.greeted = true;
       const user = conn.caller.user;
+      // Before `greeted`, so the others hear of a new visitor and this socket only the snapshot.
+      if (!user) this.#visitorOnline(conn, message.visitorId);
+      conn.greeted = true;
       this.#send(conn, {
         type: "welcome",
         v: PROTOCOL_VERSION,
         user: user ? { id: user.id, username: user.username } : null,
       });
-      this.#send(conn, { type: "lobby.snapshot", online: this.#online.size });
+      this.#send(conn, { type: "lobby.snapshot", online: this.#onlineCount() });
     },
 
     "room.join": async (conn, message) => {
@@ -1131,18 +1137,51 @@ export class RoomHub {
   }
 
   // -------------------------------------------------------------------------------------------
-  // Lobby (ADR 20): online users and public room changes, for every greeted socket
+  // Lobby (ADR 20): the online count and public room changes, for every greeted socket
 
-  /** `conn` closed: one socket fewer for its user, who goes offline with their last one. */
+  /** The online count: distinct signed-in users plus distinct visitors. */
+  #onlineCount(): number {
+    return this.#online.size + this.#visitors.size;
+  }
+
+  /**
+   * An anonymous `conn` said hello: it counts as `visitorId`'s browser, or on its own without a
+   * valid one. The first socket of a visitor changes the count. A repeated hello changes nothing.
+   */
+  #visitorOnline(conn: HubConnection, visitorId: string | undefined): void {
+    if (conn.visitorKey) return;
+    // Visitor ids are UUIDs, so a per-connection key can't collide with one.
+    const key = visitorId?.toLowerCase() ?? `connection:${conn.id}`;
+    conn.visitorKey = key;
+    this.#countOnline(this.#visitors, key);
+  }
+
+  /** One more open socket for `key` in `openSockets`; the lobby hears of its first. */
+  #countOnline(openSockets: Map<string, number>, key: string): void {
+    const sockets = openSockets.get(key) ?? 0;
+    openSockets.set(key, sockets + 1);
+    if (sockets === 0) this.#lobbyChanged();
+  }
+
+  /**
+   * `conn` closed: one socket fewer for its user or visitor, who goes offline with their last
+   * one. A visitor who signs in has their anonymous socket close as the authenticated one opens
+   * (ADR 20), so the count settles on one for them either way round.
+   */
   #goOffline(conn: HubConnection): void {
     const userId = conn.caller.user?.id;
-    if (!userId) return;
-    const sockets = (this.#online.get(userId) ?? 1) - 1;
+    if (userId) this.#countOffline(this.#online, userId);
+    else if (conn.visitorKey) this.#countOffline(this.#visitors, conn.visitorKey);
+  }
+
+  /** One socket fewer for `key` in `openSockets`; the lobby hears of its last. */
+  #countOffline(openSockets: Map<string, number>, key: string): void {
+    const sockets = (openSockets.get(key) ?? 1) - 1;
     if (sockets > 0) {
-      this.#online.set(userId, sockets);
+      openSockets.set(key, sockets);
       return;
     }
-    this.#online.delete(userId);
+    openSockets.delete(key);
     this.#lobbyChanged();
   }
 
@@ -1163,7 +1202,7 @@ export class RoomHub {
   #lobbyChanged(room?: LobbyRoomChange): void {
     const message: ServerMessage = {
       type: "lobby.changed",
-      online: this.#online.size,
+      online: this.#onlineCount(),
       ...(room ? { room } : {}),
     };
     for (const conn of this.#connections) if (conn.greeted) this.#send(conn, message);

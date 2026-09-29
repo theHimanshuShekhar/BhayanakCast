@@ -2,10 +2,11 @@
  * The lobby channel on the page (ADR 20): every page keeps the realtime socket open, signed in
  * or not. `useLobbyLive(userId)` (mounted once, in the app shell) starts it, reconnects it when
  * the session changes so it upgrades to (or drops) authentication without a reload, keeps the
- * online-user count, and invalidates room reads when the lobby says rooms changed. A user an
- * admin bans is sent home with the ban notice.
- * `useOnlineUsers()` reads the count anywhere.
+ * online count (users and visitors), and invalidates room reads when the lobby says rooms
+ * changed. A user an admin bans is sent home with the ban notice.
+ * `useOnlineCount()` reads the count anywhere.
  */
+import { Debouncer } from "@tanstack/pacer";
 import { type QueryClient, type QueryKey, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { banNoticeHref } from "./ban";
@@ -76,8 +77,8 @@ function subscribeOnline(listener: () => void): () => void {
   return () => onlineListeners.delete(listener);
 }
 
-/** Online users (signed in, with an open socket); null until the socket's first snapshot. */
-export function useOnlineUsers(): number | null {
+/** The online count (CONTEXT.md); null until the socket's first snapshot. */
+export function useOnlineCount(): number | null {
   return useSyncExternalStore(
     subscribeOnline,
     () => online,
@@ -85,8 +86,38 @@ export function useOnlineUsers(): number | null {
   );
 }
 
+/**
+ * A `lobby.changed` count shows only once it has held this long: a visitor who signs in or out
+ * closes one socket and opens another, and the server's count dips by one in between.
+ */
+export const ONLINE_SETTLE_MS = 3_000;
+
+/** `ONLINE_SETTLE_MS`, unless the build sets `VITE_ONLINE_SETTLE_MS` (the e2e build does). */
+const pageSettleMs = Number(import.meta.env.VITE_ONLINE_SETTLE_MS ?? ONLINE_SETTLE_MS);
+
+/**
+ * Feeds the online count to `apply`: a snapshot at once (the first paint and every reconnect),
+ * a `lobby.changed` count after it has held for `ONLINE_SETTLE_MS`, so N, N-1, N never shows.
+ * `cancel()` drops a pending count, on teardown.
+ */
+export function settleOnline(apply: (online: number) => void, settleMs = ONLINE_SETTLE_MS) {
+  const settle = new Debouncer(apply, { wait: settleMs });
+  return {
+    snapshot(online: number): void {
+      settle.cancel();
+      apply(online);
+    },
+    changed: (online: number): void => settle.maybeExecute(online),
+    cancel: (): void => settle.cancel(),
+  };
+}
+
 function follow(queryClient: QueryClient): () => void {
   const client = getRealtimeClient();
+  const onlineCount = settleOnline(
+    setOnline,
+    Number.isFinite(pageSettleMs) ? pageSettleMs : undefined,
+  );
   let snapshots = 0;
   const refetchCards = coalesce(
     () => void queryClient.invalidateQueries({ queryKey: roomKeys.live() }),
@@ -100,7 +131,8 @@ function follow(queryClient: QueryClient): () => void {
       return;
     }
     if (message.type !== "lobby.snapshot" && message.type !== "lobby.changed") return;
-    setOnline(message.online);
+    if (message.type === "lobby.snapshot") onlineCount.snapshot(message.online);
+    else onlineCount.changed(message.online);
     const reconnected = message.type === "lobby.snapshot" && snapshots++ > 0;
     if (message.type === "lobby.changed" && message.room?.change === "thumbnail") {
       refetchCards();
@@ -111,7 +143,10 @@ function follow(queryClient: QueryClient): () => void {
     }
   });
   client.start();
-  return unsubscribe;
+  return () => {
+    unsubscribe();
+    onlineCount.cancel();
+  };
 }
 
 /**

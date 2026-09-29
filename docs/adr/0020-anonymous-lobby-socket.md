@@ -13,3 +13,10 @@ Visitors (signed out) can browse home, profiles and recaps (ADR 6 addendum). The
 ## Consequences
 - Visitors see live counts without polling.
 - The anonymous surface is small but public, so rate and connection limits and strict message validation are required.
+
+## Addendum: visitors count towards online (2026-09-30)
+The last Decision bullet is reversed in part: the side rail's count (and the home "Online" tile) is **one number, distinct signed-in users plus distinct visitors**. Only authenticated sockets can still join rooms.
+- **Once per browser.** The client keeps a random `crypto.randomUUID()` in `localStorage` and sends it as the optional `visitorId` in `hello`, so several tabs are one visitor and another browser (or a private window) is another. If storage throws, the id lives in memory for the page. It is not a fingerprint.
+- **Server.** The hub counts visitor sockets per id from `hello` until they close, in memory only: ids are never logged, persisted or sent to other clients, only the count goes out. An anonymous `hello` with no valid id counts as a visitor of its own (older clients, browsers without storage). A signed-in socket's `visitorId` is ignored. `lobby.changed` is sent only when the total changes. `PROTOCOL_VERSION` stays 1, as the field is optional.
+- **Sign-in.** The anonymous socket closes as the authenticated one opens, so the server's count can dip by one while someone signs in or out and returns to the same total. The server sends the true count. The client debounces the count it displays from `lobby.changed` by 3 s (`ONLINE_SETTLE_MS`, TanStack Pacer; the e2e build sets it to 0 with `VITE_ONLINE_SETTLE_MS`, as other tests' sockets keep the count moving), so a dip that recovers within that never shows. A `lobby.snapshot` (the first paint, every reconnect) shows at once and drops any pending value. Discord sign-in is a full-page redirect, so a longer consent screen can still show the dip on other people's pages.
+- **Abuse.** A client can invent ids to inflate the count, bounded by the existing per-IP cap on anonymous sockets. No new limit.
