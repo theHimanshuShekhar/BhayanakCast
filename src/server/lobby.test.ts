@@ -1,5 +1,5 @@
 /**
- * The lobby channel (ADR 20, #24): anonymous sockets, the online-user count and public room
+ * The lobby channel (ADR 20, #24): anonymous sockets, the online count and public room
  * changes, through real sockets (./realtime-harness.ts).
  */
 import { afterEach, describe, expect, it } from "vitest";
@@ -32,10 +32,13 @@ afterEach(async () => {
   await h.close();
 });
 
-/** An anonymous socket, handshake done; returns it with its lobby snapshot. */
-async function visitor(headers?: Record<string, string>) {
+/**
+ * An anonymous socket, handshake done; returns it with its lobby snapshot. It counts online
+ * once per `visitorId`, or on its own without one.
+ */
+async function visitor(headers?: Record<string, string>, visitorId?: string) {
   const client = await h.connect(null, headers);
-  client.send({ type: "hello", v: PROTOCOL_VERSION });
+  client.send({ type: "hello", v: PROTOCOL_VERSION, ...(visitorId ? { visitorId } : {}) });
   expect(await client.waitFor("welcome")).toEqual({
     type: "welcome",
     v: PROTOCOL_VERSION,
@@ -61,7 +64,8 @@ describe("anonymous sockets", () => {
 
     anon.send({ type: "hello", v: PROTOCOL_VERSION });
     expect(await anon.waitFor("welcome")).toMatchObject({ user: null });
-    expect(await anon.waitFor("lobby.snapshot")).toEqual({ type: "lobby.snapshot", online: 0 });
+    // The visitor is online themself.
+    expect(await anon.waitFor("lobby.snapshot")).toEqual({ type: "lobby.snapshot", online: 1 });
 
     for (const message of [
       { type: "room.join", roomId } as const,
@@ -103,34 +107,147 @@ describe("anonymous sockets", () => {
 describe("online users", () => {
   it("counts distinct signed-in users with an open socket as they come and go", async () => {
     await start();
-    const [ana, bo] = [await h.createUser("ana"), await h.createUser("bo")];
-    const { client: anon, snapshot } = await visitor();
-    expect(snapshot.online).toBe(0);
-    // Another anonymous socket doesn't count.
-    await visitor();
+    const [ana, bo, cy] = [
+      await h.createUser("ana"),
+      await h.createUser("bo"),
+      await h.createUser("cy"),
+    ];
+    // The observer is a signed-in user, so it counts itself.
+    const observer = await h.connectAs(cy);
+    expect((await observer.waitFor("lobby.snapshot")).online).toBe(1);
 
     const a1 = await h.connectAs(ana);
-    expect(await nextChange(anon)).toEqual({ type: "lobby.changed", online: 1 });
-    expect(await a1.waitFor("lobby.snapshot")).toEqual({ type: "lobby.snapshot", online: 1 });
+    expect(await nextChange(observer)).toEqual({ type: "lobby.changed", online: 2 });
+    expect(await a1.waitFor("lobby.snapshot")).toEqual({ type: "lobby.snapshot", online: 2 });
 
     // A second socket of the same user changes nothing.
     const a2 = await h.connectAs(ana);
-    expect((await a2.waitFor("lobby.snapshot")).online).toBe(1);
+    expect((await a2.waitFor("lobby.snapshot")).online).toBe(2);
 
     const b = await h.connectAs(bo);
-    expect(await nextChange(anon)).toEqual({ type: "lobby.changed", online: 2 });
-    expect(await nextChange(a1)).toEqual({ type: "lobby.changed", online: 2 });
-    expect((await b.waitFor("lobby.snapshot")).online).toBe(2);
+    expect(await nextChange(observer)).toEqual({ type: "lobby.changed", online: 3 });
+    expect(await nextChange(a1)).toEqual({ type: "lobby.changed", online: 3 });
+    expect((await b.waitFor("lobby.snapshot")).online).toBe(3);
 
     await a1.close();
     await h.settled();
-    expect(anon.pendingLobby()).toEqual([]);
+    expect(observer.pendingLobby()).toEqual([]);
     await a2.close();
-    expect(await nextChange(anon)).toEqual({ type: "lobby.changed", online: 1 });
+    expect(await nextChange(observer)).toEqual({ type: "lobby.changed", online: 2 });
     await b.close();
-    expect(await nextChange(anon)).toEqual({ type: "lobby.changed", online: 0 });
+    expect(await nextChange(observer)).toEqual({ type: "lobby.changed", online: 1 });
     await h.settled();
-    expect(anon.pendingLobby()).toEqual([]);
+    expect(observer.pendingLobby()).toEqual([]);
+  });
+});
+
+describe("online visitors", () => {
+  const BROWSER_A = "6f0c8a52-3f1e-4c53-9d7e-2a1b0c9d8e71";
+  const BROWSER_B = "b4e1d7a9-5c02-4f6b-8a3d-91c7e2f04b68";
+  let observer: TestClient;
+
+  /** The online count of the last `lobby.changed` the observer heard. */
+  const lastOnline = () => observer.received.findLast((m) => m.type === "lobby.changed")?.online;
+
+  /** A signed-in observer: it is online itself, so the count starts at 1. */
+  async function observe() {
+    await start();
+    observer = await h.connectAs(await h.createUser("ana"));
+    expect((await observer.waitFor("lobby.snapshot")).online).toBe(1);
+  }
+
+  it("counts a visitor in their own snapshot, and every tab of one browser once", async () => {
+    await observe();
+    const tab1 = await visitor(undefined, BROWSER_A);
+    expect(tab1.snapshot.online).toBe(2);
+    expect(await nextChange(observer)).toEqual({ type: "lobby.changed", online: 2 });
+
+    const tab2 = await visitor(undefined, BROWSER_A);
+    expect(tab2.snapshot.online).toBe(2);
+    await h.settled();
+    expect(observer.pendingLobby()).toEqual([]);
+
+    // Closing one of two tabs doesn't lower it; the last one does.
+    await tab1.client.close();
+    await h.settled();
+    expect(observer.pendingLobby()).toEqual([]);
+    await tab2.client.close();
+    expect(await nextChange(observer)).toEqual({ type: "lobby.changed", online: 1 });
+  });
+
+  it("counts a different browser separately", async () => {
+    await observe();
+    const a = await visitor(undefined, BROWSER_A);
+    expect(await nextChange(observer)).toEqual({ type: "lobby.changed", online: 2 });
+    const b = await visitor(undefined, BROWSER_B);
+    expect(b.snapshot.online).toBe(3);
+    expect(await nextChange(observer)).toEqual({ type: "lobby.changed", online: 3 });
+    // The first visitor hears the second's arrival too.
+    expect(await nextChange(a.client)).toEqual({ type: "lobby.changed", online: 3 });
+
+    await a.client.close();
+    expect(await nextChange(observer)).toEqual({ type: "lobby.changed", online: 2 });
+    await b.client.close();
+    expect(await nextChange(observer)).toEqual({ type: "lobby.changed", online: 1 });
+  });
+
+  it("counts a socket with a missing or malformed id on its own, and still welcomes it", async () => {
+    await observe();
+    const bare = await visitor();
+    expect(bare.snapshot.online).toBe(2);
+    await visitor();
+    for (const bad of ["not-a-uuid", 42, ""]) {
+      const client = await h.connect(null);
+      client.sendRaw(JSON.stringify({ type: "hello", v: PROTOCOL_VERSION, visitorId: bad }));
+      expect(await client.waitFor("welcome")).toMatchObject({ user: null });
+      await client.waitFor("lobby.snapshot");
+    }
+    await h.settled();
+    expect(observer.pendingLobby().map((m) => (m as { online: number }).online)).toEqual([
+      2, 3, 4, 5, 6,
+    ]);
+
+    // Two sockets without ids aren't one visitor: closing one lowers the count.
+    await bare.client.close();
+    await expect.poll(lastOnline).toBe(5);
+  });
+
+  it("ignores the visitor id of a signed-in socket", async () => {
+    await observe();
+    const bo = await h.createUser("bo");
+    const signedIn = await h.connect(bo);
+    signedIn.send({ type: "hello", v: PROTOCOL_VERSION, visitorId: BROWSER_A });
+    expect(await signedIn.waitFor("welcome")).toMatchObject({ user: { username: "bo" } });
+    expect(await nextChange(observer)).toEqual({ type: "lobby.changed", online: 2 });
+
+    // The same id on an anonymous socket is a visitor of its own, not bo.
+    await visitor(undefined, BROWSER_A);
+    expect(await nextChange(observer)).toEqual({ type: "lobby.changed", online: 3 });
+
+    // Closing bo's socket drops the user only.
+    await signedIn.close();
+    expect(await nextChange(observer)).toEqual({ type: "lobby.changed", online: 2 });
+  });
+
+  it("counts a socket once however often it says hello", async () => {
+    await observe();
+    const { client } = await visitor(undefined, BROWSER_A);
+    client.send({ type: "hello", v: PROTOCOL_VERSION, visitorId: BROWSER_B });
+    await client.waitFor("welcome");
+    await h.settled();
+    expect(observer.pendingLobby()).toEqual([{ type: "lobby.changed", online: 2 }]);
+    await client.close();
+    await expect.poll(lastOnline).toBe(1);
+  });
+
+  it("doesn't count a socket that never said hello", async () => {
+    await observe();
+    const silent = await h.connect(null);
+    await h.settled();
+    expect(observer.pendingLobby()).toEqual([]);
+    await silent.close();
+    await h.settled();
+    expect(observer.pendingLobby()).toEqual([]);
   });
 });
 
@@ -156,7 +273,7 @@ describe("public room changes", () => {
     const roomId = await h.createRoom(ana);
     expect(await nextRoomChange(anon)).toEqual({
       type: "lobby.changed",
-      online: 0,
+      online: 1,
       room: { roomId, change: "created", participantCount: 0 },
     });
 
@@ -177,7 +294,7 @@ describe("public room changes", () => {
     await h.advance(RECONNECT_GRACE_MS); // a dropped socket leaves the room after the grace
     expect(await nextRoomChange(anon)).toEqual({
       type: "lobby.changed",
-      online: 1,
+      online: 2,
       room: { roomId, change: "count", participantCount: 0 },
     });
 
@@ -255,17 +372,17 @@ describe("with the reconnect grace", () => {
     // Online follows open sockets: bo is offline at once.
     const changesSince = () =>
       anon.received.slice(seenBefore).filter((m) => m.type === "lobby.changed");
-    await expect.poll(changesSince).toEqual([{ type: "lobby.changed", online: 1 }]);
+    await expect.poll(changesSince).toEqual([{ type: "lobby.changed", online: 2 }]);
     await h.advance(RECONNECT_GRACE_MS - SECOND);
-    expect(changesSince()).toEqual([{ type: "lobby.changed", online: 1 }]);
+    expect(changesSince()).toEqual([{ type: "lobby.changed", online: 2 }]);
 
     // Once the grace runs out bo leaves the room, and the lobby hears the new count.
     await h.advance(SECOND);
     await expect.poll(changesSince).toEqual([
-      { type: "lobby.changed", online: 1 },
+      { type: "lobby.changed", online: 2 },
       {
         type: "lobby.changed",
-        online: 1,
+        online: 2,
         room: { roomId, change: "count", participantCount: 1 },
       },
     ]);
@@ -324,7 +441,16 @@ describe("signing in", () => {
   it("upgrades the page's socket to authenticated when the client restarts it", async () => {
     await start();
     const ana = await h.createUser("ana");
+    // Another browser, online throughout: it hears the count settle at two, itself and the page
+    // below (a visitor, then ana).
     const { client: observer } = await visitor();
+    const observed = () => observer.received.findLast((m) => m.type === "lobby.changed")?.online;
+    // What a newcomer would be told: that browser, the page below and the probe itself.
+    const probe = async () => {
+      const { client, snapshot } = await visitor();
+      await client.close();
+      return snapshot.online;
+    };
 
     // The browser's client, with the session cookie a browser would send at the upgrade.
     let cookie: string | null = null;
@@ -343,18 +469,22 @@ describe("signing in", () => {
     try {
       client.start();
       await expect.poll(welcomes).toEqual([null]);
+      expect(await probe()).toBe(3);
+      await expect.poll(observed).toBe(2);
 
+      // Their anonymous socket closes as the authenticated one opens: still one person.
       cookie = ana.cookie; // signed in (e.g. in another tab)
       client.restart();
       await expect.poll(welcomes).toEqual([null, { id: ana.id, username: "ana" }]);
-      expect(await nextChange(observer)).toEqual({ type: "lobby.changed", online: 1 });
-      await expect.poll(() => received.at(-1)).toEqual({ type: "lobby.snapshot", online: 1 });
+      await expect.poll(probe).toBe(3);
+      await expect.poll(observed).toBe(2);
 
       cookie = null; // signed out
       client.restart();
       await expect.poll(() => welcomes().length).toBe(3);
       expect(welcomes()[2]).toBeNull();
-      expect(await nextChange(observer)).toEqual({ type: "lobby.changed", online: 0 });
+      await expect.poll(probe).toBe(3);
+      await expect.poll(observed).toBe(2);
     } finally {
       client.stop();
     }

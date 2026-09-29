@@ -147,7 +147,19 @@ export type SignalPayload = z.infer<typeof signalPayload>;
 // ---------------------------------------------------------------------------------------------
 // Client → server
 
-export const helloMessage = z.object({ type: z.literal("hello"), v: z.number().int() });
+/** A browser's random visitor id (ADR 20 addendum). */
+export const visitorId = z.uuid();
+
+/**
+ * The handshake. An anonymous socket's `visitorId` makes it count online once per browser,
+ * however many tabs share it. A signed-in socket's is ignored, and one that isn't a UUID reads
+ * as absent (the socket then counts on its own), so a bad id never refuses the handshake.
+ */
+export const helloMessage = z.object({
+  type: z.literal("hello"),
+  v: z.number().int(),
+  visitorId: visitorId.optional().catch(undefined),
+});
 export const roomJoinMessage = z.object({ type: z.literal("room.join"), roomId });
 export const roomLeaveMessage = z.object({ type: z.literal("room.leave") });
 /** Heartbeat; the server answers `pong`. */
@@ -449,7 +461,10 @@ export const roomEventMessage = z.object({
  */
 export const lobbySnapshotMessage = z.object({
   type: z.literal("lobby.snapshot"),
-  /** Online users: distinct signed-in users with at least one open socket. */
+  /**
+   * Online: distinct signed-in users with at least one open socket, plus distinct visitors
+   * (once per browser, ADR 20 addendum).
+   */
   online: z.number().int().min(0),
 });
 

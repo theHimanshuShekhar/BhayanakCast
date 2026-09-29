@@ -21,7 +21,7 @@ export interface CommunityTotals {
 }
 
 /**
- * The home sidebar's numbers. The online-user count isn't here: it comes from the
+ * The home sidebar's numbers. The online count isn't here: it comes from the
  * realtime server (spec #3).
  */
 export interface HomeSummary {

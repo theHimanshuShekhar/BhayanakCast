@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { homeKeys } from "./home.queries.ts";
-import { coalesce, lobbyInvalidations } from "./lobby-live.ts";
+import { coalesce, lobbyInvalidations, ONLINE_SETTLE_MS, settleOnline } from "./lobby-live.ts";
 import type { LOBBY_ROOM_CHANGES, ServerMessage } from "./realtime.ts";
 import { roomKeys } from "./rooms.queries.ts";
 
@@ -33,6 +33,55 @@ describe("lobbyInvalidations", () => {
     expect(lobbyInvalidations(snapshot, false)).toEqual([]);
     expect(lobbyInvalidations(snapshot, true)).toEqual([roomKeys.all]);
     expect(lobbyInvalidations({ type: "lobby.changed", online: 2 }, false)).toEqual([]);
+  });
+});
+
+describe("settleOnline", () => {
+  afterEach(() => vi.useRealTimers());
+
+  function setup() {
+    vi.useFakeTimers();
+    const shown: number[] = [];
+    return { shown, online: settleOnline((n) => shown.push(n)) };
+  }
+
+  it("never shows a dip that recovers within the window", () => {
+    const { shown, online } = setup();
+    online.snapshot(5);
+    online.changed(4);
+    vi.advanceTimersByTime(ONLINE_SETTLE_MS - 1);
+    online.changed(5);
+    vi.advanceTimersByTime(ONLINE_SETTLE_MS);
+    // The 5 that settled is the value already shown; the 4 never reached the store.
+    expect(shown).not.toContain(4);
+    expect(shown.at(-1)).toBe(5);
+  });
+
+  it("shows a lasting change once it has held for the window", () => {
+    const { shown, online } = setup();
+    online.snapshot(5);
+    online.changed(6);
+    vi.advanceTimersByTime(ONLINE_SETTLE_MS - 1);
+    expect(shown).toEqual([5]);
+    vi.advanceTimersByTime(1);
+    expect(shown).toEqual([5, 6]);
+  });
+
+  it("applies a snapshot at once and drops the pending count", () => {
+    const { shown, online } = setup();
+    online.changed(9);
+    online.snapshot(5);
+    expect(shown).toEqual([5]);
+    vi.advanceTimersByTime(2 * ONLINE_SETTLE_MS);
+    expect(shown).toEqual([5]);
+  });
+
+  it("shows nothing after being cancelled", () => {
+    const { shown, online } = setup();
+    online.changed(9);
+    online.cancel();
+    vi.advanceTimersByTime(2 * ONLINE_SETTLE_MS);
+    expect(shown).toEqual([]);
   });
 });
 

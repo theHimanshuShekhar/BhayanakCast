@@ -20,6 +20,7 @@ import {
   parseServerMessage,
   REALTIME_PATH,
   type ServerMessage,
+  visitorId,
 } from "./realtime";
 
 /**
@@ -52,6 +53,32 @@ export const defaultBackoff = (attempt: number) =>
  */
 export const defaultFullRoomBackoff = (attempt: number) =>
   Math.min(30_000, 5_000 * 1.5 ** attempt) * (0.8 + Math.random() * 0.4);
+
+const VISITOR_ID_KEY = "bc_visitor_id";
+let pageVisitorId: string | undefined;
+
+/**
+ * This browser's random visitor id (ADR 20 addendum): kept in localStorage, so every tab of the
+ * browser shares it, and made on first use. Where storage throws (some private modes), one id
+ * for the page instead; undefined where `crypto.randomUUID` is missing (an insecure context),
+ * so the hello still goes out and the socket counts on its own.
+ */
+export function getVisitorId(): string | undefined {
+  try {
+    const stored = localStorage.getItem(VISITOR_ID_KEY);
+    if (stored && visitorId.safeParse(stored).success) return stored;
+    const id = crypto.randomUUID();
+    localStorage.setItem(VISITOR_ID_KEY, id);
+    return id;
+  } catch {
+    try {
+      pageVisitorId ??= crypto.randomUUID();
+    } catch {
+      // No crypto.randomUUID either: send no id.
+    }
+    return pageVisitorId;
+  }
+}
 
 export class RealtimeClient {
   readonly #url: string;
@@ -169,7 +196,14 @@ export class RealtimeClient {
     const ws = new this.#WebSocket(this.#url);
     this.#ws = ws;
     ws.addEventListener("open", () => {
-      ws.send(JSON.stringify({ type: "hello", v: PROTOCOL_VERSION } satisfies ClientMessage));
+      // The id goes with every hello: the client can't tell before the handshake whether the
+      // cookie's session is still good, and the server ignores it on a signed-in socket.
+      const hello = {
+        type: "hello",
+        v: PROTOCOL_VERSION,
+        visitorId: getVisitorId(),
+      } satisfies ClientMessage;
+      ws.send(JSON.stringify(hello));
     });
     ws.addEventListener("message", (event) => {
       if (this.#ws !== ws) return; // A socket `restart` dropped.

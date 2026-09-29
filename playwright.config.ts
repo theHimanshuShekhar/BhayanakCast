@@ -71,6 +71,10 @@ export default defineConfig({
       // A share's thumbnail refreshes every 8s, not 3 minutes (e2e/thumbnails.spec.ts); Vite
       // inlines it into the client at build time.
       VITE_THUMBNAIL_REFRESH_MS: "8000",
+      // The rail's count shows at once, not after 3s (src/lib/lobby-live.ts): other tests'
+      // sockets come and go all the time, and a settled count would hide the changes the
+      // lobby spec records. The settling is covered by unit tests.
+      VITE_ONLINE_SETTLE_MS: "0",
     },
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,

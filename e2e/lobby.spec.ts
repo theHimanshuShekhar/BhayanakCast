@@ -3,11 +3,11 @@ import { signIn } from "./auth";
 import { expect, newPage, test } from "./fixtures";
 import { createRoomAs, enterRoom, uniqueRoomName } from "./rooms";
 
-// The lobby channel (ADR 20): a visitor's page follows online users and public rooms live.
+// The lobby channel (ADR 20): a visitor's page follows the online count and public rooms live.
 // Other tests connect and create rooms concurrently on the same server, so assert growth and
-// presence, never exact totals.
+// presence, never exact totals (a visitor counts too, once per browser: ADR 20 addendum).
 
-/** The rail's online-user count, once the lobby socket has reported it. */
+/** The rail's online count, once the lobby socket has reported it. */
 async function railOnline(page: Page): Promise<number> {
   const status = page.getByRole("status", { name: /^\d+ online$/ });
   await expect(status).toBeVisible();
@@ -69,6 +69,69 @@ test("a visitor's rail counts a user who signs in elsewhere", async ({ page, bro
     await (await newPage(other)).goto("/");
     await expect.poll(() => railOnlineWentUp(page)).toBe(true);
     expect(await stillSameDocument(page)).toBe(true);
+  } finally {
+    await other.close();
+  }
+});
+
+/**
+ * The visitor ids `page`'s sockets say hello with, as they open. Register before the first
+ * `goto`. The count itself can't tell one browser from two here, as other tests' visitors come
+ * and go on the same server; the hub's unit tests pin how an id is counted.
+ */
+function recordHelloIds(page: Page): (string | undefined)[] {
+  const ids: (string | undefined)[] = [];
+  page.on("websocket", (socket) => {
+    socket.on("framesent", ({ payload }) => {
+      const message = JSON.parse(String(payload)) as { type?: string; visitorId?: string };
+      if (message.type === "hello") ids.push(message.visitorId);
+    });
+  });
+  return ids;
+}
+
+test("a second browser raises a visitor's rail count", async ({ page, browser }) => {
+  await page.goto("/");
+  await railOnline(page); // the lobby socket is up, and counts this visitor
+  await recordRailOnline(page);
+
+  const other = await browser.newContext();
+  try {
+    await (await newPage(other)).goto("/");
+    await expect.poll(() => railOnlineWentUp(page)).toBe(true);
+  } finally {
+    await other.close();
+  }
+});
+
+test("tabs of one browser are one visitor, another browser is another", async ({
+  page,
+  context,
+  browser,
+}) => {
+  const first = recordHelloIds(page);
+  await page.goto("/");
+  await railOnline(page);
+  await expect.poll(() => first.length).toBeGreaterThan(0);
+
+  // A second tab of the same browser says hello with the same id...
+  const tab = await newPage(context);
+  const second = recordHelloIds(tab);
+  await tab.goto("/");
+  await railOnline(tab);
+  await expect.poll(() => second.length).toBeGreaterThan(0);
+  expect(second[0]).toMatch(/^[0-9a-f-]{36}$/);
+  expect(second[0]).toBe(first[0]);
+
+  // ...and another browser with its own.
+  const other = await browser.newContext();
+  try {
+    const away = await newPage(other);
+    const third = recordHelloIds(away);
+    await away.goto("/");
+    await expect.poll(() => third.length).toBeGreaterThan(0);
+    expect(third[0]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(third[0]).not.toBe(first[0]);
   } finally {
     await other.close();
   }

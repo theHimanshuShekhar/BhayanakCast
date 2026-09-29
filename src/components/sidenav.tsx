@@ -2,7 +2,7 @@
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { ACCENTS } from "~/lib/format";
-import { useOnlineUsers } from "~/lib/lobby-live";
+import { useOnlineCount } from "~/lib/lobby-live";
 import { useSettings } from "~/lib/settings";
 import { Icon, type IconComponent } from "./icons";
 
@@ -82,13 +82,13 @@ const RailButton = ({
 );
 
 /**
- * The rail's live count of online users (CONTEXT.md: signed-in users with an open connection),
- * from the lobby socket (ADR 20). A dash until the socket's first snapshot. It reads the count
- * itself, so a lobby update re-renders only this, never the shell around the page.
+ * The rail's live online count (CONTEXT.md: online users plus online visitors), from the lobby
+ * socket (ADR 20). A dash until the socket's first snapshot. It reads the count itself, so a
+ * lobby update re-renders only this, never the shell around the page.
  */
 const OnlineCount = () => {
-  const online = useOnlineUsers();
-  const label = online === null ? "Online users: connecting" : `${online} online`;
+  const online = useOnlineCount();
+  const label = online === null ? "Online: connecting" : `${online} online`;
   return (
     <div
       role="status"

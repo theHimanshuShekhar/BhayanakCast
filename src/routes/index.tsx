@@ -11,7 +11,7 @@ import { useAppActions } from "~/lib/app-actions";
 import { type SignInErrorSearch, validateSignInErrorSearch } from "~/lib/ban";
 import { useCurrentSession } from "~/lib/current-user";
 import { homeSummaryQuery } from "~/lib/home.queries";
-import { useOnlineUsers } from "~/lib/lobby-live";
+import { useOnlineCount } from "~/lib/lobby-live";
 import { USER_SEARCH_QUERY_MAX, type UserSearchResult } from "~/lib/profiles";
 import { searchUsersQuery } from "~/lib/profiles.queries";
 import type { LiveRoomCard, PastRoomCard } from "~/lib/rooms";
@@ -103,9 +103,9 @@ const StatMini = ({
   </div>
 );
 
-/** Online users from the lobby socket (ADR 20); reads the count itself, like the rail's. */
+/** The online count from the lobby socket (ADR 20); reads the count itself, like the rail's. */
 const OnlineTile = () => {
-  const online = useOnlineUsers();
+  const online = useOnlineCount();
   return online === null ? (
     <StatMini icon={Icon.Users} label="Online" pending="Connecting to the live count" />
   ) : (
