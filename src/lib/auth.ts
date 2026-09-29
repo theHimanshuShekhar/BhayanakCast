@@ -17,8 +17,12 @@ import { recordNewUser } from "../server/stats.ts";
 import { describeBan } from "./ban.ts";
 import { testSignIn } from "./test-sign-in.ts";
 
-/** Fields users may never change through Better Auth's own `/update-user` endpoint. */
-const SERVER_OWNED_USER_FIELDS = ["discordId", "discordUsername"] as const;
+/**
+ * Fields users may never change through Better Auth's own `/update-user` endpoint. `image` is
+ * shown to everyone who sees the user, so only the Discord sign-in sets it (a user-chosen URL
+ * would let them log their viewers' IPs).
+ */
+const SERVER_OWNED_USER_FIELDS = ["discordId", "discordUsername", "image"] as const;
 
 export interface AuthConfig {
   env: Pick<
@@ -106,9 +110,14 @@ export function createAuth(db: Db, config: AuthConfig) {
         update: {
           before: async (data, ctx) => {
             if (ctx?.path === "/update-user") {
-              const sanitized = { ...data };
-              for (const field of SERVER_OWNED_USER_FIELDS) delete sanitized[field];
-              return { data: sanitized };
+              // Refuse, not strip: Better Auth merges the data a hook returns over the
+              // original, so a field dropped from it would still be written.
+              if (SERVER_OWNED_USER_FIELDS.some((field) => data[field] !== undefined)) {
+                throw new APIError("FORBIDDEN", {
+                  message: "Those fields come from your Discord account and can't be changed.",
+                });
+              }
+              return;
             }
             // Roles change only through set-role, which src/server/admin-users.ts calls and
             // audits. The admin plugin's /admin/update-user takes `role` in its data too.
