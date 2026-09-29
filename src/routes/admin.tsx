@@ -38,10 +38,12 @@ import {
   adminOverviewQuery,
   adminRecentRoomsQuery,
   adminUsersQuery,
+  turnUsageQuery,
 } from "~/lib/admin.queries";
 import { useCurrentSession } from "~/lib/current-user";
 import { fmtAgo, fmtMins } from "~/lib/format";
 import type { LiveRoomCard } from "~/lib/rooms";
+import { TURN_FREE_TIER_GB } from "~/lib/turn-usage";
 import { useDebounced } from "~/lib/use-debounced";
 
 export const Route = createFileRoute("/admin")({
@@ -632,6 +634,58 @@ const ChartCard = ({
   </div>
 );
 
+/**
+ * Relayed TURN egress this month against the free tier (ADR 3). Loaded on its own, not by the
+ * route loader, so a slow Cloudflare never holds up the rest of the dashboard.
+ */
+const TurnUsagePanel = () => {
+  const { data: usage, isError } = useQuery(turnUsageQuery());
+  const note = (text: string) => (
+    <div className={`${card} px-[18px] py-4 text-xs text-subtle`}>{text}</div>
+  );
+  if (isError || usage?.status === "unavailable") return note("usage unavailable");
+  if (!usage) return note("loading…");
+  if (usage.status === "not-configured") return note("not configured");
+  const bar = Math.min(100, usage.percent);
+  return (
+    <div className="grid grid-cols-[repeat(auto-fit,minmax(min(420px,100%),1fr))] gap-3.5">
+      <div className="flex flex-col gap-2.5">
+        <StatCard
+          label="relayed this month"
+          value={usage.totalGb.toFixed(1)}
+          unit={`GB of ${TURN_FREE_TIER_GB.toLocaleString("en-US")} GB · ${usage.percent.toFixed(1)}%`}
+          tone={usage.warning ? "live" : "accent"}
+        />
+        <div
+          role="progressbar"
+          aria-label="TURN free tier used"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(bar)}
+          className="h-2 rounded-full bg-surface-2 border border-border overflow-hidden"
+        >
+          <span className={barFill} style={{ width: `${bar}%` }} />
+        </div>
+        {usage.warning && (
+          <div role="alert" className="text-xs text-live-ink">
+            Relayed bandwidth is at {usage.percent.toFixed(0)}% of the free tier; past{" "}
+            {TURN_FREE_TIER_GB.toLocaleString("en-US")} GB Cloudflare charges $0.05/GB.
+          </div>
+        )}
+      </div>
+      <ChartCard title="relayed GB per day" legend={[["oklch(0.72 0.18 220)", "relayed GB"]]}>
+        <BarChart
+          label={`Relayed GB per day, ${usage.month}`}
+          data={usage.daily.map((d) => ({ date: d.day.slice(5), gb: d.gb }))}
+          xKey="date"
+          height={160}
+          series={[{ key: "gb", color: "oklch(0.72 0.18 220)" }]}
+        />
+      </ChartCard>
+    </div>
+  );
+};
+
 const windowStat = (count: WindowCount) => ({
   value: count.current,
   delta: percentChange(count),
@@ -731,6 +785,14 @@ function AdminPage() {
             />
           </ChartCard>
         </div>
+
+        <SectionHead
+          title="TURN usage"
+          sub={`relayed bandwidth · ${TURN_FREE_TIER_GB.toLocaleString("en-US")} GB free per month`}
+          size="sm"
+          className="mt-6"
+        />
+        <TurnUsagePanel />
 
         <SectionHead
           title="live rooms"

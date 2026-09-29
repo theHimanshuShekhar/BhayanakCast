@@ -8,6 +8,7 @@ import {
   getAdminDailySeriesFn,
   getAdminLeaderboardsFn,
   getAdminOverviewFn,
+  getTurnUsageFn,
   listAdminLiveRoomsFn,
   listAdminRecentRoomsFn,
   listAdminUsersFn,
@@ -24,6 +25,7 @@ export const adminKeys = {
   daily: () => [...adminKeys.all, "daily"] as const,
   live: () => [...adminKeys.all, "live"] as const,
   recent: () => [...adminKeys.all, "recent"] as const,
+  turnUsage: () => [...adminKeys.all, "turn-usage"] as const,
   leaderboards: () => [...adminKeys.all, "leaderboards"] as const,
   /** Every page of the users table: bans and role changes refetch them all. */
   users: () => [...adminKeys.all, "users"] as const,
@@ -45,6 +47,10 @@ export const adminLiveRoomsQuery = () =>
 /** Live rooms and rooms ended within 30 days, private ones included. */
 export const adminRecentRoomsQuery = () =>
   queryOptions({ queryKey: adminKeys.recent(), queryFn: () => listAdminRecentRoomsFn() });
+
+/** Relayed TURN egress this month (the server caches Cloudflare's answer for about 15 minutes). */
+export const turnUsageQuery = () =>
+  queryOptions({ queryKey: adminKeys.turnUsage(), queryFn: () => getTurnUsageFn() });
 
 /** Top users by lifetime hours streamed and watched. */
 export const adminLeaderboardsQuery = () =>

@@ -38,6 +38,21 @@ test("an ADMIN_DISCORD_IDS user sees the rail item and opens the dashboard", asy
   await expect(page.getByRole("heading", dashboard)).toBeVisible();
 });
 
+// The e2e server has no Cloudflare analytics credentials, so the TURN usage panel takes its
+// "not configured" state and the rest of the dashboard is unaffected. The stat card, bar, chart
+// and warning are covered by the server tests with a fake Cloudflare client.
+test("the TURN usage panel says not configured without Cloudflare analytics credentials", async ({
+  page,
+  context,
+}) => {
+  await signIn(context, { discordId: E2E_ADMIN_DISCORD_ID, username: "admin_jpg" });
+  await page.goto("/admin");
+  await expect(page.getByRole("heading", dashboard)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "TURN usage" })).toBeVisible();
+  await expect(page.getByText("not configured", { exact: true })).toBeVisible();
+  await expect(page.getByRole("table", { name: "live rooms" })).toBeVisible();
+});
+
 const HOUR = 3600;
 
 /** A dashboard stat card's number (hours drop their "h"). */
