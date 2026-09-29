@@ -5,7 +5,9 @@
  *   await hub.handle(connection, frame);                // it sent a frame (raw JSON)
  *   await hub.disconnect(connection);                   // it closed
  *
- * An admin ban reaches it as `hub.disconnectUser(userId, notice)` (./live-hub.ts).
+ * An admin ban reaches it as `hub.disconnectUser(userId, notice)`, an admin role change as
+ * `hub.setUserRole(userId, role)`, and a regenerated invite link as `hub.inviteRotated(roomId)`
+ * (./live-hub.ts).
  *
  * The WebSocket layer (./realtime.ts) is a thin adapter over these; tests drive the same
  * calls through real sockets (./realtime-harness.ts). The hub never touches `Date`, timers or
@@ -19,6 +21,7 @@
  * `#handlers` below (the type checker insists). Refusals go through `#refuse(conn, code, …)`.
  */
 
+import type { AdminRole } from "../lib/admin.ts";
 import { MAX_STREAMERS, ROOM_CAPACITY } from "../lib/format.ts";
 import {
   BANNED_CLOSE_CODE,
@@ -106,7 +109,8 @@ export interface RoomHubDeps {
 
 class HubConnection implements Connection {
   readonly id: number;
-  readonly caller: Caller;
+  /** Replaced when an admin promotes or demotes the user (`setUserRole`). */
+  caller: Caller;
   readonly transport: Transport;
   /** Sent a valid `hello`. */
   greeted = false;
@@ -362,6 +366,41 @@ export class RoomHub {
           this.#log("closing a banned user's socket failed", error);
         }
         await this.#drop(conn);
+      }
+    });
+  }
+
+  /**
+   * The host regenerated `roomId`'s invite link (ADR 16): knocks pending through the old one end,
+   * their knockers told it's no longer valid, as when the room ends.
+   */
+  inviteRotated(roomId: string): Promise<void> {
+    return this.#enqueue(async () => {
+      const room = this.#rooms.get(roomId);
+      if (room) this.#invalidateKnocks(room);
+    });
+  }
+
+  /**
+   * An admin promoted `userId` to admin or demoted them (ADR 6 addendum): their open sockets
+   * gain or lose admin powers from their next message, without reconnecting. A new admin in a
+   * room gets the knocks already pending there, as a new mod would.
+   */
+  setUserRole(userId: string, role: AdminRole): Promise<void> {
+    return this.#enqueue(() => {
+      const inRooms = [...this.#rooms.values()].flatMap((room) => {
+        const participant = room.participants.get(userId);
+        return participant
+          ? [{ room, participant, approved: this.#approves(room, participant) }]
+          : [];
+      });
+      for (const conn of this.#connections) {
+        if (conn.caller.user?.id === userId) conn.caller = { ...conn.caller, role };
+      }
+      for (const { room, participant, approved } of inRooms) {
+        if (!approved) this.#sendPendingKnocks(room, participant);
+        // An approver may have arrived (promoted) or gone (demoted): knockers wait accordingly.
+        this.#updateKnockers(room);
       }
     });
   }
@@ -658,12 +697,7 @@ export class RoomHub {
     room.chat = [];
     room.feed = [];
     // Its invite link opens nothing now.
-    for (const knock of room.knocks.values()) {
-      knock.expiry.cancel();
-      knock.grace?.cancel();
-      this.#refuse(knock.connection, "not_found", INVALID_INVITE, "knock.request");
-    }
-    room.knocks.clear();
+    this.#invalidateKnocks(room);
     await this.#store.closeHostInterval(room.id, endedAt);
     if (await this.#store.endRoom(room.id, endedAt)) {
       await this.#store.rollupEndedRoom(room.id, this.#clock.now());
@@ -1513,6 +1547,14 @@ export class RoomHub {
     room.knocks.delete(knock.userId);
     if (status) this.#send(knock.connection, { type: "knock.status", roomId: room.id, status });
     this.#tellApprovers(room, { type: "knock.resolved", roomId: room.id, userId: knock.userId });
+  }
+
+  /** `room`'s invite link opens nothing now: every pending knock ends, refused as invalid. */
+  #invalidateKnocks(room: LiveRoom): void {
+    for (const knock of [...room.knocks.values()]) {
+      this.#endKnock(room, knock);
+      this.#refuse(knock.connection, "not_found", INVALID_INVITE, "knock.request");
+    }
   }
 
   /** The knocks pending from `conn`, in their rooms. */

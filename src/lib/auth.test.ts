@@ -4,6 +4,7 @@ import type { Db } from "../db/client.ts";
 import { dailyPlatformStats, session, user, userCotime, userStats } from "../db/schema/index.ts";
 import { DEFAULT_USER_SETTINGS } from "../db/settings.ts";
 import { createTestDb } from "../db/test-db.ts";
+import { CLIENT_IP_HEADER } from "../server/client-ip.ts";
 import { resolveSession } from "../server/session.ts";
 import { createAuth } from "./auth.ts";
 import { BANNED_USER_ERROR } from "./ban.ts";
@@ -94,6 +95,23 @@ describe("auth database hooks", () => {
     const { internalAdapter } = await auth.$context;
     await internalAdapter.createSession(existing.id);
     expect(await roleOf(existing.id)).toBe("admin");
+  });
+
+  it("changes roles only through set-role, not the admin plugin's update-user (#45)", async () => {
+    const adminHeaders = cookiesFrom(await testSignInRequest("1000", "root"));
+    const target = await createDiscordUser("2000");
+    const update = (data: Record<string, unknown>) =>
+      auth.api.adminUpdateUser({ body: { userId: target.id, data }, headers: adminHeaders });
+
+    await expect(update({ role: "admin" })).rejects.toThrow(/set-role/);
+    expect(await roleOf(target.id)).toBe("user");
+    // Other fields still update.
+    await update({ name: "renamed" });
+    const [row] = await db.select({ name: user.name }).from(user).where(eq(user.id, target.id));
+    expect(row?.name).toBe("renamed");
+
+    await auth.api.setRole({ body: { userId: target.id, role: "admin" }, headers: adminHeaders });
+    expect(await roleOf(target.id)).toBe("admin");
   });
 
   it("counts sign-ups in the daily platform stats", async () => {
@@ -303,13 +321,16 @@ describe("bans", () => {
       vi.unstubAllGlobals();
     });
 
-    /** Starts Discord sign-in the way the app's button does, then completes Discord's callback. */
-    async function completeDiscordSignIn() {
+    /**
+     * Starts Discord sign-in the way the app's button does, then completes Discord's callback.
+     * `ip` gives the requests their own sign-in rate-limit bucket.
+     */
+    async function completeDiscordSignIn({ callbackURL = "/", ip = "" } = {}) {
       const start = await auth.handler(
         new Request(`${testEnv.BETTER_AUTH_URL}/api/auth/sign-in/social`, {
           method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ provider: "discord", callbackURL: "/", errorCallbackURL: "/" }),
+          headers: { "content-type": "application/json", ...(ip && { [CLIENT_IP_HEADER]: ip }) },
+          body: JSON.stringify({ provider: "discord", callbackURL, errorCallbackURL: "/" }),
         }),
       );
       expect(start.status).toBe(200);
@@ -326,6 +347,15 @@ describe("bans", () => {
       expect(response.headers.get("location")).toBe("/");
       const signedIn = await resolveSession(auth, cookiesFrom(response));
       expect(signedIn?.user.discordUsername).toBe("discord_user");
+    });
+
+    it("returns to the invite link signed in from, not home (ADR 16)", async () => {
+      const response = await completeDiscordSignIn({
+        callbackURL: "/join/some-token",
+        ip: "10.43.0.1",
+      });
+      expect(response.status).toBe(302);
+      expect(response.headers.get("location")).toBe("/join/some-token");
     });
 
     it("sends a banned user home with the ban notice and creates no session", async () => {

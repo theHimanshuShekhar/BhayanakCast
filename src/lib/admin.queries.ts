@@ -25,7 +25,7 @@ export const adminKeys = {
   live: () => [...adminKeys.all, "live"] as const,
   recent: () => [...adminKeys.all, "recent"] as const,
   leaderboards: () => [...adminKeys.all, "leaderboards"] as const,
-  /** Every page of the users table: bans refetch them all. */
+  /** Every page of the users table: bans and role changes refetch them all. */
   users: () => [...adminKeys.all, "users"] as const,
   usersPage: (input: ListAdminUsersInput) => [...adminKeys.users(), input] as const,
 };

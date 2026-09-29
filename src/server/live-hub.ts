@@ -1,6 +1,8 @@
 /**
  * The process's running realtime hub, for server functions that change live state: an admin
- * ban disconnects the user (ADR 6). The realtime endpoint (./realtime.ts) registers its hub.
+ * ban disconnects the user and a role change updates their open sockets (ADR 6), and a
+ * regenerated invite link ends the knocks pending through the old one (ADR 16). The realtime
+ * endpoint (./realtime.ts) registers its hub.
  *
  * Like ./room-announcements.ts, it lives on a process global, not in a module variable: the
  * SSR bundle (where server functions run) and the realtime endpoint each load their own copy

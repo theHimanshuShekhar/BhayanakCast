@@ -7,13 +7,20 @@ import {
 } from "@tanstack/react-query";
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
-import { BanUserDialog, type DialogTarget, UnbanUserDialog } from "~/components/admin-dialogs";
+import {
+  BanUserDialog,
+  type DialogTarget,
+  type RoleChangeTarget,
+  SetRoleDialog,
+  UnbanUserDialog,
+} from "~/components/admin-dialogs";
 import { BarChart, LineChart } from "~/components/charts";
 import { Icon } from "~/components/icons";
 import { SectionHead } from "~/components/section-head";
 import { Avatar, Btn, MonoCaps, Seg } from "~/components/ui";
 import {
   ADMIN_WINDOW_DAYS,
+  type AdminRole,
   type AdminRoomRow,
   type AdminUserRow,
   type BanUserInput,
@@ -22,7 +29,7 @@ import {
   percentChange,
   type WindowCount,
 } from "~/lib/admin";
-import { banUserFn, unbanUserFn } from "~/lib/admin.functions";
+import { banUserFn, setUserRoleFn, unbanUserFn } from "~/lib/admin.functions";
 import {
   adminDailySeriesQuery,
   adminKeys,
@@ -32,6 +39,7 @@ import {
   adminRecentRoomsQuery,
   adminUsersQuery,
 } from "~/lib/admin.queries";
+import { useCurrentSession } from "~/lib/current-user";
 import { fmtAgo, fmtMins } from "~/lib/format";
 import type { LiveRoomCard } from "~/lib/rooms";
 import { useDebounced } from "~/lib/use-debounced";
@@ -363,9 +371,17 @@ const BanStatus = ({ ban }: { ban: AdminUserRow["ban"] }) =>
     <span className="text-subtle">active</span>
   );
 
+/** Why admin `me` can't demote `u` (the server refuses too), or undefined if they can. */
+function whyNoDemote(u: AdminUserRow, me: string | undefined): string | undefined {
+  if (u.envAdmin) return "set in ADMIN_DISCORD_IDS: can't be demoted";
+  if (u.id === me) return "you can't demote yourself";
+  return undefined;
+}
+
 /**
- * Every user, searched and paged server-side, with ban and unban behind confirmation dialogs
- * (spec #7). Admins can't be banned (the server refuses too): demote them first.
+ * Every user, searched and paged server-side, with ban, unban, promote and demote behind
+ * confirmation dialogs (spec #7). Admins can't be banned (the server refuses too): demote them
+ * first. Env admins and the admin themselves can't be demoted, nor banned users promoted.
  */
 const UsersTable = () => {
   const queryClient = useQueryClient();
@@ -379,8 +395,14 @@ const UsersTable = () => {
   });
   const [banTarget, setBanTarget] = useState<DialogTarget | null>(null);
   const [unbanTarget, setUnbanTarget] = useState<DialogTarget | null>(null);
+  const [roleTarget, setRoleTarget] = useState<RoleChangeTarget | null>(null);
+  const me = useCurrentSession().user?.id;
   // A ban also empties the user's room, so refresh every admin read, not just this table.
   const refresh = () => queryClient.invalidateQueries({ queryKey: adminKeys.all });
+  const setRole = async (userId: string, role: AdminRole) => {
+    await setUserRoleFn({ data: { userId, role } });
+    await refresh();
+  };
   const ban = async (input: BanUserInput) => {
     await banUserFn({ data: input });
     await refresh();
@@ -422,7 +444,7 @@ const UsersTable = () => {
         <MonoCaps>{data?.total ?? 0} users</MonoCaps>
       </div>
       <div className="overflow-x-auto">
-        <table aria-label="users" className="w-full min-w-[760px] border-collapse text-xs">
+        <table aria-label="users" className="w-full min-w-[830px] border-collapse text-xs">
           <thead>
             <tr>
               <th className={th}>user</th>
@@ -431,7 +453,7 @@ const UsersTable = () => {
               <th className={th}>status</th>
               <th className={`${th} !text-right`}>last seen</th>
               <th className={`${th} !text-right`}>hours</th>
-              <th className={`${th} w-[80px]`}>
+              <th className={`${th} w-[150px]`}>
                 <span className="sr-only">actions</span>
               </th>
             </tr>
@@ -451,7 +473,9 @@ const UsersTable = () => {
                 <td className={`${td} !text-subtle`}>{fmtDate(u.joinedAt)}</td>
                 <td className={td}>
                   {u.role === "admin" ? (
-                    <MonoCaps className="!text-primary">admin</MonoCaps>
+                    <MonoCaps className="!text-primary">
+                      {u.envAdmin ? "env admin" : "admin"}
+                    </MonoCaps>
                   ) : (
                     "user"
                   )}
@@ -467,24 +491,45 @@ const UsersTable = () => {
                   <span className="text-subtle">h</span>
                 </td>
                 <td className={td}>
-                  {u.ban ? (
-                    <Btn
-                      size="sm"
-                      aria-label={`Unban ${u.username}`}
-                      onClick={() => setUnbanTarget(u)}
-                    >
-                      unban
-                    </Btn>
-                  ) : u.role !== "admin" ? (
-                    <Btn
-                      size="sm"
-                      variant="danger"
-                      aria-label={`Ban ${u.username}`}
-                      onClick={() => setBanTarget(u)}
-                    >
-                      ban
-                    </Btn>
-                  ) : null}
+                  <div className="flex justify-end gap-1.5">
+                    {u.role === "admin" ? (
+                      <Btn
+                        size="sm"
+                        aria-label={`Demote ${u.username}`}
+                        disabled={!!whyNoDemote(u, me)}
+                        title={whyNoDemote(u, me)}
+                        onClick={() => setRoleTarget({ ...u, role: "user" })}
+                      >
+                        demote
+                      </Btn>
+                    ) : u.ban ? null : (
+                      <Btn
+                        size="sm"
+                        aria-label={`Promote ${u.username}`}
+                        onClick={() => setRoleTarget({ ...u, role: "admin" })}
+                      >
+                        promote
+                      </Btn>
+                    )}
+                    {u.ban ? (
+                      <Btn
+                        size="sm"
+                        aria-label={`Unban ${u.username}`}
+                        onClick={() => setUnbanTarget(u)}
+                      >
+                        unban
+                      </Btn>
+                    ) : u.role !== "admin" ? (
+                      <Btn
+                        size="sm"
+                        variant="danger"
+                        aria-label={`Ban ${u.username}`}
+                        onClick={() => setBanTarget(u)}
+                      >
+                        ban
+                      </Btn>
+                    ) : null}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -515,6 +560,11 @@ const UsersTable = () => {
         target={unbanTarget}
         onOpenChange={(open) => !open && setUnbanTarget(null)}
         onUnban={unban}
+      />
+      <SetRoleDialog
+        target={roleTarget}
+        onOpenChange={(open) => !open && setRoleTarget(null)}
+        onSetRole={setRole}
       />
     </div>
   );

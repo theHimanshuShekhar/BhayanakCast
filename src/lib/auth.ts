@@ -110,13 +110,16 @@ export function createAuth(db: Db, config: AuthConfig) {
               for (const field of SERVER_OWNED_USER_FIELDS) delete sanitized[field];
               return { data: sanitized };
             }
+            // Roles change only through set-role, which src/server/admin-users.ts calls and
+            // audits. The admin plugin's /admin/update-user takes `role` in its data too.
+            if (data.role !== undefined && ctx?.path !== "/admin/set-role") {
+              throw new APIError("FORBIDDEN", {
+                message: "Change roles with set-role, from the admin dashboard.",
+              });
+            }
             // Env-listed admins can't be demoted from the UI (ADR 6 addendum).
-            if (
-              ctx?.path === "/admin/set-role" &&
-              data.role !== undefined &&
-              data.role !== "admin"
-            ) {
-              const body = ctx.body as { userId?: unknown } | undefined;
+            if (data.role !== undefined && data.role !== "admin") {
+              const body = ctx?.body as { userId?: unknown } | undefined;
               const targetId = typeof body?.userId === "string" ? body.userId : null;
               const discordId = targetId ? await discordIdOf(targetId) : null;
               if (discordId && adminDiscordIds.has(discordId)) {

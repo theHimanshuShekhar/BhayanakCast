@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { E2E_ADMIN_DISCORD_ID, signIn } from "./auth";
-import { expect, test } from "./fixtures";
+import { expect, newPage, test } from "./fixtures";
 import { createUser, uniqueUsername } from "./profiles";
 import { minutesAgo, seedPastRoom, seedRoom, uniqueRoomName } from "./rooms";
 
@@ -113,4 +113,63 @@ test("an admin sees real platform numbers, rooms and leaderboards", async ({
       .getByRole("region", { name: "top users by hours watched" })
       .getByRole("link", { name: streamer.username }),
   ).toBeVisible();
+});
+
+test("an admin promotes a user, who gets /admin, then demotes them, who loses it on their next navigation", async ({
+  page,
+  context,
+  browser,
+}) => {
+  // Unique across browser projects too: the admin finds them by searching the users table.
+  const username = uniqueUsername("role.target");
+  await signIn(context, { discordId: E2E_ADMIN_DISCORD_ID, username: "admin_jpg" });
+  const targetContext = await browser.newContext();
+  try {
+    await signIn(targetContext, { username });
+    const target = await newPage(targetContext);
+    await target.goto("/");
+    await expect(target.getByRole("link", { name: "Admin Dashboard" })).toHaveCount(0);
+
+    await page.goto("/admin");
+    const users = page.getByRole("table", { name: "users" });
+    const search = page.getByRole("textbox", { name: "Search users" });
+
+    // The env admin (this admin) is marked, and can't be demoted.
+    await search.fill("admin_jpg");
+    const self = users.getByRole("row").filter({ hasText: "admin_jpg" });
+    await expect(self).toContainText("env admin");
+    await expect(self.getByRole("button", { name: "Demote admin_jpg" })).toBeDisabled();
+
+    await search.fill(username);
+    const row = users.getByRole("row").filter({ hasText: username });
+    await expect(row.getByRole("cell").nth(2)).toHaveText("user");
+    await row.getByRole("button", { name: `Promote ${username}` }).click();
+    const promote = page.getByRole("dialog", { name: `promote ${username}` });
+    await promote.getByRole("button", { name: "make admin" }).click();
+    await expect(promote).toHaveCount(0);
+    await expect(row.getByRole("cell").nth(2)).toHaveText("admin");
+    // Admins can't be banned: demote first.
+    await expect(row.getByRole("button", { name: `Ban ${username}` })).toHaveCount(0);
+
+    await target.goto("/");
+    await target.getByRole("link", { name: "Admin Dashboard" }).click();
+    await expect(target.getByRole("heading", dashboard)).toBeVisible();
+
+    await row.getByRole("button", { name: `Demote ${username}` }).click();
+    const demote = page.getByRole("dialog", { name: `demote ${username}` });
+    await demote.getByRole("button", { name: "remove admin" }).click();
+    await expect(demote).toHaveCount(0);
+    await expect(row.getByRole("cell").nth(2)).toHaveText("user");
+
+    // Still signed in, but their next navigation to /admin sends them home.
+    await target.getByRole("link", { name: "Active Rooms" }).click();
+    await expect(target.getByRole("heading", { level: 1, name: "Active Rooms" })).toBeVisible();
+    await expect(target.getByRole("link", { name: "Admin Dashboard" })).toHaveCount(0);
+    await target.goto("/admin");
+    await expect(target).toHaveURL(/\/$/);
+    await expect(target.getByRole("heading", dashboard)).toHaveCount(0);
+    await expect(target.getByRole("button", { name: "Account menu" })).toBeVisible();
+  } finally {
+    await targetContext.close();
+  }
 });
