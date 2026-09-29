@@ -1,9 +1,9 @@
-import type { BrowserContext } from "@playwright/test";
+import type { BrowserContext, Page } from "@playwright/test";
 import { signIn } from "./auth";
 import { expect, newPage, test } from "./fixtures";
-import { createRoomOnPage, uniqueRoomName } from "./rooms";
+import { createRoomOnPage, enterRoom, uniqueRoomName } from "./rooms";
 
-// Private rooms (#41, ADR 16): copy the invite link, knock, and the host admits.
+// Private rooms (#41, #42, ADR 16): copy the invite link, knock, and the host admits or denies.
 
 /**
  * Record what the page copies instead of touching the real clipboard, which needs permissions
@@ -22,6 +22,33 @@ async function fakeClipboard(context: BrowserContext) {
   });
 }
 
+/** Copy the room's invite link from the room-info menu (with `fakeClipboard`) and return it. */
+async function copyInviteLink(page: Page): Promise<string> {
+  await page.getByRole("button", { name: "room info" }).click();
+  await page.getByRole("menuitem", { name: "copy invite link" }).click();
+  await expect(page.getByText("invite link copied")).toBeVisible();
+  const link = await page.evaluate(() => (window as unknown as { copied?: string }).copied);
+  expect(link).toMatch(/\/join\/[\w-]+$/);
+  return link ?? "";
+}
+
+/** A signed-in `username` in a new context, on the knock screen of `link`. */
+async function openInvite(context: BrowserContext, username: string, link: string) {
+  await signIn(context, { username });
+  const guest = await newPage(context);
+  await guest.goto(link);
+  return guest;
+}
+
+/** The room's people tab, opened. */
+async function peopleTab(page: Page) {
+  await page.getByRole("tab", { name: /people/ }).click();
+  return page.getByRole("tabpanel", { name: /people/ });
+}
+
+const knockToast = (page: Page, username: string) =>
+  page.getByRole("heading", { name: `${username} wants to join` });
+
 test("the host copies the invite link, a guest knocks and is admitted", async ({
   page,
   context,
@@ -31,12 +58,7 @@ test("the host copies the invite link, a guest knocks and is admitted", async ({
   await fakeClipboard(context);
   const name = uniqueRoomName("private hang");
   const roomId = await createRoomOnPage(page, { name, isPrivate: true });
-
-  await page.getByRole("button", { name: "room info" }).click();
-  await page.getByRole("menuitem", { name: "copy invite link" }).click();
-  await expect(page.getByText("invite link copied")).toBeVisible();
-  const link = await page.evaluate(() => (window as unknown as { copied?: string }).copied);
-  expect(link).toMatch(/\/join\/[\w-]+$/);
+  const link = await copyInviteLink(page);
 
   const guestContext = await browser.newContext();
   try {
@@ -47,25 +69,113 @@ test("the host copies the invite link, a guest knocks and is admitted", async ({
     await guest.goto(`/room/${roomId}`);
     await expect(guest.getByRole("heading", { name: "room not found" })).toBeVisible();
 
-    await guest.goto(link ?? "");
+    await guest.goto(link);
     await expect(guest.getByRole("heading", { name })).toBeVisible();
+    // The waiting screen has the lobby's device check: set up the mic while waiting.
+    const mic = guest.getByRole("switch", { name: "Microphone" });
+    await mic.click();
+    await expect(mic).toHaveAttribute("aria-checked", "true");
     await guest.getByRole("button", { name: "knock" }).click();
     await expect(guest.getByText("waiting for the host to let you in")).toBeVisible();
 
     // The toast (its title; the text is also announced in a live region).
-    const knockToast = page.getByRole("heading", { name: "priv.guest wants to join" });
-    await expect(knockToast).toBeVisible();
-    await page.getByRole("button", { name: "admit priv.guest" }).click();
-    await expect(knockToast).toHaveCount(0);
+    await expect(knockToast(page, "priv.guest")).toBeVisible();
+    await page.getByRole("button", { name: "admit priv.guest" }).first().click();
+    await expect(knockToast(page, "priv.guest")).toHaveCount(0);
 
-    // Straight into the room, and everyone sees them there.
+    // Straight into the room with the mic as set up, and everyone sees them there.
     await expect(guest).toHaveURL(new RegExp(`/room/${roomId}$`));
     await expect(guest.getByRole("button", { name: "Turn camera on" })).toBeEnabled();
+    await expect(guest.getByRole("button", { name: "Mute mic" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
     await expect(page.getByRole("group", { name: "priv.guest", exact: true })).toBeVisible();
 
     // The approval lasts: a reload goes back in without knocking.
     await guest.reload();
     await expect(guest.getByRole("button", { name: "Turn camera on" })).toBeEnabled();
+  } finally {
+    await guestContext.close();
+  }
+});
+
+test("a knock waits in the people tab; denying it tells the knocker and clears it everywhere", async ({
+  page,
+  context,
+  browser,
+}) => {
+  await signIn(context, { username: "priv.deny.host" });
+  await fakeClipboard(context);
+  const roomId = await createRoomOnPage(page, {
+    name: uniqueRoomName("private deny"),
+    isPrivate: true,
+  });
+  const link = await copyInviteLink(page);
+  const people = await peopleTab(page);
+
+  const guestContext = await browser.newContext();
+  try {
+    const guest = await openInvite(guestContext, "priv.denied", link);
+    await guest.getByRole("button", { name: "knock" }).click();
+    await expect(guest.getByText("waiting for the host to let you in")).toBeVisible();
+
+    // Dismissing the toast doesn't lose the knock: it's listed under "waiting", with a link to
+    // their profile.
+    await expect(knockToast(page, "priv.denied")).toBeVisible();
+    await page.getByRole("button", { name: "dismiss priv.denied's knock" }).click();
+    await expect(knockToast(page, "priv.denied")).toHaveCount(0);
+    await expect(people).toContainText("waiting");
+    await expect(people.getByRole("link", { name: "priv.denied" })).toHaveAttribute(
+      "href",
+      /\/profile\//,
+    );
+    await people.getByRole("button", { name: "deny priv.denied" }).click();
+
+    await expect(guest.getByText("the host declined your request.")).toBeVisible();
+    await expect(people.getByRole("link", { name: "priv.denied" })).toHaveCount(0);
+
+    // Still not in.
+    await guest.goto(`/room/${roomId}`);
+    await expect(guest.getByRole("heading", { name: "room not found" })).toBeVisible();
+  } finally {
+    await guestContext.close();
+  }
+});
+
+test("with nobody to answer the knocker waits for the host; leaving withdraws the knock", async ({
+  page,
+  context,
+  browser,
+}) => {
+  await signIn(context, { username: "priv.away.host" });
+  await fakeClipboard(context);
+  const roomId = await createRoomOnPage(page, {
+    name: uniqueRoomName("private away"),
+    isPrivate: true,
+  });
+  const link = await copyInviteLink(page);
+  await page.getByRole("button", { name: /^leave$/ }).click();
+  await expect(page).toHaveURL(/\/$/);
+
+  const guestContext = await browser.newContext();
+  try {
+    const guest = await openInvite(guestContext, "priv.waiting", link);
+    await guest.getByRole("button", { name: "knock" }).click();
+    await expect(guest.getByText("waiting for the host. nobody who can let you in")).toBeVisible();
+
+    // The host comes back: the knocker hears someone can answer, and the host sees the knock.
+    await enterRoom(page, roomId);
+    await expect(guest.getByText("waiting for the host to let you in")).toBeVisible();
+    await expect(knockToast(page, "priv.waiting")).toBeVisible();
+
+    // The knocker gives up: the knock goes away for the host, toast and people tab alike.
+    await guest.getByRole("button", { name: "back", exact: true }).click();
+    await expect(guest).toHaveURL(/\/$/);
+    await expect(knockToast(page, "priv.waiting")).toHaveCount(0);
+    const people = await peopleTab(page);
+    await expect(people).toContainText("priv.away.host");
+    await expect(people).not.toContainText("waiting");
   } finally {
     await guestContext.close();
   }
