@@ -21,12 +21,28 @@ export function roomVisibleTo(caller: Caller): SQL | undefined {
   return or(
     publicRoom,
     eq(rooms.hostUserId, userId),
-    sql`exists (
-      select 1 from ${roomMembers}
-      where ${roomMembers.roomId} = ${rooms.id}
-        and ${roomMembers.userId} = ${userId}
-        and not ${roomMembers.kicked}
-        and (${roomMembers.approved} or ${roomMembers.role} <> 'member')
-    )`,
+    memberWhere(userId, sql`(${roomMembers.approved} or ${roomMembers.role} <> 'member')`),
   );
+}
+
+/**
+ * SQL condition on `rooms` for rooms whose knocks `caller` may decide and whose invite link
+ * they may share (ADR 16): the host, its mods (not kicked) and admins; `undefined` means any.
+ */
+export function roomApprovableBy(caller: Caller): SQL | undefined {
+  if (caller.role === "admin") return undefined;
+  if (!caller.user) return sql`false`;
+  const userId = caller.user.id;
+  return or(eq(rooms.hostUserId, userId), memberWhere(userId, sql`${roomMembers.role} = 'mod'`));
+}
+
+/** `userId` is a member of the room (not kicked) matching `condition` on `room_members`. */
+function memberWhere(userId: string, condition: SQL): SQL {
+  return sql`exists (
+    select 1 from ${roomMembers}
+    where ${roomMembers.roomId} = ${rooms.id}
+      and ${roomMembers.userId} = ${userId}
+      and not ${roomMembers.kicked}
+      and ${condition}
+  )`;
 }

@@ -8,14 +8,15 @@ BhayanakCast runs on the homelab as a **git-backed Dockhand stack** built from t
 browser ──https/wss──▶ Cloudflare ──tunnel──▶ shared cloudflared ──http──▶ 10.1.1.160:3000 (app) ──▶ db
 ```
 
-The stack has two services:
+The stack has three services:
 
 | Service | What it does |
 |---|---|
 | `app` | Built from the `Dockerfile` (Node 26, pnpm via corepack). On start it applies pending Drizzle migrations (`node src/db/migrate.ts`), then serves pages, `/api/*` and the realtime socket `/ws` from one port (`node server.prod.ts`). Published only on `${HOST_BIND}:${HOST_PORT}` (default `10.1.1.160:3000`). Healthcheck: `GET /api/auth/ok`. |
 | `db` | `postgres:17-alpine` with a named local Docker volume (`pgdata`). Never put it on the NAS CIFS share (ADR 9 addendum). Not published on any host port. Healthcheck: `pg_isready`. |
+| `backup` | Built from `backup/` (`postgres:17-alpine` plus `rsync` and `supercronic`). Once at start, and then on `BACKUP_SCHEDULE` (nightly by default), it writes a compressed `pg_dump` to its `backups` volume, rsyncs it to the NAS share and prunes old dumps (section 5, Backups to the NAS). Healthcheck: the last run succeeded. |
 
-Both services use `restart: unless-stopped` and json-file log rotation (3 files of 10 MB each).
+All services use `restart: unless-stopped` and json-file log rotation (3 files of 10 MB each).
 
 ## 1. Register the Discord OAuth app
 
@@ -84,6 +85,10 @@ as an empty string, and the app treats that as unset. See `.env.example` for a t
 | `HOST_PORT` | no | Host port. Default `3000`. The tunnel's service URL must match it. |
 | `REALTIME_ANONYMOUS_SOCKETS_PER_IP` | no | Open signed-out (lobby) sockets per client IP. Default `20` (ADR 20). |
 | `REALTIME_EMPTY_ROOM_TIMEOUT_MS` | no | How long an empty room waits before it ends. Default `300000` (5 minutes, ADR 14). Leave it unset in production. |
+| `BACKUP_NAS_DIR` | no | Host directory on the mounted NAS CIFS share where dumps go. Default `/mnt/nas/backups/bhayanakcast`. It must hold the `.bhayanakcast-backups` marker file, or every backup fails. See section 5 (Backups to the NAS). |
+| `BACKUP_SCHEDULE` | no | Cron expression (5 fields) for the backup. Default `0 3 * * *`, nightly at 03:00. |
+| `BACKUP_TZ` | no | Time zone for `BACKUP_SCHEDULE` and the dump's date, for example `Asia/Kolkata`. Default `UTC`. |
+| `BACKUP_RETENTION_DAYS` | no | How many days of dumps to keep, today included, both locally and on the NAS. Older ones are deleted. Default `14`. |
 
 Compose sets `NODE_ENV=production`, `PORT=3000`, `HOST=0.0.0.0` and `DATABASE_URL` itself. Don't
 set `E2E_AUTH`: compose doesn't pass it through, and the app refuses to start if it's set.
@@ -93,7 +98,7 @@ set `E2E_AUTH`: compose doesn't pass it through, and the app refuses to start if
 1. In Dockhand, open the dockhand LXC's environment → **Stacks → Create stack → Git repository**.
 2. Enter the repository `https://github.com/theHimanshuShekhar/BhayanakCast`, branch `main`, and compose file `docker-compose.yml`.
 3. Add the variables from step 3 in the stack's environment variables, either one by one or by loading a filled-in `.env`.
-4. Deploy. Dockhand builds the image on the LXC, starts `db`, waits for it to be healthy, then starts `app`. The app applies migrations and serves.
+4. Deploy. Dockhand builds the image on the LXC, starts `db`, waits for it to be healthy, then starts `app` and `backup`. The app applies migrations and serves. Set up the NAS share (section 5, Backups to the NAS) before the first deploy, or `backup` starts unhealthy.
 5. Optional: to redeploy automatically on every push, add the stack's webhook URL (with its secret) to the GitHub repo's webhooks. Otherwise, redeploy from Dockhand after merging to `main`.
 
 Known Dockhand quirks reported upstream, worth checking after the first deploy:
@@ -103,6 +108,56 @@ Known Dockhand quirks reported upstream, worth checking after the first deploy:
 - Variables that share a name with Dockhand's own container env have picked up Dockhand's values.
 
 Check what the container actually got with `docker inspect <app container> --format '{{json .Config.Env}}'`. Treat the output as secret.
+
+## 5. Backups to the NAS
+
+The `backup` service writes `bhayanakcast-YYYY-MM-DD.sql.gz` (a plain-SQL `pg_dump`, gzipped)
+to its local `backups` volume. It then rsyncs the dumps to `BACKUP_NAS_DIR` and keeps the last
+`BACKUP_RETENTION_DAYS` days of dumps (default 14: today and the 13 days before) in both places,
+deleting older ones. A second run on the same day replaces that day's dump.
+Only these dumps are copied, never the Postgres data directory (ADR 9 addendum). Other files in the
+NAS directory are left alone.
+
+The host mounts the share. The container only gets a bind mount of `BACKUP_NAS_DIR`:
+
+1. On the dockhand LXC, mount the NAS CIFS share (for example with an `/etc/fstab` entry) and create
+   the backup directory on it. The dumps hold user data and session tokens, so mount it root-only:
+   `uid=0,gid=0,file_mode=0600,dir_mode=0700`, and on the NAS limit the share to the account the
+   LXC uses.
+2. Create the marker file on the share: `touch /mnt/nas/backups/bhayanakcast/.bhayanakcast-backups`.
+   If the share isn't mounted, the mount point is an empty local directory. The backup refuses to
+   rsync there and fails instead, keeping the dump in the local volume only.
+3. Set `BACKUP_NAS_DIR` to that directory in the stack variables.
+
+The backup runs once when the container starts, so a broken setup shows up at deploy time. After
+that it runs on `BACKUP_SCHEDULE`. Every run is logged to the container log, ending in
+`backup: done` or `backup: FAILED (exit N)`. The container is **healthy** only while its last run
+succeeded. A failed run makes it **unhealthy** until the next run succeeds. To run a backup now:
+`docker exec <backup container> backup.sh`.
+
+### Restore
+
+Restore into a **fresh** database, never over the live one. Find the dump on the NAS (or in the
+`backups` volume), then, as root on the dockhand LXC, run this one command:
+
+```sh
+docker exec <db container> createdb -U bhayanakcast bhayanakcast_restore && gunzip -c /mnt/nas/backups/bhayanakcast/bhayanakcast-YYYY-MM-DD.sql.gz | docker exec -i <db container> psql -q -o /dev/null -v ON_ERROR_STOP=1 --single-transaction -U bhayanakcast -d bhayanakcast_restore
+```
+
+It fails if `bhayanakcast_restore` already exists; drop it first (`dropdb`) to retry. The restore
+either loads completely or not at all. To check it, compare row counts with the live
+database (run this against both `-d bhayanakcast` and `-d bhayanakcast_restore`):
+
+```sh
+docker exec -i <db container> psql -At -U bhayanakcast -d bhayanakcast <<'SQL'
+SELECT table_schema || '.' || table_name, (xpath('/row/c/text()', query_to_xml(format('select count(*) as c from %I.%I', table_schema, table_name), false, true, '')))[1]::text::int
+FROM information_schema.tables WHERE table_schema IN ('public', 'drizzle') AND table_type = 'BASE TABLE' ORDER BY 1;
+SQL
+```
+
+To make the restored copy live, stop `app`, then drop the live database and rename the restored one:
+`ALTER DATABASE bhayanakcast_restore RENAME TO bhayanakcast` (connect to the `postgres` database to
+do this). Then start `app` again.
 
 ## Production guards
 
@@ -124,6 +179,8 @@ Check what the container actually got with `docker inspect <app container> --for
 - [ ] The realtime socket connects through the tunnel: the lobby's online count updates, and a room opens.
 - [ ] The app log has no `Ignoring cf-connecting-ip from …` warning. If it does, fix `TRUSTED_PROXY_IPS` (step 2).
 - [ ] A two-person room works across two different networks (one on mobile data, if possible).
+- [ ] The `backup` container is **healthy**, and today's `bhayanakcast-YYYY-MM-DD.sql.gz` is on the NAS share (section 5, Backups to the NAS).
+- [ ] The latest dump restores into a scratch database, and its table counts match the live database (section 5, Restore).
 
 ## Operating
 
@@ -132,3 +189,4 @@ Check what the container actually got with `docker inspect <app container> --for
 - **Logs:** Dockhand's container logs, or `docker logs <container>`. They're rotated at 3 × 10 MB.
 - **Restarts** drop live room state. Clients reconnect on their own (ADR 9).
 - **Data** lives in the `pgdata` volume. Don't delete the stack's volumes when removing or re-creating it.
+  Nightly dumps are on the NAS share (section 5, Backups to the NAS).

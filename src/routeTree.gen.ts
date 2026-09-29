@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
+import { Route as JoinInviteTokenRouteImport } from './routes/join/$inviteToken'
 import { Route as PastRoomIdRouteImport } from './routes/past/$roomId'
 import { Route as ProfileUserIdRouteImport } from './routes/profile/$userId'
 import { Route as RoomRoomIdRouteImport } from './routes/room/$roomId'
@@ -24,6 +25,11 @@ const IndexRoute = IndexRouteImport.update({
 const AdminRoute = AdminRouteImport.update({
   id: '/admin',
   path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const JoinInviteTokenRoute = JoinInviteTokenRouteImport.update({
+  id: '/join/$inviteToken',
+  path: '/join/$inviteToken',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PastRoomIdRoute = PastRoomIdRouteImport.update({
@@ -50,6 +56,7 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/join/$inviteToken': typeof JoinInviteTokenRoute
   '/past/$roomId': typeof PastRoomIdRoute
   '/profile/$userId': typeof ProfileUserIdRoute
   '/room/$roomId': typeof RoomRoomIdRoute
@@ -58,6 +65,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/join/$inviteToken': typeof JoinInviteTokenRoute
   '/past/$roomId': typeof PastRoomIdRoute
   '/profile/$userId': typeof ProfileUserIdRoute
   '/room/$roomId': typeof RoomRoomIdRoute
@@ -67,6 +75,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/join/$inviteToken': typeof JoinInviteTokenRoute
   '/past/$roomId': typeof PastRoomIdRoute
   '/profile/$userId': typeof ProfileUserIdRoute
   '/room/$roomId': typeof RoomRoomIdRoute
@@ -77,6 +86,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/admin'
+    | '/join/$inviteToken'
     | '/past/$roomId'
     | '/profile/$userId'
     | '/room/$roomId'
@@ -85,6 +95,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/admin'
+    | '/join/$inviteToken'
     | '/past/$roomId'
     | '/profile/$userId'
     | '/room/$roomId'
@@ -93,6 +104,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/admin'
+    | '/join/$inviteToken'
     | '/past/$roomId'
     | '/profile/$userId'
     | '/room/$roomId'
@@ -102,6 +114,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
+  JoinInviteTokenRoute: typeof JoinInviteTokenRoute
   PastRoomIdRoute: typeof PastRoomIdRoute
   ProfileUserIdRoute: typeof ProfileUserIdRoute
   RoomRoomIdRoute: typeof RoomRoomIdRoute
@@ -122,6 +135,13 @@ declare module '@tanstack/react-router' {
       path: '/admin'
       fullPath: '/admin'
       preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/join/$inviteToken': {
+      id: '/join/$inviteToken'
+      path: '/join/$inviteToken'
+      fullPath: '/join/$inviteToken'
+      preLoaderRoute: typeof JoinInviteTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/past/$roomId': {
@@ -158,6 +178,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
+  JoinInviteTokenRoute: JoinInviteTokenRoute,
   PastRoomIdRoute: PastRoomIdRoute,
   ProfileUserIdRoute: ProfileUserIdRoute,
   RoomRoomIdRoute: RoomRoomIdRoute,

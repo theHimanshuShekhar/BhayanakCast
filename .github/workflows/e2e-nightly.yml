@@ -1,0 +1,90 @@
+name: E2E nightly
+
+# ADR 0018 CI addendum: the Playwright suite (Chromium + Firefox, multi-peer fake media)
+# runs nightly rather than on every push.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+# Never run two suites for the same ref at once; a manual run waits for the nightly one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # Actions sets CI=true, so playwright.config.ts starts its own server (no reuse), forbids
+    # .only, retries, and writes the HTML report. The config also supplies E2E_AUTH=1 and the
+    # fake media flags. NODE_ENV stays unset, so the server uses the non-production env schema
+    # the test-only sign-in needs (a production NODE_ENV fails fast: e2e/serve.ts's in-memory
+    # database is refused in production).
+    steps:
+      - uses: actions/checkout@v7
+
+      # pnpm version comes from package.json `packageManager`.
+      - uses: pnpm/action-setup@v6
+
+      # Must run after pnpm/action-setup so `cache: pnpm` can find the store.
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Playwright version
+        id: playwright
+        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+
+      # Restore and save are split, with the save right after a successful install, so the
+      # browsers are cached even when the tests fail (a combined actions/cache saves only when
+      # the whole job succeeds).
+      - name: Restore Playwright browsers
+        id: playwright-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium-firefox
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: pnpm exec playwright install --with-deps chromium firefox
+
+      # The browsers came from the cache, but their system libraries did not.
+      - name: Install Playwright system dependencies
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: pnpm exec playwright install-deps chromium firefox
+
+      - name: Save Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ steps.playwright-cache.outputs.cache-primary-key }}
+
+      - name: E2E tests
+        run: pnpm test:e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14
+
+      # Traces (trace: on-first-retry), screenshots and error context.
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results
+          path: test-results/
+          retention-days: 14

@@ -1,12 +1,15 @@
 import type { Page } from "@playwright/test";
-import { expect, test } from "./fixtures";
+import { signIn } from "./auth";
+import { expect, newPage, test } from "./fixtures";
 import { createUser, uniqueUsername } from "./profiles";
-import { createRoomAs, uniqueRoomName } from "./rooms";
+import { createRoomOnPage, uniqueRoomName } from "./rooms";
 
 const HOUR = 3600;
 
 // Every test shares one database, so other tests add rooms, users and stats concurrently:
-// assert that the sidebar's numbers grow by at least what this test added, never exact totals.
+// assert that the sidebar's lifetime numbers grow by at least what this test added, never
+// exact totals. Live counts can drop at any moment as other tests' rooms end, so they are
+// only checked against a room this test holds open.
 
 /** A "Right Now" tile's number. */
 async function rightNow(page: Page, label: string): Promise<number> {
@@ -31,25 +34,31 @@ test("the home sidebar counts real rooms, members and lifetime stats", async ({
   browser,
 }) => {
   await page.goto("/");
-  const liveBefore = await rightNow(page, "Live Rooms");
   const membersBefore = await community(page, "Members");
   const watchedBefore = await community(page, "Hours Watched");
   const streamedBefore = await community(page, "Hours Streamed");
   const hostedBefore = await community(page, "Rooms Hosted");
 
-  await createRoomAs(browser, uniqueUsername("sidebar.host"), {
-    name: uniqueRoomName("sidebar room"),
-  });
-  await createUser(browser, uniqueUsername("sidebar.veteran"), {
-    stats: { secondsWatched: 500 * HOUR, secondsStreamed: 200 * HOUR, roomsHosted: 40 },
-  });
+  // The host stays in the room until the checks are done, so it can't end meanwhile.
+  const host = await browser.newContext();
+  try {
+    await signIn(host, { username: uniqueUsername("sidebar.host") });
+    const name = uniqueRoomName("sidebar room");
+    await createRoomOnPage(await newPage(host), { name });
+    await createUser(browser, uniqueUsername("sidebar.veteran"), {
+      stats: { secondsWatched: 500 * HOUR, secondsStreamed: 200 * HOUR, roomsHosted: 40 },
+    });
 
-  await page.reload();
-  expect(await rightNow(page, "Live Rooms")).toBeGreaterThanOrEqual(liveBefore + 1);
-  expect(await community(page, "Members")).toBeGreaterThanOrEqual(membersBefore + 2);
-  expect(await community(page, "Hours Watched")).toBeGreaterThanOrEqual(watchedBefore + 499);
-  expect(await community(page, "Hours Streamed")).toBeGreaterThanOrEqual(streamedBefore + 199);
-  expect(await community(page, "Rooms Hosted")).toBeGreaterThanOrEqual(hostedBefore + 40);
+    await page.reload();
+    await expect(page.getByRole("button", { name: `Join ${name}` })).toBeVisible();
+    expect(await rightNow(page, "Live Rooms")).toBeGreaterThanOrEqual(1);
+    expect(await community(page, "Members")).toBeGreaterThanOrEqual(membersBefore + 2);
+    expect(await community(page, "Hours Watched")).toBeGreaterThanOrEqual(watchedBefore + 499);
+    expect(await community(page, "Hours Streamed")).toBeGreaterThanOrEqual(streamedBefore + 199);
+    expect(await community(page, "Rooms Hosted")).toBeGreaterThanOrEqual(hostedBefore + 40);
+  } finally {
+    await host.close();
+  }
 });
 
 test("every Right Now tile shows a number, the online count from the lobby socket", async ({

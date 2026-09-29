@@ -12,7 +12,7 @@
  * on boot and `last_seen_at` checkpoints (restart recovery: `loadLiveRooms`,
  * `checkpointPresence`).
  */
-import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne, type SQL, sql } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import {
   hostIntervals,
@@ -127,6 +127,10 @@ export interface RoomStore {
   setRole(roomId: string, userId: string, role: "mod" | "member"): Promise<void>;
   /** Rename `roomId` (`name` already validated). */
   renameRoom(roomId: string, name: string): Promise<void>;
+  /** The live private room `inviteToken` opens; null if unknown, ended or public (ADR 16). */
+  findInvitedRoom(inviteToken: string): Promise<StoredRoom | null>;
+  /** `userId`'s knock on the private `roomId` was admitted: approved until the room ends. */
+  approve(roomId: string, userId: string): Promise<void>;
 }
 
 /**
@@ -136,26 +140,31 @@ export interface RoomStore {
 const everOccupied = sql<boolean>`exists (select 1 from "presence_intervals" as "seen" where "seen"."room_id" = "rooms"."id")`;
 
 export function createDbRoomStore(db: Db): RoomStore {
+  /** The live room matching `where` (on `rooms`), with its roles. */
+  async function findLiveRoom(where: SQL | undefined): Promise<StoredRoom | null> {
+    const [room] = await db
+      .select({
+        id: rooms.id,
+        name: rooms.name,
+        hostUserId: rooms.hostUserId,
+        isPrivate: rooms.isPrivate,
+        occupied: everOccupied,
+      })
+      .from(rooms)
+      .where(and(where, isNull(rooms.endedAt)));
+    if (!room) return null;
+    const members = await db
+      .select({ userId: roomMembers.userId, role: roomMembers.role })
+      .from(roomMembers)
+      .where(and(eq(roomMembers.roomId, room.id), ne(roomMembers.role, "member")));
+    const roles: StoredRoom["roles"] = new Map();
+    for (const { userId, role } of members) if (role !== "member") roles.set(userId, role);
+    return { ...room, roles };
+  }
+
   return {
-    async findRoomFor(caller, roomId) {
-      const [room] = await db
-        .select({
-          id: rooms.id,
-          name: rooms.name,
-          hostUserId: rooms.hostUserId,
-          isPrivate: rooms.isPrivate,
-          occupied: everOccupied,
-        })
-        .from(rooms)
-        .where(and(eq(rooms.id, roomId), isNull(rooms.endedAt), roomVisibleTo(caller)));
-      if (!room) return null;
-      const members = await db
-        .select({ userId: roomMembers.userId, role: roomMembers.role })
-        .from(roomMembers)
-        .where(and(eq(roomMembers.roomId, roomId), ne(roomMembers.role, "member")));
-      const roles: StoredRoom["roles"] = new Map();
-      for (const { userId, role } of members) if (role !== "member") roles.set(userId, role);
-      return { ...room, roles };
+    findRoomFor(caller, roomId) {
+      return findLiveRoom(and(eq(rooms.id, roomId), roomVisibleTo(caller)));
     },
 
     async openPresence(roomId, userId, at) {
@@ -399,6 +408,20 @@ export function createDbRoomStore(db: Db): RoomStore {
 
     async renameRoom(roomId, name) {
       await db.update(rooms).set({ name }).where(eq(rooms.id, roomId));
+    },
+
+    findInvitedRoom(inviteToken) {
+      return findLiveRoom(and(eq(rooms.inviteToken, inviteToken), eq(rooms.isPrivate, true)));
+    },
+
+    async approve(roomId, userId) {
+      await db
+        .insert(roomMembers)
+        .values({ roomId, userId, role: "member", approved: true })
+        .onConflictDoUpdate({
+          target: [roomMembers.roomId, roomMembers.userId],
+          set: { approved: true },
+        });
     },
   };
 }

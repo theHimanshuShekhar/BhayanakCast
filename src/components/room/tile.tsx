@@ -44,13 +44,17 @@ export type ModAction = "kick" | "stopShare" | "promote" | "demote";
 
 const RANK: Record<RoomRole, number> = { member: 0, mod: 1, host: 2 };
 
+/** The host, a mod or an admin: kicks, stops shares and, in a private room, admits (ADRs 15, 16). */
+export const isModerator = (myRole: RoomRole, admin: boolean) =>
+  admin || myRole === "host" || myRole === "mod";
+
 /**
  * What the viewer (`myRole`, `admin`) may do to `p` (ADR 15; the server decides): host and mods
  * act on people below them, only the host changes roles, and an admin may do it all to anyone.
  */
 export const moderationFor = (p: Participant, myRole: RoomRole, admin: boolean) => {
   const any = !p.you && (admin || RANK[myRole] > RANK[p.role]);
-  const moderator = admin || myRole === "host" || myRole === "mod";
+  const moderator = isModerator(myRole, admin);
   return {
     kick: any && moderator,
     stopShare: any && moderator && p.streaming,

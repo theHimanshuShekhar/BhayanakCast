@@ -221,6 +221,8 @@ const MODERATION_MESSAGES: ReadonlySet<string> = new Set([
   "mod.stopShare",
   "mod.setRole",
   "room.rename",
+  // Admitting or denying a knock (./knock-live.ts; the room page's knock toasts).
+  "knock.decide",
 ]);
 
 /** `state` with `hostUserId` as host (the previous one a member now), away until `graceUntil`. */
