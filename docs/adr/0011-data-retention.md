@@ -11,6 +11,7 @@ Date: 2026-09-27 · Status: accepted
 ## Consequences
 - "Past streams", recaps and the admin all-time rooms table only reach back 30 days; the UI should say so.
 - Stats tables must not reference purged rows by foreign key.
+- Purged rows can survive for up to 14 more days in the nightly backups (ADR 9 addendum).
 
 ## Addendum: stat definitions (2026-09-27)
 - **Hours watched** = time present in a room *minus* that user's own stream intervals in it. Watched and streamed never overlap.

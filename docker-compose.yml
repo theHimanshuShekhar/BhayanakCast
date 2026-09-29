@@ -73,5 +73,40 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # Nightly compressed pg_dump, rsynced to the NAS share, the last 14 days kept (ADR 9 addendum).
+  # Runs once at start, then on BACKUP_SCHEDULE. Health reflects the last run. See docs/deploy.md.
+  backup:
+    build: ./backup
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER:-bhayanakcast}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-}
+      PGDATABASE: ${POSTGRES_DB:-bhayanakcast}
+      BACKUP_SCHEDULE: ${BACKUP_SCHEDULE:-0 3 * * *}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      # BACKUP_TZ, not TZ: stack variables named like Dockhand's own env can pick up its values.
+      TZ: ${BACKUP_TZ:-UTC}
+    volumes:
+      - backups:/backups
+      # The host mounts the NAS CIFS share; the container only gets a bind mount of it.
+      - ${BACKUP_NAS_DIR:-/mnt/nas/backups/bhayanakcast}:/nas
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q '^ok' /tmp/backup-status"]
+      interval: 60s
+      timeout: 5s
+      retries: 1
+      start_period: 10m
+      start_interval: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   pgdata:
+  backups:
