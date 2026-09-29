@@ -84,6 +84,6 @@ export interface PastRoomCard extends RoomSummary {
   durationMinutes: number;
   /** Everyone who was present at some point, by first arrival. */
   people: RoomPerson[];
-  /** Everyone who streamed at some point, by first stream. */
-  streamers: RoomPerson[];
+  /** Everyone who streamed at some point, by first stream, with their last thumbnail's time. */
+  streamers: Streamer[];
 }

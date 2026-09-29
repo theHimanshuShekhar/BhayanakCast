@@ -47,7 +47,7 @@ import { roomDetailFor, withRoster } from "~/lib/room-view";
 import { type LiveRoomCard, ROOM_NAME_MAX, type RoomKind } from "~/lib/rooms";
 import { roomQuery } from "~/lib/rooms.queries";
 import { useSettings } from "~/lib/settings";
-import { uploadShareThumbnail } from "~/lib/thumbnail-capture";
+import { startThumbnailUploads } from "~/lib/thumbnail-capture";
 import type { ChatMessage, Participant, RoomDetail, RoomRole } from "~/lib/types";
 
 export const Route = createFileRoute("/room/$roomId")({
@@ -451,10 +451,11 @@ function RoomPage({
   useEffect(() => {
     if (!media.share) getLocalMedia().stopShare();
   }, [media.share]);
-  // Once the screen is captured, a still of it goes to the room's cards (ADR 10).
+  // Once the screen is captured, a still of it goes to the room's cards, and a fresh one every
+  // 3 minutes until the share stops, or this page leaves the room or is taken over (ADR 10).
   const shareTrack = media.share ? local.share.track : null;
   useEffect(() => {
-    if (shareTrack) void uploadShareThumbnail(detail.id, shareTrack);
+    if (shareTrack) return startThumbnailUploads(detail.id, shareTrack);
   }, [shareTrack, detail.id]);
 
   // A device that stopped by itself (unplugged, or access revoked) is off for the room too;

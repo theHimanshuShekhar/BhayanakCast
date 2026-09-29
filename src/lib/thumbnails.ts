@@ -44,3 +44,15 @@ export const thumbnailUrl = (roomId: string, userId: string, capturedAt: string)
 /** Where a streamer uploads their thumbnail for a room. */
 export const thumbnailUploadUrl = (roomId: string): string =>
   `/api/thumbnails/${encodeURIComponent(roomId)}`;
+
+/** How often a share's thumbnail is captured again (ADR 10). */
+export const THUMBNAIL_REFRESH_MS = 3 * 60 * 1000;
+/** The shortest interval a build may configure, so a typo can't turn refresh into a flood. */
+export const THUMBNAIL_REFRESH_MIN_MS = 5_000;
+
+/** The refresh interval for a configured value (e2e shortens it): the default unless it is a positive number, never below the floor. */
+export function thumbnailRefreshMs(configured: unknown): number {
+  const ms = Number(configured);
+  if (!Number.isFinite(ms) || ms <= 0) return THUMBNAIL_REFRESH_MS;
+  return Math.max(THUMBNAIL_REFRESH_MIN_MS, ms);
+}

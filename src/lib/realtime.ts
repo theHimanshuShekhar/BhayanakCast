@@ -457,6 +457,7 @@ export const lobbySnapshotMessage = z.object({
  * `ended`: the room sat empty for 5 minutes (ADR 14) or an admin ended it, and is a past stream
  * now.
  * `host`: its host changed (handover, or an empty room's joiner), so room cards' host is stale.
+ * `thumbnail`: a streamer's screen thumbnail was replaced (ADR 10), so cards' images are stale.
  */
 export const LOBBY_ROOM_CHANGES = [
   "created",
@@ -465,6 +466,7 @@ export const LOBBY_ROOM_CHANGES = [
   "streamers",
   "renamed",
   "host",
+  "thumbnail",
 ] as const;
 
 /**

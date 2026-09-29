@@ -23,6 +23,8 @@ export interface RecapPerson extends RoomPerson {
   streamMinutes: number;
   /** Time in the room minus own streaming (ADR 11 "hours watched"). */
   watchMinutes: number;
+  /** When their last thumbnail was captured (ISO; null if none). */
+  thumbnailAt: string | null;
 }
 
 export interface Recap extends RoomSummary {

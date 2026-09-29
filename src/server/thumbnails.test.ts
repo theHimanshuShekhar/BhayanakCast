@@ -6,7 +6,8 @@ import { createTestDb } from "../db/test-db.ts";
 import { THUMBNAIL_MAX_BYTES } from "../lib/thumbnails.ts";
 import type { Caller } from "./caller.ts";
 import { SignInRequiredError } from "./caller.ts";
-import { listLiveRooms } from "./rooms.ts";
+import { getRecap } from "./recaps.ts";
+import { listLiveRooms, listPastRooms } from "./rooms.ts";
 import {
   getThumbnail,
   InvalidThumbnailError,
@@ -14,6 +15,8 @@ import {
   mayUpload,
   NotStreamingError,
   readBodyCapped,
+  thumbnailEtag,
+  thumbnailResponse,
   uploadThumbnail,
 } from "./thumbnails.ts";
 
@@ -200,6 +203,85 @@ describe("getThumbnail visibility (ADR 16)", () => {
     for (const caller of [visitor, asUser("b")]) {
       expect(await getThumbnail(db, caller, "r1", "a")).not.toBeNull();
     }
+  });
+});
+
+describe("refresh and freshness", () => {
+  it("replaces the thumbnail on each upload, and the card's time follows the newest capture", async () => {
+    const card = async () => (await listLiveRooms(db, visitor)).find((r) => r.id === "r1");
+    await upload(asUser("a"), { bytes: webp(64) }, T0);
+    const later = new Date(T0.getTime() + 3 * MIN);
+    await upload(asUser("a"), { bytes: webp(80) }, later);
+    const thumbnail = await getThumbnail(db, visitor, "r1", "a");
+    expect(thumbnail?.image.byteLength).toBe(80);
+    expect(thumbnail?.capturedAt).toEqual(later);
+    expect((await card())?.streamers[0]?.thumbnailAt).toBe(later.toISOString());
+  });
+});
+
+describe("ended rooms (ADR 11)", () => {
+  const DAY = 24 * 60 * MIN;
+  const endedAt = new Date(T0.getTime() + 10 * MIN);
+
+  beforeEach(async () => {
+    await upload(asUser("a"), {}, T0);
+    await db.update(streamIntervals).set({ endedAt });
+    await db.update(rooms).set({ endedAt }).where(eq(rooms.id, "r1"));
+  });
+
+  it("keep serving the last thumbnail for 30 days, then it is gone", async () => {
+    const within = new Date(endedAt.getTime() + 30 * DAY - MIN);
+    const past = new Date(endedAt.getTime() + 30 * DAY + MIN);
+    for (const caller of [visitor, asUser("b")]) {
+      expect(await getThumbnail(db, caller, "r1", "a", within)).not.toBeNull();
+      expect(await getThumbnail(db, caller, "r1", "a", past)).toBeNull();
+    }
+  });
+
+  it("stay private: an ended private room's thumbnail is for the people allowed in", async () => {
+    await db.update(rooms).set({ isPrivate: true }).where(eq(rooms.id, "r1"));
+    await db.insert(roomMembers).values({ roomId: "r1", userId: "c", approved: true });
+    const now = new Date(endedAt.getTime() + DAY);
+    expect(await getThumbnail(db, asUser("c"), "r1", "a", now)).not.toBeNull();
+    for (const caller of [visitor, asUser("b")]) {
+      expect(await getThumbnail(db, caller, "r1", "a", now)).toBeNull();
+    }
+  });
+
+  it("show on past cards and the recap, for those who may see the room", async () => {
+    const now = new Date(endedAt.getTime() + DAY);
+    const [card] = await listPastRooms(db, visitor, {}, now);
+    expect(card?.streamers.map((s) => [s.id, s.thumbnailAt])).toEqual([["a", T0.toISOString()]]);
+    const recap = await getRecap(db, visitor, "r1", now);
+    expect(recap?.people.find((p) => p.id === "a")?.thumbnailAt).toBe(T0.toISOString());
+  });
+});
+
+describe("thumbnailResponse", () => {
+  const thumbnail = { image: webp(), mime: "image/webp", capturedAt: T0 };
+
+  it("serves the image with an ETag from the capture time", async () => {
+    const response = thumbnailResponse(thumbnail, null);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("etag")).toBe(thumbnailEtag(T0));
+    expect(response.headers.get("content-type")).toBe("image/webp");
+    expect(response.headers.get("cache-control")).toBe("private, max-age=60");
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(webp());
+  });
+
+  it("answers 304 without a body when the ETag matches", async () => {
+    const etag = thumbnailEtag(T0);
+    for (const header of [etag, `W/${etag}`, `"other", ${etag}`, "*"]) {
+      const response = thumbnailResponse(thumbnail, header);
+      expect(response.status).toBe(304);
+      expect(response.headers.get("etag")).toBe(etag);
+      expect(await response.text()).toBe("");
+    }
+  });
+
+  it("serves the new image once the capture time changed", () => {
+    const stale = thumbnailEtag(new Date(T0.getTime() - 3 * MIN));
+    expect(thumbnailResponse(thumbnail, stale).status).toBe(200);
   });
 });
 

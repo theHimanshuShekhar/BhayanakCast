@@ -1,6 +1,6 @@
 /**
- * Room changes made outside the realtime server (a room created through a server function)
- * that it must hear about to tell the lobby (ADR 20). `createRoom` announces; the realtime
+ * Room changes made outside the realtime server (a room created through a server function, a thumbnail uploaded through its route)
+ * that it must hear about to tell the lobby (ADR 20). `createRoom` and the thumbnail upload announce; the realtime
  * endpoint (./realtime.ts) listens and hands them to its hub.
  *
  * The listeners live on a process global, not in a module variable: the SSR bundle (where
@@ -8,14 +8,17 @@
  * in production (server.prod.ts) and in dev (Vite's SSR module graph) alike.
  */
 
-export interface RoomAnnouncement {
-  kind: "created";
-  roomId: string;
-  name: string;
-  /** The creator, who is its host (until someone else has been in it without them, ADR 14). */
-  hostUserId: string;
-  isPrivate: boolean;
-}
+export type RoomAnnouncement =
+  | {
+      kind: "created";
+      roomId: string;
+      name: string;
+      /** The creator, who is its host (until someone else has been in it without them, ADR 14). */
+      hostUserId: string;
+      isPrivate: boolean;
+    }
+  /** A streamer uploaded a new thumbnail, so the room's cards are stale (ADR 10). */
+  | { kind: "thumbnail"; roomId: string };
 
 type Listener = (announcement: RoomAnnouncement) => void;
 

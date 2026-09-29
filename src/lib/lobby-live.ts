@@ -15,16 +15,49 @@ import { getRealtimeClient } from "./realtime-client";
 import { roomKeys } from "./rooms.queries";
 
 /**
- * The query keys to invalidate for a lobby `message`: the live list and home summary when a
- * public room was created or its count, streamers or host changed, every room read and the
- * home summary when one ended (past lists too), and every room read on a fresh snapshot after
- * a reconnect (`reconnected`), since anything may have changed while the socket was down.
+ * The query keys to invalidate for a lobby `message`, by what changed in a public room:
+ * - `created`, `count`, `streamers`, `renamed`, `host`: the live list and the home summary;
+ * - `thumbnail`: the live list only (the summary has no images);
+ * - `ended`: every room read (past lists too) and the home summary;
+ * - a fresh snapshot after a reconnect (`reconnected`): every room read, since anything may have
+ *   changed while the socket was down.
  */
 export function lobbyInvalidations(message: ServerMessage, reconnected: boolean): QueryKey[] {
   if (message.type === "lobby.snapshot") return reconnected ? [roomKeys.all] : [];
   if (message.type !== "lobby.changed" || !message.room) return [];
   if (message.room.change === "ended") return [roomKeys.all, homeKeys.summary()];
+  if (message.room.change === "thumbnail") return [roomKeys.live()];
   return [roomKeys.live(), homeKeys.summary()];
+}
+
+/** Thumbnail refetches are spaced at least this far apart: many streamers upload in step. */
+const THUMBNAIL_REFETCH_MS = 5_000;
+
+/**
+ * Wrap `run` so a burst of calls runs it at once, then at most once per `ms`: calls during the
+ * wait collapse into one run when it ends.
+ */
+export function coalesce(run: () => void, ms: number): () => void {
+  let waiting = false;
+  let pending = false;
+  const wait = () => {
+    waiting = true;
+    setTimeout(() => {
+      waiting = false;
+      if (!pending) return;
+      pending = false;
+      run();
+      wait();
+    }, ms);
+  };
+  return () => {
+    if (waiting) {
+      pending = true;
+      return;
+    }
+    run();
+    wait();
+  };
 }
 
 // The online count, shared by every component that shows it. Browser-only state: the server
@@ -55,6 +88,10 @@ export function useOnlineUsers(): number | null {
 function follow(queryClient: QueryClient): () => void {
   const client = getRealtimeClient();
   let snapshots = 0;
+  const refetchCards = coalesce(
+    () => void queryClient.invalidateQueries({ queryKey: roomKeys.live() }),
+    THUMBNAIL_REFETCH_MS,
+  );
   const unsubscribe = client.subscribe((message) => {
     if (message.type === "error" && message.code === "banned") {
       // An admin banned this user (ADR 6), which ended their session: load home afresh as a
@@ -65,6 +102,10 @@ function follow(queryClient: QueryClient): () => void {
     if (message.type !== "lobby.snapshot" && message.type !== "lobby.changed") return;
     setOnline(message.online);
     const reconnected = message.type === "lobby.snapshot" && snapshots++ > 0;
+    if (message.type === "lobby.changed" && message.room?.change === "thumbnail") {
+      refetchCards();
+      return;
+    }
     for (const queryKey of lobbyInvalidations(message, reconnected)) {
       void queryClient.invalidateQueries({ queryKey });
     }

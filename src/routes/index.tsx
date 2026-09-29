@@ -3,7 +3,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useMemo, useState } from "react";
 import { HomeNotice } from "~/components/home-notice";
 import { Icon, type IconComponent } from "~/components/icons";
-import { LiveCard, PastCard, useSnapshots } from "~/components/room-cards";
+import { LiveCard, PastCard, useNow } from "~/components/room-cards";
 import { SignInButton } from "~/components/sign-in-button";
 import { SignInErrorNotice } from "~/components/sign-in-error-notice";
 import { Avatar, Btn, Chip } from "~/components/ui";
@@ -229,7 +229,7 @@ function HomePage() {
     data: { rightNow, community },
   } = useSuspenseQuery(homeSummaryQuery());
   const [q, setQ] = useState("");
-  const snap = useSnapshots();
+  const now = useNow();
   const term = q.trim().toLowerCase();
 
   // Search over rooms: name, host, people in it, #tags and kind.
@@ -385,7 +385,7 @@ function HomePage() {
             )}
             <div className="grid gap-3.5 grid-cols-[repeat(auto-fill,minmax(min(340px,100%),1fr))]">
               {filtered.map((r) => (
-                <LiveCard key={r.id} room={r} onOpen={openRoom} snap={snap} />
+                <LiveCard key={r.id} room={r} onOpen={openRoom} now={now} />
               ))}
             </div>
           </>
