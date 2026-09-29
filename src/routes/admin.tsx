@@ -436,10 +436,13 @@ const UsersTable = () => {
   const [banned, setBanned] = useState(false);
   const [page, setPage] = useState(1);
   const term = useDebounced(q.trim(), 250);
-  const { data } = useQuery({
+  const { data, isPlaceholderData } = useQuery({
     ...adminUsersQuery({ q: term, banned, page }),
     placeholderData: keepPreviousData,
   });
+  // The rows are the previous search's until the new one lands (and are replaced under the
+  // pointer when it does), so their actions are off: a click on one could miss or hit the wrong row.
+  const stale = isPlaceholderData || q.trim() !== term;
   const [banTarget, setBanTarget] = useState<DialogTarget | null>(null);
   const [unbanTarget, setUnbanTarget] = useState<DialogTarget | null>(null);
   const [roleTarget, setRoleTarget] = useState<RoleChangeTarget | null>(null);
@@ -491,7 +494,11 @@ const UsersTable = () => {
         <MonoCaps>{data?.total ?? 0} users</MonoCaps>
       </div>
       <div className="overflow-x-auto">
-        <table aria-label="users" className="w-full min-w-[830px] border-collapse text-xs">
+        <table
+          aria-label="users"
+          aria-busy={stale}
+          className="w-full min-w-[830px] border-collapse text-xs"
+        >
           <thead>
             <tr>
               <th className={th}>user</th>
@@ -543,7 +550,7 @@ const UsersTable = () => {
                       <Btn
                         size="sm"
                         aria-label={`Demote ${u.username}`}
-                        disabled={!!whyNoDemote(u, me)}
+                        disabled={stale || !!whyNoDemote(u, me)}
                         title={whyNoDemote(u, me)}
                         onClick={() => setRoleTarget({ ...u, role: "user" })}
                       >
@@ -553,6 +560,7 @@ const UsersTable = () => {
                       <Btn
                         size="sm"
                         aria-label={`Promote ${u.username}`}
+                        disabled={stale}
                         onClick={() => setRoleTarget({ ...u, role: "admin" })}
                       >
                         promote
@@ -562,6 +570,7 @@ const UsersTable = () => {
                       <Btn
                         size="sm"
                         aria-label={`Unban ${u.username}`}
+                        disabled={stale}
                         onClick={() => setUnbanTarget(u)}
                       >
                         unban
@@ -571,6 +580,7 @@ const UsersTable = () => {
                         size="sm"
                         variant="danger"
                         aria-label={`Ban ${u.username}`}
+                        disabled={stale}
                         onClick={() => setBanTarget(u)}
                       >
                         ban

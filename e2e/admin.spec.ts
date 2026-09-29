@@ -215,3 +215,27 @@ test("an admin promotes a user, who gets /admin, then demotes them, who loses it
     await targetContext.close();
   }
 });
+
+// Typing a search leaves the previous rows on screen until the new results land, and swapping
+// them under the pointer swallowed clicks on Firefox (issue #54): their actions stay off until then.
+test("row actions are disabled while the users table shows a previous search", async ({
+  page,
+  context,
+  browser,
+}) => {
+  const username = uniqueUsername("stale.target");
+  await createUser(browser, username);
+  await signIn(context, { discordId: E2E_ADMIN_DISCORD_ID, username: "admin_jpg" });
+  await page.goto("/admin");
+  const users = page.getByRole("table", { name: "users" });
+  const firstBan = users.getByRole("button", { name: /^Ban / }).first();
+  await expect(firstBan).toBeEnabled();
+
+  await page.getByRole("textbox", { name: "Search users" }).fill(username);
+  await expect(users).toHaveAttribute("aria-busy", "true");
+  await expect(firstBan).toBeDisabled();
+
+  await expect(users).toHaveAttribute("aria-busy", "false");
+  await expect(users.getByRole("row").filter({ hasText: username })).toHaveCount(1);
+  await expect(users.getByRole("button", { name: `Ban ${username}` })).toBeEnabled();
+});
