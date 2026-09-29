@@ -188,5 +188,12 @@ do this). Then start `app` again.
   start. Migrations only go forward, so rolling back to an older commit doesn't undo a schema change.
 - **Logs:** Dockhand's container logs, or `docker logs <container>`. They're rotated at 3 × 10 MB.
 - **Restarts** drop live room state. Clients reconnect on their own (ADR 9).
+- **TURN and NAT (ADR 3):** each signed-in user gets TURN credentials that last 4 hours. They're
+  cached per user and minted again 30 minutes before they expire. If minting fails, the app logs
+  `[ice] minting TURN credentials failed; STUN only` and pages get STUN only until the next try.
+  A peer pair that relays through TURN, or fails even after an ICE restart, is logged as
+  `[ice] {"outcome":"relayed"|"failed",…}`. The line has candidate types and transports only, with
+  no addresses or user IDs. `docker logs <app container> 2>&1 | grep '\[ice\]'` shows how often
+  double NAT bites.
 - **Data** lives in the `pgdata` volume. Don't delete the stack's volumes when removing or re-creating it.
   Nightly dumps are on the NAS share (section 5, Backups to the NAS).

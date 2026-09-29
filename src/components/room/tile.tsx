@@ -4,7 +4,8 @@ import { type CSSProperties, useRef } from "react";
 import { avatarFor } from "~/lib/format";
 import type { Participant, RoomRole, Settings } from "~/lib/types";
 import { Icon } from "../icons";
-import { Avatar, Chip, ScreenPlaceholder, Wave } from "../ui";
+import { Avatar, Btn, Chip, ScreenPlaceholder, Wave } from "../ui";
+import { CameraVideo } from "./camera-video";
 
 /** A reaction floating up the tile, drifting `dx` pixels sideways. */
 export type Reaction = { id: string; emoji: string; dx: number };
@@ -71,11 +72,15 @@ export const Tile = ({
   admin = false,
   locallyMuted,
   volume = 1,
+  cameraTrack,
+  onCameraShown,
   reactions,
   onPin,
   onToggleMute,
   onVolume,
   onModerate,
+  cantConnect = false,
+  onRetry,
 }: {
   p: Participant;
   layout: Settings["layout"];
@@ -85,19 +90,29 @@ export const Tile = ({
   locallyMuted: boolean;
   /** How loud this person plays here, 0–1 (the viewer's own setting). */
   volume?: number;
+  /** Their camera (yours: the local one), shown while `p.camera`. */
+  cameraTrack?: MediaStreamTrack | null;
+  /** Stable: whether a peer's camera is on screen here (unshown ones are paused towards us). */
+  onCameraShown?: (userId: string, shown: boolean) => void;
   reactions: Reaction[];
   onPin: (id: string) => void;
   onToggleMute: (id: string) => void;
   onVolume?: (id: string, volume: number) => void;
   onModerate: (id: string, action: ModAction) => void;
+  /** This page's connection to them failed, even after an ICE restart (ADR 3). */
+  cantConnect?: boolean;
+  /** Try connecting to them again. */
+  onRetry?: () => void;
 }) => {
   const ref = useRef<HTMLDivElement>(null);
   const span = tileSpan(p, layout);
+  const cantConnectState = cantConnect && <CantConnect name={p.name} onRetry={onRetry} />;
 
   if (p.viewerOnly) {
     return (
       // biome-ignore lint/a11y/useSemanticElements: a tile groups one person's view, not a form
       <div role="group" aria-label={displayName(p)} className={`${tileBase} ${span} shadow-pop`}>
+        {cantConnectState}
         <div className="flex items-center gap-2.5 px-3 py-2.5 h-full">
           <Avatar name={p.name} size="md" ring={p.speaking} />
           <div className="flex-1 min-w-0">
@@ -122,6 +137,15 @@ export const Tile = ({
   const can = moderationFor(p, myRole, admin);
   const canModerate = can.kick || can.stopShare || can.setRole;
   const av = avatarFor(p.name);
+  const camera = p.camera && cameraTrack && (
+    <CameraVideo
+      userId={p.userId}
+      name={p.name}
+      track={cameraTrack}
+      mirrored={p.you}
+      onShown={p.you ? undefined : onCameraShown}
+    />
+  );
 
   return (
     // biome-ignore lint/a11y/useSemanticElements: a tile groups one person's view, not a form
@@ -133,6 +157,8 @@ export const Tile = ({
     >
       {p.streaming ? (
         <ScreenPlaceholder kind={p.screen ?? "browser"} />
+      ) : camera ? (
+        <div className="flex-1 relative min-h-0 overflow-hidden bg-black">{camera}</div>
       ) : (
         <div className="flex-1 relative min-h-0 overflow-hidden grid place-items-center bg-[oklch(0.22_0.02_260)]">
           <div className="absolute inset-0 bg-[repeating-linear-gradient(135deg,oklch(0.26_0.02_260)_0,oklch(0.26_0.02_260)_12px,oklch(0.20_0.02_260)_12px,oklch(0.20_0.02_260)_24px)]" />
@@ -259,7 +285,7 @@ export const Tile = ({
           className="absolute bottom-2.5 right-2.5 z-[3] w-14 aspect-[4/3] hidden @[300px]:grid rounded-lg overflow-hidden border border-border-strong shadow-pop place-items-center"
           style={{ background: `linear-gradient(135deg, ${av.c1}, ${av.c2})` }}
         >
-          <Avatar name={p.name} size="sm" />
+          {camera || <Avatar name={p.name} size="sm" />}
         </div>
       )}
 
@@ -277,10 +303,26 @@ export const Tile = ({
         </span>
       </div>
 
+      {cantConnectState}
       <FloatingReactions reactions={reactions} />
     </div>
   );
 };
+
+/** Over a tile whose connection failed: say so, with a retry (under the chips and controls). */
+const CantConnect = ({ name, onRetry }: { name: string; onRetry?: () => void }) => (
+  <div
+    role="alert"
+    className="absolute inset-0 z-[2] flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1.5 p-2 text-center bg-black/70 text-white text-[11.5px] font-medium"
+  >
+    <span>can't connect to {name}</span>
+    {onRetry && (
+      <Btn size="sm" onClick={onRetry}>
+        retry
+      </Btn>
+    )}
+  </div>
+);
 
 const FloatingReactions = ({ reactions }: { reactions: Reaction[] }) =>
   reactions.map((r) => (

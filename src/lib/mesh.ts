@@ -6,6 +6,7 @@
  *   mesh.join(participants);                  // the room's people (a snapshot); again on any change
  *   mesh.receive(from, payload);              // each relayed `signal`
  *   mesh.setLocalTracks({ mic: track });      // what this page sends everyone (null: stop)
+ *   mesh.setVisible(peerId, "cam", false);    // this page isn't showing their camera now
  *   mesh.subscribe((event) => …);             // remote tracks and per-peer connection state
  *   mesh.close();                             // leave: every connection closed
  *
@@ -28,12 +29,27 @@
  * page offers afresh, and one whose first offer was lost (the server drops signalling to someone
  * in their reconnect grace) sends it again.
  *
+ * A connection that fails, or doesn't connect within `CONNECT_TIMEOUT_MS`, gets one ICE restart
+ * (with the latest ICE servers: STUN plus TURN, ADR 3), or one start-over if it never even
+ * negotiated; if that fails too it is `failed` until `retry` starts it over. Once connected, its
+ * selected candidate pair says whether it is `relayed` through TURN. `relayed`, and `failed`
+ * after ICE was tried, come with the connection's anonymised ICE path.
+ *
+ * A camera this page isn't showing (a hidden or scrolled-away tile) is paused towards it, to save
+ * the sender's upload (ADR 2 addendum): `setVisible` tells that peer with a `visibility` step
+ * (over signalling, which needs no ICE; the whole state again whenever the pair connects, in
+ * case a step was lost), and the sender swaps in no track for this page alone until shown.
+ *
  * Local tracks belong to the caller (./local-media.ts): the Mesh never stops them.
  */
+import { type IcePath, icePathOf, isRelayed, STUN_SERVERS } from "./ice";
 import type { MediaSlot, SignalPayload } from "./realtime";
 
-/** `connecting` until media can flow, `connected`, or `failed` (#38 adds relayed/ICE restart). */
-export type PeerState = "connecting" | "connected" | "failed";
+/**
+ * `connecting` until media can flow (and while an ICE restart runs); then `connected`, or
+ * `relayed` through a TURN server; or `failed` when even an ICE restart didn't connect.
+ */
+export type PeerState = "connecting" | "connected" | "relayed" | "failed";
 
 /** What this page sends everyone, per slot. A missing slot is unchanged; null stops sending it. */
 export type LocalTracks = { [S in MediaSlot]?: MediaStreamTrack | null };
@@ -54,25 +70,27 @@ export interface MeshPeer {
 }
 
 export type MeshEvent =
-  /** A peer's connection state changed (a new peer starts `connecting`). */
-  | { type: "state"; userId: string; state: PeerState }
+  /**
+   * A peer's connection state changed (a new peer starts `connecting`). `ice` is its ICE path
+   * once it connected (or relays) or failed at ICE; a pair that failed without ever negotiating
+   * (a signalling stall, not an ICE failure) has none.
+   */
+  | { type: "state"; userId: string; state: PeerState; ice?: IcePath }
   /** A peer's track for `slot` arrived. */
   | { type: "track"; userId: string; slot: MediaSlot; track: MediaStreamTrack }
   /** A peer's connection closed (they left, or it restarted: a new `state` follows then). */
   | { type: "closed"; userId: string };
 
-/** STUN only for now (ADR 3): #38 hands the Mesh STUN plus TURN from a server function. */
-export const STUN_SERVERS: RTCIceServer[] = [
-  { urls: ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"] },
-];
+/** How long a connection may take to connect (or reconnect) before it gets an ICE restart. */
+export const CONNECT_TIMEOUT_MS = 20_000;
 
 export interface MeshOptions {
   /** This user's id: decides who is polite in each pair. */
   selfId: string;
   /** Deliver `payload` to peer `to` (the `signal` message). */
   send: (to: string, payload: SignalPayload) => void;
-  /** The ICE servers for each new connection. Defaults to `STUN_SERVERS`. */
-  iceServers?: () => RTCIceServer[];
+  /** The ICE servers (see `setIceServers`). Defaults to `STUN_SERVERS`. */
+  iceServers?: RTCIceServer[];
   /** Where negotiation failures are reported. Defaults to `console.warn`. */
   log?: (message: string, error?: unknown) => void;
   /** For tests. */
@@ -93,7 +111,8 @@ const newSession = () => Math.random().toString(36).slice(2, 12);
 
 type Step =
   | Omit<Extract<SignalPayload, { kind: "description" }>, "session" | "peerSession">
-  | Omit<Extract<SignalPayload, { kind: "candidate" }>, "session" | "peerSession">;
+  | Omit<Extract<SignalPayload, { kind: "candidate" }>, "session" | "peerSession">
+  | Omit<Extract<SignalPayload, { kind: "visibility" }>, "session" | "peerSession">;
 
 interface Link {
   userId: string;
@@ -112,26 +131,36 @@ interface Link {
   own: Map<MediaSlot, RTCRtpTransceiver>;
   /** Which slot each of the peer's transceivers carries, by `mid`. */
   remoteSlots: Map<string, MediaSlot>;
+  /** Slots the peer isn't showing: sent to it as no track. */
+  paused: Set<MediaSlot>;
   tracks: Partial<Record<MediaSlot, MediaStreamTrack>>;
   /** Incoming steps, handled one at a time. */
   queue: Promise<void>;
+  /** It had its ICE restart since it last connected. */
+  restarted: boolean;
+  /** It replaces a connection that never negotiated (see `#failed`). */
+  startedOver: boolean;
+  /** Runs out while it is connecting (`CONNECT_TIMEOUT_MS`). */
+  connectTimer?: ReturnType<typeof setTimeout>;
 }
 
 export class Mesh {
   readonly #selfId: string;
   readonly #send: MeshOptions["send"];
-  readonly #iceServers: () => RTCIceServer[];
+  #iceServers: RTCIceServer[];
   readonly #log: (message: string, error?: unknown) => void;
   readonly #RTCPeerConnection: typeof RTCPeerConnection;
   readonly #links = new Map<string, Link>();
   readonly #listeners = new Set<(event: MeshEvent) => void>();
   readonly #local: Partial<Record<MediaSlot, MediaStreamTrack | null>> = {};
+  /** Per peer, whether this page shows each slot of theirs it has said (kept across reconnects). */
+  readonly #shown = new Map<string, Map<MediaSlot, boolean>>();
   #closed = false;
 
   constructor(options: MeshOptions) {
     this.#selfId = options.selfId;
     this.#send = options.send;
-    this.#iceServers = options.iceServers ?? (() => STUN_SERVERS);
+    this.#iceServers = options.iceServers ?? STUN_SERVERS;
     this.#log = options.log ?? ((message, error) => console.warn(`[mesh] ${message}`, error));
     this.#RTCPeerConnection = options.RTCPeerConnection ?? RTCPeerConnection;
   }
@@ -184,6 +213,14 @@ export class Mesh {
       if (link.pc.signalingState === "have-local-offer") this.#sendDescription(link);
       return;
     }
+    if (payload.kind === "visibility") {
+      if (payload.visible === !link.paused.has(payload.slot)) return;
+      if (payload.visible) link.paused.delete(payload.slot);
+      else link.paused.add(payload.slot);
+      const transceiver = link.own.get(payload.slot);
+      if (transceiver) this.#sendSlot(link, payload.slot, transceiver);
+      return;
+    }
     const current = link;
     current.queue = current.queue
       .then(() => this.#handle(current, payload))
@@ -203,17 +240,40 @@ export class Mesh {
         // It gets the local tracks when it starts.
         if (!link.started) continue;
         const transceiver = link.own.get(slot);
-        if (transceiver) {
-          transceiver.sender
-            .replaceTrack(track)
-            .catch((error: unknown) =>
-              this.#log(`sending ${slot} to ${link.userId} failed`, error),
-            );
-        } else if (track) {
-          this.#addSlot(link, slot, track);
-        }
+        if (transceiver) this.#sendSlot(link, slot, transceiver);
+        else if (track) this.#addSlot(link, slot);
       }
     }
+  }
+
+  /**
+   * Use these ICE servers from now on (fresh TURN credentials): for new connections, and for
+   * ICE restarts of the current ones.
+   */
+  setIceServers(iceServers: RTCIceServer[]): void {
+    this.#iceServers = iceServers;
+    for (const link of this.#links.values()) this.#configure(link);
+  }
+
+  /** Start over with `userId` (after `failed`): a new connection, and they start over too. */
+  retry(userId: string): void {
+    if (this.#closed || !this.#links.has(userId)) return;
+    this.#startOver(userId);
+  }
+
+  /**
+   * Whether this page shows `userId`'s `slot` track now. Everything counts as shown until said
+   * otherwise; a hidden track is paused towards this page. The peer is told as soon as it has
+   * spoken to this side, and again whenever the pair connects.
+   */
+  setVisible(userId: string, slot: MediaSlot, visible: boolean): void {
+    if (this.#closed || userId === this.#selfId) return;
+    const shown = this.#shown.get(userId) ?? new Map<MediaSlot, boolean>();
+    if (shown.get(slot) === visible) return;
+    shown.set(slot, visible);
+    this.#shown.set(userId, shown);
+    const link = this.#links.get(userId);
+    if (link?.remoteSession) this.#signal(link, { kind: "visibility", slot, visible });
   }
 
   /** Everyone this page has a connection to. */
@@ -249,9 +309,12 @@ export class Mesh {
 
   // -------------------------------------------------------------------------------------------
 
-  /** Connect to `userId`; a polite side says `hello` unless `greet` is false (it has an offer). */
-  #open(userId: string, greet = true): Link {
-    const pc = new this.#RTCPeerConnection({ iceServers: this.#iceServers() });
+  /**
+   * Connect to `userId`; a polite side says `hello` unless `greet` is false (it has an offer).
+   * `startedOver`: it replaces one that never negotiated (its automatic start-over is used).
+   */
+  #open(userId: string, greet = true, startedOver = false): Link {
+    const pc = new this.#RTCPeerConnection({ iceServers: this.#iceServers });
     const link: Link = {
       userId,
       // Perfect negotiation needs exactly one polite side per pair: compare user ids.
@@ -264,8 +327,11 @@ export class Mesh {
       ignoreOffer: false,
       own: new Map(),
       remoteSlots: new Map(),
+      paused: new Set(),
       tracks: {},
       queue: Promise.resolve(),
+      restarted: false,
+      startedOver,
     };
     this.#links.set(userId, link);
     pc.onnegotiationneeded = () => void this.#offer(link);
@@ -276,6 +342,7 @@ export class Mesh {
     pc.ontrack = ({ transceiver, track }) => this.#track(link, transceiver, track);
     pc.onconnectionstatechange = () => this.#stateChanged(link);
     this.#emit({ type: "state", userId, state: link.state });
+    this.#waitToConnect(link);
     // The impolite side makes the first offer; the polite side starts once it has answered.
     if (!link.polite) this.#start(link);
     else if (greet) this.#send(userId, { kind: "hello", session: link.session });
@@ -286,19 +353,33 @@ export class Mesh {
   #start(link: Link): void {
     if (link.started) return;
     link.started = true;
-    for (const slot of EAGER_SLOTS) this.#addSlot(link, slot, this.#local[slot] ?? null);
+    for (const slot of EAGER_SLOTS) this.#addSlot(link, slot);
     for (const [slot, track] of Object.entries(this.#local) as [MediaSlot, MediaStreamTrack][]) {
-      if (track && !link.own.has(slot)) this.#addSlot(link, slot, track);
+      if (track && !link.own.has(slot)) this.#addSlot(link, slot);
     }
   }
 
+  /** What to send `link`'s peer for `slot`: the local track, unless they aren't showing it. */
+  #outgoing(link: Link, slot: MediaSlot): MediaStreamTrack | null {
+    return link.paused.has(slot) ? null : (this.#local[slot] ?? null);
+  }
+
   /** Start sending `slot` to `link`'s peer over a transceiver of its own (renegotiates). */
-  #addSlot(link: Link, slot: MediaSlot, track: MediaStreamTrack | null): void {
+  #addSlot(link: Link, slot: MediaSlot): void {
+    const track = this.#outgoing(link, slot);
     const transceiver = link.pc.addTransceiver(track ?? SLOT_KIND[slot], { direction: "sendonly" });
     link.own.set(slot, transceiver);
   }
 
+  /** Swap what `slot`'s transceiver sends `link`'s peer (no renegotiation). */
+  #sendSlot(link: Link, slot: MediaSlot, transceiver: RTCRtpTransceiver): void {
+    transceiver.sender
+      .replaceTrack(this.#outgoing(link, slot))
+      .catch((error: unknown) => this.#log(`sending ${slot} to ${link.userId} failed`, error));
+  }
+
   #shut(link: Link): void {
+    this.#stopWaiting(link);
     const pc = link.pc;
     pc.onnegotiationneeded = null;
     pc.onicecandidate = null;
@@ -323,7 +404,10 @@ export class Mesh {
     }
   }
 
-  async #handle(link: Link, payload: Exclude<SignalPayload, { kind: "hello" }>): Promise<void> {
+  async #handle(
+    link: Link,
+    payload: Exclude<SignalPayload, { kind: "hello" | "visibility" }>,
+  ): Promise<void> {
     if (!this.#current(link)) return;
     const pc = link.pc;
     if (payload.kind === "candidate") {
@@ -386,22 +470,121 @@ export class Mesh {
 
   #stateChanged(link: Link): void {
     if (!this.#current(link)) return;
-    const state = peerState(link.pc.connectionState);
-    if (!state || state === link.state) return;
+    switch (link.pc.connectionState) {
+      case "connected":
+        this.#stopWaiting(link);
+        link.restarted = false;
+        void this.#connected(link);
+        return;
+      case "failed":
+        this.#failed(link);
+        return;
+      case "closed":
+        // `closed` events cover it.
+        return;
+      default:
+        // new, connecting, and disconnected (which usually recovers by itself).
+        this.#waitToConnect(link);
+        this.#setState(link, "connecting");
+    }
+  }
+
+  /** Connected: directly, or through a TURN relay, going by the selected candidate pair. */
+  async #connected(link: Link): Promise<void> {
+    const ice = await this.#icePath(link);
+    if (!this.#current(link) || link.pc.connectionState !== "connected") return;
+    this.#setState(link, ice && isRelayed(ice) ? "relayed" : "connected", ice);
+  }
+
+  /** Arm the connect timeout, unless it is already running. */
+  #waitToConnect(link: Link): void {
+    if (link.connectTimer !== undefined) return;
+    link.connectTimer = setTimeout(() => {
+      this.#stopWaiting(link);
+      if (this.#current(link) && link.pc.connectionState !== "connected") this.#failed(link);
+    }, CONNECT_TIMEOUT_MS);
+  }
+
+  #stopWaiting(link: Link): void {
+    clearTimeout(link.connectTimer);
+    link.connectTimer = undefined;
+  }
+
+  /**
+   * It failed, or took too long: one automatic attempt, then `failed` until it connects after
+   * all or `retry` starts it over. A negotiated pair gets an ICE restart (both sides gather anew,
+   * with the latest ICE servers), and its failure comes with its ICE path. A pair that never
+   * negotiated (the offer or answer went missing) has no ICE to restart, so it starts over
+   * (a new session, and a `hello`); its failure is a signalling stall, not an ICE failure, and
+   * comes without an ICE path.
+   */
+  #failed(link: Link): void {
+    this.#stopWaiting(link);
+    const negotiated = link.pc.remoteDescription !== null;
+    if (!negotiated && !link.startedOver) {
+      this.#startOver(link.userId, true);
+      return;
+    }
+    if (negotiated && !link.restarted) {
+      link.restarted = true;
+      this.#configure(link);
+      link.pc.restartIce();
+      this.#waitToConnect(link);
+      this.#setState(link, "connecting");
+      return;
+    }
+    if (link.state === "failed") return;
+    if (!negotiated) {
+      this.#setState(link, "failed");
+      return;
+    }
+    link.state = "failed";
+    void this.#icePath(link).then((ice) => {
+      if (this.#current(link) && link.state === "failed") {
+        this.#emit({ type: "state", userId: link.userId, state: "failed", ...(ice && { ice }) });
+      }
+    });
+  }
+
+  /** The connection's anonymised ICE path, from its stats (undefined if they can't be read). */
+  async #icePath(link: Link): Promise<IcePath | undefined> {
+    try {
+      return icePathOf(await link.pc.getStats());
+    } catch (error) {
+      this.#log(`reading ICE stats for ${link.userId} failed`, error);
+      return undefined;
+    }
+  }
+
+  /** Replace the connection to `userId` with a new one; the peer starts over too. */
+  #startOver(userId: string, automatic = false): void {
+    this.peerLeft(userId);
+    this.#open(userId, true, automatic);
+  }
+
+  /** Give `link` the current ICE servers (used from its next ICE restart). */
+  #configure(link: Link): void {
+    try {
+      link.pc.setConfiguration({ ...link.pc.getConfiguration(), iceServers: this.#iceServers });
+    } catch (error) {
+      this.#log(`updating ICE servers for ${link.userId} failed`, error);
+    }
+  }
+
+  #setState(link: Link, state: PeerState, ice?: IcePath): void {
+    if (state === link.state) return;
     link.state = state;
-    this.#emit({ type: "state", userId: link.userId, state });
+    this.#emit({ type: "state", userId: link.userId, state, ...(ice && { ice }) });
+    // Everything counts as shown on their side until told, and a step sent while the pair was
+    // down may have been dropped (their reconnect grace): all of it again.
+    if (state === "connected") {
+      for (const [slot, visible] of this.#shown.get(link.userId) ?? []) {
+        this.#signal(link, { kind: "visibility", slot, visible });
+      }
+    }
   }
 
   #emit(event: MeshEvent): void {
     for (const listener of this.#listeners) listener(event);
   }
-}
-
-/** The Mesh's view of a connection state (none for `closed`, which `closed` events cover). */
-function peerState(state: RTCPeerConnectionState): PeerState | null {
-  if (state === "connected") return "connected";
-  if (state === "failed") return "failed";
-  if (state === "closed") return null;
-  // new, connecting, and disconnected (which usually recovers by itself).
-  return "connecting";
 }

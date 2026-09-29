@@ -1,8 +1,11 @@
 // Knocks on a private room (ADR 16), as toasts for its approvers: "X wants to join" with
-// admit and deny. The server sends `knock.pending` only to the host, mods and admins present.
+// admit and deny, or dismiss (the people tab lists it still). The server sends `knock.pending`
+// only to the host, mods and admins present.
 import { Toast } from "@base-ui/react/toast";
 import { useEffect } from "react";
-import { Avatar, Btn } from "~/components/ui";
+import { Icon } from "~/components/icons";
+import { Avatar, Btn, iconBtnCls } from "~/components/ui";
+import { decideKnock } from "~/lib/knock-live";
 import { getRealtimeClient } from "~/lib/realtime-client";
 
 interface KnockToastData {
@@ -58,8 +61,7 @@ function KnockToastList() {
     const knocker = toast.data;
     if (!knocker) return null;
     // Closes when the server says it was handled (by anyone), not on click.
-    const decide = (admit: boolean) =>
-      getRealtimeClient().send({ type: "knock.decide", userId: knocker.userId, admit });
+    const decide = (admit: boolean) => decideKnock(knocker.userId, admit);
     return (
       <Toast.Root
         key={toast.id}
@@ -69,6 +71,13 @@ function KnockToastList() {
         <div className="flex items-center gap-2.5 min-w-0">
           <Avatar name={knocker.username} />
           <Toast.Title className="m-0 text-[12.5px] text-fg font-medium truncate" />
+          {/* Out of the way; the knock stays in the people tab's "waiting" group. */}
+          <Toast.Close
+            aria-label={`dismiss ${knocker.username}'s knock`}
+            className={`${iconBtnCls} ml-auto !w-6 !h-6 flex-shrink-0`}
+          >
+            <Icon.Close size={12} />
+          </Toast.Close>
         </div>
         <div className="flex gap-2">
           <Btn
