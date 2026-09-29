@@ -3,12 +3,14 @@
  * the dashboard reads them with `useSuspenseQuery`.
  */
 import { queryOptions } from "@tanstack/react-query";
+import type { ListAdminUsersInput } from "./admin";
 import {
   getAdminDailySeriesFn,
   getAdminLeaderboardsFn,
   getAdminOverviewFn,
   listAdminLiveRoomsFn,
   listAdminRecentRoomsFn,
+  listAdminUsersFn,
 } from "./admin.functions";
 import { roomKeys } from "./rooms.queries";
 
@@ -23,6 +25,9 @@ export const adminKeys = {
   live: () => [...adminKeys.all, "live"] as const,
   recent: () => [...adminKeys.all, "recent"] as const,
   leaderboards: () => [...adminKeys.all, "leaderboards"] as const,
+  /** Every page of the users table: bans refetch them all. */
+  users: () => [...adminKeys.all, "users"] as const,
+  usersPage: (input: ListAdminUsersInput) => [...adminKeys.users(), input] as const,
 };
 
 /** All-time totals and the last 30 days against the 30 before. */
@@ -44,3 +49,10 @@ export const adminRecentRoomsQuery = () =>
 /** Top users by lifetime hours streamed and watched. */
 export const adminLeaderboardsQuery = () =>
   queryOptions({ queryKey: adminKeys.leaderboards(), queryFn: () => getAdminLeaderboardsFn() });
+
+/** A page of the users table, as searched. */
+export const adminUsersQuery = (input: ListAdminUsersInput) =>
+  queryOptions({
+    queryKey: adminKeys.usersPage(input),
+    queryFn: () => listAdminUsersFn({ data: input }),
+  });
