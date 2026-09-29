@@ -81,6 +81,7 @@ as an empty string, and the app treats that as unset. See `.env.example` for a t
 | `ADMIN_DISCORD_IDS` | no | Comma-separated Discord user IDs granted the admin role at sign-in (ADR 6). In Discord, enable **Settings → Advanced → Developer Mode**, right-click a user and choose **Copy User ID**. |
 | `TRUSTED_PROXY_IPS` | yes | Comma-separated IPs or CIDR ranges of the cloudflared host (step 2). |
 | `CLOUDFLARE_TURN_KEY_ID`, `CLOUDFLARE_TURN_API_TOKEN` | no | Cloudflare dashboard → **Realtime → TURN Server → Create**. Copy the **Turn Token ID** and **API Token**. These are server-only and used to mint short-lived TURN credentials (ADR 3). Without them only STUN is available, so peers behind strict NAT or CGNAT may fail to connect. |
+| `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_ANALYTICS_API_TOKEN` | no | For the admin dashboard's account-wide TURN usage panel (ADR 3 addendum). Account ID: Cloudflare dashboard → your account → **Copy account ID**. Token: **My Profile → API Tokens → Create Token**, custom, with only **Account → Account Analytics → Read** (not the TURN API token). Without them the panel says "not configured". |
 | `HOST_BIND` | no | Host address the app is published on. Default `10.1.1.160` (the dockhand LXC's LAN IP). |
 | `HOST_PORT` | no | Host port. Default `3000`. The tunnel's service URL must match it. |
 | `REALTIME_ANONYMOUS_SOCKETS_PER_IP` | no | Open signed-out (lobby) sockets per client IP. Default `20` (ADR 20). |
@@ -179,6 +180,7 @@ do this). Then start `app` again.
 - [ ] The realtime socket connects through the tunnel: the lobby's online count updates, and a room opens.
 - [ ] The app log has no `Ignoring cf-connecting-ip from …` warning. If it does, fix `TRUSTED_PROXY_IPS` (step 2).
 - [ ] A two-person room works across two different networks (one on mobile data, if possible).
+- [ ] If you set the TURN usage variables: the dashboard's TURN usage panel was built from Cloudflare's docs and never run against the real API, so check the query once by hand. Run `curl -s https://api.cloudflare.com/client/v4/graphql -H "Authorization: Bearer $CLOUDFLARE_ANALYTICS_API_TOKEN" -H "Content-Type: application/json" --data '{"query":"query { viewer { accounts(filter: {accountTag: \"<account id>\"}) { callsTurnUsageAdaptiveGroups(limit: 10000, filter: {date_geq: \"<YYYY-MM-01>\", date_leq: \"<today>\"}) { dimensions { datetimeHour } sum { egressBytes } } } } }"}'` (query text: `TURN_EGRESS_QUERY` in `src/server/turn-usage.ts`). It should return `data` with no `errors`. Then open `/admin`: the panel shows a number, not "usage unavailable" (the app log says `[turn-usage] Cloudflare analytics failed` with the reason).
 - [ ] The `backup` container is **healthy**, and today's `bhayanakcast-YYYY-MM-DD.sql.gz` is on the NAS share (section 5, Backups to the NAS).
 - [ ] The latest dump restores into a scratch database, and its table counts match the live database (section 5, Restore).
 

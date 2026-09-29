@@ -29,6 +29,10 @@ const baseSchema = z.object({
   ADMIN_DISCORD_IDS: commaList,
   CLOUDFLARE_TURN_KEY_ID: z.string().optional(),
   CLOUDFLARE_TURN_API_TOKEN: z.string().optional(),
+  /** With the analytics token: the admin dashboard's account-wide TURN usage panel. */
+  CLOUDFLARE_ACCOUNT_ID: z.string().optional(),
+  /** A read-only Analytics token, not the TURN API token. */
+  CLOUDFLARE_ANALYTICS_API_TOKEN: z.string().optional(),
   /**
    * Peers (IPs or CIDR ranges, comma-separated) whose `cf-connecting-ip` header is trusted: the
    * shared cloudflared host (ADR 9). For anyone else the socket address is the client IP.
