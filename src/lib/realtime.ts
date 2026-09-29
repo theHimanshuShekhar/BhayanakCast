@@ -15,6 +15,7 @@
  *   message's type. The server never closes the socket for a bad message.
  */
 import { z } from "zod";
+import { inviteToken } from "./invites.ts";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -124,6 +125,29 @@ export const modSetRoleMessage = z.object({
  */
 export const roomRenameMessage = z.object({ type: z.literal("room.rename"), name: z.string() });
 
+/**
+ * Private rooms (ADR 16): ask to be let into the private room `inviteToken` opens. The server
+ * answers `knock.status` (`waiting`, or `approved` at once for someone already allowed in) and
+ * tells the host, mods and admins present `knock.pending`. Sending it again (e.g. after a
+ * reconnect) re-sends the same knock from this socket. An unknown token, or a public room's,
+ * is refused with `not_found`.
+ */
+export const knockRequestMessage = z.object({
+  type: z.literal("knock.request"),
+  inviteToken,
+});
+/**
+ * Admit or deny `userId`'s pending knock on the sender's room (host, mods and admins in it).
+ * Admitting approves them until the room ends (`room_members.approved`); either way the
+ * knocker gets `knock.status` and every approver present `knock.resolved`. Refusals:
+ * `forbidden` (not an approver here), `not_found` (no such knock pending).
+ */
+export const knockDecideMessage = z.object({
+  type: z.literal("knock.decide"),
+  userId: targetUserId,
+  admit: z.boolean(),
+});
+
 export const clientMessage = z.discriminatedUnion("type", [
   helloMessage,
   roomJoinMessage,
@@ -136,6 +160,8 @@ export const clientMessage = z.discriminatedUnion("type", [
   modStopShareMessage,
   modSetRoleMessage,
   roomRenameMessage,
+  knockRequestMessage,
+  knockDecideMessage,
 ]);
 export type ClientMessage = z.infer<typeof clientMessage>;
 export type ClientMessageType = ClientMessage["type"];
@@ -362,6 +388,43 @@ export const feedEntryMessage = z.object({
   entry: feedEntry,
 });
 
+/** Someone knocking on a private room, as its approvers see them. */
+export const knockEntry = z.object({
+  userId: z.string(),
+  username: z.string(),
+  /** When they knocked (server clock). */
+  at: z.iso.datetime(),
+});
+export type KnockEntry = z.infer<typeof knockEntry>;
+
+/** Someone knocked (`knock.request`): sent to the host, mods and admins present in the room. */
+export const knockPendingMessage = z.object({
+  type: z.literal("knock.pending"),
+  roomId,
+  knock: knockEntry,
+});
+
+/** `userId`'s knock was handled (`knock.decide`): sent to every approver present. */
+export const knockResolvedMessage = z.object({
+  type: z.literal("knock.resolved"),
+  roomId,
+  userId: z.string(),
+});
+
+/**
+ * Where a knocker stands: `waiting` for an approver, `approved` (send `room.join` now; the
+ * approval lasts until the room ends), or `denied`.
+ */
+export const KNOCK_STATUSES = ["waiting", "approved", "denied"] as const;
+export type KnockStatus = (typeof KNOCK_STATUSES)[number];
+
+/** The knocker's answer to `knock.request`, and again once their knock is decided. */
+export const knockStatusMessage = z.object({
+  type: z.literal("knock.status"),
+  roomId,
+  status: z.enum(KNOCK_STATUSES),
+});
+
 export const ERROR_CODES = [
   /** Not valid JSON, not a known message, or not allowed at this point (e.g. before `hello`). */
   "bad_request",
@@ -411,6 +474,9 @@ export const serverMessage = z.discriminatedUnion("type", [
   feedEntryMessage,
   errorMessage,
   pongMessage,
+  knockPendingMessage,
+  knockResolvedMessage,
+  knockStatusMessage,
 ]);
 export type ServerMessage = z.infer<typeof serverMessage>;
 export type ServerMessageType = ServerMessage["type"];

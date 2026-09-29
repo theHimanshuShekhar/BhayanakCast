@@ -85,7 +85,7 @@ describe("invalid messages", () => {
     expect((await a.join(roomId)).participants).toHaveLength(1);
   });
 
-  it("refuses joining an unknown, ended or hidden room with not_found", async () => {
+  it("refuses joining an unknown or ended room with not_found, and a private one with forbidden", async () => {
     const privateRoom = await h.createRoom(ana, { isPrivate: true });
     const ended = await h.createRoom(ana);
     await h.db
@@ -93,10 +93,13 @@ describe("invalid messages", () => {
       .set({ endedAt: new Date(T0) })
       .where(eq(rooms.id, ended));
     const b = await h.connectAs(bo);
-    for (const id of ["no-such-room", privateRoom, ended]) {
+    for (const id of ["no-such-room", ended]) {
       b.send({ type: "room.join", roomId: id });
       expect(await b.waitFor("error")).toMatchObject({ code: "not_found", re: "room.join" });
     }
+    // Private rooms are entered by knocking (ADR 16, ./realtime-knock.test.ts).
+    b.send({ type: "room.join", roomId: privateRoom });
+    expect(await b.waitFor("error")).toMatchObject({ code: "forbidden", re: "room.join" });
     expect(await presenceRows()).toEqual([]);
   });
 });
