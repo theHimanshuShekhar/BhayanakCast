@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CONNECT_TIMEOUT_MS,
   degradationFor,
+  isSameOffer,
   Mesh,
   type MeshEvent,
   SHARE_AUDIO_BITRATE,
@@ -742,5 +743,18 @@ describe("withStereoOpus", () => {
     );
     expect(withStereoOpus(sdp, new Set())).toBe(sdp);
     expect(withStereoOpus(sdp, new Set(["1"]))).toBe(sdp);
+  });
+});
+
+describe("isSameOffer", () => {
+  const offer = "v=0\r\no=- 7 2 IN IP4 127.0.0.1\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=mid:0\r\n";
+
+  it("recognises an offer sent again with more ICE candidates", () => {
+    expect(isSameOffer(`${offer}a=candidate:1 1 udp 1 10.0.0.1 9 typ host\r\n`, offer)).toBe(true);
+  });
+
+  it("tells a new offer apart by its version", () => {
+    expect(isSameOffer(offer.replace("- 7 2", "- 7 3"), offer)).toBe(false);
+    expect(isSameOffer(offer, undefined)).toBe(false);
   });
 });

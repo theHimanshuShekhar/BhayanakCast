@@ -126,6 +126,18 @@ export function degradationFor(contentHint: string): RTCDegradationPreference {
 }
 
 /**
+ * Whether `sdp` is the description `previous` was again. A description sent again carries the
+ * ICE candidates gathered since, so its text differs; its origin line (session id and version,
+ * which a new description bumps) does not.
+ */
+export function isSameOffer(sdp: string | undefined, previous: string | undefined): boolean {
+  if (sdp === undefined || previous === undefined) return false;
+  const origin = (text: string) => /^o=.*$/m.exec(text)?.[0];
+  const o = origin(sdp);
+  return o === undefined ? sdp === previous : o === origin(previous);
+}
+
+/**
  * `sdp` with stereo Opus at `SHARE_AUDIO_BITRATE` in the m-sections whose mid is in `mids`
  * (this side's share audio): a sender encodes what the other side's description asks for.
  */
@@ -508,8 +520,8 @@ export class Mesh {
     }
     const description = payload.description;
     const offer = description.type === "offer";
-    // An offer sent again after a `hello` that crossed it (a new offer always differs).
-    if (offer && description.sdp === link.remoteSdp) return;
+    // An offer sent again after a `hello` that crossed it (with more candidates, if it waited).
+    if (offer && isSameOffer(description.sdp, link.remoteSdp)) return;
     for (const [mid, slot] of Object.entries(payload.slots ?? {})) link.remoteSlots.set(mid, slot);
     const collision = offer && (link.makingOffer || pc.signalingState !== "stable");
     link.ignoreOffer = !link.polite && collision;
