@@ -26,7 +26,12 @@ export default defineConfig({
       use: {
         ...devices["Desktop Chrome"],
         launchOptions: {
-          args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"],
+          args: [
+            "--use-fake-device-for-media-stream",
+            "--use-fake-ui-for-media-stream",
+            // Screen sharing (#36) picks the (fake) screen without a picker.
+            "--auto-select-desktop-capture-source=Entire screen",
+          ],
         },
       },
     },

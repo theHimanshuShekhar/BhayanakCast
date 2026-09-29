@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   type ChatEntry,
   FEED_HISTORY_SIZE,
@@ -6,7 +6,14 @@ import {
   type RoomParticipant,
   type ServerMessage,
 } from "./realtime";
-import { applyRoomMessage, CHAT_LINES_KEPT, feedLine, type RoomLive } from "./room-live";
+import {
+  applyRoomMessage,
+  CHAT_LINES_KEPT,
+  feedLine,
+  pendingShareAnswer,
+  type RoomLive,
+  SHARE_ACK_TIMEOUT_MS,
+} from "./room-live";
 
 const person = (userId: string): RoomParticipant => ({
   userId,
@@ -256,5 +263,33 @@ describe("the feed", () => {
     expect(words({ ...base, kind: "hostChanged" })).toBe("ana is now the host");
     expect(words({ ...base, kind: "kicked", by: mod })).toBe("ana was removed by mo");
     expect(feedLine({ ...base, kind: "joined" })).toMatchObject({ id: "f", at });
+  });
+});
+
+describe("pendingShareAnswer", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("times out when the server doesn't answer within the click's window", async () => {
+    vi.useFakeTimers();
+    const { answer } = pendingShareAnswer();
+    let settled = false;
+    void answer.then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(SHARE_ACK_TIMEOUT_MS - 1);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await answer).toBe("timeout");
+  });
+
+  it("gives the server's answer when it comes in time, once", async () => {
+    vi.useFakeTimers();
+    const { answer, settle } = pendingShareAnswer();
+    settle("accepted");
+    settle("refused");
+    await vi.advanceTimersByTimeAsync(SHARE_ACK_TIMEOUT_MS);
+    expect(await answer).toBe("accepted");
   });
 });

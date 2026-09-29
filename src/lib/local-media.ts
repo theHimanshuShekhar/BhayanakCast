@@ -1,6 +1,6 @@
 /**
- * This browser's own mic and camera: which devices there are, which one the user picked, and
- * the live `MediaStreamTrack` for each while it's on. The lobby (`CONTEXT.md`) picks and
+ * This browser's own mic, camera and screen share: which devices there are, which one the user
+ * picked, and the live `MediaStreamTrack` for each while it's on. The lobby (`CONTEXT.md`) picks and
  * previews devices with it, and the room's controls and the mesh (ADR 1) read the same tracks:
  * `getLocalMedia()` is the page's one `LocalMedia`, and `useLocalMedia()` follows its state.
  *
@@ -9,12 +9,16 @@
  * - The chosen device ids are remembered in localStorage; whether each was on never is.
  * - Choosing another device while one is on swaps its track (a new `MediaStreamTrack` object),
  *   so consumers follow `track` identity, e.g. `RTCRtpSender.replaceTrack` on change.
+ * - A screen share (`startShare`) asks the browser's own picker every time, for the screen
+ *   and its tab or system audio where the browser offers it, tuned for the room kind
+ *   (`shareHintFor`). The browser's own "stop sharing" turns it off.
  * - `release()` stops every track (leaving the room, taken over, kicked): the camera light
  *   goes off.
  *
  * Browser-only: call it from effects and event handlers, never during render.
  */
 import { useSyncExternalStore } from "react";
+import type { RoomKind } from "./rooms";
 
 export type LocalDeviceKind = "mic" | "cam";
 
@@ -45,6 +49,19 @@ export interface LocalTrackState {
   failure: LocalTrackFailure | null;
 }
 
+/**
+ * Why the last `startShare` failed: as for a device, or `late` when the browser no longer
+ * counted it as following the user's click (it only lets a page capture the screen then).
+ */
+export type ShareFailure = LocalTrackFailure | "late";
+
+/** The screen share: its video as `track`, and `audio`. */
+export interface LocalShareState extends Omit<LocalTrackState, "failure"> {
+  /** The tab or system audio while `on`, if the browser gave any; else null. */
+  audio: MediaStreamTrack | null;
+  failure: ShareFailure | null;
+}
+
 export interface LocalMediaState {
   /** Devices of each kind, as `enumerateDevices` lists them (labels once permission is given). */
   devices: Record<LocalDeviceKind, LocalDevice[]>;
@@ -52,15 +69,18 @@ export interface LocalMediaState {
   selected: Record<LocalDeviceKind, string | null>;
   mic: LocalTrackState;
   cam: LocalTrackState;
+  share: LocalShareState;
 }
 
 const OFF: LocalTrackState = { status: "off", track: null, failure: null };
+const SHARE_OFF: LocalShareState = { status: "off", track: null, audio: null, failure: null };
 
 export const LOCAL_MEDIA_INITIAL: LocalMediaState = {
   devices: { mic: [], cam: [] },
   selected: { mic: null, cam: null },
   mic: OFF,
   cam: OFF,
+  share: SHARE_OFF,
 };
 
 /** Where the chosen device ids are kept. */
@@ -72,6 +92,41 @@ export const CAMERA_CONSTRAINTS: MediaTrackConstraints = {
   height: { ideal: 360 },
   frameRate: { ideal: 15 },
 };
+
+/**
+ * Screen capture: at most 1080p30, the quality ladder's default (ADR 2). The ladder's 1080p60
+ * rung (#37) needs the frame rate raised here.
+ */
+export const SCREEN_CONSTRAINTS: MediaTrackConstraints = {
+  width: { max: 1920 },
+  height: { max: 1080 },
+  frameRate: { ideal: 30 },
+};
+
+/** Share audio as it plays: no voice processing (ADR 2 addendum). */
+export const SHARE_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
+  echoCancellation: false,
+  noiseSuppression: false,
+  autoGainControl: false,
+};
+
+/** A share's video `contentHint`: what its room kind shows most (ADR 2 addendum). */
+export type ShareHint = "motion" | "detail" | "text";
+
+/** Smooth motion for games, films and drawing; sharp text for code; detail for the rest. */
+export function shareHintFor(kind: RoomKind): ShareHint {
+  switch (kind) {
+    case "gaming":
+    case "watch":
+    case "art":
+      return "motion";
+    case "code":
+      return "text";
+    case "music":
+    case "chat":
+      return "detail";
+  }
+}
 
 const INPUT_KIND: Record<LocalDeviceKind, MediaDeviceKind> = {
   mic: "audioinput",
@@ -86,9 +141,13 @@ export interface LocalMediaOptions {
   mediaDevices?: Pick<
     MediaDevices,
     "getUserMedia" | "enumerateDevices" | "addEventListener" | "removeEventListener"
-  >;
+  > &
+    // Missing where screen sharing isn't (mobile browsers).
+    Partial<Pick<MediaDevices, "getDisplayMedia">>;
   /** localStorage, or null where it's unavailable. */
   storage?: Storage | null;
+  /** `navigator.userActivation`, where the browser has it. */
+  userActivation?: Pick<UserActivation, "isActive">;
 }
 
 type Listener = () => void;
@@ -119,14 +178,16 @@ const isNamed = (e: unknown): e is { name: string } =>
 export class LocalMedia {
   readonly #mediaDevices: LocalMediaOptions["mediaDevices"];
   readonly #storage: Storage | null;
+  readonly #userActivation: LocalMediaOptions["userActivation"];
   readonly #listeners = new Set<Listener>();
   #state: LocalMediaState;
   /** Bumped per kind by every enable/disable, so a slow `getUserMedia` that lost knows it. */
-  readonly #attempt: Record<LocalDeviceKind, number> = { mic: 0, cam: 0 };
+  readonly #attempt: Record<LocalDeviceKind | "share", number> = { mic: 0, cam: 0, share: 0 };
 
   constructor(options: LocalMediaOptions = {}) {
     this.#mediaDevices = options.mediaDevices;
     this.#storage = options.storage ?? null;
+    this.#userActivation = options.userActivation;
     this.#state = { ...LOCAL_MEDIA_INITIAL, selected: this.#loadSelected() };
   }
 
@@ -239,6 +300,73 @@ export class LocalMedia {
   release(): void {
     this.disable("mic");
     this.disable("cam");
+    this.stopShare();
+  }
+
+  /** Whether this browser can share its screen at all (not on mobile, ADR 17). */
+  canShare(): boolean {
+    return typeof this.#mediaDevices?.getDisplayMedia === "function";
+  }
+
+  /**
+   * Share the screen, a window or a tab, as the user picks in the browser's own picker, with
+   * its audio where the browser offers it; the video's `contentHint` is `hint`. Resolves to the
+   * live video track, or null if it failed (see `failure`; `denied` when the picker was
+   * cancelled, `late` when too long had passed since the user's click) or was stopped meanwhile.
+   */
+  async startShare(hint: ShareHint): Promise<MediaStreamTrack | null> {
+    const current = this.#state.share;
+    if (current.status === "on" && current.track) return current.track;
+    const attempt = ++this.#attempt.share;
+    if (!this.#mediaDevices?.getDisplayMedia) {
+      this.#set({ share: { ...SHARE_OFF, failure: "unsupported" } });
+      return null;
+    }
+    // Past the click's short window (e.g. a slow server acknowledgement), the browser would
+    // refuse as if the user had cancelled the picker: say so instead.
+    if (this.#userActivation && !this.#userActivation.isActive) {
+      this.#set({ share: { ...SHARE_OFF, failure: "late" } });
+      return null;
+    }
+    this.#set({ share: { ...SHARE_OFF, status: "starting" } });
+    let stream: MediaStream | null = null;
+    let failure: ShareFailure | null = null;
+    try {
+      stream = await this.#mediaDevices.getDisplayMedia({
+        video: SCREEN_CONSTRAINTS,
+        audio: SHARE_AUDIO_CONSTRAINTS,
+      });
+    } catch (error) {
+      failure = failureOf(error);
+    }
+    const [video] = stream?.getVideoTracks() ?? [];
+    const [audio = null] = stream?.getAudioTracks() ?? [];
+    if (attempt !== this.#attempt.share || !video) {
+      // Stopped (or started again) while the picker was open: this one lost.
+      for (const track of stream?.getTracks() ?? []) track.stop();
+      if (attempt === this.#attempt.share) {
+        this.#set({ share: { ...SHARE_OFF, failure: failure ?? "missing" } });
+      }
+      return null;
+    }
+    video.contentHint = hint;
+    // Music, not speech: encoded for fidelity.
+    if (audio) audio.contentHint = "music";
+    // The browser's own "stop sharing" (or the shared window closing): it's off now.
+    video.addEventListener("ended", () => {
+      if (this.#state.share.track === video) this.stopShare();
+    });
+    this.#set({ share: { status: "on", track: video, audio, failure: null } });
+    return video;
+  }
+
+  /** Stop sharing (a share still being picked is dropped when it arrives). */
+  stopShare(): void {
+    this.#attempt.share++;
+    const { track, audio } = this.#state.share;
+    track?.stop();
+    audio?.stop();
+    if (this.#state.share !== SHARE_OFF) this.#set({ share: SHARE_OFF });
   }
 
   #capture(kind: LocalDeviceKind, deviceId: string | null): Promise<MediaStreamTrack> {
@@ -299,7 +427,11 @@ export function getLocalMedia(): LocalMedia {
     } catch {
       // Blocked site data.
     }
-    localMedia = new LocalMedia({ mediaDevices: navigator.mediaDevices, storage });
+    localMedia = new LocalMedia({
+      mediaDevices: navigator.mediaDevices,
+      storage,
+      userActivation: navigator.userActivation,
+    });
   }
   return localMedia;
 }
@@ -311,4 +443,15 @@ const getServerSnapshot = () => LOCAL_MEDIA_INITIAL;
 /** This browser's mic and camera state (`LocalMediaState`); everything off during SSR. */
 export function useLocalMedia(): LocalMediaState {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+}
+
+const never = () => () => {};
+
+/** Whether this browser can share its screen (`LocalMedia.canShare`); false during SSR. */
+export function useCanShare(): boolean {
+  return useSyncExternalStore(
+    never,
+    () => getLocalMedia().canShare(),
+    () => false,
+  );
 }

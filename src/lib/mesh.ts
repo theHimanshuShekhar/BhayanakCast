@@ -40,6 +40,11 @@
  * (over signalling, which needs no ICE; the whole state again whenever the pair connects, in
  * case a step was lost), and the sender swaps in no track for this page alone until shown.
  *
+ * A screen share is tuned as its track says (ADR 2 addendum): the sender's degradation
+ * preference follows the screen track's `contentHint`, and share audio goes as stereo Opus at
+ * `SHARE_AUDIO_BITRATE` (asked for in the Opus parameters of the remote descriptions this side
+ * applies, which is where browsers take them from).
+ *
  * Local tracks belong to the caller (./local-media.ts): the Mesh never stops them.
  */
 import { type IcePath, icePathOf, isRelayed, STUN_SERVERS } from "./ice";
@@ -107,6 +112,67 @@ const SLOT_KIND: Record<MediaSlot, "audio" | "video"> = {
 /** Created with every connection, so a pair connects before anyone unmutes. */
 const EAGER_SLOTS: readonly MediaSlot[] = ["mic"];
 
+/** Share audio's bitrate: tab or system sound, in stereo (ADR 2 addendum). */
+export const SHARE_AUDIO_BITRATE = 128_000;
+
+/**
+ * What a screen sender gives up first under pressure, by its track's `contentHint`: frames
+ * for detail and text (sharp resolution), resolution for motion (smooth frames).
+ */
+export function degradationFor(contentHint: string): RTCDegradationPreference {
+  return contentHint === "detail" || contentHint === "text"
+    ? "maintain-resolution"
+    : "maintain-framerate";
+}
+
+/**
+ * Whether `sdp` is the description `previous` was again. A description sent again carries the
+ * ICE candidates gathered since, so its text differs; its origin line (session id and version,
+ * which a new description bumps) does not.
+ */
+export function isSameOffer(sdp: string | undefined, previous: string | undefined): boolean {
+  if (sdp === undefined || previous === undefined) return false;
+  const origin = (text: string) => /^o=.*$/m.exec(text)?.[0];
+  const o = origin(sdp);
+  return o === undefined ? sdp === previous : o === origin(previous);
+}
+
+/**
+ * `sdp` with stereo Opus at `SHARE_AUDIO_BITRATE` in the m-sections whose mid is in `mids`
+ * (this side's share audio): a sender encodes what the other side's description asks for.
+ */
+export function withStereoOpus(sdp: string, mids: ReadonlySet<string>): string {
+  if (mids.size === 0) return sdp;
+  const [session = "", ...media] = sdp.split(/\r\n(?=m=)/);
+  const sections = media.map((section) => {
+    const lines = section.split("\r\n");
+    const mid = lines.find((line) => line.startsWith("a=mid:"))?.slice("a=mid:".length);
+    if (mid === undefined || !mids.has(mid)) return section;
+    const opus = lines
+      .map((line) => /^a=rtpmap:(\d+) opus\/48000/i.exec(line)?.[1])
+      .find((pt) => pt !== undefined);
+    if (opus === undefined) return section;
+    const wanted = `stereo=1;maxaveragebitrate=${SHARE_AUDIO_BITRATE}`;
+    const fmtp = `a=fmtp:${opus} `;
+    const at = lines.findIndex((line) => line.startsWith(fmtp));
+    if (at === -1) {
+      lines.splice(
+        lines.findIndex((line) => line.startsWith(`a=rtpmap:${opus} `)) + 1,
+        0,
+        fmtp + wanted,
+      );
+    } else {
+      const kept = (lines[at] as string)
+        .slice(fmtp.length)
+        .split(";")
+        .filter((param) => param && !/^(stereo|maxaveragebitrate)=/.test(param.trim()));
+      lines[at] = fmtp + [...kept, wanted].join(";");
+    }
+    return lines.join("\r\n");
+  });
+  return [session, ...sections].join("\r\n");
+}
+
 const newSession = () => Math.random().toString(36).slice(2, 12);
 
 type Step =
@@ -131,6 +197,8 @@ interface Link {
   own: Map<MediaSlot, RTCRtpTransceiver>;
   /** Which slot each of the peer's transceivers carries, by `mid`. */
   remoteSlots: Map<string, MediaSlot>;
+  /** The peer's description this side applied last, as sent (before `withStereoOpus`). */
+  remoteSdp?: string;
   /** Slots the peer isn't showing: sent to it as no track. */
   paused: Set<MediaSlot>;
   tracks: Partial<Record<MediaSlot, MediaStreamTrack>>;
@@ -286,6 +354,20 @@ export class Mesh {
     }));
   }
 
+  /**
+   * Whether `userId`'s `slot` media is arriving: a packet came within the last 10 seconds.
+   * Their track stays, unmuted, while they send nothing (e.g. a share without audio), so this
+   * is what tells.
+   */
+  receiving(userId: string, slot: MediaSlot): boolean {
+    const link = this.#links.get(userId);
+    const track = link?.tracks[slot];
+    if (!link || !track) return false;
+    const receiver = link.pc.getReceivers().find((r) => r.track === track);
+    // Browsers list a source until 10 seconds after its last packet.
+    return (receiver?.getSynchronizationSources().length ?? 0) > 0;
+  }
+
   /** Each connection's `getStats()`, by peer (for quality control and ICE logging, #37/#38). */
   async stats(): Promise<Map<string, RTCStatsReport>> {
     const links = [...this.#links.values()];
@@ -367,15 +449,31 @@ export class Mesh {
   /** Start sending `slot` to `link`'s peer over a transceiver of its own (renegotiates). */
   #addSlot(link: Link, slot: MediaSlot): void {
     const track = this.#outgoing(link, slot);
-    const transceiver = link.pc.addTransceiver(track ?? SLOT_KIND[slot], { direction: "sendonly" });
+    const transceiver = link.pc.addTransceiver(track ?? SLOT_KIND[slot], {
+      direction: "sendonly",
+      ...(slot === "screenAudio" && { sendEncodings: [{ maxBitrate: SHARE_AUDIO_BITRATE }] }),
+    });
     link.own.set(slot, transceiver);
+    this.#tune(link, slot, transceiver.sender);
   }
 
   /** Swap what `slot`'s transceiver sends `link`'s peer (no renegotiation). */
   #sendSlot(link: Link, slot: MediaSlot, transceiver: RTCRtpTransceiver): void {
     transceiver.sender
       .replaceTrack(this.#outgoing(link, slot))
+      .then(() => this.#tune(link, slot, transceiver.sender))
       .catch((error: unknown) => this.#log(`sending ${slot} to ${link.userId} failed`, error));
+  }
+
+  /** A screen sender's degradation preference follows its track's content hint (room kind). */
+  #tune(link: Link, slot: MediaSlot, sender: RTCRtpSender): void {
+    if (slot !== "screen" || !sender.track) return;
+    const parameters = sender.getParameters();
+    const degradationPreference = degradationFor(sender.track.contentHint);
+    if (parameters.degradationPreference === degradationPreference) return;
+    sender
+      .setParameters({ ...parameters, degradationPreference })
+      .catch((error: unknown) => this.#log(`tuning the share to ${link.userId} failed`, error));
   }
 
   #shut(link: Link): void {
@@ -421,16 +519,22 @@ export class Mesh {
       return;
     }
     const description = payload.description;
-    // An offer sent again after a `hello` that crossed it (a new offer always differs).
-    if (description.type === "offer" && description.sdp === pc.remoteDescription?.sdp) return;
+    const offer = description.type === "offer";
+    // An offer sent again after a `hello` that crossed it (with more candidates, if it waited).
+    if (offer && isSameOffer(description.sdp, link.remoteSdp)) return;
     for (const [mid, slot] of Object.entries(payload.slots ?? {})) link.remoteSlots.set(mid, slot);
-    const collision =
-      description.type === "offer" && (link.makingOffer || pc.signalingState !== "stable");
+    const collision = offer && (link.makingOffer || pc.signalingState !== "stable");
     link.ignoreOffer = !link.polite && collision;
     if (link.ignoreOffer) return;
+    const shareAudio = link.own.get("screenAudio")?.mid;
+    const sdp =
+      description.sdp && shareAudio
+        ? withStereoOpus(description.sdp, new Set([shareAudio]))
+        : description.sdp;
     // A polite side's own pending offer is rolled back implicitly.
-    await pc.setRemoteDescription(description);
-    if (description.type === "offer") {
+    await pc.setRemoteDescription({ type: description.type, sdp });
+    link.remoteSdp = description.sdp;
+    if (offer) {
       await pc.setLocalDescription();
       if (!this.#current(link)) return;
       this.#sendDescription(link);
