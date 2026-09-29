@@ -59,6 +59,8 @@ export const REACTION_RATE_LIMIT = { reactions: 5, windowMs: 3_000 } as const;
 export const SIGNAL_RATE_LIMIT = { messages: 400, windowMs: 10_000 } as const;
 /** How many recent feed entries a live room keeps in memory for joiners. */
 export const FEED_HISTORY_SIZE = 50;
+/** A knock on a private room nobody decides within this long expires (ADR 16; server clock). */
+export const KNOCK_EXPIRY_MS = 10 * 60_000;
 
 /** Someone's mic, camera and screen share, on or off. No media flows in this slice (spec #4). */
 export const mediaState = z.object({ mic: z.boolean(), cam: z.boolean(), share: z.boolean() });
@@ -198,10 +200,14 @@ export const signalMessage = z.object({
 
 /**
  * Private rooms (ADR 16): ask to be let into the private room `inviteToken` opens. The server
- * answers `knock.status` (`waiting`, or `approved` at once for someone already allowed in) and
- * tells the host, mods and admins present `knock.pending`. Sending it again (e.g. after a
- * reconnect) re-sends the same knock from this socket. An unknown token, or a public room's,
- * is refused with `not_found`.
+ * answers `knock.status` (`waiting`, `waiting_for_host` while no host, mod or admin is
+ * connected, or `approved` at once for someone already allowed in) and tells the host, mods
+ * and admins present `knock.pending`. Sending it again keeps the same knock (its time and
+ * expiry) and moves it to this socket: after a reconnect, or from another tab, which is then
+ * told `elsewhere`. A knock whose socket closes stays pending for the reconnect grace (30s),
+ * then is withdrawn unless knocked again; `knock.cancel` withdraws it at once. Undecided for
+ * `KNOCK_EXPIRY_MS`, it expires (`expired`). An unknown token, or a public room's, is refused
+ * with `not_found`, and so is a knock still pending when its room ends.
  */
 export const knockRequestMessage = z.object({
   type: z.literal("knock.request"),
@@ -210,13 +216,21 @@ export const knockRequestMessage = z.object({
 /**
  * Admit or deny `userId`'s pending knock on the sender's room (host, mods and admins in it).
  * Admitting approves them until the room ends (`room_members.approved`); either way the
- * knocker gets `knock.status` and every approver present `knock.resolved`. Refusals:
- * `forbidden` (not an approver here), `not_found` (no such knock pending).
+ * knocker gets `knock.status` (`room_full` if admitted into a full room) and every approver
+ * present `knock.resolved`. The first decision wins. Refusals: `forbidden` (not an approver
+ * here), `not_found` (no such knock pending, e.g. another approver decided it first).
  */
 export const knockDecideMessage = z.object({
   type: z.literal("knock.decide"),
   userId: targetUserId,
   admit: z.boolean(),
+});
+/**
+ * Withdraw the knock pending from this socket, if any, at once (the knocker left the waiting
+ * screen).
+ */
+export const knockCancelMessage = z.object({
+  type: z.literal("knock.cancel"),
 });
 
 export const clientMessage = z.discriminatedUnion("type", [
@@ -234,6 +248,7 @@ export const clientMessage = z.discriminatedUnion("type", [
   signalMessage,
   knockRequestMessage,
   knockDecideMessage,
+  knockCancelMessage,
 ]);
 export type ClientMessage = z.infer<typeof clientMessage>;
 export type ClientMessageType = ClientMessage["type"];
@@ -484,7 +499,10 @@ export const knockPendingMessage = z.object({
   knock: knockEntry,
 });
 
-/** `userId`'s knock was handled (`knock.decide`): sent to every approver present. */
+/**
+ * `userId`'s knock is gone (decided, withdrawn, expired, or its socket closed and nobody knocked
+ * again within the reconnect grace): sent to every approver present.
+ */
 export const knockResolvedMessage = z.object({
   type: z.literal("knock.resolved"),
   roomId,
@@ -492,10 +510,22 @@ export const knockResolvedMessage = z.object({
 });
 
 /**
- * Where a knocker stands: `waiting` for an approver, `approved` (send `room.join` now; the
- * approval lasts until the room ends), or `denied`.
+ * Where a knocker stands: `waiting` for an approver, `waiting_for_host` (no host, mod or admin
+ * is connected; it turns `waiting` when one arrives, and back when the last goes), `approved`
+ * (send `room.join` now; the approval lasts until the room ends), `room_full` (approved, but
+ * the room is full: `room.join` is refused `room_full` until a spot frees), `denied`,
+ * `expired` (undecided for `KNOCK_EXPIRY_MS`; knock again), or `elsewhere` (the same user
+ * knocked from another socket, which gets the answer now; knocking here takes it back).
  */
-export const KNOCK_STATUSES = ["waiting", "approved", "denied"] as const;
+export const KNOCK_STATUSES = [
+  "waiting",
+  "waiting_for_host",
+  "approved",
+  "room_full",
+  "denied",
+  "expired",
+  "elsewhere",
+] as const;
 export type KnockStatus = (typeof KNOCK_STATUSES)[number];
 
 /** The knocker's answer to `knock.request`, and again once their knock is decided. */

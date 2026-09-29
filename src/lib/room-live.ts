@@ -389,7 +389,9 @@ export function useRoomLive(
           setResult((r) => ({ ...r, error: message }));
         }
         if (message.re === "chat.send") setResult((r) => ({ ...r, chatError: message }));
-        if (message.re && MODERATION_MESSAGES.has(message.re)) {
+        // A knock someone else decided first (or that went away) is no news: it's gone here too.
+        const knockGone = message.re === "knock.decide" && message.code === "not_found";
+        if (message.re && MODERATION_MESSAGES.has(message.re) && !knockGone) {
           setResult((r) => ({ ...r, moderationError: message }));
         }
         if (message.re === "media.state") {
