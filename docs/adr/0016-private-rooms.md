@@ -5,7 +5,7 @@ Date: 2026-09-27 · Status: accepted
 ## Decision
 - Private rooms are hidden from Live Now, search and profile "recent streams" for anyone who isn't a member. Admins still see them.
 - The invite URL carries an unguessable token. Opening it lets a signed-in user **knock**. The host or a mod approves or denies each knock over the WebSocket. Only approved users receive signalling for the room.
-- The host can regenerate the invite token, which invalidates old links.
+- The host can regenerate the invite token, which invalidates old links. Knocks pending through an old link end at once, refused as invalid.
 - Once approved, a user can rejoin freely until the room ends, unless kicked.
 
 ## Consequences

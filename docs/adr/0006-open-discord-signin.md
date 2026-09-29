@@ -18,7 +18,7 @@ There is no BhayanakBot integration for now. Room-live announcements or slash co
 
 ## Addendum: visitors and the sign-in entry point (2026-09-27)
 - Visitors can view home, profiles and past-stream recaps. Entering a room requires sign-in. Private rooms are never shown to visitors, and `/admin` requires the admin role.
-- There is no sign-in page. A "sign in with Discord" button (in the rail's avatar slot, in the home sidebar, and in a "sign in to join" prompt when a visitor clicks a room) goes straight to Discord OAuth and returns to home. Signing out also returns to the public home.
+- There is no sign-in page. A "sign in with Discord" button (in the rail's avatar slot, in the home sidebar, and in a "sign in to join" prompt when a visitor clicks a room) goes straight to Discord OAuth and returns to home. The one exception is a private room's invite link (ADR 16): signing in there returns to that link, so the visitor can knock. Signing out also returns to the public home.
 - Hosts: `https://cast.bhayanak.net` (production) and `http://localhost:3000` (development). Both are registered as Discord redirect URIs.
 - Admin actions in v1: ban and unban users (which also removes them from live rooms), end any room, promote and demote admins, and a TURN relayed-bandwidth panel against the Cloudflare free tier.
 
