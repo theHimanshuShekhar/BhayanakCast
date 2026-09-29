@@ -45,9 +45,30 @@
  * `SHARE_AUDIO_BITRATE` (asked for in the Opus parameters of the remote descriptions this side
  * applies, which is where browsers take them from).
  *
+ * Video is adaptive and per pair (ADR 2). `adjust` (run every `QUALITY_INTERVAL_MS`) reads each
+ * screen and camera sender's stats and moves it along its quality ladder (./quality.ts), applied
+ * with `setParameters` to that peer's sender alone. Each side also tells the other which video
+ * codecs it can decode (in `hello` and every description), and orders its own senders' codecs
+ * best first, AV1 > VP9 > H.264 > VP8, among those (./codecs.ts). A codec preference takes effect
+ * in the next offer, which browsers version as they do any other.
+ *
  * Local tracks belong to the caller (./local-media.ts): the Mesh never stops them.
  */
+import { localVideoCodecs, orderCodecs, type VideoCodecs } from "./codecs";
 import { type IcePath, icePathOf, isRelayed, STUN_SERVERS } from "./ice";
+import {
+  CAMERA_DEFAULT_RUNG,
+  CAMERA_LADDER,
+  captureCap,
+  freshLadderState,
+  type LadderState,
+  type Rung,
+  readSample,
+  SCREEN_DEFAULT_RUNG,
+  SCREEN_LADDER,
+  type StatsSample,
+  step,
+} from "./quality";
 import type { MediaSlot, SignalPayload } from "./realtime";
 
 /**
@@ -86,6 +107,24 @@ export type MeshEvent =
   /** A peer's connection closed (they left, or it restarted: a new `state` follows then). */
   | { type: "closed"; userId: string };
 
+/** How often each video sender's stats are read to adapt its quality. */
+export const QUALITY_INTERVAL_MS = 4_000;
+/** Readings ignored after a sender starts: the bandwidth estimate is still ramping up. */
+const WARMUP_READINGS = 2;
+
+/** What the dev overlay shows of one video sender to one peer. */
+export interface SlotQuality {
+  /** The ladder rung, like `1080p30`. */
+  rung: string;
+  /** The codec in use, like `video/VP9`, once known. */
+  codec?: string;
+}
+export interface PeerQuality {
+  userId: string;
+  screen?: SlotQuality;
+  cam?: SlotQuality;
+}
+
 /** How long a connection may take to connect (or reconnect) before it gets an ICE restart. */
 export const CONNECT_TIMEOUT_MS = 20_000;
 
@@ -98,6 +137,8 @@ export interface MeshOptions {
   iceServers?: RTCIceServer[];
   /** Where negotiation failures are reported. Defaults to `console.warn`. */
   log?: (message: string, error?: unknown) => void;
+  /** This browser's video codecs. Defaults to what it reports. For tests. */
+  codecs?: VideoCodecs;
   /** For tests. */
   RTCPeerConnection?: typeof RTCPeerConnection;
 }
@@ -108,6 +149,15 @@ const SLOT_KIND: Record<MediaSlot, "audio" | "video"> = {
   screen: "video",
   screenAudio: "audio",
 };
+
+type VideoSlot = "screen" | "cam";
+const VIDEO_SLOTS: readonly VideoSlot[] = ["screen", "cam"];
+const LADDERS: Record<VideoSlot, { rungs: readonly Rung[]; start: number }> = {
+  screen: { rungs: SCREEN_LADDER, start: SCREEN_DEFAULT_RUNG },
+  cam: { rungs: CAMERA_LADDER, start: CAMERA_DEFAULT_RUNG },
+};
+const isVideoSlot = (slot: MediaSlot): slot is VideoSlot => slot in LADDERS;
+const rungOf = (slot: VideoSlot, i: number) => LADDERS[slot].rungs[i] as Rung;
 
 /** Created with every connection, so a pair connects before anyone unmutes. */
 const EAGER_SLOTS: readonly MediaSlot[] = ["mic"];
@@ -180,6 +230,15 @@ type Step =
   | Omit<Extract<SignalPayload, { kind: "candidate" }>, "session" | "peerSession">
   | Omit<Extract<SignalPayload, { kind: "visibility" }>, "session" | "peerSession">;
 
+/** One video sender's place on its quality ladder (`rung` is the one wanted, see `#tune`). */
+interface Adaptation extends LadderState {
+  /** Readings taken since it started, warm-up included. */
+  readings: number;
+  /** The latest reading (the next one's `sendBitrate` is measured from it). */
+  last?: StatsSample;
+  codec?: string;
+}
+
 interface Link {
   userId: string;
   polite: boolean;
@@ -208,6 +267,12 @@ interface Link {
   restarted: boolean;
   /** It replaces a connection that never negotiated (see `#failed`). */
   startedOver: boolean;
+  /** The video codecs the peer can decode, once it has said. */
+  remoteCodecs?: string[];
+  /** Where each of this side's video senders is on its ladder. */
+  quality: Partial<Record<VideoSlot, Adaptation>>;
+  /** Each video sender's parameter changes, one at a time. */
+  tuning: Partial<Record<VideoSlot, Promise<void>>>;
   /** Runs out while it is connecting (`CONNECT_TIMEOUT_MS`). */
   connectTimer?: ReturnType<typeof setTimeout>;
 }
@@ -218,12 +283,15 @@ export class Mesh {
   #iceServers: RTCIceServer[];
   readonly #log: (message: string, error?: unknown) => void;
   readonly #RTCPeerConnection: typeof RTCPeerConnection;
+  readonly #codecs: VideoCodecs | undefined;
   readonly #links = new Map<string, Link>();
   readonly #listeners = new Set<(event: MeshEvent) => void>();
   readonly #local: Partial<Record<MediaSlot, MediaStreamTrack | null>> = {};
   /** Per peer, whether this page shows each slot of theirs it has said (kept across reconnects). */
   readonly #shown = new Map<string, Map<MediaSlot, boolean>>();
   #closed = false;
+  #adjustTimer: ReturnType<typeof setInterval> | undefined;
+  #adjusting = false;
 
   constructor(options: MeshOptions) {
     this.#selfId = options.selfId;
@@ -231,6 +299,7 @@ export class Mesh {
     this.#iceServers = options.iceServers ?? STUN_SERVERS;
     this.#log = options.log ?? ((message, error) => console.warn(`[mesh] ${message}`, error));
     this.#RTCPeerConnection = options.RTCPeerConnection ?? RTCPeerConnection;
+    this.#codecs = options.codecs ?? localVideoCodecs();
   }
 
   /**
@@ -275,6 +344,13 @@ export class Mesh {
     const offer = payload.kind === "description" && payload.description.type === "offer";
     link ??= this.#open(from, !offer);
     link.remoteSession = payload.session;
+    if ((payload.kind === "hello" || payload.kind === "description") && payload.codecs) {
+      link.remoteCodecs = payload.codecs;
+      for (const slot of VIDEO_SLOTS) {
+        const transceiver = link.own.get(slot);
+        if (transceiver) this.#prefer(link, transceiver);
+      }
+    }
     if (payload.kind === "hello") {
       // They have no offer from this side: it went while they were away (their reconnect
       // grace), so send it again. It carries the candidates gathered so far.
@@ -303,6 +379,11 @@ export class Mesh {
     if (this.#closed) return;
     for (const [slot, track] of Object.entries(tracks) as [MediaSlot, MediaStreamTrack | null][]) {
       if (track === undefined) continue;
+      // A new capture starts at its ladder's default again.
+      if (track && track !== this.#local[slot] && isVideoSlot(slot)) {
+        for (const link of this.#links.values()) delete link.quality[slot];
+        this.#watchQuality();
+      }
       this.#local[slot] = track;
       for (const link of this.#links.values()) {
         // It gets the local tracks when it starts.
@@ -375,6 +456,37 @@ export class Mesh {
     return new Map(links.map((link, i) => [link.userId, reports[i] as RTCStatsReport]));
   }
 
+  /**
+   * Read every video sender's stats and move it along its ladder (run every
+   * `QUALITY_INTERVAL_MS` while something is sent; public for tests). Each peer's senders adapt
+   * on their own connection's stats, so a viewer on a bad link doesn't degrade the others.
+   */
+  async adjust(): Promise<void> {
+    if (this.#adjusting) return;
+    this.#adjusting = true;
+    try {
+      await Promise.all([...this.#links.values()].map((link) => this.#adjustLink(link)));
+    } finally {
+      this.#adjusting = false;
+    }
+  }
+
+  /** Each peer's current rung and codec, per video sender that is sending (for the dev overlay). */
+  quality(): PeerQuality[] {
+    return [...this.#links.values()].map((link) => {
+      const peer: PeerQuality = { userId: link.userId };
+      for (const slot of VIDEO_SLOTS) {
+        const state = link.quality[slot];
+        if (!state || !link.own.get(slot)?.sender.track) continue;
+        peer[slot] = {
+          rung: rungOf(slot, state.rung).label,
+          ...(state.codec && { codec: state.codec }),
+        };
+      }
+      return peer;
+    });
+  }
+
   /** Remote tracks and connection states as they change. Returns an unsubscribe function. */
   subscribe(listener: (event: MeshEvent) => void): () => void {
     this.#listeners.add(listener);
@@ -386,6 +498,7 @@ export class Mesh {
     if (this.#closed) return;
     for (const userId of [...this.#links.keys()]) this.peerLeft(userId);
     this.#closed = true;
+    clearInterval(this.#adjustTimer);
     this.#listeners.clear();
   }
 
@@ -411,6 +524,8 @@ export class Mesh {
       remoteSlots: new Map(),
       paused: new Set(),
       tracks: {},
+      quality: {},
+      tuning: {},
       queue: Promise.resolve(),
       restarted: false,
       startedOver,
@@ -427,7 +542,9 @@ export class Mesh {
     this.#waitToConnect(link);
     // The impolite side makes the first offer; the polite side starts once it has answered.
     if (!link.polite) this.#start(link);
-    else if (greet) this.#send(userId, { kind: "hello", session: link.session });
+    else if (greet) {
+      this.#send(userId, { kind: "hello", session: link.session, ...this.#decodable() });
+    }
     return link;
   }
 
@@ -454,26 +571,128 @@ export class Mesh {
       ...(slot === "screenAudio" && { sendEncodings: [{ maxBitrate: SHARE_AUDIO_BITRATE }] }),
     });
     link.own.set(slot, transceiver);
+    if (SLOT_KIND[slot] === "video") this.#prefer(link, transceiver);
     this.#tune(link, slot, transceiver.sender);
+  }
+
+  /** Offer `transceiver`'s codecs best first, among those the peer can decode (once known). */
+  #prefer(link: Link, transceiver: RTCRtpTransceiver): void {
+    if (!this.#codecs || !transceiver.setCodecPreferences) return;
+    try {
+      transceiver.setCodecPreferences(orderCodecs(this.#codecs.send, link.remoteCodecs));
+    } catch (error) {
+      this.#log(`choosing codecs for ${link.userId} failed`, error);
+    }
   }
 
   /** Swap what `slot`'s transceiver sends `link`'s peer (no renegotiation). */
   #sendSlot(link: Link, slot: MediaSlot, transceiver: RTCRtpTransceiver): void {
     transceiver.sender
       .replaceTrack(this.#outgoing(link, slot))
-      .then(() => this.#tune(link, slot, transceiver.sender))
+      .then(() => {
+        // A resumed or replaced track: the readings so far were of something else.
+        const state = isVideoSlot(slot) ? link.quality[slot] : undefined;
+        if (state)
+          Object.assign(state, freshLadderState(state.rung), { readings: 0, last: undefined });
+        this.#tune(link, slot, transceiver.sender);
+      })
       .catch((error: unknown) => this.#log(`sending ${slot} to ${link.userId} failed`, error));
   }
 
-  /** A screen sender's degradation preference follows its track's content hint (room kind). */
+  /**
+   * Make a video sender encode at its wanted rung (bitrate, frame rate, scale down from the
+   * capture) and, for a screen, its degradation preference (from its track's content hint, i.e.
+   * the room kind). Changes to one sender go one at a time; what is applied is compared with
+   * what is wanted on every `adjust` pass, so a change that was refused (or a capture that has
+   * since been resized) is made again.
+   */
   #tune(link: Link, slot: MediaSlot, sender: RTCRtpSender): void {
-    if (slot !== "screen" || !sender.track) return;
+    if (!isVideoSlot(slot)) return;
+    link.tuning[slot] = (link.tuning[slot] ?? Promise.resolve())
+      .then(() => this.#applyRung(link, slot, sender))
+      .catch((error: unknown) => this.#log(`tuning the ${slot} to ${link.userId} failed`, error));
+  }
+
+  async #applyRung(link: Link, slot: VideoSlot, sender: RTCRtpSender): Promise<void> {
+    const track = sender.track;
+    if (!track || !this.#current(link)) return;
+    const rung = rungOf(slot, this.#adaptation(link, slot, track).rung);
     const parameters = sender.getParameters();
-    const degradationPreference = degradationFor(sender.track.contentHint);
-    if (parameters.degradationPreference === degradationPreference) return;
-    sender
-      .setParameters({ ...parameters, degradationPreference })
-      .catch((error: unknown) => this.#log(`tuning the share to ${link.userId} failed`, error));
+    const [first, ...others] = parameters.encodings ?? [];
+    if (!first) return;
+    const height = track.getSettings?.().height;
+    const wanted: RTCRtpEncodingParameters = {
+      maxBitrate: rung.maxBitrate,
+      maxFramerate: rung.frameRate,
+      ...(height && { scaleResolutionDownBy: Math.max(1, height / rung.height) }),
+    };
+    const degradationPreference =
+      slot === "screen" ? degradationFor(track.contentHint) : parameters.degradationPreference;
+    const unchanged =
+      parameters.degradationPreference === degradationPreference &&
+      Object.entries(wanted).every(([key, value]) => first[key as keyof typeof first] === value);
+    if (unchanged) return;
+    await sender.setParameters({
+      ...parameters,
+      encodings: [{ ...first, ...wanted }, ...others],
+      ...(degradationPreference && { degradationPreference }),
+    });
+  }
+
+  /** `slot`'s ladder state for `link`: its default rung, or the highest its capture feeds. */
+  #adaptation(link: Link, slot: VideoSlot, track: MediaStreamTrack): Adaptation {
+    let state = link.quality[slot];
+    if (!state) {
+      const rung = Math.min(LADDERS[slot].start, this.#cap(slot, track));
+      state = { ...freshLadderState(rung), readings: 0 };
+      link.quality[slot] = state;
+    }
+    return state;
+  }
+
+  /** The highest rung `track`'s capture can feed. */
+  #cap(slot: VideoSlot, track: MediaStreamTrack): number {
+    return captureCap(LADDERS[slot].rungs, track.getSettings?.() ?? {});
+  }
+
+  /** What `link`'s other video sender is sending, which `slot`'s can't have of the estimate. */
+  #reservedFor(link: Link, slot: VideoSlot): number {
+    const other = VIDEO_SLOTS.find((s) => s !== slot) as VideoSlot;
+    return link.own.get(other)?.sender.track ? (link.quality[other]?.last?.sendBitrate ?? 0) : 0;
+  }
+
+  #watchQuality(): void {
+    this.#adjustTimer ??= setInterval(() => void this.adjust(), QUALITY_INTERVAL_MS);
+  }
+
+  async #adjustLink(link: Link): Promise<void> {
+    if (link.state !== "connected" && link.state !== "relayed") return;
+    for (const slot of VIDEO_SLOTS) {
+      const sender = link.own.get(slot)?.sender;
+      const track = sender?.track;
+      if (!sender || !track) continue;
+      const state = this.#adaptation(link, slot, track);
+      let sample: StatsSample;
+      try {
+        sample = readSample(await sender.getStats(), state.last);
+      } catch (error) {
+        this.#log(`reading ${slot} stats for ${link.userId} failed`, error);
+        continue;
+      }
+      if (!this.#current(link) || sender.track !== track || link.quality[slot] !== state) continue;
+      if (sample.codec) state.codec = sample.codec;
+      state.last = sample;
+      if (state.readings++ >= WARMUP_READINGS) {
+        Object.assign(
+          state,
+          step(LADDERS[slot].rungs, state, sample, {
+            max: this.#cap(slot, track),
+            reserved: this.#reservedFor(link, slot),
+          }),
+        );
+      }
+      this.#tune(link, slot, sender);
+    }
   }
 
   #shut(link: Link): void {
@@ -534,6 +753,11 @@ export class Mesh {
     // A polite side's own pending offer is rolled back implicitly.
     await pc.setRemoteDescription({ type: description.type, sdp });
     link.remoteSdp = description.sdp;
+    // Encoding parameters can only be set once there is something negotiated to set them on.
+    for (const slot of VIDEO_SLOTS) {
+      const sender = link.own.get(slot)?.sender;
+      if (sender) this.#tune(link, slot, sender);
+    }
     if (offer) {
       await pc.setLocalDescription();
       if (!this.#current(link)) return;
@@ -552,7 +776,13 @@ export class Mesh {
       kind: "description",
       description: { type: description.type, sdp: description.sdp },
       slots,
+      ...this.#decodable(),
     });
+  }
+
+  /** The video codecs this side tells peers it can decode. */
+  #decodable(): { codecs?: string[] } {
+    return this.#codecs ? { codecs: this.#codecs.receive } : {};
   }
 
   #signal(link: Link, step: Step): void {

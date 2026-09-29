@@ -1,4 +1,5 @@
 import type { Browser, BrowserContext, Page } from "@playwright/test";
+import { captureCap, SCREEN_DEFAULT_RUNG, SCREEN_LADDER } from "../src/lib/quality";
 import { MAX_CLIENT_MESSAGE_BYTES } from "../src/lib/realtime";
 import { signIn } from "./auth";
 import { expect, newPage, test } from "./fixtures";
@@ -124,6 +125,42 @@ const shareSenders = (page: Page) =>
     return { screens, audio };
   });
 
+/**
+ * How the page's open connections encode its share (ADR 2): each screen sender's encoding
+ * (bitrate and frame rate cap, from its quality rung) and the codec it sends with, next to the
+ * best codec this browser offers by the ladder AV1 > VP9 > H.264 > VP8.
+ */
+const screenEncodings = (page: Page) =>
+  page.evaluate(async () => {
+    const w = window as unknown as Instrumented;
+    const open = w.__pcs.filter((pc) => pc.connectionState !== "closed");
+    const senders: { maxBitrate?: number; maxFramerate?: number; codec?: string }[] = [];
+    for (const pc of open) {
+      for (const sender of pc.getSenders()) {
+        const track = sender.track;
+        if (track?.kind !== "video" || !w.__captured.includes(track)) continue;
+        const { maxBitrate, maxFramerate } = sender.getParameters().encodings[0] ?? {};
+        let codec: string | undefined;
+        const report = await sender.getStats();
+        report.forEach((s: { type: string; codecId?: string }) => {
+          if (s.type === "outbound-rtp" && s.codecId) {
+            codec = (report.get(s.codecId) as { mimeType?: string } | undefined)?.mimeType;
+          }
+        });
+        senders.push({ maxBitrate, maxFramerate, codec });
+      }
+    }
+    const settings = w.__captured.find((track) => track.kind === "video")?.getSettings() ?? {};
+    const capture = { height: settings.height, frameRate: settings.frameRate };
+    const offered = (RTCRtpSender.getCapabilities("video")?.codecs ?? []).map((c) =>
+      c.mimeType.toLowerCase(),
+    );
+    const best = ["video/av1", "video/vp9", "video/h264", "video/vp8"].find((m) =>
+      offered.includes(m),
+    );
+    return { senders, best, capture };
+  });
+
 const log = (page: Page) => page.evaluate(() => (window as unknown as Instrumented).__log);
 const largestSent = (page: Page) =>
   page.evaluate(() => (window as unknown as Instrumented).__largestSent);
@@ -180,6 +217,25 @@ test("a share plays with its audio for everyone, and a mod's force-stop removes 
         { maxBitrate: 128_000, fmtp: expect.stringContaining("stereo=1") },
         { maxBitrate: 128_000, fmtp: expect.stringContaining("stereo=1") },
       ]);
+
+    // Each viewer's copy is on the quality ladder, and goes out in the best codec this browser
+    // offers (both ends are the same browser here).
+    // Each starts at 1080p30, or the highest rung its capture feeds if that is lower.
+    const start =
+      SCREEN_LADDER[
+        Math.min(
+          SCREEN_DEFAULT_RUNG,
+          captureCap(SCREEN_LADDER, (await screenEncodings(streamer.page)).capture),
+        )
+      ];
+    const started = async () =>
+      (await screenEncodings(streamer.page)).senders.map(
+        (s) =>
+          s.maxBitrate === start?.maxBitrate && s.maxFramerate === start?.frameRate && !!s.codec,
+      );
+    await expect.poll(started, { timeout: 15_000 }).toEqual([true, true]);
+    const { senders, best } = await screenEncodings(streamer.page);
+    for (const sender of senders) expect(sender.codec?.toLowerCase()).toBe(best);
 
     // The viewer hears it, at their own volume for this share. (Headless Firefox runs no
     // AudioContext, so its stand-in share is silent there.)

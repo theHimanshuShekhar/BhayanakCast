@@ -94,13 +94,13 @@ export const CAMERA_CONSTRAINTS: MediaTrackConstraints = {
 };
 
 /**
- * Screen capture: at most 1080p30, the quality ladder's default (ADR 2). The ladder's 1080p60
- * rung (#37) needs the frame rate raised here.
+ * Screen capture: at most 1080p60, the quality ladder's top rung (ADR 2). Each peer's sender
+ * encodes at the rung its connection allows (src/lib/quality.ts), 1080p30 to start.
  */
 export const SCREEN_CONSTRAINTS: MediaTrackConstraints = {
   width: { max: 1920 },
   height: { max: 1080 },
-  frameRate: { ideal: 30 },
+  frameRate: { ideal: 60 },
 };
 
 /** Share audio as it plays: no voice processing (ADR 2 addendum). */

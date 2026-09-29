@@ -236,8 +236,25 @@ describe("signal", () => {
     expect(await a.closed()).toBe(1009);
   });
 
+  it("relays the video codecs each side can decode with its hello and descriptions", async () => {
+    const [a, b] = await inRoom([ana, bo]);
+    const codecs = ["video/AV1", "video/VP9", "video/H264", "video/VP8"];
+    a.send(signal(bo, { ...HELLO, codecs }));
+    expect((await b.waitFor("signal")).payload).toEqual({ ...HELLO, codecs });
+    a.send(signal(bo, { ...OFFER, codecs }));
+    expect((await b.waitFor("signal")).payload).toEqual({ ...OFFER, codecs });
+  });
+
   it("refuses a malformed payload", async () => {
     const [a] = await inRoom([ana, bo]);
+    a.sendRaw(
+      JSON.stringify({
+        type: "signal",
+        to: bo.id,
+        payload: { ...HELLO, codecs: ["x".repeat(49)] },
+      }),
+    );
+    expect(await a.waitFor("error")).toMatchObject({ code: "bad_request", re: "signal" });
     a.sendRaw(JSON.stringify({ type: "signal", to: bo.id, payload: { kind: "nonsense" } }));
     expect(await a.waitFor("error")).toMatchObject({ code: "bad_request", re: "signal" });
     a.sendRaw(

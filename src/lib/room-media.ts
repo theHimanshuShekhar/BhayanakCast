@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { keepIceServersFresh } from "./ice";
 import { getIceServersFn, reportIceFn } from "./ice.functions";
-import { Mesh, type PeerState } from "./mesh";
+import { Mesh, type PeerQuality, type PeerState } from "./mesh";
 import type { MediaSlot, RoomParticipant } from "./realtime";
 import { getRealtimeClient } from "./realtime-client";
 import { speakingContext, watchSpeaking } from "./speaking";
@@ -32,6 +32,8 @@ export interface RoomMesh {
   shareAudio: ReadonlySet<string>;
   /** Start the connection to `userId` over (after it `failed`). */
   retry: (userId: string) => void;
+  /** Each peer's video rung and codec, for the dev overlay (ADR 2). */
+  quality: () => PeerQuality[];
 }
 
 /** What this page sends everyone (null: nothing). */
@@ -169,7 +171,9 @@ export function useRoomMesh(
 
   const retry = useCallback((userId: string) => mesh.current?.retry(userId), []);
 
-  return { remote, states, shareAudio, retry };
+  const quality = useCallback(() => mesh.current?.quality() ?? [], []);
+
+  return { remote, states, shareAudio, retry, quality };
 }
 
 /** Tell `mesh` whose cameras (of everyone else in `roster`) this page is showing. */
