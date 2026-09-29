@@ -14,7 +14,7 @@ import { useAppActions } from "~/lib/app-actions";
 import { useCurrentSession } from "~/lib/current-user";
 import { fmtMins, MAX_STREAMERS } from "~/lib/format";
 import { inviteUrl } from "~/lib/invites";
-import { getInviteTokenFn } from "~/lib/invites.functions";
+import { getInviteTokenFn, regenerateInviteTokenFn } from "~/lib/invites.functions";
 import { decideKnock, usePendingKnocks } from "~/lib/knock-live";
 import { getLocalMedia, type LocalDeviceKind, useLocalMedia } from "~/lib/local-media";
 import {
@@ -163,16 +163,19 @@ function RoomVisit({ room, admin }: { room: LiveRoomCard; admin: boolean }) {
 }
 
 /**
- * The room-info menu. In a private room the host, mods and admins can copy its invite link
- * (ADR 16); `onInviteResult` gets what to tell them, copied or not.
+ * The room-info menu. In a private room the host, mods and admins can copy its invite link,
+ * and the host can regenerate it so old links stop working (ADR 16); `onInviteResult` gets what
+ * to tell them, done or not.
  */
 function RoomInfoMenu({
   roomId,
   canInvite,
+  canRegenerate,
   onInviteResult,
 }: {
   roomId: string;
   canInvite: boolean;
+  canRegenerate: boolean;
   onInviteResult: (notice: { message: string }) => void;
 }) {
   const trigger = (
@@ -197,6 +200,18 @@ function RoomInfoMenu({
       onInviteResult({ message: "couldn't copy the invite link" });
     }
   };
+  const regenerateInvite = async () => {
+    try {
+      if (!(await regenerateInviteTokenFn({ data: { roomId } }))) {
+        throw new Error("Only the host can regenerate the invite link");
+      }
+      onInviteResult({ message: "new invite link made: old links no longer work" });
+    } catch {
+      onInviteResult({ message: "couldn't regenerate the invite link" });
+    }
+  };
+  const itemCls =
+    "flex items-center gap-2 px-2.5 py-2 rounded-[var(--radius-sm)] text-xs text-fg cursor-pointer outline-0 data-highlighted:bg-surface-2";
   return (
     <Menu.Root>
       <Menu.Trigger render={<Btn variant="ghost" size="sm" title="Room info" />}>
@@ -205,12 +220,14 @@ function RoomInfoMenu({
       <Menu.Portal>
         <Menu.Positioner side="top" align="start" sideOffset={10} className="z-[160] outline-0">
           <Menu.Popup className="min-w-[200px] p-1.5 bg-surface border border-border-strong rounded-[var(--radius)] shadow-deep outline-0">
-            <Menu.Item
-              onClick={() => void copyInvite()}
-              className="flex items-center gap-2 px-2.5 py-2 rounded-[var(--radius-sm)] text-xs text-fg cursor-pointer outline-0 data-highlighted:bg-surface-2"
-            >
+            <Menu.Item onClick={() => void copyInvite()} className={itemCls}>
               <Icon.Users size={13} /> copy invite link
             </Menu.Item>
+            {canRegenerate && (
+              <Menu.Item onClick={() => void regenerateInvite()} className={itemCls}>
+                <Icon.Lock size={13} /> regenerate invite link
+              </Menu.Item>
+            )}
           </Menu.Popup>
         </Menu.Positioner>
       </Menu.Portal>
@@ -363,7 +380,7 @@ function RoomPage({
   const mediaNotice = useNotice(live.mediaError);
   const moderationNotice = useNotice(live.moderationError);
   const deviceNotice = useNotice(deviceError, 8_000);
-  // Whether "copy invite link" worked.
+  // Whether "copy invite link" or "regenerate invite link" worked.
   const [inviteResult, setInviteResult] = useState<{ message: string } | null>(null);
   const inviteNotice = useNotice(inviteResult);
   const notice = moderationNotice ?? deviceNotice ?? mediaNotice ?? inviteNotice;
@@ -618,6 +635,7 @@ function RoomPage({
             <RoomInfoMenu
               roomId={detail.id}
               canInvite={isPrivate && joined && isModerator(myRole, admin)}
+              canRegenerate={isPrivate && joined && myRole === "host"}
               onInviteResult={setInviteResult}
             />
           </div>

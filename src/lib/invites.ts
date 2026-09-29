@@ -16,7 +16,12 @@ export interface InvitedRoom {
   name: string;
 }
 
+/** The path of the invite link for `inviteToken`. */
+export function invitePath(inviteToken: string): string {
+  return `/join/${encodeURIComponent(inviteToken)}`;
+}
+
 /** The invite link for `inviteToken` on the site at `origin`. */
 export function inviteUrl(origin: string, inviteToken: string): string {
-  return `${origin}/join/${encodeURIComponent(inviteToken)}`;
+  return `${origin}${invitePath(inviteToken)}`;
 }

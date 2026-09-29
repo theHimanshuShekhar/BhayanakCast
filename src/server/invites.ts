@@ -5,9 +5,11 @@
  */
 import { and, eq, isNull } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
+import { newInviteToken } from "../db/ids.ts";
 import { rooms } from "../db/schema/index.ts";
 import type { InvitedRoom } from "../lib/invites.ts";
 import type { Caller } from "./caller.ts";
+import type { RoomHub } from "./room-hub.ts";
 import { roomApprovableBy } from "./visibility.ts";
 
 /**
@@ -45,4 +47,34 @@ export async function getInviteToken(
       ),
     );
   return room?.inviteToken ?? null;
+}
+
+/**
+ * Regenerate the invite link of the live private room `roomId`, for its host only: old links
+ * stop opening it, and knocks pending through them end on `hub` (./live-hub.ts; null when none
+ * runs in this process), while approved members keep their approval. The new token, or null for
+ * anyone else, or for a public or ended room.
+ */
+export async function regenerateInviteToken(
+  db: Db,
+  caller: Caller,
+  roomId: string,
+  hub: Pick<RoomHub, "inviteRotated"> | null,
+): Promise<string | null> {
+  if (!caller.user) return null;
+  const [room] = await db
+    .update(rooms)
+    .set({ inviteToken: newInviteToken() })
+    .where(
+      and(
+        eq(rooms.id, roomId),
+        eq(rooms.isPrivate, true),
+        isNull(rooms.endedAt),
+        eq(rooms.hostUserId, caller.user.id),
+      ),
+    )
+    .returning({ inviteToken: rooms.inviteToken });
+  if (!room) return null;
+  await hub?.inviteRotated(roomId);
+  return room.inviteToken;
 }
