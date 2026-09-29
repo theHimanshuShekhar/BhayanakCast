@@ -197,22 +197,25 @@ describe("test-only sign-in", () => {
   });
 });
 
+/** Better Auth's own `/update-user` as the signed-in user of `signedIn`'s cookies. */
+function updateUserRequest(signedIn: Response, body: object) {
+  const headers = cookiesFrom(signedIn);
+  headers.set("content-type", "application/json");
+  headers.set("origin", testEnv.BETTER_AUTH_URL);
+  return auth.handler(
+    new Request(`${testEnv.BETTER_AUTH_URL}/api/auth/update-user`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
 describe("settings column", () => {
   it("can't be written through Better Auth's /update-user", async () => {
     const signedIn = await testSignInRequest("4000", "kodama_jpg");
     const { userId } = (await signedIn.clone().json()) as { userId: string };
-    const updateUser = (body: object) => {
-      const headers = cookiesFrom(signedIn);
-      headers.set("content-type", "application/json");
-      headers.set("origin", testEnv.BETTER_AUTH_URL);
-      return auth.handler(
-        new Request(`${testEnv.BETTER_AUTH_URL}/api/auth/update-user`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(body),
-        }),
-      );
-    };
+    const updateUser = (body: object) => updateUserRequest(signedIn, body);
     const rowOf = async () => {
       const [row] = await db.select().from(user).where(eq(user.id, userId));
       return row;
@@ -223,6 +226,41 @@ describe("settings column", () => {
 
     await updateUser({ settings: { ...DEFAULT_USER_SETTINGS, theme: "light" } });
     expect((await rowOf())?.settings).toEqual(DEFAULT_USER_SETTINGS);
+  });
+});
+
+describe("Discord columns", () => {
+  it("can't be written through Better Auth's /update-user", async () => {
+    const signedIn = await testSignInRequest("4200", "kodama_jpg");
+    const { userId } = (await signedIn.clone().json()) as { userId: string };
+    // An env admin's Discord id would make the next sign-in an admin's.
+    for (const body of [{ discordId: "1000" }, { discordUsername: "someone_else" }]) {
+      expect((await updateUserRequest(signedIn, body)).status).toBe(403);
+    }
+    const [row] = await db.select().from(user).where(eq(user.id, userId));
+    expect(row).toMatchObject({ discordId: "4200", discordUsername: "kodama_jpg" });
+  });
+});
+
+describe("image column", () => {
+  it("can't be written through Better Auth's /update-user", async () => {
+    const signedIn = await testSignInRequest("4100", "kodama_jpg");
+    const { userId } = (await signedIn.clone().json()) as { userId: string };
+    const rowOf = async () => {
+      const [row] = await db
+        .select({ name: user.name, image: user.image })
+        .from(user)
+        .where(eq(user.id, userId));
+      return row;
+    };
+    expect((await updateUserRequest(signedIn, { name: "renamed" })).ok).toBe(true);
+
+    // Anyone shown this picture would load it: a URL of the user's own would log their IPs.
+    const image = "https://tracker.example/pixel.png";
+    const response = await updateUserRequest(signedIn, { name: "renamed again", image });
+    expect(response.status).toBe(403);
+    // Refused whole: nothing of that request applied.
+    expect(await rowOf()).toEqual({ name: "renamed", image: null });
   });
 });
 
