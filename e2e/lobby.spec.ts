@@ -25,16 +25,49 @@ async function stillSameDocument(page: Page): Promise<boolean> {
   return page.evaluate(() => (window as { __lobbyMark?: boolean }).__lobbyMark === true);
 }
 
+/**
+ * Record every value the rail's online count takes from now on. Users of other tests leave as
+ * ours arrives, so a snapshot of the count can miss the arrival (1 -> 2 -> 1); the sequence
+ * can't.
+ */
+async function recordRailOnline(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const seen: number[] = [];
+    (window as { __railOnline?: number[] }).__railOnline = seen;
+    const read = () => {
+      const label = document.querySelector('[role="status"]')?.getAttribute("aria-label");
+      const value = Number.parseInt(label?.match(/^(\d+) online$/)?.[1] ?? "", 10);
+      if (!Number.isNaN(value) && value !== seen.at(-1)) seen.push(value);
+    };
+    new MutationObserver(read).observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["aria-label"],
+    });
+    read();
+  });
+}
+
+/** Whether the recorded rail count ever went up. */
+async function railOnlineWentUp(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const seen = (window as { __railOnline?: number[] }).__railOnline ?? [];
+    return seen.some((value, i) => i > 0 && value > (seen[i - 1] ?? value));
+  });
+}
+
 test("a visitor's rail counts a user who signs in elsewhere", async ({ page, browser }) => {
   await page.goto("/");
-  const before = await railOnline(page);
+  await railOnline(page); // the lobby socket is up
   await markDocument(page);
+  await recordRailOnline(page);
 
   const other = await browser.newContext();
   try {
     await signIn(other, { username: "lobby.arrival" });
     await (await newPage(other)).goto("/");
-    await expect.poll(() => railOnline(page)).toBeGreaterThan(before);
+    await expect.poll(() => railOnlineWentUp(page)).toBe(true);
     expect(await stillSameDocument(page)).toBe(true);
   } finally {
     await other.close();
