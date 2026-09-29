@@ -197,6 +197,19 @@ describe("knock and admit", () => {
     await b.waitFor("knock.status", (m) => m.status === "approved");
   });
 
+  it("tells a knocker waiting for the host when a site admin arrives or goes by role change", async () => {
+    await approve(cy.id);
+    const c = await h.connectAs(cy);
+    await c.join(roomId);
+    const b = await knock(bo, "waiting_for_host");
+
+    await h.hub.setUserRole(cy.id, "admin");
+    expect(await b.waitFor("knock.status")).toMatchObject({ status: "waiting" });
+
+    await h.hub.setUserRole(cy.id, "user");
+    expect(await b.waitFor("knock.status")).toMatchObject({ status: "waiting_for_host" });
+  });
+
   it("keeps the knock pending if the approval can't be stored", async () => {
     const a = await h.connectAs(ana);
     await a.join(roomId);

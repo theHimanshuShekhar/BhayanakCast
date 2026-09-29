@@ -387,6 +387,8 @@ export class RoomHub {
       }
       for (const { room, participant, approved } of inRooms) {
         if (!approved) this.#sendPendingKnocks(room, participant);
+        // An approver may have arrived (promoted) or gone (demoted): knockers wait accordingly.
+        this.#updateKnockers(room);
       }
     });
   }
