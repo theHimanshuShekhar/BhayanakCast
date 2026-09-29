@@ -170,7 +170,7 @@ async function peopleIn(
 }
 
 /** When each streamer's latest thumbnail was captured (ISO), keyed `roomId:userId`. */
-async function thumbnailTimes(db: Db, roomIds: string[]): Promise<Map<string, string>> {
+export async function thumbnailTimes(db: Db, roomIds: string[]): Promise<Map<string, string>> {
   if (roomIds.length === 0) return new Map();
   const rows = await db
     .select({
@@ -182,6 +182,10 @@ async function thumbnailTimes(db: Db, roomIds: string[]): Promise<Map<string, st
     .where(inArray(thumbnails.roomId, roomIds));
   return new Map(rows.map((r) => [`${r.roomId}:${r.userId}`, r.capturedAt.toISOString()]));
 }
+
+/** `userId`'s thumbnail time in `roomId` from `thumbnailTimes`, or null if they have none. */
+export const capturedAtOf = (captured: Map<string, string>, roomId: string, userId: string) =>
+  captured.get(`${roomId}:${userId}`) ?? null;
 
 /** Live room rows with the people in them now (open presence and stream intervals). */
 async function withPeopleNow(db: Db, rows: RoomRow[]): Promise<LiveRoomCard[]> {
@@ -195,7 +199,7 @@ async function withPeopleNow(db: Db, rows: RoomRow[]): Promise<LiveRoomCard[]> {
     const participants = present.get(row.id) ?? [];
     const streamers = (streaming.get(row.id) ?? []).map((person) => ({
       ...person,
-      thumbnailAt: captured.get(`${row.id}:${person.id}`) ?? null,
+      thumbnailAt: capturedAtOf(captured, row.id, person.id),
     }));
     return {
       ...toSummary(row),
@@ -264,9 +268,10 @@ export async function listPastRooms(
     )
     .orderBy(desc(rooms.endedAt), asc(rooms.id));
   const ids = rows.map((row) => row.id);
-  const [present, streamed] = await Promise.all([
+  const [present, streamed, captured] = await Promise.all([
     peopleIn(db, presenceIntervals, ids, { openOnly: false }),
     peopleIn(db, streamIntervals, ids, { openOnly: false }),
+    thumbnailTimes(db, ids),
   ]);
   return rows.flatMap((row) => {
     if (!row.endedAt) return [];
@@ -276,7 +281,10 @@ export async function listPastRooms(
         endedAt: row.endedAt.toISOString(),
         durationMinutes: minutesBetween(row.createdAt, row.endedAt),
         people: present.get(row.id) ?? [],
-        streamers: streamed.get(row.id) ?? [],
+        streamers: (streamed.get(row.id) ?? []).map((person) => ({
+          ...person,
+          thumbnailAt: capturedAtOf(captured, row.id, person.id),
+        })),
       },
     ];
   });

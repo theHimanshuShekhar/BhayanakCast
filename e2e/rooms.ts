@@ -121,3 +121,17 @@ export async function createRoomAs(
     await context.close();
   }
 }
+
+/** The row of live room `name` in the admin's live rooms table (on /admin). */
+export const liveRoomRow = (admin: Page, name: string) =>
+  admin.getByRole("table", { name: "live rooms" }).getByRole("row").filter({ hasText: name });
+
+/** On `admin` (at /admin), end the live room `name` through its confirmation dialog. */
+export async function endRoom(admin: Page, name: string) {
+  await liveRoomRow(admin, name)
+    .getByRole("button", { name: `End ${name}` })
+    .click();
+  const dialog = admin.getByRole("dialog", { name: `end ${name}` });
+  await dialog.getByRole("button", { name: "end room" }).click();
+  await expect(dialog).toHaveCount(0);
+}

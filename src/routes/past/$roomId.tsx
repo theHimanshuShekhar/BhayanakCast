@@ -3,7 +3,12 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { Icon, type IconComponent } from "~/components/icons";
-import { placeholderStreams, StreamMosaic } from "~/components/room-cards";
+import {
+  endedLabel,
+  newestThumbnail,
+  placeholderStreams,
+  StreamMosaic,
+} from "~/components/room-cards";
 import { DOTS, SectionHead } from "~/components/section-head";
 import { Avatar, Chip } from "~/components/ui";
 import { fmtAgo, fmtMins } from "~/lib/format";
@@ -111,6 +116,7 @@ function PastStreamPage({ recap }: { recap: Recap }) {
     .sort((a, b) => b.streamMinutes - a.streamMinutes);
   const place = placeOn(recap);
   const endedAgo = fmtAgo(recap.endedAt);
+  const newest = newestThumbnail(streamers);
   const ticks = [0, 0.25, 0.5, 0.75, 1];
 
   return (
@@ -163,11 +169,11 @@ function PastStreamPage({ recap }: { recap: Recap }) {
         </div>
 
         <div className="grid grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] gap-4 max-[820px]:grid-cols-1">
-          {/* Placeholder screens until thumbnails land (spec #5). */}
+          {/* The streamers' last thumbnails, or placeholders for those who have none. */}
           <StreamMosaic
-            streams={placeholderStreams(streamers)}
+            streams={placeholderStreams(streamers, recap.id)}
             cached
-            freshness={`ended · ${endedAgo}`}
+            freshness={endedLabel(newest, recap.endedAt)}
           />
           <div className="grid grid-cols-2 gap-2.5 content-start">
             <RecapStat icon={Icon.Clock} label="duration" value={fmtMins(total)} accent />

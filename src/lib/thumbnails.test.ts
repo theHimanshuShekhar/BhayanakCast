@@ -1,5 +1,14 @@
-import { describe, expect, it } from "vitest";
-import { THUMBNAIL_HEIGHT, THUMBNAIL_WIDTH, thumbnailLayout, thumbnailUrl } from "./thumbnails.ts";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { startThumbnailUploads } from "./thumbnail-capture.ts";
+import {
+  THUMBNAIL_HEIGHT,
+  THUMBNAIL_REFRESH_MIN_MS,
+  THUMBNAIL_REFRESH_MS,
+  THUMBNAIL_WIDTH,
+  thumbnailLayout,
+  thumbnailRefreshMs,
+  thumbnailUrl,
+} from "./thumbnails.ts";
 
 describe("thumbnailLayout", () => {
   it("fills the thumbnail with a 16:9 frame", () => {
@@ -56,5 +65,58 @@ describe("thumbnailUrl", () => {
     const next = thumbnailUrl("r1", "u1", "2026-09-01T12:03:00.000Z");
     expect(first).toMatch(/^\/api\/thumbnails\/r1\/u1\?t=\d+$/);
     expect(next).not.toBe(first);
+  });
+});
+
+describe("thumbnailRefreshMs", () => {
+  it("defaults to 3 minutes and ignores values that aren't positive numbers", () => {
+    expect(THUMBNAIL_REFRESH_MS).toBe(180_000);
+    for (const configured of [undefined, "", "abc", "-5000", "0", "NaN", "Infinity"]) {
+      expect(thumbnailRefreshMs(configured)).toBe(THUMBNAIL_REFRESH_MS);
+    }
+  });
+
+  it("takes a configured interval, but never below the floor", () => {
+    expect(thumbnailRefreshMs("8000")).toBe(8000);
+    expect(thumbnailRefreshMs("100")).toBe(THUMBNAIL_REFRESH_MIN_MS);
+  });
+});
+
+describe("startThumbnailUploads", () => {
+  afterEach(() => vi.useRealTimers());
+
+  const setup = () => {
+    vi.useFakeTimers();
+    const upload = vi.fn(async () => {});
+    const track = { readyState: "live" } as MediaStreamTrack;
+    const stop = startThumbnailUploads("r1", track, upload, 60_000);
+    return { upload, track, stop };
+  };
+
+  it("uploads at once, then once per interval", () => {
+    const { upload, track } = setup();
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(upload).toHaveBeenLastCalledWith("r1", track);
+    vi.advanceTimersByTime(59_999);
+    expect(upload).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(1);
+    expect(upload).toHaveBeenCalledTimes(2);
+    vi.advanceTimersByTime(120_000);
+    expect(upload).toHaveBeenCalledTimes(4);
+  });
+
+  it("stops when told to", () => {
+    const { upload, stop } = setup();
+    vi.advanceTimersByTime(60_000);
+    stop();
+    vi.advanceTimersByTime(600_000);
+    expect(upload).toHaveBeenCalledTimes(2);
+  });
+
+  it("skips a track that has ended", () => {
+    const { upload, track } = setup();
+    (track as { readyState: string }).readyState = "ended";
+    vi.advanceTimersByTime(600_000);
+    expect(upload).toHaveBeenCalledTimes(1);
   });
 });

@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { getDb } from "~/db/client";
 import { THUMBNAIL_MAX_BYTES } from "~/lib/thumbnails";
 import { requireSignedIn, SignInRequiredError } from "~/server/caller";
+import { announceRoom } from "~/server/room-announcements";
 import { callerFromSession, getSessionFromRequest } from "~/server/session";
 import {
   InvalidThumbnailError,
@@ -34,6 +35,8 @@ export const Route = createFileRoute("/api/thumbnails/$roomId/")({
             contentType: request.headers.get("content-type"),
             bytes,
           });
+          // After the commit, so lists refetched on the lobby's word carry the new image.
+          announceRoom({ kind: "thumbnail", roomId: params.roomId });
           return Response.json(stored);
         } catch (error) {
           if (error instanceof SignInRequiredError) return fail(401, error.message);

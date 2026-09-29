@@ -18,6 +18,7 @@ import {
   type TestClient,
   type TestUser,
 } from "./realtime-harness.ts";
+import { announceRoom } from "./room-announcements.ts";
 import { RECONNECT_GRACE_MS } from "./room-hub.ts";
 
 let h: RealtimeHarness;
@@ -210,6 +211,29 @@ describe("public room changes", () => {
       expect(JSON.stringify(lobby)).not.toContain(privateRoom);
     }
     expect(JSON.stringify([...anon.received, ...b.received])).not.toContain(privateRoom);
+  });
+});
+
+describe("thumbnail uploads", () => {
+  it("tell the lobby about a public room, never about a private one", async () => {
+    await start();
+    const ana = await h.createUser("ana");
+    const { client: anon } = await visitor();
+    const publicRoom = await h.createRoom(ana);
+    const privateRoom = await h.createRoom(ana, { isPrivate: true });
+    await h.settled();
+
+    announceRoom({ kind: "thumbnail", roomId: privateRoom });
+    announceRoom({ kind: "thumbnail", roomId: "unknown" });
+    announceRoom({ kind: "thumbnail", roomId: publicRoom });
+    const change = await anon.waitFor("lobby.changed", (m) => m.room?.change === "thumbnail");
+    expect(change.room).toEqual({
+      roomId: publicRoom,
+      change: "thumbnail",
+      participantCount: 0,
+    });
+    await h.settled();
+    expect(JSON.stringify(anon.received)).not.toContain(privateRoom);
   });
 });
 
