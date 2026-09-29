@@ -46,6 +46,7 @@ import {
 import { createRoomInput, ROOM_NAME_MAX } from "../lib/rooms.ts";
 import type { Caller, SignedInCaller } from "./caller.ts";
 import type { Clock, Timer } from "./clock.ts";
+import { withinRateLimit } from "./rate-limit.ts";
 import type { RoomAnnouncement } from "./room-announcements.ts";
 import type { PresenceSeen, RoomStore, StoredRoom } from "./room-store.ts";
 
@@ -1508,23 +1509,4 @@ function isAdmin(conn: HubConnection): boolean {
 /** Who `participant` is, for room events and the feed. */
 function person(participant: LiveParticipant): FeedPerson {
   return { userId: participant.userId, username: participant.username };
-}
-
-/**
- * Whether `key` may act at `at` under a sliding window (at most `max` actions in any
- * `windowMs`), recording the action if so. Refused attempts don't count.
- */
-function withinRateLimit(
-  sends: Map<string, number[]>,
-  key: string,
-  max: number,
-  windowMs: number,
-  at: Date,
-): boolean {
-  const since = at.getTime() - windowMs;
-  const recent = (sends.get(key) ?? []).filter((t) => t > since);
-  const allowed = recent.length < max;
-  if (allowed) recent.push(at.getTime());
-  sends.set(key, recent);
-  return allowed;
 }
