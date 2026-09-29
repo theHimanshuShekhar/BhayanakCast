@@ -24,3 +24,7 @@ The room's **feed** (joins, leaves, share starts and stops, role and host change
 - The server uses the `ws` library on the HTTP server's `upgrade` event. The protocol is JSON with zod-validated discriminated unions shared by client and server.
 - After a server restart, rooms stay live in the DB. Clients auto-reconnect and re-announce their state, and roles are restored from the DB. Rooms nobody returns to within 5 minutes end at their last-seen time (ADR 14). Peer-to-peer media keeps flowing during the blip.
 - Home and lists load through route loaders and TanStack Query. The socket pushes invalidation events so lists and counts update live.
+
+## Addendum: speaking is local, signalling is relayed opaquely (2026-09-29)
+- **Speaking** does not go over the socket, despite the presence list above. Each client measures it itself with WebAudio analysers on the audio it receives (and on its own mic), so rings and waves need no server round trip and nothing about speaking is sent or stored.
+- **Signalling** (`signal {to, payload}`) is relayed without being read, only between two current members of the same room, and rate-limited per sender (`SIGNAL_RATE_LIMIT`).

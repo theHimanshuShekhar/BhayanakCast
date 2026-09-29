@@ -15,6 +15,7 @@
  *   message's type. The server never closes the socket for a bad message.
  */
 import { z } from "zod";
+import { inviteToken } from "./invites.ts";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -51,6 +52,13 @@ export const REACTION_EMOJIS = ["🔥", "💯", "✨", "🎧", "⚡", "🫡"] as
 export type ReactionEmoji = (typeof REACTION_EMOJIS)[number];
 /** Reaction rate limit per user: at most `reactions` in any `windowMs` (server clock). */
 export const REACTION_RATE_LIMIT = { reactions: 5, windowMs: 3_000 } as const;
+/**
+ * Signalling rate limit per user: at most `messages` relayed `signal`s in any `windowMs`
+ * (server clock). Joining a full room is about 20 steps (a description and ICE candidates,
+ * more with TURN) to each of 9 peers, so this leaves twice that for renegotiation while
+ * capping a flood at 40 a second.
+ */
+export const SIGNAL_RATE_LIMIT = { messages: 400, windowMs: 10_000 } as const;
 /** How many recent feed entries a live room keeps in memory for joiners. */
 export const FEED_HISTORY_SIZE = 50;
 
@@ -59,6 +67,57 @@ export const mediaState = z.object({ mic: z.boolean(), cam: z.boolean(), share: 
 export type MediaState = z.infer<typeof mediaState>;
 /** Everything off: how everyone arrives (the lobby starts mic and camera off). */
 export const MEDIA_OFF: MediaState = { mic: false, cam: false, share: false };
+
+/**
+ * The tracks one participant can send each peer, all over one connection per pair (ADR 1
+ * addendum): the mic now; camera, screen and share audio in later tickets (#35, #36).
+ */
+export const MEDIA_SLOTS = ["mic", "cam", "screen", "screenAudio"] as const;
+export type MediaSlot = (typeof MEDIA_SLOTS)[number];
+
+/** An SDP offer or answer, as `RTCSessionDescriptionInit`. */
+const sessionDescription = z.object({
+  type: z.enum(["offer", "answer", "pranswer", "rollback"]),
+  sdp: z.string().max(MAX_CLIENT_MESSAGE_BYTES).optional(),
+});
+/** An ICE candidate, as `RTCIceCandidateInit`. */
+const iceCandidate = z.object({
+  candidate: z.string().max(1_024).optional(),
+  sdpMid: z.string().max(64).nullable().optional(),
+  sdpMLineIndex: z.number().int().min(0).max(1_024).nullable().optional(),
+  usernameFragment: z.string().max(256).nullable().optional(),
+});
+const pcSession = z.string().min(1).max(64);
+
+/**
+ * One WebRTC signalling step between two peers' connections (src/lib/mesh.ts), which the server
+ * relays without reading. `session` names the sender's `RTCPeerConnection` for this pair and
+ * `peerSession` the recipient's it is talking to, once known: a new `session` means the sender
+ * started over (a reload, a rejoin), and a step for an older session of the recipient's is stale.
+ */
+export const signalPayload = z.discriminatedUnion("kind", [
+  /**
+   * A new connection's first word when it has no offer yet: a peer that had one to the sender's
+   * old page starts over, and one whose offer was lost sends it again.
+   */
+  z.object({ kind: z.literal("hello"), session: pcSession }),
+  z.object({
+    kind: z.literal("description"),
+    session: pcSession,
+    peerSession: pcSession.optional(),
+    description: sessionDescription,
+    /** Which of the sender's tracks each of its own transceivers (by `mid`) carries. */
+    slots: z.record(z.string().max(32), z.enum(MEDIA_SLOTS)).optional(),
+  }),
+  z.object({
+    kind: z.literal("candidate"),
+    session: pcSession,
+    peerSession: pcSession.optional(),
+    /** Null: the sender finished gathering. */
+    candidate: iceCandidate.nullable(),
+  }),
+]);
+export type SignalPayload = z.infer<typeof signalPayload>;
 
 // ---------------------------------------------------------------------------------------------
 // Client → server
@@ -125,6 +184,42 @@ export const modSetRoleMessage = z.object({
  * or longer than a room name may be (`bad_request`); everyone gets `renamed`.
  */
 export const roomRenameMessage = z.object({ type: z.literal("room.rename"), name: z.string() });
+/**
+ * WebRTC signalling for the peer `to` (ADR 1), relayed to them as `signal` with `from` stamped,
+ * only between two people in the same room, the sender over their current connection. Refused
+ * otherwise: `forbidden` when the sender isn't in a room here (never joined, left, kicked, taken
+ * over), `not_found` when `to` isn't in the sender's room (or is the sender), and
+ * `rate_limited` over `SIGNAL_RATE_LIMIT`. Dropped for a
+ * recipient in their reconnect grace, who has no socket.
+ */
+export const signalMessage = z.object({
+  type: z.literal("signal"),
+  to: z.string().min(1).max(64),
+  payload: signalPayload,
+});
+
+/**
+ * Private rooms (ADR 16): ask to be let into the private room `inviteToken` opens. The server
+ * answers `knock.status` (`waiting`, or `approved` at once for someone already allowed in) and
+ * tells the host, mods and admins present `knock.pending`. Sending it again (e.g. after a
+ * reconnect) re-sends the same knock from this socket. An unknown token, or a public room's,
+ * is refused with `not_found`.
+ */
+export const knockRequestMessage = z.object({
+  type: z.literal("knock.request"),
+  inviteToken,
+});
+/**
+ * Admit or deny `userId`'s pending knock on the sender's room (host, mods and admins in it).
+ * Admitting approves them until the room ends (`room_members.approved`); either way the
+ * knocker gets `knock.status` and every approver present `knock.resolved`. Refusals:
+ * `forbidden` (not an approver here), `not_found` (no such knock pending).
+ */
+export const knockDecideMessage = z.object({
+  type: z.literal("knock.decide"),
+  userId: targetUserId,
+  admit: z.boolean(),
+});
 
 export const clientMessage = z.discriminatedUnion("type", [
   helloMessage,
@@ -138,6 +233,9 @@ export const clientMessage = z.discriminatedUnion("type", [
   modStopShareMessage,
   modSetRoleMessage,
   roomRenameMessage,
+  signalMessage,
+  knockRequestMessage,
+  knockDecideMessage,
 ]);
 export type ClientMessage = z.infer<typeof clientMessage>;
 export type ClientMessageType = ClientMessage["type"];
@@ -357,11 +455,56 @@ export const reactionMessage = z.object({
   reaction: reactionEntry,
 });
 
+/** Signalling from `from`, who is in the same room (`signal`). */
+export const signalRelayMessage = z.object({
+  type: z.literal("signal"),
+  roomId,
+  from: z.string(),
+  payload: signalPayload,
+});
+
 /** A new feed entry, sent to everyone in the room. */
 export const feedEntryMessage = z.object({
   type: z.literal("feed.entry"),
   roomId,
   entry: feedEntry,
+});
+
+/** Someone knocking on a private room, as its approvers see them. */
+export const knockEntry = z.object({
+  userId: z.string(),
+  username: z.string(),
+  /** When they knocked (server clock). */
+  at: z.iso.datetime(),
+});
+export type KnockEntry = z.infer<typeof knockEntry>;
+
+/** Someone knocked (`knock.request`): sent to the host, mods and admins present in the room. */
+export const knockPendingMessage = z.object({
+  type: z.literal("knock.pending"),
+  roomId,
+  knock: knockEntry,
+});
+
+/** `userId`'s knock was handled (`knock.decide`): sent to every approver present. */
+export const knockResolvedMessage = z.object({
+  type: z.literal("knock.resolved"),
+  roomId,
+  userId: z.string(),
+});
+
+/**
+ * Where a knocker stands: `waiting` for an approver, `approved` (send `room.join` now; the
+ * approval lasts until the room ends), or `denied`.
+ */
+export const KNOCK_STATUSES = ["waiting", "approved", "denied"] as const;
+export type KnockStatus = (typeof KNOCK_STATUSES)[number];
+
+/** The knocker's answer to `knock.request`, and again once their knock is decided. */
+export const knockStatusMessage = z.object({
+  type: z.literal("knock.status"),
+  roomId,
+  status: z.enum(KNOCK_STATUSES),
 });
 
 export const ERROR_CODES = [
@@ -415,8 +558,12 @@ export const serverMessage = z.discriminatedUnion("type", [
   chatMessageMessage,
   reactionMessage,
   feedEntryMessage,
+  signalRelayMessage,
   errorMessage,
   pongMessage,
+  knockPendingMessage,
+  knockResolvedMessage,
+  knockStatusMessage,
 ]);
 export type ServerMessage = z.infer<typeof serverMessage>;
 export type ServerMessageType = ServerMessage["type"];

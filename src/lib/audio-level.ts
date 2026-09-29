@@ -1,14 +1,19 @@
 /**
- * How loud an audio track is right now, for the lobby's mic meter (and later, speaking rings on
- * tiles). Browser-only.
+ * How loud an audio track is right now, for the lobby's mic meter and the room's speaking rings
+ * (./speaking.ts). Browser-only.
  */
 
 /**
  * Call `onLevel` about once per animation frame with `track`'s loudness, 0 (silence) to 1.
- * Returns a function that stops listening (it never stops `track` itself).
+ * Returns a function that stops listening (it never stops `track` itself). It runs in an
+ * `AudioContext` of its own unless given `shared`, which it leaves open.
  */
-export function watchAudioLevel(track: MediaStreamTrack, onLevel: (level: number) => void) {
-  const context = new AudioContext();
+export function watchAudioLevel(
+  track: MediaStreamTrack,
+  onLevel: (level: number) => void,
+  shared?: AudioContext,
+) {
+  const context = shared ?? new AudioContext();
   const source = context.createMediaStreamSource(new MediaStream([track]));
   const analyser = context.createAnalyser();
   analyser.fftSize = 512;
@@ -26,7 +31,7 @@ export function watchAudioLevel(track: MediaStreamTrack, onLevel: (level: number
   return () => {
     cancelAnimationFrame(frame);
     source.disconnect();
-    void context.close().catch(() => {});
+    if (!shared) void context.close().catch(() => {});
   };
 }
 

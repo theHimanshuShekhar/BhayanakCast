@@ -4,13 +4,17 @@ import { createFileRoute, Link, notFound, redirect, useNavigate } from "@tanstac
 import { type ReactNode, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { Icon } from "~/components/icons";
 import { ControlBtn } from "~/components/room/control-btn";
+import { KnockToasts } from "~/components/room/knock-toasts";
 import { failureText, Lobby } from "~/components/room/lobby";
+import { PeerAudio } from "~/components/room/peer-audio";
 import { RoomSide } from "~/components/room/side-panel";
-import { type ModAction, Tile } from "~/components/room/tile";
+import { isModerator, type ModAction, Tile } from "~/components/room/tile";
 import { Btn, Chip } from "~/components/ui";
 import { useAppActions } from "~/lib/app-actions";
 import { useCurrentSession } from "~/lib/current-user";
 import { fmtMins, MAX_STREAMERS } from "~/lib/format";
+import { inviteUrl } from "~/lib/invites";
+import { getInviteTokenFn } from "~/lib/invites.functions";
 import { getLocalMedia, type LocalDeviceKind, useLocalMedia } from "~/lib/local-media";
 import {
   type FeedEntry,
@@ -29,6 +33,7 @@ import {
   useRoomReactions,
   wasInRoom,
 } from "~/lib/room-live";
+import { useRoomMesh, useSpeakers } from "~/lib/room-media";
 import { roomDetailFor, withRoster } from "~/lib/room-view";
 import { type LiveRoomCard, ROOM_NAME_MAX } from "~/lib/rooms";
 import { roomQuery } from "~/lib/rooms.queries";
@@ -146,8 +151,65 @@ function RoomVisit({ room, admin }: { room: LiveRoomCard; admin: boolean }) {
       detail={roomDetailFor(room, user)}
       meId={user?.id ?? null}
       admin={admin}
+      isPrivate={room.isPrivate}
       initialMedia={entered}
     />
+  );
+}
+
+/**
+ * The room-info menu. In a private room the host, mods and admins can copy its invite link
+ * (ADR 16); `onInviteResult` gets what to tell them, copied or not.
+ */
+function RoomInfoMenu({
+  roomId,
+  canInvite,
+  onInviteResult,
+}: {
+  roomId: string;
+  canInvite: boolean;
+  onInviteResult: (notice: { message: string }) => void;
+}) {
+  const trigger = (
+    <>
+      <Icon.Hash size={12} /> room info
+    </>
+  );
+  if (!canInvite) {
+    return (
+      <Btn variant="ghost" size="sm" title="Room info">
+        {trigger}
+      </Btn>
+    );
+  }
+  const copyInvite = async () => {
+    try {
+      const token = await getInviteTokenFn({ data: { roomId } });
+      if (!token) throw new Error("No invite token for this caller");
+      await navigator.clipboard.writeText(inviteUrl(window.location.origin, token));
+      onInviteResult({ message: "invite link copied" });
+    } catch {
+      onInviteResult({ message: "couldn't copy the invite link" });
+    }
+  };
+  return (
+    <Menu.Root>
+      <Menu.Trigger render={<Btn variant="ghost" size="sm" title="Room info" />}>
+        {trigger}
+      </Menu.Trigger>
+      <Menu.Portal>
+        <Menu.Positioner side="top" align="start" sideOffset={10} className="z-[160] outline-0">
+          <Menu.Popup className="min-w-[200px] p-1.5 bg-surface border border-border-strong rounded-[var(--radius)] shadow-deep outline-0">
+            <Menu.Item
+              onClick={() => void copyInvite()}
+              className="flex items-center gap-2 px-2.5 py-2 rounded-[var(--radius-sm)] text-xs text-fg cursor-pointer outline-0 data-highlighted:bg-surface-2"
+            >
+              <Icon.Users size={13} /> copy invite link
+            </Menu.Item>
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
   );
 }
 
@@ -244,12 +306,15 @@ function RoomPage({
   detail,
   meId,
   admin,
+  isPrivate,
   initialMedia,
 }: {
   detail: RoomDetail;
   meId: string | null;
   /** A site admin: moderation in any room (ADR 15). */
   admin: boolean;
+  /** Entered by invite link and knock (ADR 16). */
+  isPrivate: boolean;
   /** The mic and camera as the lobby left them. */
   initialMedia: MediaState;
 }) {
@@ -290,10 +355,14 @@ function RoomPage({
   const mediaNotice = useNotice(live.mediaError);
   const moderationNotice = useNotice(live.moderationError);
   const deviceNotice = useNotice(deviceError, 8_000);
-  const notice = moderationNotice ?? deviceNotice ?? mediaNotice;
+  // Whether "copy invite link" worked.
+  const [inviteResult, setInviteResult] = useState<{ message: string } | null>(null);
+  const inviteNotice = useNotice(inviteResult);
+  const notice = moderationNotice ?? deviceNotice ?? mediaNotice ?? inviteNotice;
 
-  // Mic and camera are real local tracks (src/lib/local-media.ts), announced once they're on.
-  // TODO(ADR 1/2): the mesh sends them, and share becomes a getDisplayMedia track.
+  // Mic and camera are real local tracks (src/lib/local-media.ts), announced once they're on;
+  // the mesh sends the mic. TODO(#35, #36): it sends the camera, and share becomes a
+  // getDisplayMedia track.
   const toggleDevice = async (kind: LocalDeviceKind) => {
     const localMedia = getLocalMedia();
     if (media[kind]) {
@@ -330,6 +399,21 @@ function RoomPage({
     markInRoom(detail.id, false);
   }, [out, detail.id]);
 
+  // Peer-to-peer media (ADR 1): every connection closes with the room (leave unmounts this).
+  const mesh = useRoomMesh(detail.id, meId, roster, local.mic.track, !out);
+  const [volumes, setVolumes] = useState<Record<string, number>>({});
+  const micTracks = useMemo(() => {
+    const tracks: Record<string, MediaStreamTrack | undefined> = {};
+    for (const [userId, theirs] of Object.entries(mesh.remote)) tracks[userId] = theirs.mic;
+    if (meId && local.mic.track) tracks[meId] = local.mic.track;
+    return tracks;
+  }, [mesh.remote, local.mic.track, meId]);
+  const speaking = useSpeakers(micTracks);
+  const people = useMemo(
+    () => participants.map((p) => ({ ...p, speaking: speaking.has(p.userId) })),
+    [participants, speaking],
+  );
+
   // Floats on the pinned tile, else the first streamer's, else the first on stage, else yours.
   const react = (emoji: ReactionEmoji) => {
     const target =
@@ -359,7 +443,7 @@ function RoomPage({
     });
 
   const stage = useMemo(() => {
-    const base = showViewers ? participants : participants.filter((p) => !p.viewerOnly);
+    const base = showViewers ? people : people.filter((p) => !p.viewerOnly);
     if (!pinnedId) return base;
     return [
       ...base
@@ -369,7 +453,7 @@ function RoomPage({
         .filter((p) => p.id !== pinnedId)
         .map((p) => (p.size === "l" ? { ...p, size: "m" as const } : p)),
     ];
-  }, [participants, showViewers, pinnedId]);
+  }, [people, showViewers, pinnedId]);
 
   // The room ended or was hidden from us since the page loaded.
   if (live.error?.code === "not_found") return <RoomNotFound />;
@@ -474,6 +558,8 @@ function RoomPage({
               myRole={myRole}
               admin={admin}
               locallyMuted={mutedIds.has(p.id)}
+              volume={volumes[p.id] ?? 1}
+              onVolume={(id, volume) => setVolumes((v) => ({ ...v, [id]: volume }))}
               reactions={reactions.filter((r) => r.targetUserId === p.userId)}
               onPin={(id) => setPinnedId((cur) => (cur === id ? null : id))}
               onToggleMute={toggleMute}
@@ -481,12 +567,26 @@ function RoomPage({
             />
           ))}
         </div>
+        {Object.entries(mesh.remote).map(
+          ([userId, tracks]) =>
+            tracks.mic && (
+              <PeerAudio
+                key={userId}
+                userId={userId}
+                track={tracks.mic}
+                volume={volumes[userId] ?? 1}
+                muted={mutedIds.has(userId)}
+              />
+            ),
+        )}
 
         <div className="relative flex items-center justify-center gap-2.5 px-[18px] py-3.5 max-sm:px-2 max-sm:py-2.5 bg-canvas border-t border-border-subtle">
           <div className="absolute left-[18px] flex gap-2 max-lg:hidden">
-            <Btn variant="ghost" size="sm" title="Room info">
-              <Icon.Hash size={12} /> room info
-            </Btn>
+            <RoomInfoMenu
+              roomId={detail.id}
+              canInvite={isPrivate && joined && isModerator(myRole, admin)}
+              onInviteResult={setInviteResult}
+            />
           </div>
 
           {/* A refused media change (a share start with 3 people already sharing), a share a
@@ -599,6 +699,7 @@ function RoomPage({
         </div>
       </div>
 
+      {isPrivate && <KnockToasts roomId={detail.id} />}
       {settings.showChat && sideOpen && (
         <button
           type="button"
@@ -609,7 +710,7 @@ function RoomPage({
       )}
       {settings.showChat && (
         <RoomSide
-          participants={participants}
+          participants={people}
           chat={chat}
           chatError={live.chatError}
           activity={activity}

@@ -44,13 +44,17 @@ export type ModAction = "kick" | "stopShare" | "promote" | "demote";
 
 const RANK: Record<RoomRole, number> = { member: 0, mod: 1, host: 2 };
 
+/** The host, a mod or an admin: kicks, stops shares and, in a private room, admits (ADRs 15, 16). */
+export const isModerator = (myRole: RoomRole, admin: boolean) =>
+  admin || myRole === "host" || myRole === "mod";
+
 /**
  * What the viewer (`myRole`, `admin`) may do to `p` (ADR 15; the server decides): host and mods
  * act on people below them, only the host changes roles, and an admin may do it all to anyone.
  */
 export const moderationFor = (p: Participant, myRole: RoomRole, admin: boolean) => {
   const any = !p.you && (admin || RANK[myRole] > RANK[p.role]);
-  const moderator = admin || myRole === "host" || myRole === "mod";
+  const moderator = isModerator(myRole, admin);
   return {
     kick: any && moderator,
     stopShare: any && moderator && p.streaming,
@@ -66,9 +70,11 @@ export const Tile = ({
   myRole,
   admin = false,
   locallyMuted,
+  volume = 1,
   reactions,
   onPin,
   onToggleMute,
+  onVolume,
   onModerate,
 }: {
   p: Participant;
@@ -77,9 +83,12 @@ export const Tile = ({
   /** The viewer is a site admin: moderation in any room. */
   admin?: boolean;
   locallyMuted: boolean;
+  /** How loud this person plays here, 0–1 (the viewer's own setting). */
+  volume?: number;
   reactions: Reaction[];
   onPin: (id: string) => void;
   onToggleMute: (id: string) => void;
+  onVolume?: (id: string, volume: number) => void;
   onModerate: (id: string, action: ModAction) => void;
 }) => {
   const ref = useRef<HTMLDivElement>(null);
@@ -178,6 +187,19 @@ export const Tile = ({
           >
             {locallyMuted ? <Icon.MicOff size={14} /> : <Icon.Headset size={14} />}
           </button>
+        )}
+        {!p.you && onVolume && (
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={volume}
+            aria-label={`Volume for ${p.name}`}
+            title="Volume for me"
+            onChange={(e) => onVolume(p.id, Number(e.target.value))}
+            className="w-16 h-[26px] cursor-pointer accent-[var(--color-primary)]"
+          />
         )}
         <button
           type="button"

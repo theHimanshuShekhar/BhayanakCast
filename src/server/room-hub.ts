@@ -44,6 +44,7 @@ import {
   type RoomParticipant,
   type RoomRole,
   type ServerMessage,
+  SIGNAL_RATE_LIMIT,
 } from "../lib/realtime.ts";
 import { createRoomInput, ROOM_NAME_MAX } from "../lib/rooms.ts";
 import type { Caller, SignedInCaller } from "./caller.ts";
@@ -159,6 +160,17 @@ interface LiveRoom {
   lastLeftAt?: Date;
   /** Set while nobody is here (ADR 14): since when, and the timer that ends the room. */
   empty?: { since: Date; timer: Timer };
+  /** Pending knocks on a private room (ADR 16), by knocker's user id; memory only. */
+  knocks: Map<string, PendingKnock>;
+}
+
+/** Someone knocking on a private room (`knock.request`), until an approver decides. */
+interface PendingKnock {
+  userId: string;
+  username: string;
+  at: Date;
+  /** The socket that knocked (the latest, if they knocked again): where the answer goes. */
+  connection: HubConnection;
 }
 
 /** A feed entry to log: the hub stamps its id and time. */
@@ -171,13 +183,13 @@ type NewFeedEntry = FeedEntry extends infer E
 /** Someone named in a room event or feed entry. */
 type FeedPerson = { userId: string; username: string };
 
-/** What a moderator can do in a room (ADR 15). */
-type ModPower = "kick" | "stopShare" | "setRole" | "rename";
+/** What a moderator can do in a room (ADR 15); `admit` decides knocks (ADR 16). */
+type ModPower = "kick" | "stopShare" | "setRole" | "rename" | "admit";
 
 /** Which powers each room role has (ADR 15); an admin has them all in any room. */
 const ROOM_POWERS: Record<RoomRole, ReadonlySet<ModPower>> = {
-  host: new Set<ModPower>(["kick", "stopShare", "setRole", "rename"]),
-  mod: new Set<ModPower>(["kick", "stopShare"]),
+  host: new Set<ModPower>(["kick", "stopShare", "setRole", "rename", "admit"]),
+  mod: new Set<ModPower>(["kick", "stopShare", "admit"]),
   member: new Set<ModPower>(),
 };
 
@@ -215,6 +227,8 @@ export class RoomHub {
   #nextFeedId = 1;
   /** Per user id, when (epoch ms) their recent accepted reactions were sent. */
   readonly #reactionSends = new Map<string, number[]>();
+  /** Per user id, when (epoch ms) their recent relayed signalling steps were sent. */
+  readonly #signalSends = new Map<string, number[]>();
   #queue: Promise<void> = Promise.resolve();
 
   constructor(deps: RoomHubDeps) {
@@ -388,7 +402,18 @@ export class RoomHub {
         return this.#refuse(conn, "kicked", "You were removed from this room", message.type);
       }
       const stored = await this.#store.findRoomFor(caller, roomId);
-      if (!stored) return this.#refuse(conn, "not_found", "That room isn't live", message.type);
+      if (!stored) {
+        // A live private room they weren't approved into: in only by knocking (ADR 16).
+        if (this.#rooms.get(roomId)?.isPrivate) {
+          return this.#refuse(
+            conn,
+            "forbidden",
+            "This room is private: knock with its invite link",
+            message.type,
+          );
+        }
+        return this.#refuse(conn, "not_found", "That room isn't live", message.type);
+      }
       const room = this.#rooms.get(roomId) ?? this.#addRoom(stored);
       // A room known only from its creation announcement: the database is the fuller picture
       // (e.g. roles given before anyone entered).
@@ -491,6 +516,12 @@ export class RoomHub {
     "mod.setRole": (conn, message) => this.#setRole(conn, message),
 
     "room.rename": (conn, message) => this.#rename(conn, message),
+
+    signal: (conn, message) => this.#signal(conn, message),
+
+    "knock.request": (conn, message) => this.#knock(conn, message),
+
+    "knock.decide": (conn, message) => this.#decideKnock(conn, message),
   };
 
   #dispatch(conn: HubConnection, message: ClientMessage): Promise<void> | void {
@@ -513,6 +544,7 @@ export class RoomHub {
       chat: [],
       feed: [],
       hostRecorded: false,
+      knocks: new Map(),
     };
     this.#rooms.set(room.id, room);
     return room;
@@ -762,6 +794,7 @@ export class RoomHub {
     this.#announceHost(room, at);
     if (next && changed) {
       this.#feed(room, at, { kind: "hostChanged", userId: next.userId, username: next.username });
+      this.#sendPendingKnocks(room, next);
     }
     // A new host who is away themselves gets a host grace of their own.
     if (next?.grace) this.#hostGone(room);
@@ -922,6 +955,7 @@ export class RoomHub {
     };
   }
 
+  /** `room.snapshot` for `conn`, which is in `roomId`; then, for an approver, pending knocks. */
   #sendSnapshot(conn: HubConnection, roomId: string): void {
     const room = this.#rooms.get(roomId);
     if (!room) return;
@@ -935,6 +969,8 @@ export class RoomHub {
       feed: [...room.feed],
       ...(room.hostGrace ? { hostGraceUntil: room.hostGrace.until.toISOString() } : {}),
     });
+    const participant = conn.caller.user && room.participants.get(conn.caller.user.id);
+    if (participant?.connection === conn) this.#sendPendingKnocks(room, participant);
   }
 
   /** Send `event` to everyone in `room` except `except`. */
@@ -1119,10 +1155,8 @@ export class RoomHub {
   // Reactions (never stored) and the feed (the last 50 per room, in memory only)
 
   #react(conn: HubConnection, message: ClientMessageOf<"reaction.send">) {
-    const userId = conn.caller.user?.id;
-    const room = conn.roomId ? this.#rooms.get(conn.roomId) : undefined;
-    const participant = userId ? room?.participants.get(userId) : undefined;
-    if (!room || !participant || participant.connection !== conn) {
+    const { room, participant } = this.#participantOf(conn);
+    if (!room || !participant) {
       return this.#refuse(conn, "forbidden", "Join the room to react", message.type);
     }
     const target = room.participants.get(message.targetUserId);
@@ -1130,7 +1164,8 @@ export class RoomHub {
       return this.#refuse(conn, "not_found", "They're not in this room", message.type);
     }
     const at = this.#clock.now();
-    if (!withinRateLimit(this.#reactionSends, participant.userId, REACTION_RATE_LIMIT, at)) {
+    const { reactions, windowMs } = REACTION_RATE_LIMIT;
+    if (!withinRateLimit(this.#reactionSends, participant.userId, reactions, windowMs, at)) {
       return this.#refuse(
         conn,
         "rate_limited",
@@ -1186,10 +1221,8 @@ export class RoomHub {
     power: ModPower,
     re: string,
   ): { room: LiveRoom; actor: LiveParticipant } | undefined {
-    const userId = conn.caller.user?.id;
-    const room = conn.roomId ? this.#rooms.get(conn.roomId) : undefined;
-    const actor = userId ? room?.participants.get(userId) : undefined;
-    if (!room || !actor || actor.connection !== conn) {
+    const { room, participant: actor } = this.#participantOf(conn);
+    if (!room || !actor) {
       this.#refuse(conn, "forbidden", "Join the room first", re);
       return;
     }
@@ -1290,6 +1323,7 @@ export class RoomHub {
     else room.roles.delete(target.userId);
     const at = this.#clock.now();
     this.#broadcast(room, { kind: "roleChanged", userId: target.userId, role: message.role }, at);
+    this.#sendPendingKnocks(room, target);
     this.#feed(room, at, {
       kind: "roleChanged",
       ...person(target),
@@ -1328,7 +1362,127 @@ export class RoomHub {
   }
 
   // -------------------------------------------------------------------------------------------
+  // Signalling (ADR 1): relayed opaquely, only between two people in the same room
+
+  /**
+   * `signal`: pass the payload to `to`, stamped with the sender. Both must be in the room the
+   * sender is in over this connection, so someone who left, was kicked or was taken over can't
+   * reach anyone there. A recipient in their reconnect grace has no socket, so it's dropped.
+   * Over `SIGNAL_RATE_LIMIT` it's refused, so nobody can flood the room through the relay.
+   */
+  #signal(conn: HubConnection, message: ClientMessageOf<"signal">) {
+    const { room, participant: sender } = this.#participantOf(conn);
+    if (!room || !sender) {
+      return this.#refuse(conn, "forbidden", "Join the room first", message.type);
+    }
+    const target = room.participants.get(message.to);
+    if (!target || target === sender) {
+      return this.#refuse(conn, "not_found", "They're not in this room", message.type);
+    }
+    const { messages, windowMs } = SIGNAL_RATE_LIMIT;
+    if (!withinRateLimit(this.#signalSends, sender.userId, messages, windowMs, this.#clock.now())) {
+      return this.#refuse(conn, "rate_limited", "Too much signalling; wait a moment", message.type);
+    }
+    this.#send(target.connection, {
+      type: "signal",
+      roomId: room.id,
+      from: sender.userId,
+      payload: message.payload,
+    });
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // Private rooms (ADR 16): knock with the invite link, and the host, a mod or an admin admits
+
+  /** `knock.request`: wait at the private room's door, or walk in if already allowed. */
+  async #knock(conn: HubConnection, message: ClientMessageOf<"knock.request">) {
+    const caller = conn.caller;
+    if (!isSignedIn(caller)) return;
+    const stored = await this.#store.findInvitedRoom(message.inviteToken);
+    // Every live room is in memory (created: `announce`; after a restart: `#restore`).
+    const room = stored && this.#rooms.get(stored.id);
+    if (!room) {
+      return this.#refuse(conn, "not_found", "This invite link is no longer valid", message.type);
+    }
+    const { id: userId, username } = caller.user;
+    // Kicked is for good (ADR 15): the link doesn't bring them back, admins included.
+    if (await this.#store.isKicked(room.id, userId)) {
+      return this.#refuse(conn, "kicked", "You were removed from this room", message.type);
+    }
+    // The host, an approved member, a mod or an admin: nothing to ask.
+    if (await this.#store.findRoomFor(caller, room.id)) {
+      return this.#send(conn, { type: "knock.status", roomId: room.id, status: "approved" });
+    }
+    const knock: PendingKnock = {
+      userId,
+      username,
+      at: room.knocks.get(userId)?.at ?? this.#clock.now(),
+      connection: conn,
+    };
+    room.knocks.set(userId, knock);
+    this.#send(conn, { type: "knock.status", roomId: room.id, status: "waiting" });
+    this.#tellApprovers(room, knockPending(room, knock));
+  }
+
+  /** `knock.decide`: admit (approved until the room ends) or deny a pending knock. */
+  async #decideKnock(conn: HubConnection, message: ClientMessageOf<"knock.decide">) {
+    const mod = this.#moderator(conn, "admit", message.type);
+    if (!mod) return;
+    const { room } = mod;
+    const knock = room.knocks.get(message.userId);
+    if (!knock) {
+      return this.#refuse(conn, "not_found", "Nobody is knocking by that name", message.type);
+    }
+    // Stays pending if the approval can't be stored.
+    if (message.admit) await this.#store.approve(room.id, knock.userId);
+    room.knocks.delete(knock.userId);
+    this.#send(knock.connection, {
+      type: "knock.status",
+      roomId: room.id,
+      status: message.admit ? "approved" : "denied",
+    });
+    this.#tellApprovers(room, { type: "knock.resolved", roomId: room.id, userId: knock.userId });
+  }
+
+  /** Send `message` to everyone in `room` who may decide knocks: host, mods and admins. */
+  #tellApprovers(room: LiveRoom, message: ServerMessage): void {
+    for (const participant of room.participants.values()) {
+      if (this.#approves(room, participant)) this.#send(participant.connection, message);
+    }
+  }
+
+  /**
+   * `participant` just became able to decide knocks (joined, came back, made mod or host): the
+   * knocks already pending, which they missed.
+   */
+  #sendPendingKnocks(room: LiveRoom, participant: LiveParticipant): void {
+    if (!this.#approves(room, participant)) return;
+    for (const knock of room.knocks.values()) {
+      this.#send(participant.connection, knockPending(room, knock));
+    }
+  }
+
+  #approves(room: LiveRoom, participant: LiveParticipant): boolean {
+    return (
+      isAdmin(participant.connection) ||
+      ROOM_POWERS[this.#roleOf(room, participant.userId)].has("admit")
+    );
+  }
+
+  // -------------------------------------------------------------------------------------------
   // Plumbing
+
+  /**
+   * The room this connection is in and its sender there, if they are in it over this connection
+   * (not one they left, were kicked from, or were taken over from); otherwise nothing.
+   */
+  #participantOf(conn: HubConnection): { room?: LiveRoom; participant?: LiveParticipant } {
+    const userId = conn.caller.user?.id;
+    const room = conn.roomId ? this.#rooms.get(conn.roomId) : undefined;
+    const participant = userId ? room?.participants.get(userId) : undefined;
+    if (!room || !participant || participant.connection !== conn) return {};
+    return { room, participant };
+  }
 
   #own(connection: Connection): HubConnection {
     if (!(connection instanceof HubConnection)) throw new Error("Not a hub connection");
@@ -1373,6 +1527,16 @@ function isSignedIn(caller: Caller): caller is SignedInCaller {
 }
 
 /** A site admin: moderation powers in any room (ADR 15). */
+/** `knock` as its approvers see it. */
+function knockPending(room: LiveRoom, knock: PendingKnock): ServerMessage {
+  const { userId, username, at } = knock;
+  return {
+    type: "knock.pending",
+    roomId: room.id,
+    knock: { userId, username, at: at.toISOString() },
+  };
+}
+
 function isAdmin(conn: HubConnection): boolean {
   return conn.caller.role === "admin";
 }
@@ -1383,18 +1547,19 @@ function person(participant: LiveParticipant): FeedPerson {
 }
 
 /**
- * Whether `key` may act at `at` under a sliding-window `limit` (at most `reactions` in any
+ * Whether `key` may act at `at` under a sliding window (at most `max` actions in any
  * `windowMs`), recording the action if so. Refused attempts don't count.
  */
 function withinRateLimit(
   sends: Map<string, number[]>,
   key: string,
-  limit: { reactions: number; windowMs: number },
+  max: number,
+  windowMs: number,
   at: Date,
 ): boolean {
-  const since = at.getTime() - limit.windowMs;
+  const since = at.getTime() - windowMs;
   const recent = (sends.get(key) ?? []).filter((t) => t > since);
-  const allowed = recent.length < limit.reactions;
+  const allowed = recent.length < max;
   if (allowed) recent.push(at.getTime());
   sends.set(key, recent);
   return allowed;

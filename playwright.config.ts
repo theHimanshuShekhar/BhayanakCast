@@ -10,7 +10,8 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  reporter: process.env.CI ? "github" : "list",
+  // In CI: annotations on the run, plus an HTML report the nightly workflow uploads on failure.
+  reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "list",
   // Parallel browsers on a loaded machine render slowly (Firefox especially), so a page can
   // take longer than the 5s expect default and a multi-page test longer than 30s.
   timeout: 60_000,
