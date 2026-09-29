@@ -37,6 +37,14 @@ export function describeBan(user: BanFields): string {
   return `${reasonText} ${expiryText}`;
 }
 
+/**
+ * Where a signed-in user an admin just banned goes (the realtime server tells them `banned`
+ * with `describeBan` as the message): home, showing the ban notice like a refused sign-in.
+ */
+export function banNoticeHref(description: string): string {
+  return `/?${new URLSearchParams({ error: BANNED_USER_ERROR, error_description: description })}`;
+}
+
 /** Home's search params for a failed Discord sign-in (Better Auth's error redirect). */
 export interface SignInErrorSearch {
   error?: string;

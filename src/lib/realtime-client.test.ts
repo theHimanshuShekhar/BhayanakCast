@@ -188,16 +188,19 @@ describe("RealtimeClient", () => {
     expect(joins()).toBe(4);
   });
 
-  it("stops wanting its room once taken over, even across reconnects", () => {
-    client.joinRoom("r1");
-    const first = latest();
-    first.handshake();
-    first.serverSends({ type: "error", code: "taken_over", message: "elsewhere" });
-    first.close();
-    vi.advanceTimersByTime(1_000);
-    latest().handshake();
-    expect(latest().sent).toEqual([{ type: "hello", v: PROTOCOL_VERSION }]);
-  });
+  it.each(["taken_over", "banned"] as const)(
+    "stops wanting its room once told %s, even across reconnects",
+    (code) => {
+      client.joinRoom("r1");
+      const first = latest();
+      first.handshake();
+      first.serverSends({ type: "error", code, message: "elsewhere" });
+      first.close();
+      vi.advanceTimersByTime(1_000);
+      latest().handshake();
+      expect(latest().sent).toEqual([{ type: "hello", v: PROTOCOL_VERSION }]);
+    },
+  );
 
   it("is closed, not reconnecting, once stopped", () => {
     client.start();

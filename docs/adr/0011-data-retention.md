@@ -17,3 +17,6 @@ Date: 2026-09-27 · Status: accepted
 - **Hours watched** = time present in a room *minus* that user's own stream intervals in it. Watched and streamed never overlap.
 - **Hours streamed** = the sum of the user's stream intervals.
 - **Rooms hosted**: every user who held the host role at any point in a room gets +1 for that room (at most once per room). This requires a host-interval log (`host_intervals`: roomId, userId, startedAt, endedAt), written by the realtime server on room creation and on each host transfer (ADR 14).
+
+## Addendum: admin audit log (2026-09-29)
+The admin audit log (`admin_actions`, ADR 6 addendum) is kept indefinitely, like stats. It is not room-level data: the purge never deletes it, and it references rooms and users by id only, never by foreign key.

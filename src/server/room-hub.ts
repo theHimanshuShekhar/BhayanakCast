@@ -5,6 +5,8 @@
  *   await hub.handle(connection, frame);                // it sent a frame (raw JSON)
  *   await hub.disconnect(connection);                   // it closed
  *
+ * An admin ban reaches it as `hub.disconnectUser(userId, notice)` (./live-hub.ts).
+ *
  * The WebSocket layer (./realtime.ts) is a thin adapter over these; tests drive the same
  * calls through real sockets (./realtime-harness.ts). The hub never touches `Date`, timers or
  * the database directly: it takes a `Clock` (./clock.ts) and a `RoomStore` persistence port
@@ -19,6 +21,7 @@
 
 import { MAX_STREAMERS, ROOM_CAPACITY } from "../lib/format.ts";
 import {
+  BANNED_CLOSE_CODE,
   CHAT_HISTORY_SIZE,
   CHAT_MAX_LENGTH,
   CHAT_RATE_LIMIT,
@@ -327,6 +330,39 @@ export class RoomHub {
   disconnect(connection: Connection): Promise<void> {
     const conn = this.#own(connection);
     return this.#enqueue(() => this.#drop(conn));
+  }
+
+  /**
+   * An admin banned `userId` (ADR 6): they leave any room at once (no reconnect grace; a host
+   * hands host on straight away, as for a kick), which the room sees as `left`, and every socket
+   * of theirs is told `banned` with `notice` (the ban's reason and end) and closed.
+   */
+  disconnectUser(userId: string, notice: string): Promise<void> {
+    return this.#enqueue(async () => {
+      const at = this.#clock.now();
+      for (const room of [...this.#rooms.values()]) {
+        const participant = room.participants.get(userId);
+        if (!participant) continue;
+        if (userId === room.hostUserId) {
+          this.#cancelHostGrace(room);
+          await this.#handOverHost(room, at);
+        }
+        participant.connection.roomId = null;
+        // Someone in their reconnect grace was last here when their socket closed.
+        await this.#removeParticipant(room, participant, participant.grace?.since ?? at);
+      }
+      for (const conn of [...this.#connections]) {
+        if (conn.caller.user?.id !== userId) continue;
+        conn.roomId = null;
+        this.#refuse(conn, "banned", notice);
+        try {
+          conn.transport.close(BANNED_CLOSE_CODE, "banned");
+        } catch (error) {
+          this.#log("closing a banned user's socket failed", error);
+        }
+        await this.#drop(conn);
+      }
+    });
   }
 
   /** Resolves once every queued operation (messages, disconnects, timers) has finished. */

@@ -1,28 +1,40 @@
 // Admin dashboard — restricted to admins (ADR 6).
-import { useSuspenseQuery } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useQuery,
+  useQueryClient,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
+import { BanUserDialog, type DialogTarget, UnbanUserDialog } from "~/components/admin-dialogs";
 import { BarChart, LineChart } from "~/components/charts";
 import { Icon } from "~/components/icons";
 import { SectionHead } from "~/components/section-head";
-import { Avatar, MonoCaps } from "~/components/ui";
+import { Avatar, Btn, MonoCaps, Seg } from "~/components/ui";
 import {
   ADMIN_WINDOW_DAYS,
   type AdminRoomRow,
+  type AdminUserRow,
+  type BanUserInput,
   LEADERBOARD_SIZE,
   type LeaderboardEntry,
   percentChange,
   type WindowCount,
 } from "~/lib/admin";
+import { banUserFn, unbanUserFn } from "~/lib/admin.functions";
 import {
   adminDailySeriesQuery,
+  adminKeys,
   adminLeaderboardsQuery,
   adminLiveRoomsQuery,
   adminOverviewQuery,
   adminRecentRoomsQuery,
+  adminUsersQuery,
 } from "~/lib/admin.queries";
 import { fmtAgo, fmtMins } from "~/lib/format";
 import type { LiveRoomCard } from "~/lib/rooms";
+import { useDebounced } from "~/lib/use-debounced";
 
 export const Route = createFileRoute("/admin")({
   // Visitors and non-admins go home. A UX guard only: admin server functions check the role themselves.
@@ -36,10 +48,14 @@ export const Route = createFileRoute("/admin")({
       queryClient.ensureQueryData(adminLiveRoomsQuery()),
       queryClient.ensureQueryData(adminRecentRoomsQuery()),
       queryClient.ensureQueryData(adminLeaderboardsQuery()),
+      queryClient.ensureQueryData(adminUsersQuery(FIRST_USERS_PAGE)),
     ]);
   },
   component: AdminPage,
 });
+
+/** The users table as the page opens: no search, everyone, page 1. */
+const FIRST_USERS_PAGE = { q: "", banned: false, page: 1 };
 
 const card = "bg-surface border border-border rounded-[var(--radius)] shadow-card";
 const th =
@@ -323,6 +339,187 @@ const RecentRoomsTable = ({ rooms: rows }: { rooms: AdminRoomRow[] }) => {
   );
 };
 
+/** "3 Oct 2026" for an ISO timestamp, in UTC like the rest of the dashboard. */
+const fmtDate = (iso: string) =>
+  new Date(iso).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+
+const BanStatus = ({ ban }: { ban: AdminUserRow["ban"] }) =>
+  ban ? (
+    <div className="flex flex-col gap-0.5">
+      <span className="inline-flex self-start items-center px-2 py-0.5 rounded-full text-[9.5px] tracking-[0.08em] font-semibold uppercase border bg-[color-mix(in_oklch,var(--color-live)_22%,transparent)] text-live-ink border-[color-mix(in_oklch,var(--color-live)_50%,transparent)]">
+        banned
+      </span>
+      <span className="text-[11px] text-muted">
+        {ban.reason ?? "no reason"} ·{" "}
+        {ban.expiresAt ? `until ${fmtDate(ban.expiresAt)}` : "permanent"}
+      </span>
+    </div>
+  ) : (
+    <span className="text-subtle">active</span>
+  );
+
+/**
+ * Every user, searched and paged server-side, with ban and unban behind confirmation dialogs
+ * (spec #7). Admins can't be banned (the server refuses too): demote them first.
+ */
+const UsersTable = () => {
+  const queryClient = useQueryClient();
+  const [q, setQ] = useState("");
+  const [banned, setBanned] = useState(false);
+  const [page, setPage] = useState(1);
+  const term = useDebounced(q.trim(), 250);
+  const { data } = useQuery({
+    ...adminUsersQuery({ q: term, banned, page }),
+    placeholderData: keepPreviousData,
+  });
+  const [banTarget, setBanTarget] = useState<DialogTarget | null>(null);
+  const [unbanTarget, setUnbanTarget] = useState<DialogTarget | null>(null);
+  // A ban also empties the user's room, so refresh every admin read, not just this table.
+  const refresh = () => queryClient.invalidateQueries({ queryKey: adminKeys.all });
+  const ban = async (input: BanUserInput) => {
+    await banUserFn({ data: input });
+    await refresh();
+  };
+  const unban = async (userId: string) => {
+    await unbanUserFn({ data: { userId } });
+    await refresh();
+  };
+  const users = data?.users ?? [];
+  const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
+  const search = (next: { q?: string; banned?: boolean }) => {
+    if (next.q !== undefined) setQ(next.q);
+    if (next.banned !== undefined) setBanned(next.banned);
+    setPage(1);
+  };
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-2.5 px-3.5 py-2.5 border-b border-border-subtle bg-canvas">
+        <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-0">
+          <div className="flex items-center gap-2 h-[30px] px-2.5 flex-1 min-w-0 sm:flex-none sm:min-w-[280px] bg-surface border border-border rounded-lg text-muted focus-within:border-primary">
+            <Icon.Search size={12} />
+            <input
+              aria-label="Search users"
+              className="flex-1 min-w-0 bg-transparent border-0 outline-0 text-fg text-xs"
+              placeholder="search usernames…"
+              value={q}
+              onChange={(e) => search({ q: e.target.value })}
+            />
+          </div>
+          <div className="w-[180px]">
+            <Seg
+              value={banned ? "banned" : "everyone"}
+              options={["everyone", "banned"]}
+              onChange={(v) => search({ banned: v === "banned" })}
+            />
+          </div>
+        </div>
+        <MonoCaps>{data?.total ?? 0} users</MonoCaps>
+      </div>
+      <div className="overflow-x-auto">
+        <table aria-label="users" className="w-full min-w-[760px] border-collapse text-xs">
+          <thead>
+            <tr>
+              <th className={th}>user</th>
+              <th className={th}>joined</th>
+              <th className={th}>role</th>
+              <th className={th}>status</th>
+              <th className={`${th} !text-right`}>last seen</th>
+              <th className={`${th} !text-right`}>hours</th>
+              <th className={`${th} w-[80px]`}>
+                <span className="sr-only">actions</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.map((u) => (
+              <tr key={u.id} className="group">
+                <td className={td}>
+                  <Link
+                    to="/profile/$userId"
+                    params={{ userId: u.id }}
+                    className="inline-flex items-center gap-2 !text-fg font-medium hover:no-underline"
+                  >
+                    <Avatar name={u.username} size="sm" /> {u.username}
+                  </Link>
+                </td>
+                <td className={`${td} !text-subtle`}>{fmtDate(u.joinedAt)}</td>
+                <td className={td}>
+                  {u.role === "admin" ? (
+                    <MonoCaps className="!text-primary">admin</MonoCaps>
+                  ) : (
+                    "user"
+                  )}
+                </td>
+                <td className={td}>
+                  <BanStatus ban={u.ban} />
+                </td>
+                <td className={`${td} text-right !text-subtle`}>
+                  {u.lastSeenAt ? fmtAgo(u.lastSeenAt) : "—"}
+                </td>
+                <td className={`${td} text-right`}>
+                  {u.hours.toFixed(1)}
+                  <span className="text-subtle">h</span>
+                </td>
+                <td className={td}>
+                  {u.ban ? (
+                    <Btn
+                      size="sm"
+                      aria-label={`Unban ${u.username}`}
+                      onClick={() => setUnbanTarget(u)}
+                    >
+                      unban
+                    </Btn>
+                  ) : u.role !== "admin" ? (
+                    <Btn
+                      size="sm"
+                      variant="danger"
+                      aria-label={`Ban ${u.username}`}
+                      onClick={() => setBanTarget(u)}
+                    >
+                      ban
+                    </Btn>
+                  ) : null}
+                </td>
+              </tr>
+            ))}
+            {users.length === 0 && <EmptyRow cols={7}>no users match</EmptyRow>}
+          </tbody>
+        </table>
+      </div>
+      <nav
+        aria-label="users pages"
+        className="flex items-center justify-end gap-2 px-3.5 py-2.5 border-t border-border-subtle bg-canvas"
+      >
+        <MonoCaps>
+          page {Math.min(page, pages)} of {pages}
+        </MonoCaps>
+        <Btn size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+          previous
+        </Btn>
+        <Btn size="sm" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>
+          next
+        </Btn>
+      </nav>
+      <BanUserDialog
+        target={banTarget}
+        onOpenChange={(open) => !open && setBanTarget(null)}
+        onBan={ban}
+      />
+      <UnbanUserDialog
+        target={unbanTarget}
+        onOpenChange={(open) => !open && setUnbanTarget(null)}
+        onUnban={unban}
+      />
+    </div>
+  );
+};
+
 const TopUsersTable = ({ users, label }: { users: LeaderboardEntry[]; label: string }) => {
   const max = users[0]?.hours || 1;
   return (
@@ -505,6 +702,11 @@ function AdminPage() {
         />
         <div className={`${card} overflow-hidden`}>
           <RecentRoomsTable rooms={recentRooms} />
+        </div>
+
+        <SectionHead title="users" sub="search · ban and unban" size="sm" className="mt-6" />
+        <div className={`${card} overflow-hidden`}>
+          <UsersTable />
         </div>
 
         <SectionHead title="top users" sub="leaderboards" size="sm" className="mt-6" />

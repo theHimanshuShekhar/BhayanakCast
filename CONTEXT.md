@@ -21,6 +21,8 @@ Small-group live screen-sharing hangouts. Anyone signs in with Discord, starts o
 - **Lobby**: the pre-join check before entering a room, where the user picks and previews devices. Mic and camera start off.
 - **Takeover**: joining from a new tab or device ends the user's previous room connection. A user is in at most one room at a time.
 - **Admin**: a site-wide role with access to `/admin`, bans, and moderation in any room.
+- **Ban**: a site-wide block an admin puts on a user, with a reason and an optional expiry. It signs them out and removes them from any live room at once. Admins can't be banned.
+- **Audit log**: the record of every admin action (who, what, on whom or which room, when). It is kept indefinitely.
 
 ## Stack at a glance
 TanStack Start (React 19, Vite) · Tailwind v4 + Base UI · WebSocket signalling in the same Node process · native WebRTC full mesh · STUN + Cloudflare TURN · Better Auth (Discord) · Postgres + Drizzle · Docker Compose on the homelab behind Cloudflare Tunnel · pnpm, Biome, Vitest, Playwright.
