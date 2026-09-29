@@ -2,11 +2,13 @@
  * The lobby channel on the page (ADR 20): every page keeps the realtime socket open, signed in
  * or not. `useLobbyLive(userId)` (mounted once, in the app shell) starts it, reconnects it when
  * the session changes so it upgrades to (or drops) authentication without a reload, keeps the
- * online-user count, and invalidates room reads when the lobby says rooms changed.
+ * online-user count, and invalidates room reads when the lobby says rooms changed. A user an
+ * admin bans is sent home with the ban notice.
  * `useOnlineUsers()` reads the count anywhere.
  */
 import { type QueryClient, type QueryKey, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useSyncExternalStore } from "react";
+import { banNoticeHref } from "./ban";
 import { homeKeys } from "./home.queries";
 import type { ServerMessage } from "./realtime";
 import { getRealtimeClient } from "./realtime-client";
@@ -54,6 +56,12 @@ function follow(queryClient: QueryClient): () => void {
   const client = getRealtimeClient();
   let snapshots = 0;
   const unsubscribe = client.subscribe((message) => {
+    if (message.type === "error" && message.code === "banned") {
+      // An admin banned this user (ADR 6), which ended their session: load home afresh as a
+      // visitor, with the ban notice, so nothing the page holds as them survives.
+      window.location.assign(banNoticeHref(message.message));
+      return;
+    }
     if (message.type !== "lobby.snapshot" && message.type !== "lobby.changed") return;
     setOnline(message.online);
     const reconnected = message.type === "lobby.snapshot" && snapshots++ > 0;

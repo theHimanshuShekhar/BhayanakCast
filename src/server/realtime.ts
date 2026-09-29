@@ -18,6 +18,7 @@ import type { Caller } from "./caller.ts";
 import { CLIENT_IP_HEADER, createClientIpResolver } from "./client-ip.ts";
 import { systemClock } from "./clock.ts";
 import { env } from "./env.ts";
+import { registerLiveHub } from "./live-hub.ts";
 import { onRoomAnnouncement } from "./room-announcements.ts";
 import { RoomHub } from "./room-hub.ts";
 import { createDbRoomStore } from "./room-store.ts";
@@ -72,6 +73,8 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
   const stopAnnouncements = onRoomAnnouncement((announcement) => {
     void hub.announce(announcement);
   });
+  // Admin server functions reach it here (a ban disconnects the user).
+  const unregisterHub = registerLiveHub(hub);
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_CLIENT_MESSAGE_BYTES });
 
   function serve(ws: WebSocket, caller: Caller): void {
@@ -133,6 +136,7 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
     async close() {
       server.off("upgrade", onUpgrade);
       stopAnnouncements();
+      unregisterHub();
       for (const ws of wss.clients) ws.terminate();
       await new Promise<void>((resolve) => wss.close(() => resolve()));
       await hub.idle();

@@ -24,7 +24,7 @@ import {
 import type { Caller } from "./caller.ts";
 
 /** The name a profile shows: the Discord username, else the display name. */
-const username = sql<string>`coalesce(${user.discordUsername}, ${user.name})`;
+export const username = sql<string>`coalesce(${user.discordUsername}, ${user.name})`;
 
 const statColumns = {
   secondsStreamed: userStats.secondsStreamed,
@@ -82,7 +82,7 @@ async function topCoUsers(db: Db, userId: string): Promise<CoUser[]> {
 }
 
 /** `%` and `_` in a search term match themselves, not any characters. */
-const escapeLike = (term: string) => term.replace(/[\\%_]/g, (c) => `\\${c}`);
+export const escapeLike = (term: string) => term.replace(/[\\%_]/g, (c) => `\\${c}`);
 
 /**
  * Users whose Discord username contains the query (case-insensitive), at most
