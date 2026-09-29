@@ -10,7 +10,9 @@ import { type ReactNode, useState } from "react";
 import {
   BanUserDialog,
   type DialogTarget,
+  EndRoomDialog,
   type RoleChangeTarget,
+  type RoomDialogTarget,
   SetRoleDialog,
   UnbanUserDialog,
 } from "~/components/admin-dialogs";
@@ -29,7 +31,7 @@ import {
   percentChange,
   type WindowCount,
 } from "~/lib/admin";
-import { banUserFn, setUserRoleFn, unbanUserFn } from "~/lib/admin.functions";
+import { banUserFn, endRoomFn, setUserRoleFn, unbanUserFn } from "~/lib/admin.functions";
 import {
   adminDailySeriesQuery,
   adminKeys,
@@ -42,6 +44,7 @@ import {
 import { useCurrentSession } from "~/lib/current-user";
 import { fmtAgo, fmtMins } from "~/lib/format";
 import type { LiveRoomCard } from "~/lib/rooms";
+import { roomKeys } from "~/lib/rooms.queries";
 import { useDebounced } from "~/lib/use-debounced";
 
 export const Route = createFileRoute("/admin")({
@@ -154,54 +157,78 @@ const EmptyRow = ({ cols, children }: { cols: number; children: ReactNode }) => 
   </tr>
 );
 
-const LiveRoomsTable = ({ rooms }: { rooms: LiveRoomCard[] }) => (
-  <div className="overflow-x-auto">
-    <table aria-label="live rooms" className="w-full min-w-[640px] border-collapse text-xs">
-      <thead>
-        <tr>
-          <th className={th}>room</th>
-          <th className={th}>host</th>
-          <th className={`${th} !text-right`}>people</th>
-          <th className={`${th} !text-right`}>streams</th>
-          <th className={`${th} !text-right`}>duration</th>
-          <th className={`${th} w-[60px]`}>
-            <span className="sr-only">actions</span>
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        {rooms.map((r) => (
-          <tr key={r.id} className="group">
-            <td className={td}>
-              <RoomCell live name={r.name} isPrivate={r.isPrivate} />
-            </td>
-            <td className={td}>
-              <UserCell name={r.host?.username ?? null} />
-            </td>
-            <td className={`${td} text-right`}>
-              <b>{r.participantCount}</b>
-              <span className="text-subtle">/{r.capacity}</span>
-            </td>
-            <td className={`${td} text-right`}>{r.streamCount}</td>
-            <td className={`${td} text-right`}>
-              {fmtMins((Date.now() - Date.parse(r.createdAt)) / 60_000)}
-            </td>
-            <td className={td}>
-              <Link
-                to="/room/$roomId"
-                params={{ roomId: r.id }}
-                className="inline-flex items-center h-7 px-2.5 text-[11.5px] border rounded-[var(--radius-sm)] bg-surface border-border !text-fg shadow-card hover:bg-surface-2 hover:no-underline"
-              >
-                open
-              </Link>
-            </td>
+const LiveRoomsTable = ({ rooms }: { rooms: LiveRoomCard[] }) => {
+  const queryClient = useQueryClient();
+  const [endTarget, setEndTarget] = useState<RoomDialogTarget | null>(null);
+  const end = async (roomId: string) => {
+    await endRoomFn({ data: { roomId } });
+    // Live and past lists both change, here and on home.
+    await queryClient.invalidateQueries({ queryKey: roomKeys.all });
+  };
+  return (
+    <div className="overflow-x-auto">
+      <table aria-label="live rooms" className="w-full min-w-[640px] border-collapse text-xs">
+        <thead>
+          <tr>
+            <th className={th}>room</th>
+            <th className={th}>host</th>
+            <th className={`${th} !text-right`}>people</th>
+            <th className={`${th} !text-right`}>streams</th>
+            <th className={`${th} !text-right`}>duration</th>
+            <th className={`${th} w-[110px]`}>
+              <span className="sr-only">actions</span>
+            </th>
           </tr>
-        ))}
-        {rooms.length === 0 && <EmptyRow cols={6}>no live rooms</EmptyRow>}
-      </tbody>
-    </table>
-  </div>
-);
+        </thead>
+        <tbody>
+          {rooms.map((r) => (
+            <tr key={r.id} className="group">
+              <td className={td}>
+                <RoomCell live name={r.name} isPrivate={r.isPrivate} />
+              </td>
+              <td className={td}>
+                <UserCell name={r.host?.username ?? null} />
+              </td>
+              <td className={`${td} text-right`}>
+                <b>{r.participantCount}</b>
+                <span className="text-subtle">/{r.capacity}</span>
+              </td>
+              <td className={`${td} text-right`}>{r.streamCount}</td>
+              <td className={`${td} text-right`}>
+                {fmtMins((Date.now() - Date.parse(r.createdAt)) / 60_000)}
+              </td>
+              <td className={td}>
+                <div className="flex justify-end gap-1.5">
+                  <Link
+                    to="/room/$roomId"
+                    params={{ roomId: r.id }}
+                    className="inline-flex items-center h-7 px-2.5 text-[11.5px] border rounded-[var(--radius-sm)] bg-surface border-border !text-fg shadow-card hover:bg-surface-2 hover:no-underline"
+                  >
+                    open
+                  </Link>
+                  <Btn
+                    size="sm"
+                    variant="danger"
+                    aria-label={`End ${r.name}`}
+                    onClick={() => setEndTarget(r)}
+                  >
+                    end
+                  </Btn>
+                </div>
+              </td>
+            </tr>
+          ))}
+          {rooms.length === 0 && <EmptyRow cols={6}>no live rooms</EmptyRow>}
+        </tbody>
+      </table>
+      <EndRoomDialog
+        target={endTarget}
+        onOpenChange={(open) => !open && setEndTarget(null)}
+        onEnd={end}
+      />
+    </div>
+  );
+};
 
 type RecentRoom = AdminRoomRow & { hostName: string };
 type SortKey = keyof Pick<

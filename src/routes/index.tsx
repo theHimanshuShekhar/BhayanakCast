@@ -1,6 +1,7 @@
 import { keepPreviousData, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useMemo, useState } from "react";
+import { HomeNotice } from "~/components/home-notice";
 import { Icon, type IconComponent } from "~/components/icons";
 import { LiveCard, PastCard, useSnapshots } from "~/components/room-cards";
 import { SignInButton } from "~/components/sign-in-button";
@@ -20,9 +21,13 @@ import { useDebounced } from "~/lib/use-debounced";
 export const Route = createFileRoute("/")({
   // `join` is set when a visitor was sent here from a room URL; the shell then shows the
   // "sign in to join" prompt for that room. A failed Discord sign-in (e.g. a banned
-  // user) lands here with `error`/`error_description` to show.
-  validateSearch: (search: Record<string, unknown>): { join?: string } & SignInErrorSearch => ({
+  // user) lands here with `error`/`error_description` to show. Someone whose room an admin
+  // ended lands here with `ended=admin`.
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { join?: string; ended?: "admin" } & SignInErrorSearch => ({
     ...(typeof search.join === "string" && search.join ? { join: search.join } : {}),
+    ...(search.ended === "admin" ? { ended: "admin" as const } : {}),
     ...validateSignInErrorSearch(search),
   }),
   loaderDeps: ({ search }) => ({ join: search.join }),
@@ -302,6 +307,20 @@ function HomePage() {
             })
           }
         />
+        {search.ended === "admin" && (
+          <HomeNotice
+            icon={Icon.Broadcast}
+            title="This room was ended by an admin"
+            detail="Everyone in it was sent back here. It shows under Past Streams."
+            onDismiss={() =>
+              navigate({
+                to: "/",
+                search: (prev) => ({ ...prev, ended: undefined }),
+                replace: true,
+              })
+            }
+          />
+        )}
         <h1 className="m-0 mb-1 text-xl sm:text-2xl font-extrabold tracking-[-0.01em]">
           Active Rooms
         </h1>
