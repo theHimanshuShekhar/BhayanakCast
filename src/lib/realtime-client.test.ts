@@ -202,6 +202,22 @@ describe("RealtimeClient", () => {
     },
   );
 
+  it("stops wanting its room once an admin ended it, even across reconnects", () => {
+    client.joinRoom("r1");
+    const first = latest();
+    first.handshake();
+    first.serverSends({
+      type: "room.event",
+      roomId: "r1",
+      at: "2026-09-01T12:00:00.000Z",
+      event: { kind: "ended", reason: "admin" },
+    });
+    first.close();
+    vi.advanceTimersByTime(1_000);
+    latest().handshake();
+    expect(latest().sent).toEqual([{ type: "hello", v: PROTOCOL_VERSION }]);
+  });
+
   it("is closed, not reconnecting, once stopped", () => {
     client.start();
     latest().close();

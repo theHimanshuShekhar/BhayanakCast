@@ -1,0 +1,1 @@
+ALTER TYPE "public"."admin_action_kind" ADD VALUE 'end_room';

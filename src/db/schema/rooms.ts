@@ -44,7 +44,10 @@ export const rooms = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     /** When the room last became empty; null while occupied (ADR 14). */
     lastEmptyAt: timestamp("last_empty_at", { withTimezone: true }),
-    /** Set when the room ends; equals the time it last became empty (ADR 14). */
+    /**
+     * Set when the room ends: the time it last became empty (ADR 14), or when an admin ended it
+     * (ADR 6 addendum).
+     */
     endedAt: timestamp("ended_at", { withTimezone: true }),
     peakParticipants: integer("peak_participants").default(0).notNull(),
     lastThumbnailAt: timestamp("last_thumbnail_at", { withTimezone: true }),
