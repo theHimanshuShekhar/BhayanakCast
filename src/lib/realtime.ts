@@ -49,6 +49,13 @@ export const REACTION_EMOJIS = ["🔥", "💯", "✨", "🎧", "⚡", "🫡"] as
 export type ReactionEmoji = (typeof REACTION_EMOJIS)[number];
 /** Reaction rate limit per user: at most `reactions` in any `windowMs` (server clock). */
 export const REACTION_RATE_LIMIT = { reactions: 5, windowMs: 3_000 } as const;
+/**
+ * Signalling rate limit per user: at most `messages` relayed `signal`s in any `windowMs`
+ * (server clock). Joining a full room is about 20 steps (a description and ICE candidates,
+ * more with TURN) to each of 9 peers, so this leaves twice that for renegotiation while
+ * capping a flood at 40 a second.
+ */
+export const SIGNAL_RATE_LIMIT = { messages: 400, windowMs: 10_000 } as const;
 /** How many recent feed entries a live room keeps in memory for joiners. */
 export const FEED_HISTORY_SIZE = 50;
 
@@ -57,6 +64,57 @@ export const mediaState = z.object({ mic: z.boolean(), cam: z.boolean(), share: 
 export type MediaState = z.infer<typeof mediaState>;
 /** Everything off: how everyone arrives (the lobby starts mic and camera off). */
 export const MEDIA_OFF: MediaState = { mic: false, cam: false, share: false };
+
+/**
+ * The tracks one participant can send each peer, all over one connection per pair (ADR 1
+ * addendum): the mic now; camera, screen and share audio in later tickets (#35, #36).
+ */
+export const MEDIA_SLOTS = ["mic", "cam", "screen", "screenAudio"] as const;
+export type MediaSlot = (typeof MEDIA_SLOTS)[number];
+
+/** An SDP offer or answer, as `RTCSessionDescriptionInit`. */
+const sessionDescription = z.object({
+  type: z.enum(["offer", "answer", "pranswer", "rollback"]),
+  sdp: z.string().max(MAX_CLIENT_MESSAGE_BYTES).optional(),
+});
+/** An ICE candidate, as `RTCIceCandidateInit`. */
+const iceCandidate = z.object({
+  candidate: z.string().max(1_024).optional(),
+  sdpMid: z.string().max(64).nullable().optional(),
+  sdpMLineIndex: z.number().int().min(0).max(1_024).nullable().optional(),
+  usernameFragment: z.string().max(256).nullable().optional(),
+});
+const pcSession = z.string().min(1).max(64);
+
+/**
+ * One WebRTC signalling step between two peers' connections (src/lib/mesh.ts), which the server
+ * relays without reading. `session` names the sender's `RTCPeerConnection` for this pair and
+ * `peerSession` the recipient's it is talking to, once known: a new `session` means the sender
+ * started over (a reload, a rejoin), and a step for an older session of the recipient's is stale.
+ */
+export const signalPayload = z.discriminatedUnion("kind", [
+  /**
+   * A new connection's first word when it has no offer yet: a peer that had one to the sender's
+   * old page starts over, and one whose offer was lost sends it again.
+   */
+  z.object({ kind: z.literal("hello"), session: pcSession }),
+  z.object({
+    kind: z.literal("description"),
+    session: pcSession,
+    peerSession: pcSession.optional(),
+    description: sessionDescription,
+    /** Which of the sender's tracks each of its own transceivers (by `mid`) carries. */
+    slots: z.record(z.string().max(32), z.enum(MEDIA_SLOTS)).optional(),
+  }),
+  z.object({
+    kind: z.literal("candidate"),
+    session: pcSession,
+    peerSession: pcSession.optional(),
+    /** Null: the sender finished gathering. */
+    candidate: iceCandidate.nullable(),
+  }),
+]);
+export type SignalPayload = z.infer<typeof signalPayload>;
 
 // ---------------------------------------------------------------------------------------------
 // Client → server
@@ -123,6 +181,19 @@ export const modSetRoleMessage = z.object({
  * or longer than a room name may be (`bad_request`); everyone gets `renamed`.
  */
 export const roomRenameMessage = z.object({ type: z.literal("room.rename"), name: z.string() });
+/**
+ * WebRTC signalling for the peer `to` (ADR 1), relayed to them as `signal` with `from` stamped,
+ * only between two people in the same room, the sender over their current connection. Refused
+ * otherwise: `forbidden` when the sender isn't in a room here (never joined, left, kicked, taken
+ * over), `not_found` when `to` isn't in the sender's room (or is the sender), and
+ * `rate_limited` over `SIGNAL_RATE_LIMIT`. Dropped for a
+ * recipient in their reconnect grace, who has no socket.
+ */
+export const signalMessage = z.object({
+  type: z.literal("signal"),
+  to: z.string().min(1).max(64),
+  payload: signalPayload,
+});
 
 export const clientMessage = z.discriminatedUnion("type", [
   helloMessage,
@@ -136,6 +207,7 @@ export const clientMessage = z.discriminatedUnion("type", [
   modStopShareMessage,
   modSetRoleMessage,
   roomRenameMessage,
+  signalMessage,
 ]);
 export type ClientMessage = z.infer<typeof clientMessage>;
 export type ClientMessageType = ClientMessage["type"];
@@ -355,6 +427,14 @@ export const reactionMessage = z.object({
   reaction: reactionEntry,
 });
 
+/** Signalling from `from`, who is in the same room (`signal`). */
+export const signalRelayMessage = z.object({
+  type: z.literal("signal"),
+  roomId,
+  from: z.string(),
+  payload: signalPayload,
+});
+
 /** A new feed entry, sent to everyone in the room. */
 export const feedEntryMessage = z.object({
   type: z.literal("feed.entry"),
@@ -409,6 +489,7 @@ export const serverMessage = z.discriminatedUnion("type", [
   chatMessageMessage,
   reactionMessage,
   feedEntryMessage,
+  signalRelayMessage,
   errorMessage,
   pongMessage,
 ]);

@@ -5,6 +5,7 @@ import { type ReactNode, useEffect, useLayoutEffect, useMemo, useState } from "r
 import { Icon } from "~/components/icons";
 import { ControlBtn } from "~/components/room/control-btn";
 import { failureText, Lobby } from "~/components/room/lobby";
+import { PeerAudio } from "~/components/room/peer-audio";
 import { RoomSide } from "~/components/room/side-panel";
 import { type ModAction, Tile } from "~/components/room/tile";
 import { Btn, Chip } from "~/components/ui";
@@ -29,6 +30,7 @@ import {
   useRoomReactions,
   wasInRoom,
 } from "~/lib/room-live";
+import { useRoomMesh, useSpeakers } from "~/lib/room-media";
 import { roomDetailFor, withRoster } from "~/lib/room-view";
 import { type LiveRoomCard, ROOM_NAME_MAX } from "~/lib/rooms";
 import { roomQuery } from "~/lib/rooms.queries";
@@ -292,8 +294,9 @@ function RoomPage({
   const deviceNotice = useNotice(deviceError, 8_000);
   const notice = moderationNotice ?? deviceNotice ?? mediaNotice;
 
-  // Mic and camera are real local tracks (src/lib/local-media.ts), announced once they're on.
-  // TODO(ADR 1/2): the mesh sends them, and share becomes a getDisplayMedia track.
+  // Mic and camera are real local tracks (src/lib/local-media.ts), announced once they're on;
+  // the mesh sends the mic. TODO(#35, #36): it sends the camera, and share becomes a
+  // getDisplayMedia track.
   const toggleDevice = async (kind: LocalDeviceKind) => {
     const localMedia = getLocalMedia();
     if (media[kind]) {
@@ -330,6 +333,21 @@ function RoomPage({
     markInRoom(detail.id, false);
   }, [out, detail.id]);
 
+  // Peer-to-peer media (ADR 1): every connection closes with the room (leave unmounts this).
+  const mesh = useRoomMesh(detail.id, meId, roster, local.mic.track, !out);
+  const [volumes, setVolumes] = useState<Record<string, number>>({});
+  const micTracks = useMemo(() => {
+    const tracks: Record<string, MediaStreamTrack | undefined> = {};
+    for (const [userId, theirs] of Object.entries(mesh.remote)) tracks[userId] = theirs.mic;
+    if (meId && local.mic.track) tracks[meId] = local.mic.track;
+    return tracks;
+  }, [mesh.remote, local.mic.track, meId]);
+  const speaking = useSpeakers(micTracks);
+  const people = useMemo(
+    () => participants.map((p) => ({ ...p, speaking: speaking.has(p.userId) })),
+    [participants, speaking],
+  );
+
   // Floats on the pinned tile, else the first streamer's, else the first on stage, else yours.
   const react = (emoji: ReactionEmoji) => {
     const target =
@@ -359,7 +377,7 @@ function RoomPage({
     });
 
   const stage = useMemo(() => {
-    const base = showViewers ? participants : participants.filter((p) => !p.viewerOnly);
+    const base = showViewers ? people : people.filter((p) => !p.viewerOnly);
     if (!pinnedId) return base;
     return [
       ...base
@@ -369,7 +387,7 @@ function RoomPage({
         .filter((p) => p.id !== pinnedId)
         .map((p) => (p.size === "l" ? { ...p, size: "m" as const } : p)),
     ];
-  }, [participants, showViewers, pinnedId]);
+  }, [people, showViewers, pinnedId]);
 
   // The room ended or was hidden from us since the page loaded.
   if (live.error?.code === "not_found") return <RoomNotFound />;
@@ -474,6 +492,8 @@ function RoomPage({
               myRole={myRole}
               admin={admin}
               locallyMuted={mutedIds.has(p.id)}
+              volume={volumes[p.id] ?? 1}
+              onVolume={(id, volume) => setVolumes((v) => ({ ...v, [id]: volume }))}
               reactions={reactions.filter((r) => r.targetUserId === p.userId)}
               onPin={(id) => setPinnedId((cur) => (cur === id ? null : id))}
               onToggleMute={toggleMute}
@@ -481,6 +501,18 @@ function RoomPage({
             />
           ))}
         </div>
+        {Object.entries(mesh.remote).map(
+          ([userId, tracks]) =>
+            tracks.mic && (
+              <PeerAudio
+                key={userId}
+                userId={userId}
+                track={tracks.mic}
+                volume={volumes[userId] ?? 1}
+                muted={mutedIds.has(userId)}
+              />
+            ),
+        )}
 
         <div className="relative flex items-center justify-center gap-2.5 px-[18px] py-3.5 max-sm:px-2 max-sm:py-2.5 bg-canvas border-t border-border-subtle">
           <div className="absolute left-[18px] flex gap-2 max-lg:hidden">
@@ -609,7 +641,7 @@ function RoomPage({
       )}
       {settings.showChat && (
         <RoomSide
-          participants={participants}
+          participants={people}
           chat={chat}
           chatError={live.chatError}
           activity={activity}
