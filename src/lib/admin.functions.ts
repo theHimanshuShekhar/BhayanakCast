@@ -14,11 +14,12 @@ import {
   listAdminLiveRooms,
   listAdminRecentRooms,
 } from "~/server/admin";
-import { banUser, listAdminUsers, unbanUser } from "~/server/admin-users";
+import { banUser, listAdminUsers, setUserRole, unbanUser } from "~/server/admin-users";
+import { adminDiscordIds } from "~/server/env";
 import { getLiveHub } from "~/server/live-hub";
 import { getCaller } from "~/server/request-caller";
 import { toHeaders } from "~/server/session";
-import { banUserInput, listAdminUsersInput, unbanUserInput } from "./admin";
+import { banUserInput, listAdminUsersInput, setUserRoleInput, unbanUserInput } from "./admin";
 
 export const getAdminOverviewFn = createServerFn({ method: "GET" }).handler(async () =>
   getAdminOverview(getDb(), await getCaller()),
@@ -42,10 +43,11 @@ export const getAdminLeaderboardsFn = createServerFn({ method: "GET" }).handler(
 
 export const listAdminUsersFn = createServerFn({ method: "GET" })
   .validator(listAdminUsersInput)
-  .handler(async ({ data }) => listAdminUsers(getDb(), await getCaller(), data));
+  .handler(async ({ data }) => listAdminUsers(getDb(), await getCaller(), data, adminDiscordIds));
 
-// Ban and unban act through Better Auth as the calling admin (their session cookie), then on
-// the live realtime hub. Built inside each handler, so none of it reaches the client bundle.
+// Ban, unban and role changes act through Better Auth as the calling admin (their session
+// cookie), then on the live realtime hub. Built inside each handler, so none of it reaches the
+// client bundle.
 export const banUserFn = createServerFn({ method: "POST" })
   .validator(banUserInput)
   .handler(async ({ data }) =>
@@ -60,6 +62,16 @@ export const unbanUserFn = createServerFn({ method: "POST" })
   .validator(unbanUserInput)
   .handler(async ({ data }) =>
     unbanUser(getDb(), await getCaller(), data, {
+      auth,
+      headers: toHeaders(getRequestHeaders()),
+      hub: getLiveHub(),
+    }),
+  );
+
+export const setUserRoleFn = createServerFn({ method: "POST" })
+  .validator(setUserRoleInput)
+  .handler(async ({ data }) =>
+    setUserRole(getDb(), await getCaller(), data, {
       auth,
       headers: toHeaders(getRequestHeaders()),
       hub: getLiveHub(),

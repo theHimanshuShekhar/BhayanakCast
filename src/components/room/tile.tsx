@@ -4,7 +4,7 @@ import { type CSSProperties, useRef } from "react";
 import { avatarFor } from "~/lib/format";
 import type { Participant, RoomRole, Settings } from "~/lib/types";
 import { Icon } from "../icons";
-import { Avatar, Chip, ScreenPlaceholder, Wave } from "../ui";
+import { Avatar, Btn, Chip, ScreenPlaceholder, Wave } from "../ui";
 import { CameraVideo } from "./camera-video";
 
 /** A reaction floating up the tile, drifting `dx` pixels sideways. */
@@ -79,6 +79,8 @@ export const Tile = ({
   onToggleMute,
   onVolume,
   onModerate,
+  cantConnect = false,
+  onRetry,
 }: {
   p: Participant;
   layout: Settings["layout"];
@@ -97,14 +99,20 @@ export const Tile = ({
   onToggleMute: (id: string) => void;
   onVolume?: (id: string, volume: number) => void;
   onModerate: (id: string, action: ModAction) => void;
+  /** This page's connection to them failed, even after an ICE restart (ADR 3). */
+  cantConnect?: boolean;
+  /** Try connecting to them again. */
+  onRetry?: () => void;
 }) => {
   const ref = useRef<HTMLDivElement>(null);
   const span = tileSpan(p, layout);
+  const cantConnectState = cantConnect && <CantConnect name={p.name} onRetry={onRetry} />;
 
   if (p.viewerOnly) {
     return (
       // biome-ignore lint/a11y/useSemanticElements: a tile groups one person's view, not a form
       <div role="group" aria-label={displayName(p)} className={`${tileBase} ${span} shadow-pop`}>
+        {cantConnectState}
         <div className="flex items-center gap-2.5 px-3 py-2.5 h-full">
           <Avatar name={p.name} size="md" ring={p.speaking} />
           <div className="flex-1 min-w-0">
@@ -295,10 +303,26 @@ export const Tile = ({
         </span>
       </div>
 
+      {cantConnectState}
       <FloatingReactions reactions={reactions} />
     </div>
   );
 };
+
+/** Over a tile whose connection failed: say so, with a retry (under the chips and controls). */
+const CantConnect = ({ name, onRetry }: { name: string; onRetry?: () => void }) => (
+  <div
+    role="alert"
+    className="absolute inset-0 z-[2] flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1.5 p-2 text-center bg-black/70 text-white text-[11.5px] font-medium"
+  >
+    <span>can't connect to {name}</span>
+    {onRetry && (
+      <Btn size="sm" onClick={onRetry}>
+        retry
+      </Btn>
+    )}
+  </div>
+);
 
 const FloatingReactions = ({ reactions }: { reactions: Reaction[] }) =>
   reactions.map((r) => (

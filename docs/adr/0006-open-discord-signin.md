@@ -26,3 +26,9 @@ There is no BhayanakBot integration for now. Room-live announcements or slash co
 - A ban goes through the Better Auth admin plugin (reason, expiry of 1 day, 7 days or none), which revokes the user's sessions. The realtime server then tells each of their sockets `banned`, closes them, and removes them from any live room, which sees them leave. Admins can't be banned: demote them first.
 - Every admin action writes a row to `admin_actions` (actor, action, target user or room, details, time). Unbanning someone with no ban in force changes and logs nothing.
 - The audit log is kept indefinitely (ADR 11 addendum). It has no foreign keys to `rooms` or `user`, so neither the 30-day room purge nor a deleted account removes its rows.
+
+## Addendum: promoting and demoting admins (2026-09-29)
+- Promote and demote go through the Better Auth admin plugin's set-role, each written to the audit log (`promote`, `demote`). Giving someone the role they already have changes and logs nothing.
+- Env admins (listed in `ADMIN_DISCORD_IDS`) are marked "env admin" in the users table. Demoting one is refused server-side by the set-role hook, not just disabled in the UI. Roles change only through set-role: the hook refuses a role in any other user update, such as the plugin's `/admin/update-user`.
+- An admin can't demote themselves. A demote that leaves no admin at all (two admins demoting each other at once, with no env admins) is undone in one conditional update and refused, so at least one admin always remains. A banned user can't be promoted, since admins can't be banned.
+- A role change takes effect on the user's next request: a demoted admin loses `/admin` on their next navigation. Their open realtime sockets gain or lose admin powers at once, without reconnecting.

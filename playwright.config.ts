@@ -53,6 +53,9 @@ export default defineConfig({
       BETTER_AUTH_URL: baseURL,
       E2E_AUTH: "1",
       ADMIN_DISCORD_IDS: E2E_ADMIN_DISCORD_ID,
+      // Tests give each browser its own client IP via `cf-connecting-ip` (e.g. so sign-in rate
+      // limits aren't shared); the browsers connect from loopback, so trust it as the proxy.
+      TRUSTED_PROXY_IPS: "127.0.0.1,::1",
       // Every test's visitor pages connect from 127.0.0.1 at once.
       REALTIME_ANONYMOUS_SOCKETS_PER_IP: "1000",
       // Empty rooms end after 60s, not 5 minutes, so a test can watch one end

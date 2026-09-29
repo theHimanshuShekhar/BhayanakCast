@@ -5,8 +5,8 @@
  */
 import { index, jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
-/** What an admin did. Later slices add promote/demote and ending rooms. */
-export const adminActionKind = pgEnum("admin_action_kind", ["ban", "unban"]);
+/** What an admin did. A later slice adds ending rooms. */
+export const adminActionKind = pgEnum("admin_action_kind", ["ban", "unban", "promote", "demote"]);
 export type AdminActionKind = (typeof adminActionKind.enumValues)[number];
 
 export const adminActions = pgTable(

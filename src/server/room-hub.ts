@@ -5,8 +5,9 @@
  *   await hub.handle(connection, frame);                // it sent a frame (raw JSON)
  *   await hub.disconnect(connection);                   // it closed
  *
- * An admin ban reaches it as `hub.disconnectUser(userId, notice)`, and a regenerated invite link
- * as `hub.inviteRotated(roomId)` (./live-hub.ts).
+ * An admin ban reaches it as `hub.disconnectUser(userId, notice)`, an admin role change as
+ * `hub.setUserRole(userId, role)`, and a regenerated invite link as `hub.inviteRotated(roomId)`
+ * (./live-hub.ts).
  *
  * The WebSocket layer (./realtime.ts) is a thin adapter over these; tests drive the same
  * calls through real sockets (./realtime-harness.ts). The hub never touches `Date`, timers or
@@ -20,6 +21,7 @@
  * `#handlers` below (the type checker insists). Refusals go through `#refuse(conn, code, …)`.
  */
 
+import type { AdminRole } from "../lib/admin.ts";
 import { MAX_STREAMERS, ROOM_CAPACITY } from "../lib/format.ts";
 import {
   BANNED_CLOSE_CODE,
@@ -52,6 +54,7 @@ import {
 import { createRoomInput, ROOM_NAME_MAX } from "../lib/rooms.ts";
 import type { Caller, SignedInCaller } from "./caller.ts";
 import type { Clock, Timer } from "./clock.ts";
+import { withinRateLimit } from "./rate-limit.ts";
 import type { RoomAnnouncement } from "./room-announcements.ts";
 import type { PresenceSeen, RoomStore, StoredRoom } from "./room-store.ts";
 
@@ -106,7 +109,8 @@ export interface RoomHubDeps {
 
 class HubConnection implements Connection {
   readonly id: number;
-  readonly caller: Caller;
+  /** Replaced when an admin promotes or demotes the user (`setUserRole`). */
+  caller: Caller;
   readonly transport: Transport;
   /** Sent a valid `hello`. */
   greeted = false;
@@ -374,6 +378,30 @@ export class RoomHub {
     return this.#enqueue(async () => {
       const room = this.#rooms.get(roomId);
       if (room) this.#invalidateKnocks(room);
+    });
+  }
+
+  /**
+   * An admin promoted `userId` to admin or demoted them (ADR 6 addendum): their open sockets
+   * gain or lose admin powers from their next message, without reconnecting. A new admin in a
+   * room gets the knocks already pending there, as a new mod would.
+   */
+  setUserRole(userId: string, role: AdminRole): Promise<void> {
+    return this.#enqueue(() => {
+      const inRooms = [...this.#rooms.values()].flatMap((room) => {
+        const participant = room.participants.get(userId);
+        return participant
+          ? [{ room, participant, approved: this.#approves(room, participant) }]
+          : [];
+      });
+      for (const conn of this.#connections) {
+        if (conn.caller.user?.id === userId) conn.caller = { ...conn.caller, role };
+      }
+      for (const { room, participant, approved } of inRooms) {
+        if (!approved) this.#sendPendingKnocks(room, participant);
+        // An approver may have arrived (promoted) or gone (demoted): knockers wait accordingly.
+        this.#updateKnockers(room);
+      }
     });
   }
 
@@ -1677,23 +1705,4 @@ function isAdmin(conn: HubConnection): boolean {
 /** Who `participant` is, for room events and the feed. */
 function person(participant: LiveParticipant): FeedPerson {
   return { userId: participant.userId, username: participant.username };
-}
-
-/**
- * Whether `key` may act at `at` under a sliding window (at most `max` actions in any
- * `windowMs`), recording the action if so. Refused attempts don't count.
- */
-function withinRateLimit(
-  sends: Map<string, number[]>,
-  key: string,
-  max: number,
-  windowMs: number,
-  at: Date,
-): boolean {
-  const since = at.getTime() - windowMs;
-  const recent = (sends.get(key) ?? []).filter((t) => t > since);
-  const allowed = recent.length < max;
-  if (allowed) recent.push(at.getTime());
-  sends.set(key, recent);
-  return allowed;
 }
