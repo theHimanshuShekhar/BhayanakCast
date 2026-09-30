@@ -52,6 +52,10 @@ export interface UserSearchResult extends RoomPerson {
 const SECONDS_PER_HOUR = 3600;
 export const secondsToHours = (seconds: number): number => seconds / SECONDS_PER_HOUR;
 
+/** How often shown stats refetch: the hub checkpoints open intervals every 60 s, so hours move
+ * then. */
+export const STATS_REFRESH_MS = 60_000;
+
 /** "Mar 2024". UTC so SSR and the browser agree. */
 export const formatJoined = (iso: string): string =>
   new Date(iso).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });

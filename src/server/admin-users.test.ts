@@ -419,6 +419,8 @@ describe("listAdminUsers", () => {
       hostUserId: "bo",
       createdBy: "bo",
       createdAt: minutesAgo(120),
+      // Its time is in the stored stats already; this test reads the stored hours.
+      statsRolledUpAt: minutesAgo(1),
     });
     await db.insert(presenceIntervals).values([
       // bo: an earlier stay, and one still open (last seen at the latest checkpoint).
@@ -466,6 +468,15 @@ describe("listAdminUsers", () => {
     expect(byId.get("cy")).toMatchObject({ role: "user", envAdmin: false });
     expect(byId.get("banned_bo")?.ban).toEqual({ reason: "spam", expiresAt: null });
     expect(byId.get("was_banned")?.ban).toBeNull();
+  });
+
+  it("includes time in a room in progress in the lifetime hours", async () => {
+    await db.update(rooms).set({ statsRolledUpAt: null }).where(eq(rooms.id, "r"));
+    const page = await listAdminUsers(db, admin, {}, ENV_ADMINS, now);
+    const hours = (id: string) => page.users.find((u) => u.id === id)?.hours;
+    // bo: 2.5 stored + 20 min + 29 min watched in r. cy: 1 stored + 10 min.
+    expect(hours("bo")).toBeCloseTo(2.5 + 49 / 60, 10);
+    expect(hours("cy")).toBeCloseTo(1 + 10 / 60, 10);
   });
 
   it("searches usernames case-insensitively, literally", async () => {
