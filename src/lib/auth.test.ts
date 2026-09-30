@@ -242,6 +242,101 @@ describe("Discord columns", () => {
   });
 });
 
+/** A POST to `/api/auth<path>` with the cookies of `signedIn`. */
+function postAuth(signedIn: Response, path: string, body: object = {}) {
+  const headers = cookiesFrom(signedIn);
+  headers.set("content-type", "application/json");
+  headers.set("origin", testEnv.BETTER_AUTH_URL);
+  return auth.handler(
+    new Request(`${testEnv.BETTER_AUTH_URL}/api/auth${path}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
+describe("endpoints closed over HTTP (#58)", () => {
+  // Admin actions go through src/server/admin-users.ts, which enforces the app's rules and
+  // writes the audit log. Better Auth's own admin routes skip both.
+  it("404s an admin on the admin plugin's routes and changes nothing", async () => {
+    const admin = await testSignInRequest("1000", "root");
+    const target = await createDiscordUser("2000");
+    const targetRow = async () => (await db.select().from(user).where(eq(user.id, target.id)))[0];
+    const before = await targetRow();
+    const usersBefore = await db.select().from(user);
+    const sessionsBefore = await db.select().from(session);
+
+    const attempts: [string, object][] = [
+      ["/admin/ban-user", { userId: target.id }],
+      ["/admin/unban-user", { userId: target.id }],
+      ["/admin/set-role", { userId: target.id, role: "admin" }],
+      // discordId only: an env admin's id would make the target an admin at their next sign-in.
+      ["/admin/update-user", { userId: target.id, data: { discordId: "1000" } }],
+      ["/admin/impersonate-user", { userId: target.id }],
+      [
+        "/admin/create-user",
+        { email: "new@discord.invalid", password: "password-1234", name: "new", role: "admin" },
+      ],
+      ["/admin/set-user-password", { userId: target.id, newPassword: "password-1234" }],
+      ["/admin/revoke-user-sessions", { userId: target.id }],
+      ["/admin/remove-user", { userId: target.id }],
+    ];
+    for (const [path, body] of attempts) {
+      expect((await postAuth(admin, path, body)).status, path).toBe(404);
+    }
+
+    expect(await targetRow()).toEqual(before);
+    expect(await db.select().from(user)).toEqual(usersBefore);
+    expect(await db.select().from(session)).toEqual(sessionsBefore);
+  });
+
+  it("404s a signed-in user on account linking and session editing", async () => {
+    const signedIn = await testSignInRequest("4000", "kodama_jpg");
+    for (const path of ["/link-social", "/unlink-account", "/update-session"]) {
+      expect((await postAuth(signedIn, path, { provider: "discord" })).status, path).toBe(404);
+    }
+  });
+
+  it("leaves no admin plugin route open", () => {
+    const adminPaths = Object.values(auth.api)
+      .map((endpoint) => (endpoint as { path?: string }).path)
+      .filter((path): path is string => path?.startsWith("/admin/") ?? false);
+    // Guards against the filter going stale, so the check below can't pass on an empty list.
+    expect(adminPaths.length).toBeGreaterThanOrEqual(15);
+    expect(auth.options.disabledPaths).toEqual(expect.arrayContaining(adminPaths));
+  });
+
+  it("still lets the server call the admin API, as the dashboard does", async () => {
+    const adminHeaders = cookiesFrom(await testSignInRequest("1000", "root"));
+    const target = await createDiscordUser("2000");
+    const bannedOf = async () =>
+      (await db.select({ banned: user.banned }).from(user).where(eq(user.id, target.id)))[0]
+        ?.banned;
+
+    await auth.api.banUser({ body: { userId: target.id }, headers: adminHeaders });
+    expect(await bannedOf()).toBe(true);
+    await auth.api.unbanUser({ body: { userId: target.id }, headers: adminHeaders });
+    expect(await bannedOf()).toBe(false);
+    await auth.api.setRole({ body: { userId: target.id, role: "admin" }, headers: adminHeaders });
+    expect(await roleOf(target.id)).toBe("admin");
+  });
+
+  it("still serves the routes the app uses", async () => {
+    const signedIn = await testSignInRequest("4000", "kodama_jpg");
+    const get = (path: string, headers?: Headers) =>
+      auth.handler(new Request(`${testEnv.BETTER_AUTH_URL}/api/auth${path}`, { headers }));
+
+    expect((await get("/ok")).status).toBe(200);
+    expect((await get("/error")).status).toBe(200);
+    const sessionResponse = await get("/get-session", cookiesFrom(signedIn));
+    expect(((await sessionResponse.json()) as { user: { discordId: string } }).user.discordId).toBe(
+      "4000",
+    );
+    expect((await postAuth(signedIn, "/sign-out")).status).toBe(200);
+  });
+});
+
 describe("image column", () => {
   it("can't be written through Better Auth's /update-user", async () => {
     const signedIn = await testSignInRequest("4100", "kodama_jpg");
