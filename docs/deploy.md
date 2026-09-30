@@ -86,7 +86,8 @@ as an empty string, and the app treats that as unset. See `.env.example` for a t
 | `HOST_PORT` | no | Host port. Default `3000`. The tunnel's service URL must match it. |
 | `REALTIME_ANONYMOUS_SOCKETS_PER_IP` | no | Open signed-out (lobby) sockets per client IP. Default `20` (ADR 20). |
 | `REALTIME_EMPTY_ROOM_TIMEOUT_MS` | no | How long an empty room waits before it ends. Default `300000` (5 minutes, ADR 14). Leave it unset in production. |
-| `BACKUP_NAS_DIR` | no | Host directory on the mounted NAS CIFS share where dumps go. Default `/mnt/nas/backups/bhayanakcast`. It must hold the `.bhayanakcast-backups` marker file, or every backup fails. See section 5 (Backups to the NAS). |
+| `BACKUP_NAS_SHARE` | no | The NAS CIFS directory where dumps go, as `//host/share/path`. Default `//10.1.1.195/weyland/Services/backups/bhayanakcast`. It must exist and hold the `.bhayanakcast-backups` marker file. See section 5 (Backups to the NAS). |
+| `BACKUP_NAS_USERNAME`, `BACKUP_NAS_PASSWORD` | yes, for backups | The NAS account that can write to `BACKUP_NAS_SHARE`. The password can't contain `,` or `$` (it goes into the mount options and through compose interpolation). Without them `backup` can't start; the app is unaffected. |
 | `BACKUP_SCHEDULE` | no | Cron expression (5 fields) for the backup. Default `0 3 * * *`, nightly at 03:00. |
 | `BACKUP_TZ` | no | Time zone for `BACKUP_SCHEDULE` and the dump's date, for example `Asia/Kolkata`. Default `UTC`. |
 | `BACKUP_RETENTION_DAYS` | no | How many days of dumps to keep, today included, both locally and on the NAS. Older ones are deleted. Default `14`. |
@@ -113,22 +114,30 @@ Check what the container actually got with `docker inspect <app container> --for
 ## 5. Backups to the NAS
 
 The `backup` service writes `bhayanakcast-YYYY-MM-DD.sql.gz` (a plain-SQL `pg_dump`, gzipped)
-to its local `backups` volume. It then rsyncs the dumps to `BACKUP_NAS_DIR` and keeps the last
-`BACKUP_RETENTION_DAYS` days of dumps (default 14: today and the 13 days before) in both places,
-deleting older ones. A second run on the same day replaces that day's dump.
+to its local `backups` volume. It then rsyncs the dumps to the NAS (`BACKUP_NAS_SHARE`) and
+keeps the last `BACKUP_RETENTION_DAYS` days of dumps (default 14: today and the 13 days before) in
+both places, deleting older ones. A second run on the same day replaces that day's dump.
 Only these dumps are copied, never the Postgres data directory (ADR 9 addendum). Other files in the
 NAS directory are left alone.
 
-The host mounts the share. The container only gets a bind mount of `BACKUP_NAS_DIR`:
+Docker mounts the share itself, as the stack's `nas` volume (a `cifs` volume of the `local`
+driver), whenever `backup` starts. Nothing is mounted on the host, so it survives reboots. If the
+NAS is unreachable or the credentials are wrong, `backup` fails to start (its error names the
+mount) instead of writing to local disk; the app doesn't depend on it and keeps running. The volume
+is mounted root-only (`uid=0,gid=0,file_mode=0600,dir_mode=0700`), because the dumps hold user data
+and session tokens.
 
-1. On the dockhand LXC, mount the NAS CIFS share (for example with an `/etc/fstab` entry) and create
-   the backup directory on it. The dumps hold user data and session tokens, so mount it root-only:
-   `uid=0,gid=0,file_mode=0600,dir_mode=0700`, and on the NAS limit the share to the account the
-   LXC uses.
-2. Create the marker file on the share: `touch /mnt/nas/backups/bhayanakcast/.bhayanakcast-backups`.
-   If the share isn't mounted, the mount point is an empty local directory. The backup refuses to
-   rsync there and fails instead, keeping the dump in the local volume only.
-3. Set `BACKUP_NAS_DIR` to that directory in the stack variables.
+1. On the NAS, create the backup directory, for example `Services/backups/bhayanakcast` on the
+   `weyland` share. A CIFS mount of a directory that doesn't exist fails. On the NAS, limit the
+   share to the account you use below.
+2. Create the marker file in it, `.bhayanakcast-backups` (empty). The backup refuses to rsync
+   anywhere without it, so a share that points at the wrong directory is never written to.
+3. Set `BACKUP_NAS_USERNAME` and `BACKUP_NAS_PASSWORD` in the stack variables, and
+   `BACKUP_NAS_SHARE` if the directory isn't the default.
+
+Docker fixes a volume's options when it first creates it. After changing any `BACKUP_NAS_*`
+variable, stop `backup`, remove the volume (`docker volume rm bhayanakcast_nas`; this unmounts it
+and leaves the files on the NAS alone), then redeploy.
 
 The backup runs once when the container starts, so a broken setup shows up at deploy time. After
 that it runs on `BACKUP_SCHEDULE`. Every run is logged to the container log, ending in
@@ -138,11 +147,12 @@ succeeded. A failed run makes it **unhealthy** until the next run succeeds. To r
 
 ### Restore
 
-Restore into a **fresh** database, never over the live one. Find the dump on the NAS (or in the
-`backups` volume), then, as root on the dockhand LXC, run this one command:
+Restore into a **fresh** database, never over the live one. Pick a dump
+(`docker exec <backup container> ls /nas`, or `/backups` for the local copies), then, as root on
+the dockhand LXC, run this one command:
 
 ```sh
-docker exec <db container> createdb -U bhayanakcast bhayanakcast_restore && gunzip -c /mnt/nas/backups/bhayanakcast/bhayanakcast-YYYY-MM-DD.sql.gz | docker exec -i <db container> psql -q -o /dev/null -v ON_ERROR_STOP=1 --single-transaction -U bhayanakcast -d bhayanakcast_restore
+docker exec <db container> createdb -U bhayanakcast bhayanakcast_restore && docker exec <backup container> cat /nas/bhayanakcast-YYYY-MM-DD.sql.gz | gunzip | docker exec -i <db container> psql -q -o /dev/null -v ON_ERROR_STOP=1 --single-transaction -U bhayanakcast -d bhayanakcast_restore
 ```
 
 It fails if `bhayanakcast_restore` already exists; drop it first (`dropdb`) to retry. The restore
@@ -181,7 +191,7 @@ do this). Then start `app` again.
 - [ ] The app log has no `Ignoring cf-connecting-ip from …` warning. If it does, fix `TRUSTED_PROXY_IPS` (step 2).
 - [ ] A two-person room works across two different networks (one on mobile data, if possible).
 - [ ] If you set the TURN usage variables: the dashboard's TURN usage panel was built from Cloudflare's docs and never run against the real API, so check the query once by hand. Run `curl -s https://api.cloudflare.com/client/v4/graphql -H "Authorization: Bearer $CLOUDFLARE_ANALYTICS_API_TOKEN" -H "Content-Type: application/json" --data '{"query":"query { viewer { accounts(filter: {accountTag: \"<account id>\"}) { callsTurnUsageAdaptiveGroups(limit: 10000, filter: {date_geq: \"<YYYY-MM-01>\", date_leq: \"<today>\"}) { dimensions { datetimeHour } sum { egressBytes } } } } }"}'` (query text: `TURN_EGRESS_QUERY` in `src/server/turn-usage.ts`). It should return `data` with no `errors`. Then open `/admin`: the panel shows a number, not "usage unavailable" (the app log says `[turn-usage] Cloudflare analytics failed` with the reason).
-- [ ] The `backup` container is **healthy**, and today's `bhayanakcast-YYYY-MM-DD.sql.gz` is on the NAS share (section 5, Backups to the NAS).
+- [ ] The `backup` container is **healthy**, and today's `bhayanakcast-YYYY-MM-DD.sql.gz` is on the NAS share: `docker exec <backup container> ls -l /nas` (section 5, Backups to the NAS).
 - [ ] The latest dump restores into a scratch database, and its table counts match the live database (section 5, Restore).
 
 ## Operating

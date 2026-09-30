@@ -90,8 +90,8 @@ services:
       TZ: ${BACKUP_TZ:-UTC}
     volumes:
       - backups:/backups
-      # The host mounts the NAS CIFS share; the container only gets a bind mount of it.
-      - ${BACKUP_NAS_DIR:-/mnt/nas/backups/bhayanakcast}:/nas
+      # The NAS directory for dumps, a CIFS volume Docker mounts itself (see `nas` below).
+      - nas:/nas
     depends_on:
       db:
         condition: service_healthy
@@ -112,3 +112,14 @@ services:
 volumes:
   pgdata:
   backups:
+  # The NAS directory for dumps, mounted by Docker whenever `backup` starts, so it needs no host
+  # mount and survives reboots. If the share is unreachable, `backup` doesn't start rather than
+  # writing to local disk. Root-only, as the dumps hold user data and session tokens. Docker fixes
+  # these options when it creates the volume: after changing a BACKUP_NAS_* variable, remove the
+  # `nas` volume (the share's files stay) and redeploy. See docs/deploy.md section 5.
+  nas:
+    driver: local
+    driver_opts:
+      type: cifs
+      device: ${BACKUP_NAS_SHARE:-//10.1.1.195/weyland/Services/backups/bhayanakcast}
+      o: username=${BACKUP_NAS_USERNAME:-},password=${BACKUP_NAS_PASSWORD:-},vers=3.0,uid=0,gid=0,file_mode=0600,dir_mode=0700,soft,nounix

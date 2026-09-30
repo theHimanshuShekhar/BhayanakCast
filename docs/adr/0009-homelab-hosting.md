@@ -21,3 +21,6 @@ The realtime WebSocket (`/ws`) runs on the same port and hostname as the app, so
 
 ## Addendum: client IP behind the tunnel (2026-09-28)
 The app is published on the LAN IP, so a LAN client can reach it directly and send its own `cf-connecting-ip`. The header is trusted only when the direct peer is listed in `TRUSTED_PROXY_IPS` (the shared cloudflared host; required in production); from anyone else the socket address is the client IP. This covers the per-IP limit on anonymous sockets (ADR 20) and Better Auth's rate limiter, which reads only headers, so the production server rewrites `cf-connecting-ip` to the resolved IP before any handler runs. `pnpm dev` doesn't rewrite it.
+
+## Addendum: the backup sidecar mounts the NAS itself (2026-09-30)
+The sidecar's NAS directory is a Docker `cifs` volume of the `local` driver in the compose file, not a bind mount of a share the host mounts. Docker mounts it whenever the sidecar starts, so it needs no host fstab entry and survives reboots, and an unreachable share stops the sidecar instead of letting it write to an empty local mount point. The NAS account's credentials are stack variables. Postgres data stays on its local volume.
