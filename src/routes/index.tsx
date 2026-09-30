@@ -415,26 +415,29 @@ function HomePage() {
           </div>
         </section>
 
-        <section aria-label="Filling Up" className={panelCls}>
-          <PanelHead icon={Icon.Bolt}>Filling Up</PanelHead>
-          {trending.map((r) => (
-            <button
-              key={r.id}
-              type="button"
-              onClick={() => openRoom(r)}
-              className="w-[calc(100%+1rem)] flex items-center gap-2.5 p-2 -mx-2 rounded-lg cursor-pointer text-left hover:bg-surface"
-            >
-              <Avatar name={r.host?.username ?? r.name} image={r.host?.image ?? null} size="md" />
-              <div className="flex-1 min-w-0">
-                <div className="text-xs font-medium truncate">{r.name}</div>
-                <div className="text-[10.5px] text-muted">{r.host?.username ?? "no host"}</div>
-              </div>
-              <span className="text-[10.5px] font-semibold text-success-ink px-1.5 py-0.5 rounded-md tabular-nums bg-[color-mix(in_oklch,var(--color-success)_15%,transparent)]">
-                {r.participantCount}/{r.capacity}
-              </span>
-            </button>
-          ))}
-        </section>
+        {/* Hidden with no live rooms: the main column already says so. */}
+        {trending.length > 0 && (
+          <section aria-label="Filling Up" className={panelCls}>
+            <PanelHead icon={Icon.Bolt}>Filling Up</PanelHead>
+            {trending.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                onClick={() => openRoom(r)}
+                className="w-[calc(100%+1rem)] flex items-center gap-2.5 p-2 -mx-2 rounded-lg cursor-pointer text-left hover:bg-surface"
+              >
+                <Avatar name={r.host?.username ?? r.name} image={r.host?.image ?? null} size="md" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-medium truncate">{r.name}</div>
+                  <div className="text-[10.5px] text-muted">{r.host?.username ?? "no host"}</div>
+                </div>
+                <span className="text-[10.5px] font-semibold text-success-ink px-1.5 py-0.5 rounded-md tabular-nums bg-[color-mix(in_oklch,var(--color-success)_15%,transparent)]">
+                  {r.participantCount}/{r.capacity}
+                </span>
+              </button>
+            ))}
+          </section>
+        )}
 
         <section aria-label="Community" className={panelCls}>
           <PanelHead icon={Icon.Users}>Community</PanelHead>
