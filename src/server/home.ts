@@ -6,14 +6,16 @@
  * "Right Now" counts over the live rooms the caller may see, the same way
  * `listLiveRooms` does (open presence and stream intervals of live, visible rooms),
  * so the panel agrees with the Live Now list. "Community" sums the persistent
- * per-user stats, which carry no room data, so it's the same for every caller.
+ * per-user stats plus the rooms in progress, which carry no room data, so it's the
+ * same for every caller.
  */
-import { type AnyColumn, and, count, eq, isNull, sql } from "drizzle-orm";
+import { and, count, eq, isNull, type SQLWrapper, sql } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
-import { presenceIntervals, rooms, streamIntervals, user, userStats } from "../db/schema/index.ts";
+import { presenceIntervals, rooms, streamIntervals, user } from "../db/schema/index.ts";
 import type { CommunityTotals, HomeSummary, RightNow } from "../lib/home.ts";
 import { secondsToHours } from "../lib/profiles.ts";
 import type { Caller } from "./caller.ts";
+import { userStatsNow } from "./stats.ts";
 import { roomVisibleTo } from "./visibility.ts";
 
 /** The sidebar numbers as `caller` sees them. */
@@ -45,7 +47,7 @@ async function rightNowCounts(db: Db, caller: Caller): Promise<RightNow> {
 }
 
 /** Postgres sums integers as bigint/numeric (a string on the wire); read it as a number. */
-export const total = (column: AnyColumn) =>
+export const total = (column: SQLWrapper) =>
   sql<number>`coalesce(sum(${column}), 0)`.mapWith(Number);
 
 async function communityTotals(db: Db): Promise<CommunityTotals> {
@@ -53,11 +55,11 @@ async function communityTotals(db: Db): Promise<CommunityTotals> {
     db.select({ n: count() }).from(user),
     db
       .select({
-        secondsWatched: total(userStats.secondsWatched),
-        secondsStreamed: total(userStats.secondsStreamed),
-        roomsHosted: total(userStats.roomsHosted),
+        secondsWatched: total(userStatsNow.secondsWatched),
+        secondsStreamed: total(userStatsNow.secondsStreamed),
+        roomsHosted: total(userStatsNow.roomsHosted),
       })
-      .from(userStats),
+      .from(userStatsNow.from),
   ]);
   return {
     members: members?.n ?? 0,

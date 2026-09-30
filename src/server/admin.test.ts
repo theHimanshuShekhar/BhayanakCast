@@ -4,6 +4,7 @@ import {
   dailyPlatformStats,
   presenceIntervals,
   rooms,
+  streamIntervals,
   user,
   userStats,
 } from "../db/schema/index.ts";
@@ -96,14 +97,50 @@ describe("getAdminOverview", () => {
       { day: "2026-07-29", newUsers: 100, roomsCreated: 100, roomsEnded: 100 },
     ]);
 
+    // The three rooms above aren't rolled up, so each adds a hosted room (a) and a created room
+    // today.
     expect(await getAdminOverview(db, admin, now)).toEqual({
-      totals: { users: 4, hoursStreamed: 3, hoursWatched: 10.5, roomsHosted: 4, liveRooms: 2 },
+      totals: { users: 4, hoursStreamed: 3, hoursWatched: 10.5, roomsHosted: 7, liveRooms: 2 },
       window: {
         newUsers: { current: 3, previous: 6 },
-        roomsCreated: { current: 5, previous: 0 },
+        roomsCreated: { current: 8, previous: 0 },
         roomsEnded: { current: 1, previous: 2 },
       },
     });
+  });
+
+  it("includes a room in progress in the totals, the window and the leaderboards", async () => {
+    await db.insert(rooms).values(room({ id: "live", createdBy: "a", createdAt: minutesAgo(90) }));
+    await db.insert(presenceIntervals).values([
+      { roomId: "live", userId: "a", startedAt: minutesAgo(90), lastSeenAt: minutesAgo(30) },
+      { roomId: "live", userId: "b", startedAt: minutesAgo(60), lastSeenAt: minutesAgo(30) },
+    ]);
+    await db.insert(streamIntervals).values({
+      roomId: "live",
+      userId: "a",
+      startedAt: minutesAgo(90),
+      lastSeenAt: minutesAgo(30),
+    });
+
+    // a streamed 1 h; b watched 0.5 h. Created today, not ended.
+    const overview = await getAdminOverview(db, admin, now);
+    expect(overview.totals).toEqual({
+      users: 4,
+      hoursStreamed: 1,
+      hoursWatched: 0.5,
+      roomsHosted: 1,
+      liveRooms: 1,
+    });
+    expect(overview.window.roomsCreated).toEqual({ current: 1, previous: 0 });
+    expect(overview.window.roomsEnded).toEqual({ current: 0, previous: 0 });
+    expect((await getAdminDailySeries(db, admin, now)).at(-1)).toMatchObject({
+      day: "2026-09-27",
+      roomsCreated: 1,
+      roomsEnded: 0,
+    });
+    const { streamed, watched } = await getAdminLeaderboards(db, admin);
+    expect(streamed).toMatchObject([{ id: "a", hours: 1 }]);
+    expect(watched).toMatchObject([{ id: "b", hours: 0.5 }]);
   });
 
   it("is all zeros on an empty platform, except the users", async () => {

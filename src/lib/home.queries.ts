@@ -4,16 +4,22 @@
  */
 import { queryOptions } from "@tanstack/react-query";
 import { getHomeSummaryFn } from "./home.functions";
+import { STATS_REFRESH_MS } from "./profiles";
 import { roomKeys } from "./rooms.queries";
 
 export const homeKeys = {
   /**
-   * Under `roomKeys.all`: the counts change whenever rooms do (created, joined, ended and
-   * rolled up into stats), so anything that invalidates the rooms refreshes the summary too.
+   * Under `roomKeys.all`: the counts change whenever rooms do (created, joined, ended), so
+   * anything that invalidates the rooms refreshes the summary too. The community numbers
+   * include rooms in progress, so the query also refetches every minute.
    */
   summary: () => [...roomKeys.all, "home-summary"] as const,
 };
 
 /** The home sidebar's "Right Now" and "Community" numbers, as the caller sees them. */
 export const homeSummaryQuery = () =>
-  queryOptions({ queryKey: homeKeys.summary(), queryFn: () => getHomeSummaryFn() });
+  queryOptions({
+    queryKey: homeKeys.summary(),
+    queryFn: () => getHomeSummaryFn(),
+    refetchInterval: STATS_REFRESH_MS,
+  });

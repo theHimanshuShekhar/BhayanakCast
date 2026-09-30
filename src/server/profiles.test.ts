@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "../db/client.ts";
-import { user, userCotime, userStats } from "../db/schema/index.ts";
+import {
+  presenceIntervals,
+  rooms,
+  streamIntervals,
+  user,
+  userCotime,
+  userStats,
+} from "../db/schema/index.ts";
 import { createTestDb } from "../db/test-db.ts";
 import type { Caller } from "./caller.ts";
 import { getProfile, searchUsers } from "./profiles.ts";
@@ -118,6 +125,43 @@ describe("getProfile", () => {
     expect((await getProfile(db, visitor, "z"))?.coUsers).toEqual([
       { id: "m", username: "m.discord", image: null, secondsTogether: 50 },
     ]);
+  });
+
+  it("adds a room in progress to the stored stats and co-time", async () => {
+    await addUser("a", "a.discord");
+    await addUser("b", "b.discord");
+    await db
+      .insert(userStats)
+      .values({ userId: "a", secondsStreamed: 3600, roomsHosted: 2, peakViewers: 5 });
+    await addCotime("a", "b", 600);
+    const started = new Date("2026-09-30T10:00:00Z");
+    const minutes = (n: number) => new Date(started.getTime() + n * 60_000);
+    await db.insert(rooms).values({ id: "live", name: "live", createdBy: "a", hostUserId: "a" });
+    // Open intervals, last seen 30 minutes in.
+    await db.insert(presenceIntervals).values([
+      { roomId: "live", userId: "a", startedAt: started, lastSeenAt: minutes(30) },
+      { roomId: "live", userId: "b", startedAt: minutes(10), lastSeenAt: minutes(30) },
+    ]);
+    await db
+      .insert(streamIntervals)
+      .values({ roomId: "live", userId: "a", startedAt: started, lastSeenAt: minutes(30) });
+
+    const profile = await getProfile(db, visitor, "a");
+    expect(profile?.stats).toEqual({
+      hoursStreamed: 1.5,
+      hoursWatched: 0,
+      roomsHosted: 3,
+      roomsJoined: 1,
+      // Stored 5 beats the live 1.
+      peakViewers: 5,
+    });
+    expect(profile?.coUsers).toEqual([
+      { id: "b", username: "b.discord", image: null, secondsTogether: 600 + 20 * 60 },
+    ]);
+    expect((await getProfile(db, visitor, "b"))?.stats).toMatchObject({
+      hoursWatched: 20 / 60,
+      roomsJoined: 1,
+    });
   });
 
   it("skips pairs with no time together", async () => {

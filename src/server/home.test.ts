@@ -122,11 +122,33 @@ describe("getHomeSummary", () => {
       },
       { userId: "b", secondsWatched: 2.5 * HOUR, secondsStreamed: 0, roomsHosted: 1 },
     ]);
-    // A private room doesn't change the lifetime totals.
+    // A room in progress counts as hosted, private or not, the same for every caller.
     await createRoom(db, host, { ...baseInput, isPrivate: true });
 
-    const expected = { members: 6, hoursWatched: 12.5, hoursStreamed: 1.5, roomsHosted: 4 };
+    const expected = { members: 6, hoursWatched: 12.5, hoursStreamed: 1.5, roomsHosted: 5 };
     expect((await getHomeSummary(db, visitor)).community).toEqual(expected);
     expect((await getHomeSummary(db, admin)).community).toEqual(expected);
+  });
+
+  it("adds the time of a room in progress to the community hours", async () => {
+    await db.insert(userStats).values({ userId: "a", secondsWatched: 2 * HOUR });
+    const { id } = await createRoom(db, host, baseInput);
+    // One clock reading, so the spans below have exact lengths.
+    const clock = Date.now();
+    const ago = (minutes: number) => new Date(clock - minutes * 60_000);
+    await db.insert(presenceIntervals).values([
+      { roomId: id, userId: "host", startedAt: ago(90), lastSeenAt: ago(30) },
+      { roomId: id, userId: "b", startedAt: ago(60), lastSeenAt: ago(0) },
+    ]);
+    await db
+      .insert(streamIntervals)
+      .values({ roomId: id, userId: "host", startedAt: ago(90), lastSeenAt: ago(30) });
+
+    // Live: host streamed 1 h (and watched none); b watched 1 h.
+    expect((await getHomeSummary(db, visitor)).community).toMatchObject({
+      hoursStreamed: 1,
+      hoursWatched: 3,
+      roomsHosted: 1,
+    });
   });
 });

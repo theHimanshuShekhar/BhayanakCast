@@ -9,7 +9,7 @@ import type { Db } from "../db/client.ts";
 import { rooms } from "../db/schema/index.ts";
 import type { Recap, RecapPerson } from "../lib/recaps.ts";
 import type { Caller } from "./caller.ts";
-import { roomTimes } from "./intervals.ts";
+import { inRoom, roomTimes } from "./intervals.ts";
 import {
   capturedAtOf,
   endedWithinRetention,
@@ -24,7 +24,7 @@ import { roomVisibleTo } from "./visibility.ts";
 /** One merged span per row, with its user's totals repeated on each of their rows. */
 function recapSpans(db: Db, roomId: string) {
   const spans = sql`(
-    with ${roomTimes(roomId)},
+    with ${roomTimes(inRoom(roomId))},
     spans as (
       select 'presence' as kind, user_id, s, e from p
       union all

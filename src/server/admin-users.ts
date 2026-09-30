@@ -12,13 +12,7 @@
  */
 import { and, count, desc, eq, gt, isNull, max, notExists, or, sql } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
-import {
-  type AdminActionKind,
-  adminActions,
-  presenceIntervals,
-  user,
-  userStats,
-} from "../db/schema/index.ts";
+import { type AdminActionKind, adminActions, presenceIntervals, user } from "../db/schema/index.ts";
 import {
   ADMIN_USERS_PAGE_SIZE,
   type AdminBan,
@@ -40,6 +34,7 @@ import { secondsToHours } from "../lib/profiles.ts";
 import { type AdminCaller, type Caller, requireAdmin } from "./caller.ts";
 import { escapeLike, username } from "./profiles.ts";
 import type { RoomHub } from "./room-hub.ts";
+import { userStatsNow } from "./stats.ts";
 
 /** Thrown when an admin tries to ban another admin: they must be demoted first. */
 export class BanAdminError extends Error {
@@ -133,11 +128,11 @@ export async function listAdminUsers(
         banReason: user.banReason,
         banExpires: user.banExpires,
         lastSeenAt: lastSeen.at,
-        secondsStreamed: userStats.secondsStreamed,
-        secondsWatched: userStats.secondsWatched,
+        secondsStreamed: userStatsNow.secondsStreamed,
+        secondsWatched: userStatsNow.secondsWatched,
       })
       .from(user)
-      .leftJoin(userStats, eq(userStats.userId, user.id))
+      .leftJoin(userStatsNow.from, eq(userStatsNow.userId, user.id))
       .leftJoin(lastSeen, eq(lastSeen.userId, user.id))
       .where(where)
       .orderBy(desc(user.createdAt), desc(user.id))

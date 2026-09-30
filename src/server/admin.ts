@@ -3,10 +3,12 @@
  * the caller explicitly, like src/server/rooms.ts, and refuses anyone without the
  * admin role before reading anything; the /admin route guard is UX only.
  *
- * - All-time totals come from the user table and the persistent `user_stats`.
+ * - All-time totals come from the user table and the persistent `user_stats`, plus the
+ *   rooms in progress (./stats.ts).
  * - The 30-day numbers and charts come from `daily_platform_stats` (UTC days). Those
- *   counters are bumped at sign-up and at the stats roll-up of an ended room, so a room
- *   counts as created (on its creation day) once it has ended and been rolled up.
+ *   counters are bumped at sign-up and at the stats roll-up of an ended room; a room not
+ *   yet rolled up is added to `rooms_created` on its creation day when read, so it counts
+ *   as created while live and `rooms_ended` only moves once it has ended and rolled up.
  * - Room tables read `rooms` and presence intervals, so they reach back 30 days only.
  *   Admins see every room, private ones included (`roomVisibleTo`).
  */
@@ -26,13 +28,7 @@ import {
   sql,
 } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
-import {
-  dailyPlatformStats,
-  presenceIntervals,
-  rooms,
-  user,
-  userStats,
-} from "../db/schema/index.ts";
+import { type dailyPlatformStats, presenceIntervals, rooms, user } from "../db/schema/index.ts";
 import {
   ADMIN_WINDOW_DAYS,
   type AdminLeaderboards,
@@ -55,7 +51,7 @@ import {
   toSummary,
   usernameOf,
 } from "./rooms.ts";
-import { utcDay } from "./stats.ts";
+import { dailyStatsNow, userStatsNow, utcDay } from "./stats.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -67,9 +63,14 @@ type Counters = Omit<typeof dailyPlatformStats.$inferSelect, "day">;
 /** Counter rows from `firstDay` through `now`'s day, by day. */
 async function countersSince(db: Db, firstDay: string, now: Date) {
   const rows = await db
-    .select()
-    .from(dailyPlatformStats)
-    .where(and(gte(dailyPlatformStats.day, firstDay), lte(dailyPlatformStats.day, utcDay(now))));
+    .select({
+      day: dailyStatsNow.day,
+      newUsers: dailyStatsNow.newUsers,
+      roomsCreated: dailyStatsNow.roomsCreated,
+      roomsEnded: dailyStatsNow.roomsEnded,
+    })
+    .from(dailyStatsNow.from)
+    .where(and(gte(dailyStatsNow.day, firstDay), lte(dailyStatsNow.day, utcDay(now))));
   return new Map<string, Counters>(rows.map(({ day, ...counters }) => [day, counters]));
 }
 
@@ -90,11 +91,11 @@ export async function getAdminOverview(
     userCount(db),
     db
       .select({
-        secondsStreamed: total(userStats.secondsStreamed),
-        secondsWatched: total(userStats.secondsWatched),
-        roomsHosted: total(userStats.roomsHosted),
+        secondsStreamed: total(userStatsNow.secondsStreamed),
+        secondsWatched: total(userStatsNow.secondsWatched),
+        roomsHosted: total(userStatsNow.roomsHosted),
       })
-      .from(userStats),
+      .from(userStatsNow.from),
     db.select({ n: count() }).from(rooms).where(isNull(rooms.endedAt)),
     countersSince(db, daysBefore(now, 2 * ADMIN_WINDOW_DAYS - 1), now),
   ]);
@@ -243,7 +244,7 @@ export async function listAdminRecentRooms(
 
 async function topBy(
   db: Db,
-  column: typeof userStats.secondsStreamed | typeof userStats.secondsWatched,
+  column: typeof userStatsNow.secondsStreamed | typeof userStatsNow.secondsWatched,
 ): Promise<LeaderboardEntry[]> {
   const rows = await db
     .select({
@@ -253,8 +254,8 @@ async function topBy(
       image: user.image,
       seconds: column,
     })
-    .from(userStats)
-    .innerJoin(user, eq(user.id, userStats.userId))
+    .from(userStatsNow.from)
+    .innerJoin(user, eq(user.id, userStatsNow.userId))
     .where(gt(column, 0))
     .orderBy(desc(column), asc(user.id))
     .limit(LEADERBOARD_SIZE);
@@ -262,7 +263,7 @@ async function topBy(
     id: row.id,
     username: usernameOf(row),
     image: row.image,
-    hours: secondsToHours(row.seconds),
+    hours: secondsToHours(row.seconds ?? 0),
   }));
 }
 
@@ -270,8 +271,8 @@ async function topBy(
 export async function getAdminLeaderboards(db: Db, caller: Caller): Promise<AdminLeaderboards> {
   requireAdmin(caller);
   const [streamed, watched] = await Promise.all([
-    topBy(db, userStats.secondsStreamed),
-    topBy(db, userStats.secondsWatched),
+    topBy(db, userStatsNow.secondsStreamed),
+    topBy(db, userStatsNow.secondsWatched),
   ]);
   return { streamed, watched };
 }

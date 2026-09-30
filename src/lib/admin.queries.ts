@@ -13,12 +13,15 @@ import {
   listAdminRecentRoomsFn,
   listAdminUsersFn,
 } from "./admin.functions";
+import { STATS_REFRESH_MS } from "./profiles";
 import { roomKeys } from "./rooms.queries";
 
 export const adminKeys = {
   /**
-   * Under `roomKeys.all`: every admin number moves when rooms do (created, joined, ended
-   * and rolled up into stats), so anything that invalidates the rooms refreshes these too.
+   * Under `roomKeys.all`: every admin number moves when rooms do (created, joined, ended),
+   * so anything that invalidates the rooms refreshes these too. The stats ones (overview,
+   * daily series, leaderboards, users) include rooms in progress, so they also refetch
+   * every minute.
    */
   all: [...roomKeys.all, "admin"] as const,
   overview: () => [...adminKeys.all, "overview"] as const,
@@ -34,11 +37,19 @@ export const adminKeys = {
 
 /** All-time totals and the last 30 days against the 30 before. */
 export const adminOverviewQuery = () =>
-  queryOptions({ queryKey: adminKeys.overview(), queryFn: () => getAdminOverviewFn() });
+  queryOptions({
+    queryKey: adminKeys.overview(),
+    queryFn: () => getAdminOverviewFn(),
+    refetchInterval: STATS_REFRESH_MS,
+  });
 
 /** The last 30 UTC days of platform counters, gaps filled with zeros. */
 export const adminDailySeriesQuery = () =>
-  queryOptions({ queryKey: adminKeys.daily(), queryFn: () => getAdminDailySeriesFn() });
+  queryOptions({
+    queryKey: adminKeys.daily(),
+    queryFn: () => getAdminDailySeriesFn(),
+    refetchInterval: STATS_REFRESH_MS,
+  });
 
 /** Every live room, private ones included. */
 export const adminLiveRoomsQuery = () =>
@@ -54,11 +65,16 @@ export const turnUsageQuery = () =>
 
 /** Top users by lifetime hours streamed and watched. */
 export const adminLeaderboardsQuery = () =>
-  queryOptions({ queryKey: adminKeys.leaderboards(), queryFn: () => getAdminLeaderboardsFn() });
+  queryOptions({
+    queryKey: adminKeys.leaderboards(),
+    queryFn: () => getAdminLeaderboardsFn(),
+    refetchInterval: STATS_REFRESH_MS,
+  });
 
 /** A page of the users table, as searched. */
 export const adminUsersQuery = (input: ListAdminUsersInput) =>
   queryOptions({
     queryKey: adminKeys.usersPage(input),
     queryFn: () => listAdminUsersFn({ data: input }),
+    refetchInterval: STATS_REFRESH_MS,
   });
