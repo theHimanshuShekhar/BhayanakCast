@@ -1,10 +1,10 @@
 /** Browser-side Better Auth client (ADR 7). Sign in with `signInWithDiscord()`. */
-import { adminClient, inferAdditionalFields } from "better-auth/client/plugins";
+import { inferAdditionalFields } from "better-auth/client/plugins";
 import { createAuthClient } from "better-auth/react";
 import type { auth } from "./auth.ts";
 
 export const authClient = createAuthClient({
-  plugins: [adminClient(), inferAdditionalFields<typeof auth>()],
+  plugins: [inferAdditionalFields<typeof auth>()],
 });
 
 export const { useSession, signOut } = authClient;

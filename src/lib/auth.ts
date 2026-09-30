@@ -24,6 +24,9 @@ import { testSignIn } from "./test-sign-in.ts";
  */
 const SERVER_OWNED_USER_FIELDS = ["discordId", "discordUsername", "image"] as const;
 
+/** Account-linking and session-editing endpoints the app doesn't use. */
+const UNUSED_ACCOUNT_PATHS = ["/link-social", "/unlink-account", "/update-session"];
+
 export interface AuthConfig {
   env: Pick<
     Env,
@@ -49,10 +52,21 @@ export function createAuth(db: Db, config: AuthConfig) {
     return row?.discordId ?? null;
   }
 
+  // A banned user's sign-in fails with BANNED_USER and this message; the Discord
+  // callback carries both back to home, which shows the ban notice (./ban.ts).
+  const adminPlugin = admin({ bannedUserMessage: (user) => describeBan(user) });
+
   return betterAuth({
     baseURL: config.env.BETTER_AUTH_URL,
     secret: config.env.BETTER_AUTH_SECRET,
     database: drizzleAdapter(db, { provider: "pg", schema }),
+    // Closed over HTTP only (a 404 in the router). Server-side `auth.api.*` calls skip this
+    // check, so src/server/admin-users.ts still bans, unbans and sets roles, under the app's
+    // rules and audit log. Taken from the plugin so an upgrade that adds an admin path is covered.
+    disabledPaths: [
+      ...Object.values(adminPlugin.endpoints).map((endpoint) => endpoint.path),
+      ...UNUSED_ACCOUNT_PATHS,
+    ],
     socialProviders: {
       discord: {
         clientId: config.env.DISCORD_CLIENT_ID,
@@ -157,9 +171,7 @@ export function createAuth(db: Db, config: AuthConfig) {
       },
     },
     plugins: [
-      // A banned user's sign-in fails with BANNED_USER and this message; the Discord
-      // callback carries both back to home, which shows the ban notice (./ban.ts).
-      admin({ bannedUserMessage: (user) => describeBan(user) }),
+      adminPlugin,
       ...(isTestSignInEnabled(config.env) ? [testSignIn(db)] : []),
       // Must stay last (Better Auth TanStack Start integration docs).
       tanstackStartCookies(),
