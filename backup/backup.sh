@@ -61,10 +61,10 @@ pg_dump --no-owner --no-privileges | gzip > "$file.partial"
 mv "$file.partial" "$file"
 prune /backups
 
-# /nas is a bind mount of the host's CIFS mount point. If the share isn't mounted, the mount
-# point is an empty local directory, so require a marker file that only exists on the share.
+# /nas is the NAS CIFS volume Docker mounts at start (docker-compose.yml). Require a marker file
+# that only exists in the intended directory, so a share pointed elsewhere is never written to.
 if [ ! -e /nas/.bhayanakcast-backups ]; then
-  echo "backup: /nas/.bhayanakcast-backups is missing; is the NAS share mounted? Dump kept in /backups only." >&2
+  echo "backup: /nas/.bhayanakcast-backups is missing; is BACKUP_NAS_SHARE the right directory? Dump kept in /backups only." >&2
   exit 1
 fi
 # --omit-dir-times: setting times on the CIFS mount root can fail.
