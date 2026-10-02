@@ -49,7 +49,11 @@ import { createDbRoomStore, type RoomStore } from "./room-store.ts";
 import { createRoom } from "./rooms.ts";
 import { callerFromSession, resolveSession, toHeaders } from "./session.ts";
 
-const DEFAULT_TIMEOUT_MS = 2_000;
+// Real time, not the fake clock's: how long a wait for a message (or for the server to see a
+// close) lasts before the test fails. Only a failing test ever waits it out, so it's generous: a
+// loaded machine delays real sockets and PGlite by seconds. Keep it under `testTimeout` in
+// vitest.config.ts, so a stuck wait reports what it waited for instead of a bare test timeout.
+const DEFAULT_TIMEOUT_MS = 10_000;
 
 const testEnv = {
   NODE_ENV: "test" as const,

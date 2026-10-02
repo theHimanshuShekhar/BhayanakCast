@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { rooms } from "../db/schema/index.ts";
 import {
   CONNECTION_MESSAGE_BUDGET,
@@ -87,8 +87,9 @@ async function rateLimited(client: TestClient, count: number, re?: string) {
 }
 
 describe("per-connection rate limits", () => {
+  beforeEach(() => start());
+
   it("refuses room.join past the limit without doing the work", async () => {
-    await start();
     const ana = await h.createUser("ana");
     const both = [await h.createRoom(ana), await h.createRoom(ana)];
     const a = await h.connectAs(ana);
@@ -108,7 +109,6 @@ describe("per-connection rate limits", () => {
   });
 
   it("refuses media.state past the limit, so share toggles don't write stream intervals", async () => {
-    await start();
     const ana = await h.createUser("ana");
     const roomId = await h.createRoom(ana);
     const a = await h.connectAs(ana);
@@ -127,7 +127,6 @@ describe("per-connection rate limits", () => {
   });
 
   it("refuses knock.request past the limit", async () => {
-    await start();
     const ana = await h.createUser("ana");
     const bo = await h.createUser("bo");
     const roomId = await h.createRoom(ana, { isPrivate: true });
@@ -154,7 +153,6 @@ describe("per-connection rate limits", () => {
   }
 
   it("drops frames past the budget, telling the socket once per window, and recovers", async () => {
-    await start();
     const ana = await h.createUser("ana");
     const a = await h.connectAs(ana, { heartbeat: false });
     await useUpBudget(a, 1); // the hello took one
@@ -175,7 +173,6 @@ describe("per-connection rate limits", () => {
   });
 
   it("closes a socket that keeps sending past the budget", async () => {
-    await start();
     const ana = await h.createUser("ana");
     const a = await h.connectAs(ana, { heartbeat: false });
     await useUpBudget(a, 1);
@@ -187,7 +184,6 @@ describe("per-connection rate limits", () => {
   });
 
   it("keeps another room's chat and heartbeats close to the front of the queue in a flood", async () => {
-    await start();
     const ana = await h.createUser("ana");
     const bo = await h.createUser("bo");
     const cy = await h.createUser("cy");
@@ -229,8 +225,9 @@ describe("per-connection rate limits", () => {
 });
 
 describe("queued work per connection", () => {
+  beforeEach(() => start());
+
   it("keeps a flood of join, knock and media messages off a stalled queue", async () => {
-    await start();
     const ana = await h.createUser("ana");
     const roomId = await h.createRoom(ana);
     const inviteToken = await inviteTokenOf(await h.createRoom(ana, { isPrivate: true }));
@@ -257,7 +254,6 @@ describe("queued work per connection", () => {
   });
 
   it("closes a socket that has too much waiting, and carries on for everyone else", async () => {
-    await start();
     const ana = await h.createUser("ana");
     const bo = await h.createUser("bo");
     const roomId = await h.createRoom(ana);
@@ -284,8 +280,9 @@ describe("queued work per connection", () => {
 });
 
 describe("normal use stays within the limits", () => {
+  beforeEach(() => start());
+
   it("rejoins after reconnects, re-announcing media each time", async () => {
-    await start();
     const ana = await h.createUser("ana");
     const roomId = await h.createRoom(ana);
     let client = await h.connectAs(ana, { heartbeat: false });
@@ -302,7 +299,6 @@ describe("normal use stays within the limits", () => {
   });
 
   it("allows quick share and mic toggling", async () => {
-    await start();
     const ana = await h.createUser("ana");
     const roomId = await h.createRoom(ana);
     const a = await h.connectAs(ana);
@@ -326,7 +322,6 @@ describe("normal use stays within the limits", () => {
   });
 
   it("lets a person knock, and knock again after a reconnect", async () => {
-    await start();
     const ana = await h.createUser("ana");
     const bo = await h.createUser("bo");
     const roomId = await h.createRoom(ana, { isPrivate: true });
@@ -343,12 +338,13 @@ describe("normal use stays within the limits", () => {
 });
 
 describe("sockets per signed-in user", () => {
+  beforeEach(() => start({ socketsPerUser: 2 }));
+
   async function ids() {
     return { ana: await h.createUser("ana"), bo: await h.createUser("bo") };
   }
 
   it("refuses upgrades past the limit, per user, and frees a slot when a socket closes", async () => {
-    await start({ socketsPerUser: 2 });
     const { ana, bo }: { ana: TestUser; bo: TestUser } = await ids();
     const first = await h.connectAs(ana);
     await h.connectAs(ana);
@@ -364,7 +360,6 @@ describe("sockets per signed-in user", () => {
   });
 
   it("still lets a second tab take over the room", async () => {
-    await start({ socketsPerUser: 2 });
     const { ana } = await ids();
     const roomId = await h.createRoom(ana);
     const tab1 = await h.connectAs(ana);
