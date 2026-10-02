@@ -80,3 +80,16 @@ export function validateSignInErrorSearch(search: Record<string, unknown>): Sign
         : undefined,
   };
 }
+
+let leavingForBan = false;
+
+/**
+ * An admin banned this user, so the page is about to load home afresh as a visitor: there is
+ * no leaving of a room to confirm (the room page's leave guard checks `isLeavingForBan`).
+ * Lasts until that page load.
+ */
+export function markLeavingForBan(): void {
+  leavingForBan = true;
+}
+
+export const isLeavingForBan = (): boolean => leavingForBan;
