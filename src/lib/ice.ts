@@ -10,6 +10,11 @@ export const STUN_SERVERS: RTCIceServer[] = [
   { urls: ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"] },
 ];
 
+/** Whether `servers` include a TURN server (so a pair can relay), as the STUN fallback doesn't. */
+export function hasTurn(servers: readonly RTCIceServer[]): boolean {
+  return servers.some(({ urls }) => [urls].flat().some((url) => /^turns?:/i.test(url)));
+}
+
 /** The ICE servers for the signed-in caller (`getIceServersFn`), and when to ask again. */
 export interface IceServersGrant {
   iceServers: RTCIceServer[];

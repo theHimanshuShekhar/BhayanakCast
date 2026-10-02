@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { databaseUrl } from "../db/database-url.ts";
 import { isTrustedProxyEntry } from "./client-ip.ts";
 
 /**
@@ -22,7 +23,7 @@ const commaList = z
 const baseSchema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("production"),
   PORT: z.coerce.number().int().positive().default(3000),
-  DATABASE_URL: z.url(),
+  DATABASE_URL: databaseUrl,
   BETTER_AUTH_SECRET: z.string().min(32, "BETTER_AUTH_SECRET must be at least 32 characters"),
   BETTER_AUTH_URL: z.url(),
   DISCORD_CLIENT_ID: z.string().min(1),
@@ -75,7 +76,7 @@ const prodSchema = baseSchema.extend({
 const devSchema = baseSchema.extend({
   // Always present: `parseEnv` picks this schema only for an explicit development or test.
   NODE_ENV: z.enum(["development", "test"]),
-  DATABASE_URL: z.url().default("postgres://postgres:postgres@localhost:5432/bhayanakcast"),
+  DATABASE_URL: databaseUrl.default("postgres://postgres:postgres@localhost:5432/bhayanakcast"),
   BETTER_AUTH_SECRET: z.string().default("dev-only-insecure-secret-change-me-0123456789"),
   BETTER_AUTH_URL: z.url().default("http://localhost:3000"),
   DISCORD_CLIENT_ID: z.string().default("dev-discord-client-id"),

@@ -8,9 +8,10 @@
  * closes every peer connection. The page's own tracks belong to ./local-media.ts, which the
  * room releases at the same moments.
  *
- * The Mesh starts once the ICE servers (STUN plus TURN, ADR 3) have come from the server, and
- * gets fresh ones before their credentials expire. Pairs that relay or fail are reported to the
- * server's log (anonymised candidate types).
+ * The Mesh starts once the ICE servers (STUN plus TURN, ADR 3) have come from the server (STUN
+ * alone if fetching them failed), and gets fresh ones before their credentials expire: TURN
+ * arriving late restarts the pairs that failed on STUN. Pairs that relay or fail are reported
+ * to the server's log (anonymised candidate types).
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { keepIceServersFresh } from "./ice";
@@ -71,20 +72,21 @@ export function useRoomMesh(
 
   useEffect(() => {
     if (!meId || !active) return;
-    const stop = keepIceServersFresh(() => getIceServersFn(), setIceServers);
+    const stop = keepIceServersFresh(() => getIceServersFn({ data: { roomId } }), setIceServers);
     return () => {
       stop();
       setIceServers(null);
     };
-  }, [meId, active]);
+  }, [roomId, meId, active]);
 
   useEffect(() => {
     if (!meId || !active || !iceReady) return;
     const client = getRealtimeClient();
     const current = new Mesh({
       selfId: meId,
-      // Dropped while the socket reconnects: established pairs keep their media meanwhile.
-      send: (to, payload) => void client.send({ type: "signal", to, payload }),
+      // Dropped while the socket reconnects (established pairs keep their media meanwhile); the
+      // Mesh keeps the descriptions that were, and sends them again on the room's next snapshot.
+      send: (to, payload) => client.send({ type: "signal", to, payload }),
       iceServers: latest.current.iceServers ?? undefined,
     });
     mesh.current = current;
@@ -110,6 +112,10 @@ export function useRoomMesh(
     const unsubscribeSocket = client.subscribe((message) => {
       if (message.type === "signal" && message.roomId === roomId) {
         current.receive(message.from, message.payload);
+      } else if (message.type === "room.snapshot" && message.roomId === roomId) {
+        // Back in the room after a reconnect: the client re-joins right after `welcome`, and
+        // the server handles a socket's messages in order, so what is sent from here is relayed.
+        current.resend();
       }
     });
     current.setLocalTracks({ ...latest.current.own });

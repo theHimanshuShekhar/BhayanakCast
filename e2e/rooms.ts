@@ -107,6 +107,23 @@ export async function createRoomOnPage(page: Page, room: NewRoom): Promise<strin
   return id;
 }
 
+/**
+ * Record what the page copies instead of touching the real clipboard, which needs permissions
+ * Playwright can't grant in every browser. Read it back from `window.copied`.
+ */
+export async function fakeClipboard(context: BrowserContext) {
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          (window as unknown as { copied?: string }).copied = text;
+        },
+      },
+    });
+  });
+}
+
 /** Create a room hosted by a fresh user `hostUsername` in a separate browser context. */
 export async function createRoomAs(
   browser: Browser,

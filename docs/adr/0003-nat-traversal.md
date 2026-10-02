@@ -32,3 +32,12 @@ Some peer pairs behind CGNAT or strict/mobile NATs cannot connect directly (ADR 
 - The answer is cached in memory for 15 minutes, keyed by month so the 1st never shows last month's total. A failed call isn't cached; the panel says "usage unavailable" and the rest of the dashboard is unaffected.
 - The panel warns at 80% of the free tier (800 GB).
 - 1 GB is taken as 10^9 bytes. Cloudflare doesn't say whether it means GB or GiB; decimal shows a slightly higher percentage, so it errs on the side of warning early.
+
+## Addendum: TURN arriving late restarts failed pairs (2026-10-02)
+A page whose ICE-server fetch failed starts on STUN alone (and asks again every minute). Pairs that failed in that time stayed `failed` even after TURN credentials arrived. When TURN servers appear where there were none, the Mesh now gives every `failed` pair that had negotiated one more ICE restart with the new servers. Credential refreshes after that restart nothing, and a pair that never negotiated is still a signalling stall, not an ICE failure.
+
+## Addendum: TURN only for people in a room they may enter (2026-10-02)
+- TURN relays traffic for whoever holds credentials, so the server hands them out only to a signed-in user asking for a **live room they may enter**: it is live, visible to them (ADR 16) and they weren't kicked from it (ADR 15). That is the rule the realtime server applies on a join, so it also covers the page's first fetch right after the lobby. Anyone else gets STUN only (and asks again after a minute, in case the room has opened up to them).
+- `getIceServersFn` therefore takes the room id. Credentials stay cached **per user**, not per room: switching rooms reuses a valid cached credential, and the room only decides whether it is handed out.
+- Credentials already minted stay valid until they expire (at most 4 hours), even if the user is then kicked; the check keeps new ones, and the cached ones, from being handed out again.
+- TURN goes to anyone who may enter the room. For a public live room that means any signed-in account can get credentials by naming its id, without joining. That is accepted: the room must be live and visible to them, which is much narrower than any signed-in user at any time.
