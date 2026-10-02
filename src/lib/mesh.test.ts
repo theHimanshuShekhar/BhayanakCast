@@ -6,10 +6,19 @@ import {
   isSameOffer,
   Mesh,
   type MeshEvent,
+  QUALITY_INTERVAL_MS,
   SHARE_AUDIO_BITRATE,
   withStereoOpus,
 } from "./mesh";
-import { SCREEN_DEFAULT_RUNG, SCREEN_LADDER, UP_SAMPLES } from "./quality";
+import {
+  INITIAL_UPLINK,
+  SCREEN_DEFAULT_RUNG,
+  SCREEN_LADDER,
+  UP_SAMPLES,
+  UPLINK_DROP_LIMIT,
+  UPLINK_FLOOR,
+  UPLINK_SHARE,
+} from "./quality";
 import type { SignalPayload } from "./realtime";
 
 // The Mesh's negotiation (#34) against a fake RTCPeerConnection that keeps the signalling state
@@ -18,6 +27,9 @@ import type { SignalPayload } from "./realtime";
 // e2e/ice.spec.ts.
 
 let nextPc = 0;
+
+/** Whether the fake browser reports `degradationPreference` (Firefox, probably Safari, don't). */
+const browser = { reportsDegradation: true };
 
 class FakeTransceiver {
   mid: string | null = null;
@@ -38,6 +50,8 @@ class FakeTransceiver {
     track: unknown;
     /** What `getStats()` answers. */
     stats: Map<string, unknown>;
+    /** How many times `setParameters` was called. */
+    setCalls: number;
     getStats: () => Promise<Map<string, unknown>>;
     replaceTrack: (track: unknown) => Promise<void>;
     getParameters: () => Partial<RTCRtpSendParameters>;
@@ -51,12 +65,18 @@ class FakeTransceiver {
     const sender = {
       track,
       stats: new Map<string, unknown>(),
+      setCalls: 0,
       getStats: async () => sender.stats,
       replaceTrack: async (next: unknown) => {
         sender.track = next;
       },
-      getParameters: () => structuredClone(parameters),
+      getParameters: () => {
+        const reported = structuredClone(parameters);
+        if (!browser.reportsDegradation) delete reported.degradationPreference;
+        return reported;
+      },
       setParameters: async (next: Partial<RTCRtpSendParameters>) => {
+        sender.setCalls++;
         parameters = structuredClone(next);
       },
     };
@@ -206,6 +226,7 @@ function page(
   network: Map<string, Mesh>,
   iceServers?: RTCIceServer[],
   codecs?: VideoCodecs,
+  uplink?: number,
 ) {
   const events: MeshEvent[] = [];
   const pcs: FakePC[] = [];
@@ -222,6 +243,7 @@ function page(
     },
     iceServers,
     codecs,
+    uplink,
     RTCPeerConnection: class extends FakePC {
       constructor(configuration?: RTCConfiguration) {
         super(configuration);
@@ -648,12 +670,27 @@ describe("Mesh across socket reconnects (ADR 1)", () => {
 const trackWith = (name: string, settings: Partial<MediaTrackSettings> = {}, contentHint = "") =>
   ({ id: name, contentHint, getSettings: () => settings }) as unknown as MediaStreamTrack;
 
-/** A video sender's stats, as `readSample` reads them. */
-const senderStats = (loss: number, codec = "video/VP9") =>
+/** A video sender's stats, as `readSample` reads them (`sent`: its counters, for the bitrate). */
+const senderStats = (
+  loss: number,
+  codec = "video/VP9",
+  sent?: { bytesSent: number; timestamp: number },
+  reason?: string,
+) =>
   new Map<string, unknown>([
     ["t", { id: "t", type: "transport", selectedCandidatePairId: "p" }],
     ["p", { id: "p", type: "candidate-pair", availableOutgoingBitrate: 20_000_000 }],
-    ["o", { id: "o", type: "outbound-rtp", kind: "video", codecId: "c" }],
+    [
+      "o",
+      {
+        id: "o",
+        type: "outbound-rtp",
+        kind: "video",
+        codecId: "c",
+        ...(reason && { qualityLimitationReason: reason }),
+        ...sent,
+      },
+    ],
     ["c", { id: "c", type: "codec", mimeType: codec }],
     ["r", { id: "r", type: "remote-inbound-rtp", kind: "video", fractionLost: loss }],
   ]);
@@ -839,6 +876,305 @@ describe("Mesh quality ladder (ADR 2)", () => {
     await ana.mesh.adjust();
     expect(reads).toBe(0);
     ana.mesh.close();
+  });
+});
+
+describe("Mesh uplink budget (ADR 2)", () => {
+  const MBPS = 1_000_000;
+
+  /**
+   * Ana shares a 1080p60 screen (and, with `withCam`, a 360p15 camera) to `names` (all
+   * connected), with `uplink` bits per second to spend.
+   */
+  async function crowd(names: string[], uplink?: number, withCam = false) {
+    const network = new Map<string, Mesh>();
+    const ana = page("ana", network, undefined, undefined, uplink);
+    const viewers = names.map((name) => page(name, network));
+    const room = [{ userId: "ana" }, ...names.map((userId) => ({ userId }))];
+    for (const mesh of network.values()) mesh.join(room);
+    await settle();
+    const screen = trackWith("ana screen", { height: 1080, frameRate: 60 }, "motion");
+    const cam = trackWith("ana cam", { height: 360, frameRate: 15 });
+    ana.mesh.setLocalTracks(withCam ? { screen, cam } : { screen });
+    await settle();
+    connect(ana, ...viewers);
+    await settle();
+    // Ana's connections are in the order of `names`.
+    const senders = ana.pcs.map((pc) => carrying(pc, screen) as FakeTransceiver);
+    return { ana: ana.mesh, anaPage: ana, network, viewers, senders };
+  }
+
+  /**
+   * One `adjust` pass in which every sender sends `share` of its rung's bitrate over a link
+   * losing `loss` of its packets (by sender, if a function) and held back by `limit`; the uplink
+   * budget afterwards.
+   */
+  const counters = new Map<FakeTransceiver, { bytes: number; at: number }>();
+  async function pass(
+    ana: Mesh,
+    senders: FakeTransceiver[],
+    {
+      loss = 0,
+      share = 1,
+      limit,
+    }: { loss?: number | ((sender: number) => number); share?: number; limit?: string } = {},
+  ) {
+    for (const [i, t] of senders.entries()) {
+      const c = counters.get(t) ?? { bytes: 0, at: 0 };
+      counters.set(t, c);
+      const bitrate = (t.sender.getParameters().encodings?.[0]?.maxBitrate ?? 0) * share;
+      c.at += QUALITY_INTERVAL_MS;
+      c.bytes += (bitrate * QUALITY_INTERVAL_MS) / 8_000;
+      const lost = typeof loss === "function" ? loss(i) : loss;
+      t.sender.stats = senderStats(
+        lost,
+        "video/VP9",
+        { bytesSent: c.bytes, timestamp: c.at },
+        limit,
+      );
+    }
+    await ana.adjust();
+    await new Promise((resolve) => setTimeout(resolve));
+    return ana.uplink();
+  }
+  const labels = (mesh: Mesh) => mesh.quality().map((q) => q.screen?.rung);
+  const count = (list: (string | undefined)[], rung: string) =>
+    list.filter((r) => r === rung).length;
+
+  it("starts many viewers within the budget instead of every one at the top", async () => {
+    // Five viewers at 1080p30 would be 15 Mbps: four get it, the fifth the rung that is left.
+    const five = await crowd(["bo", "cy", "di", "ed", "fi"], 13.5 * MBPS);
+    expect(five.ana.uplink()).toEqual({ budget: 13.5 * MBPS, targeted: 13.5 * MBPS });
+    expect(count(labels(five.ana), "1080p30")).toBe(4);
+    expect(count(labels(five.ana), "720p30")).toBe(1);
+    five.ana.close();
+
+    // A sixth finds no room, and starts at the lowest rung: the first pass sheds the excess.
+    const six = await crowd(["bo", "cy", "di", "ed", "fi", "gu"], 13.5 * MBPS);
+    expect(six.ana.uplink().targeted).toBeGreaterThan(13.5 * MBPS);
+    expect(count(labels(six.ana), "720p30")).toBe(2);
+    expect((await pass(six.ana, six.senders)).targeted).toBeLessThanOrEqual(13.5 * MBPS);
+    six.ana.close();
+
+    // With the default budget, nine viewers (ADR 2's worst case, 27 Mbps at the top) fit too.
+    const nine = await crowd(["bo", "cy", "di", "ed", "fi", "gu", "hu", "io", "jo"]);
+    const { budget, targeted } = await pass(nine.ana, nine.senders);
+    expect(targeted).toBeLessThanOrEqual(budget);
+    expect(labels(nine.ana)).toHaveLength(9);
+    nine.ana.close();
+  });
+
+  it("lowers the budget and the total when most pairs are strained, to what was being sent", async () => {
+    const { ana, senders } = await crowd(["bo", "cy", "di", "ed", "fi", "gu"], 18 * MBPS);
+    expect(ana.uplink().targeted).toBe(18 * MBPS);
+    // Warm-up, then two readings in which every link loses packets and carries 95% of its target.
+    for (let i = 0; i < 2; i++) await pass(ana, senders);
+    expect(ana.uplink()).toEqual({ budget: 18 * MBPS, targeted: 18 * MBPS });
+    await pass(ana, senders, { loss: 0.1, share: 0.95 });
+    const { budget, targeted } = await pass(ana, senders, { loss: 0.1, share: 0.95 });
+    expect(budget).toBeCloseTo(18 * MBPS * 0.95 * UPLINK_SHARE, -3);
+    expect(targeted).toBeLessThanOrEqual(budget);
+    expect(targeted).toBeLessThan(18 * MBPS);
+    ana.close();
+  });
+
+  it("doesn't let a quiet scene collapse the budget: one drop is bounded", async () => {
+    const { ana, senders } = await crowd(["bo", "cy", "di", "ed", "fi", "gu"], 30 * MBPS);
+    for (let i = 0; i < 2; i++) await pass(ana, senders);
+    // A still screen sends 5% of its target, then a loss spike hits every link.
+    await pass(ana, senders, { loss: 0.1, share: 0.05 });
+    const { budget, targeted } = await pass(ana, senders, { loss: 0.1, share: 0.05 });
+    expect(budget).toBeCloseTo(30 * MBPS * UPLINK_DROP_LIMIT, -3);
+    // The pairs step down for their own loss, one rung, but nobody is thrown to the bottom.
+    expect(labels(ana)).toEqual(Array(6).fill("900p30"));
+    expect(targeted).toBeLessThanOrEqual(budget);
+    ana.close();
+  });
+
+  it("leaves a CPU-bound encoder to its own pairs: it doesn't cut the uplink budget", async () => {
+    const { ana, senders } = await crowd(["bo", "cy", "di", "ed", "fi", "gu"], 30 * MBPS);
+    for (let i = 0; i < 2; i++) await pass(ana, senders);
+    await pass(ana, senders, { limit: "cpu" });
+    const { budget } = await pass(ana, senders, { limit: "cpu" });
+    expect(budget).toBe(30 * MBPS);
+    // Each pair still steps down for it.
+    expect(labels(ana)).toEqual(Array(6).fill("900p30"));
+    ana.close();
+  });
+
+  it("leaves one bad link to its own pair, whatever the budget", async () => {
+    const { ana, senders } = await crowd(["bo", "cy", "di", "ed"], 20 * MBPS);
+    for (let i = 0; i < 2; i++) await pass(ana, senders);
+    const bad = senders.slice(0, 1);
+    for (let i = 0; i < 2; i++) {
+      for (const t of senders.slice(1)) t.sender.stats = senderStats(0);
+      await pass(ana, bad, { loss: 0.2 });
+    }
+    expect(ana.uplink().budget).toBe(20 * MBPS);
+    expect(labels(ana).sort()).toEqual(["1080p30", "1080p30", "1080p30", "900p30"]);
+    ana.close();
+  });
+
+  it("lets no pair probe past the budget, and only one at a time once a clean spell allows", async () => {
+    const { ana, senders } = await crowd(["bo", "cy", "di", "ed"], 12 * MBPS);
+    expect(ana.uplink()).toEqual({ budget: 12 * MBPS, targeted: 12 * MBPS });
+    // Clean links all the while. The pairs are due for a probe after the warm-up and a window,
+    // but the budget is full: nobody goes up yet.
+    for (let i = 0; i < 2 + UP_SAMPLES; i++) {
+      const { budget, targeted } = await pass(ana, senders);
+      expect(targeted).toBeLessThanOrEqual(budget);
+    }
+    expect(count(labels(ana), "1080p30")).toBe(4);
+    // Then one pair probes (the budget grows by that probe only), the others still wait.
+    expect(await pass(ana, senders)).toEqual({ budget: 13.5 * MBPS, targeted: 13.5 * MBPS });
+    expect(count(labels(ana), "1080p45")).toBe(1);
+    expect(count(labels(ana), "1080p30")).toBe(3);
+    // And so on, never past the budget at any pass.
+    for (let i = 0; i < 40; i++) {
+      const { budget, targeted } = await pass(ana, senders);
+      expect(targeted).toBeLessThanOrEqual(budget);
+    }
+    expect(ana.uplink().budget).toBeGreaterThan(13.5 * MBPS);
+    ana.close();
+  });
+
+  it("recovers when the pressure clears, and never past the budget", async () => {
+    const { ana, senders } = await crowd(["bo", "cy", "di", "ed", "fi", "gu"], 18 * MBPS);
+    for (let i = 0; i < 2; i++) await pass(ana, senders);
+    await pass(ana, senders, { loss: 0.1, share: 0.95 });
+    const low = await pass(ana, senders, { loss: 0.1, share: 0.95 });
+    expect(low.budget).toBeLessThan(18 * MBPS);
+
+    // Clean again: nothing jumps back at once, and the total climbs without passing the budget.
+    expect(await pass(ana, senders)).toEqual(low);
+    for (let i = 0; i < 60; i++) {
+      const { budget, targeted } = await pass(ana, senders);
+      expect(targeted).toBeLessThanOrEqual(budget);
+    }
+    const recovered = ana.uplink();
+    expect(recovered.budget).toBeGreaterThan(low.budget);
+    expect(recovered.targeted).toBeGreaterThan(low.targeted);
+    ana.close();
+  });
+
+  it("starts from the floor ADR 2 assumes, less an allowance for audio", async () => {
+    const { ana } = await crowd(["bo"]);
+    expect(ana.uplink().budget).toBe(INITIAL_UPLINK);
+    expect(INITIAL_UPLINK).toBeLessThan(UPLINK_FLOOR);
+    ana.close();
+  });
+
+  it("lets healthy viewers grow the budget past a mediocre one (lossy, but not pressured)", async () => {
+    // Ed's share starts lowest (what was left), and his link loses 2%: not strained, not clean.
+    const { ana, senders } = await crowd(["bo", "cy", "di", "ed"], 11.2 * MBPS);
+    expect(labels(ana)).toEqual(["1080p30", "1080p30", "1080p30", "900p30"]);
+    const options = { loss: (i: number) => (i === 3 ? 0.02 : 0) };
+    for (let i = 0; i < 2 + UP_SAMPLES; i++) await pass(ana, senders, options);
+    expect(await pass(ana, senders, options)).toEqual({
+      budget: 12.7 * MBPS,
+      targeted: 12.7 * MBPS,
+    });
+    expect(count(labels(ana), "1080p45")).toBe(1);
+    expect(labels(ana)[3]).toBe("900p30");
+    ana.close();
+  });
+
+  it("doesn't wait on a pair that isn't connected to take its turn", async () => {
+    const { ana, anaPage, senders } = await crowd(["bo", "cy", "di", "ed"], 11.2 * MBPS);
+    for (let i = 0; i < 2 + UP_SAMPLES; i++) await pass(ana, senders);
+    // Ed has been clean for a window on the lowest rung, and now his connection drops.
+    anaPage.pcs[3]?.setConnectionState("disconnected");
+    expect(await pass(ana, senders)).toEqual({ budget: 12.7 * MBPS, targeted: 12.7 * MBPS });
+    expect(count(labels(ana), "1080p45")).toBe(1);
+    ana.close();
+  });
+
+  it("brings a resumed camera back through the budget, so nobody else steps down", async () => {
+    const { ana, anaPage, network, viewers } = await crowd(["bo", "cy", "di"], 12.9 * MBPS, true);
+    expect(ana.uplink().targeted).toBe(10.5 * MBPS);
+    const [bo] = viewers;
+    bo?.mesh.setVisible("ana", "cam", false);
+    await settle();
+    expect(ana.uplink().targeted).toBe(10 * MBPS);
+    // Meanwhile a newcomer takes what room there is: a 900p30 share and a 360p15 camera.
+    const ed = page("ed", network);
+    const room = ["ana", "bo", "cy", "di", "ed"].map((userId) => ({ userId }));
+    for (const mesh of network.values()) mesh.join(room);
+    await settle();
+    connect(anaPage, ed);
+    await settle();
+    expect(ana.uplink().targeted).toBe(12.7 * MBPS);
+    expect(ana.quality()[3]).toMatchObject({ screen: { rung: "900p30" }, cam: { rung: "360p15" } });
+
+    // Bo shows the camera again: it comes back at the rung that fits, and nobody else moves.
+    bo?.mesh.setVisible("ana", "cam", true);
+    await settle();
+    await ana.adjust();
+    await settle();
+    expect(ana.quality()[0]?.cam?.rung).toBe("180p15");
+    expect(labels(ana)).toEqual(["1080p30", "1080p30", "1080p30", "900p30"]);
+    const { budget, targeted } = ana.uplink();
+    expect(targeted).toBeLessThanOrEqual(budget);
+    ana.close();
+  });
+
+  describe("with a pair whose stats read hasn't returned (the #74 guard)", () => {
+    /** Four viewers at 12 Mbps; the first one's stats hang after the warm-up. */
+    async function hung() {
+      const { ana, senders } = await crowd(["bo", "cy", "di", "ed"], 12 * MBPS);
+      for (let i = 0; i < 2; i++) await pass(ana, senders);
+      (senders[0] as FakeTransceiver).sender.getStats = () => new Promise(() => {});
+      // This pass never finishes (it waits on the first pair), but the others' parts do.
+      void ana.adjust();
+      await new Promise((resolve) => setTimeout(resolve));
+      return { ana, healthy: senders.slice(1) };
+    }
+
+    it("counts what it was last sending, so the budget doesn't drop too deep", async () => {
+      const { ana, healthy } = await hung();
+      await pass(ana, healthy, { loss: 0.1, share: 0.95 });
+      const { budget } = await pass(ana, healthy, { loss: 0.1, share: 0.95 });
+      // Its 3 Mbps and the other three's 95% of 3 Mbps each, not just the three.
+      expect(budget).toBeCloseTo((3 + 3 * 2.85) * MBPS * UPLINK_SHARE, -3);
+      ana.close();
+    });
+
+    it("leaves it alone while fitting the others to a lower budget", async () => {
+      const { ana, healthy } = await hung();
+      await pass(ana, healthy, { loss: 0.1, share: 0.6 });
+      const { budget, targeted } = await pass(ana, healthy, { loss: 0.1, share: 0.6 });
+      expect(budget).toBeCloseTo(12 * MBPS * UPLINK_DROP_LIMIT, -3);
+      expect(targeted).toBeLessThanOrEqual(budget);
+      // The heaviest sender is the hung pair's, which isn't stepped down mid-read.
+      expect(labels(ana)[0]).toBe("1080p30");
+      ana.close();
+    });
+  });
+
+  it("applies encoder parameters only when they change, on a browser that doesn't report degradationPreference", async () => {
+    browser.reportsDegradation = false;
+    try {
+      const { ana, senders } = await crowd(["bo", "cy"]);
+      for (const t of senders) {
+        // Set once for the share's content hint, though the browser never says it has it.
+        expect(t.sender.setCalls).toBe(1);
+        expect(t.sender.getParameters().degradationPreference).toBeUndefined();
+      }
+      // Warm-up and a clean window: no rung changes yet, so nothing to apply.
+      for (let i = 0; i < 2 + UP_SAMPLES - 1; i++) await pass(ana, senders);
+      for (const t of senders) expect(t.sender.setCalls).toBe(1);
+
+      // A share with another content hint is a real change, made once.
+      ana.setLocalTracks({
+        screen: trackWith("ana screen 2", { height: 1080, frameRate: 60 }, "text"),
+      });
+      await settle();
+      for (let i = 0; i < 4; i++) await pass(ana, senders);
+      for (const t of senders) expect(t.sender.setCalls).toBe(2);
+      ana.close();
+    } finally {
+      browser.reportsDegradation = true;
+    }
   });
 });
 

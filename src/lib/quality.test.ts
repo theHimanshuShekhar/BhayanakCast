@@ -1,18 +1,27 @@
 import { describe, expect, it } from "vitest";
 import {
+  AUDIO_ALLOWANCE,
   CAMERA_DEFAULT_RUNG,
   CAMERA_LADDER,
   captureCap,
   DOWN_SAMPLES,
+  fitRung,
   freshLadderState,
+  INITIAL_UPLINK,
   MAX_BACKOFF,
   nextRung,
+  probeDue,
   readSample,
   SCREEN_DEFAULT_RUNG,
   SCREEN_LADDER,
   type StatsSample,
   step,
+  strained,
   UP_SAMPLES,
+  UPLINK_DROP_LIMIT,
+  UPLINK_FLOOR,
+  UPLINK_SHARE,
+  UplinkBudget,
 } from "./quality";
 
 const TOP = SCREEN_LADDER.length - 1;
@@ -191,6 +200,139 @@ describe("step", () => {
     expect(nextRung(CAMERA_LADDER, times(DOWN_SAMPLES, LOSSY), CAMERA_DEFAULT_RUNG)).toBe(0);
     expect(CAMERA_LADDER[0]?.label).toBe("180p15");
     expect(nextRung(CAMERA_LADDER, times(UP_SAMPLES, GOOD), 0)).toBe(CAMERA_DEFAULT_RUNG);
+  });
+});
+
+describe("fitRung", () => {
+  it("picks the highest rung that fits the room, never below the lowest", () => {
+    expect(fitRung(SCREEN_LADDER, 10_000_000)).toBe(TOP);
+    expect(fitRung(SCREEN_LADDER, 3_000_000)).toBe(2);
+    expect(fitRung(SCREEN_LADDER, 2_999_999)).toBe(1);
+    expect(fitRung(SCREEN_LADDER, 0)).toBe(0);
+    // Not above the top it is given (the capture's cap, or the default).
+    expect(fitRung(SCREEN_LADDER, 10_000_000, SCREEN_DEFAULT_RUNG)).toBe(SCREEN_DEFAULT_RUNG);
+  });
+});
+
+describe("strained and probeDue", () => {
+  it("counts loss, a long round trip and a short estimate as strain, but not a CPU limit", () => {
+    expect(strained(GOOD)).toBe(false);
+    expect(strained(LOSSY)).toBe(true);
+    expect(strained({ ...GOOD, rttMs: 800 })).toBe(true);
+    expect(
+      strained({
+        ...GOOD,
+        limit: "bandwidth",
+        sendBitrate: 3_000_000,
+        availableBitrate: 1_000_000,
+      }),
+    ).toBe(true);
+    // A CPU-bound encoder is slow on every pair at once whatever the uplink is.
+    expect(strained({ ...GOOD, limit: "cpu" })).toBe(false);
+    expect(nextRung(SCREEN_LADDER, times(DOWN_SAMPLES, { ...GOOD, limit: "cpu" }), 3)).toBe(2);
+  });
+
+  it("is due once a full clean window has gathered, waiting longer after failed probes", () => {
+    expect(probeDue(times(UP_SAMPLES - 1, GOOD))).toBe(false);
+    expect(probeDue(times(UP_SAMPLES, GOOD))).toBe(true);
+    // Not pressured, but not clean either (1 to 5% loss): never due.
+    expect(probeDue(times(UP_SAMPLES * 2, { ...GOOD, loss: 0.03 }))).toBe(false);
+    expect(probeDue(times(UP_SAMPLES, GOOD), 1)).toBe(false);
+    expect(probeDue(times(UP_SAMPLES * 2, GOOD), 1)).toBe(true);
+  });
+});
+
+describe("UplinkBudget", () => {
+  const MBPS = 1_000_000;
+  const calm = { pairs: 4, strainedPairs: 0, sent: 10 * MBPS };
+  const shared = { pairs: 4, strainedPairs: 3, sent: 10 * MBPS };
+  const pass = (budget: UplinkBudget, reading: typeof calm, n = 1) => {
+    for (let i = 0; i < n; i++) budget.observe(reading);
+  };
+
+  it("starts at the floor ADR 2 assumes less an audio allowance, and says what room is left", () => {
+    const budget = new UplinkBudget();
+    expect(budget.limit).toBe(INITIAL_UPLINK);
+    expect(INITIAL_UPLINK).toBe(UPLINK_FLOOR - AUDIO_ALLOWANCE);
+    expect(AUDIO_ALLOWANCE).toBeGreaterThanOrEqual(1_700_000);
+    expect(budget.room(20 * MBPS)).toBe(INITIAL_UPLINK - 20 * MBPS);
+    expect(budget.room(30 * MBPS)).toBe(0);
+  });
+
+  it("admits what fits, and refuses what doesn't before a clean spell", () => {
+    const budget = new UplinkBudget(10 * MBPS);
+    expect(budget.admit(8 * MBPS, 2 * MBPS)).toBe(true);
+    expect(budget.admit(8 * MBPS, 2.5 * MBPS)).toBe(false);
+    pass(budget, calm, UP_SAMPLES - 1);
+    expect(budget.admit(8 * MBPS, 2.5 * MBPS)).toBe(false);
+    expect(budget.limit).toBe(10 * MBPS);
+  });
+
+  it("grows by just the one probe after a clean spell, so the next must wait", () => {
+    const budget = new UplinkBudget(10 * MBPS);
+    pass(budget, calm, UP_SAMPLES);
+    expect(budget.admit(10 * MBPS, 1.5 * MBPS)).toBe(true);
+    expect(budget.limit).toBe(11.5 * MBPS);
+    expect(budget.admit(11.5 * MBPS, 1.5 * MBPS)).toBe(false);
+    pass(budget, calm, UP_SAMPLES);
+    expect(budget.admit(11.5 * MBPS, 1.5 * MBPS)).toBe(true);
+    // Not on a sender's turn: it waits.
+    pass(budget, calm, UP_SAMPLES);
+    expect(budget.admit(13 * MBPS, 1.5 * MBPS, false)).toBe(false);
+  });
+
+  it("drops to a share of what was sent when most pairs are strained, not on one bad link", () => {
+    const budget = new UplinkBudget(12 * MBPS);
+    pass(budget, { pairs: 4, strainedPairs: 1, sent: 10 * MBPS }, 5);
+    pass(budget, { pairs: 1, strainedPairs: 1, sent: 10 * MBPS }, 5);
+    expect(budget.limit).toBe(12 * MBPS);
+    // Two in a row, as a step down needs; one such reading isn't enough.
+    pass(budget, shared);
+    expect(budget.limit).toBe(12 * MBPS);
+    pass(budget, shared);
+    expect(budget.limit).toBe(10 * MBPS * UPLINK_SHARE);
+    // Half the pairs is enough, but never a lone strained one of two.
+    const half = new UplinkBudget(8 * MBPS);
+    pass(half, { pairs: 2, strainedPairs: 1, sent: 7 * MBPS }, 4);
+    expect(half.limit).toBe(8 * MBPS);
+    pass(half, { pairs: 2, strainedPairs: 2, sent: 7 * MBPS }, 2);
+    expect(half.limit).toBe(7 * MBPS * UPLINK_SHARE);
+  });
+
+  it("bounds one drop, so a quiet scene sending next to nothing doesn't collapse it", () => {
+    const budget = new UplinkBudget(20 * MBPS);
+    pass(budget, { ...shared, sent: 0.5 * MBPS }, 2);
+    expect(budget.limit).toBe(20 * MBPS * UPLINK_DROP_LIMIT);
+    // A real shortage keeps lowering it, a step at a time.
+    pass(budget, { ...shared, sent: 0.5 * MBPS }, 2);
+    expect(budget.limit).toBeCloseTo(20 * MBPS * UPLINK_DROP_LIMIT ** 2, 0);
+  });
+
+  it("never raises the budget by pressure, and recovers one probe at a time once it clears", () => {
+    const budget = new UplinkBudget(20 * MBPS);
+    pass(budget, { ...shared, sent: 30 * MBPS }, 2);
+    expect(budget.limit).toBe(20 * MBPS);
+    pass(budget, shared, 2);
+    const lowered = budget.limit;
+    expect(lowered).toBeLessThan(20 * MBPS);
+    pass(budget, calm, UP_SAMPLES);
+    expect(budget.admit(lowered, MBPS)).toBe(true);
+    expect(budget.limit).toBe(lowered + MBPS);
+  });
+
+  it("waits twice as long after a growth that brought pressure back, until one holds", () => {
+    const budget = new UplinkBudget(10 * MBPS);
+    pass(budget, calm, UP_SAMPLES);
+    expect(budget.admit(10 * MBPS, MBPS)).toBe(true);
+    // The pressure returns before the growth held: backoff.
+    pass(budget, shared, 2);
+    pass(budget, calm, UP_SAMPLES);
+    expect(budget.admit(budget.limit, MBPS)).toBe(false);
+    pass(budget, calm, UP_SAMPLES);
+    expect(budget.admit(budget.limit, MBPS)).toBe(true);
+    // This one holds for a window: the wait is the short one again.
+    pass(budget, calm, UP_SAMPLES);
+    expect(budget.admit(budget.limit, MBPS)).toBe(true);
   });
 });
 
