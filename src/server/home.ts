@@ -6,8 +6,9 @@
  * "Right Now" counts over the live rooms the caller may see, the same way
  * `listLiveRooms` does (open presence and stream intervals of live, visible rooms),
  * so the panel agrees with the Live Now list. "Community" sums the persistent
- * per-user stats plus the rooms in progress, which carry no room data, so it's the
- * same for every caller.
+ * per-user stats plus the rooms in progress over every room, private ones included
+ * (`userStatsNow`): anonymous totals that name no room or user, so they're the same for
+ * every caller (ADR 16 addendum).
  */
 import { and, count, eq, isNull, type SQLWrapper, sql } from "drizzle-orm";
 import type { Db } from "../db/client.ts";

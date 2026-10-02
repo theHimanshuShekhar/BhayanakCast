@@ -305,6 +305,29 @@ describe("getAdminLeaderboards", () => {
     });
   });
 
+  it("counts private rooms, live or rolled up: admins see everything", async () => {
+    // Stored all-rooms totals with no public ones, as a private room's roll-up leaves them.
+    await db.insert(userStats).values({ userId: "a", secondsStreamed: 2 * HOUR });
+    await db.insert(rooms).values(room({ id: "secret", isPrivate: true }));
+    await db.insert(presenceIntervals).values({
+      roomId: "secret",
+      userId: "b",
+      startedAt: minutesAgo(60),
+      lastSeenAt: minutesAgo(0),
+    });
+
+    expect((await getAdminLeaderboards(db, admin)).watched).toEqual([
+      { id: "b", username: "b_user", image: null, hours: 1 },
+    ]);
+    expect((await getAdminLeaderboards(db, admin)).streamed).toEqual([
+      { id: "a", username: "a_user", image: null, hours: 2 },
+    ]);
+    expect((await getAdminOverview(db, admin, now)).totals).toMatchObject({
+      hoursStreamed: 2,
+      hoursWatched: 1,
+    });
+  });
+
   it("keeps the top 6", async () => {
     const ids = Array.from({ length: 8 }, (_, i) => `u${i}`);
     await db
