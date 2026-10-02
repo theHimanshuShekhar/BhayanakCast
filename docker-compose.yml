@@ -29,6 +29,7 @@ services:
       CLOUDFLARE_ANALYTICS_API_TOKEN: ${CLOUDFLARE_ANALYTICS_API_TOKEN:-}
       REALTIME_ANONYMOUS_SOCKETS_PER_IP: ${REALTIME_ANONYMOUS_SOCKETS_PER_IP:-}
       REALTIME_SOCKETS_PER_USER: ${REALTIME_SOCKETS_PER_USER:-}
+      PUBLIC_READ_LIMIT_SCALE: ${PUBLIC_READ_LIMIT_SCALE:-}
       REALTIME_EMPTY_ROOM_TIMEOUT_MS: ${REALTIME_EMPTY_ROOM_TIMEOUT_MS:-}
     # Apply pending migrations, then start the server (the image's default command too).
     command: ["sh", "-c", "node src/db/migrate.ts && exec node server.prod.ts"]
@@ -41,9 +42,10 @@ services:
       - "${HOST_BIND:-10.1.1.160}:${HOST_PORT:-3000}:3000"
     restart: unless-stopped
     healthcheck:
+      # /api/health runs `select 1` against db, so a lost database turns the app unhealthy.
       test:
         - CMD-SHELL
-        - node -e "fetch('http://127.0.0.1:3000/api/auth/ok').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        - node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
       interval: 30s
       timeout: 10s
       retries: 3

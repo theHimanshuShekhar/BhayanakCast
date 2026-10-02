@@ -7,7 +7,7 @@ Deploy on the homelab as Docker Compose: `app` (TanStack Start Node server with 
 
 ## Consequences
 - The server handles only HTTP, WebSocket signalling and DB work; media is peer-to-peer (ADR 1), with Cloudflare TURN as relay (ADR 3). Home uplink is not a media bottleneck.
-- Availability depends on home uptime. A restart drops live room state; clients reconnect (ADR 4).
+- Availability depends on home uptime. A restart doesn't end rooms: they're restored from Postgres and clients reconnect within a grace, losing only chat and the feed (ADR 4, 2026-10-02 addendum).
 - Cloudflare Tunnel may close idle WebSockets, so the client and server exchange heartbeats (ping every ~30s).
 
 ## Addendum: deployment and storage (2026-09-27)
@@ -41,3 +41,7 @@ The production server (`server.prod.ts`) sets the headers; `pnpm dev` sets none,
 - **Caching:** HTML pages (they embed the session's loader data), `/_serverFn/*` and `/api/auth/*` send `Cache-Control: private, no-store`, as does any other app response that sets none of its own; thumbnails keep their `private` and ETag. Files in `/assets/` are content-hashed and get `public, max-age=31536000, immutable` (the static middleware sent no `Cache-Control` before); other static files, like the favicon, keep the default. Without this, one CDN cache rule would have let a shared cache serve one user's server-function answer to another.
 - An error the app throws is answered by the same middleware as a plain 500 (logged as `[http] unhandled error`), so it carries the headers and `no-store` too.
 - The WebSocket upgrade isn't a fetch response and is untouched.
+
+## Addendum: the app's healthcheck reaches the database; secrets are host-visible (2026-10-02)
+- The app's compose healthcheck calls `GET /api/health`, which runs `select 1` with a 3 s timeout and answers 200 or 503 (`src/server/health.ts`). It replaces Better Auth's `/api/auth/ok`, which never touched Postgres, so a lost database now shows as `unhealthy`. It is outside `/api/auth`, so the auth rate limiter doesn't count it, and it needs no session. Docker doesn't restart an unhealthy container (`restart: unless-stopped` acts on exits only), so this makes the outage visible in Dockhand rather than fixing it; the app's connection pool reconnects once Postgres is back.
+- Secrets are visible to anyone with Docker access on the host: `docker inspect` shows the app's environment (`DATABASE_URL` carries the database password), and `docker volume inspect` shows `BACKUP_NAS_PASSWORD` in the `nas` volume's options. This is documented in docs/deploy.md ("Who can see the secrets on the host") and accepted: the alternatives (a credentials file or mount on the host) give up the git-backed, no-host-setup deploy.

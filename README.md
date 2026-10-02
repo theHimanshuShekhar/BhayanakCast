@@ -35,7 +35,7 @@ Make a room private and share an invite link. Everyone who opens it **knocks**, 
 Hosts can promote mods, rename the room, stop a share, or remove someone who's ruining the vibe. Your room, your rules.
 
 ### 🎛️ Check before you join
-The pre-join lobby lets you pick and preview your mic and camera first. Both start **off**, so you never go live by accident.
+The pre-join check lets you pick and preview your mic and camera first. Both start **off**, so you never go live by accident.
 
 ### 📼 Recaps of every hangout
 When a room ends, its recap stays up for 30 days. You can see who showed up, how long they stayed, and who was streaming.
@@ -58,7 +58,7 @@ Your profile keeps track of hours streamed, hours watched, rooms hosted, and you
 
 ## Works where you are
 
-- **Desktop:** Chrome, Edge, and Firefox are fully supported. Safari works too.
+- **Desktop:** Chrome, Edge, and Firefox are fully supported. Desktop Safari is best-effort: it should work, but it isn't tested.
 - **Mobile:** watch, chat, talk, and turn on your camera from your phone. You'll need a desktop browser to share your screen.
 
 <p align="center">

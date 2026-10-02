@@ -3,6 +3,7 @@
  * fields. Property keys are what Better Auth maps against, so keep them as-is.
  * App-specific user columns (Discord identity, settings) live here too.
  */
+import { sql } from "drizzle-orm";
 import { boolean, index, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { DEFAULT_USER_SETTINGS, type UserSettings } from "../settings.ts";
 
@@ -30,7 +31,14 @@ export const user = pgTable(
     discordUsername: text("discord_username"),
     settings: jsonb("settings").$type<UserSettings>().default(DEFAULT_USER_SETTINGS).notNull(),
   },
-  (table) => [index("user_discord_username_idx").on(table.discordUsername)],
+  (table) => [
+    // Username search (`ilike '%q%'` on the name a profile shows, src/server/profiles.ts) uses
+    // this: the expression must match the query's. `pg_trgm` is created in migration 0007.
+    index("user_username_trgm_idx").using(
+      "gin",
+      sql`(coalesce(${table.discordUsername}, ${table.name})) gin_trgm_ops`,
+    ),
+  ],
 );
 
 export const session = pgTable(

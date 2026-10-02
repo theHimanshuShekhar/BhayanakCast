@@ -35,6 +35,13 @@ export function lobbyInvalidations(message: ServerMessage, reconnected: boolean)
 const THUMBNAIL_REFETCH_MS = 5_000;
 
 /**
+ * Home summary refetches are spaced at least this far apart: a busy lobby changes many times a
+ * minute, and the summary is rate-limited per IP (ADR 20 addendum), so a few tabs refetching
+ * on every change would use up the budget. At most 12 a minute per tab.
+ */
+const SUMMARY_REFETCH_MS = 5_000;
+
+/**
  * Wrap `run` so a burst of calls runs it at once, then at most once per `ms`: calls during the
  * wait collapse into one run when it ends.
  */
@@ -59,6 +66,30 @@ export function coalesce(run: () => void, ms: number): () => void {
     run();
     wait();
   };
+}
+
+/** Whether `key` starts with `prefix`, as a query key matches the keys under it. */
+const startsWith = (key: QueryKey, prefix: QueryKey) =>
+  prefix.length <= key.length && prefix.every((part, i) => part === key[i]);
+
+/**
+ * Invalidate `keys` (from `lobbyInvalidations`), but leave the home summary to `refetchSummary`,
+ * a `coalesce`d refetch of it, wherever a key covers it (`roomKeys.all` does).
+ */
+export function invalidateLobbyKeys(
+  queryClient: Pick<QueryClient, "invalidateQueries">,
+  keys: QueryKey[],
+  refetchSummary: () => void,
+): void {
+  const summary = homeKeys.summary();
+  for (const queryKey of keys) {
+    void queryClient.invalidateQueries({
+      queryKey,
+      predicate: (query) =>
+        query.queryKey.length !== summary.length || !startsWith(query.queryKey, summary),
+    });
+    if (startsWith(summary, queryKey)) refetchSummary();
+  }
 }
 
 // The online count, shared by every component that shows it. Browser-only state: the server
@@ -123,6 +154,10 @@ function follow(queryClient: QueryClient): () => void {
     () => void queryClient.invalidateQueries({ queryKey: roomKeys.live() }),
     THUMBNAIL_REFETCH_MS,
   );
+  const refetchSummary = coalesce(
+    () => void queryClient.invalidateQueries({ queryKey: homeKeys.summary(), exact: true }),
+    SUMMARY_REFETCH_MS,
+  );
   const unsubscribe = client.subscribe((message) => {
     if (message.type === "error" && message.code === "banned") {
       // An admin banned this user (ADR 6), which ended their session: load home afresh as a
@@ -138,9 +173,7 @@ function follow(queryClient: QueryClient): () => void {
       refetchCards();
       return;
     }
-    for (const queryKey of lobbyInvalidations(message, reconnected)) {
-      void queryClient.invalidateQueries({ queryKey });
-    }
+    invalidateLobbyKeys(queryClient, lobbyInvalidations(message, reconnected), refetchSummary);
   });
   client.start();
   return () => {

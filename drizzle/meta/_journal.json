@@ -50,6 +50,13 @@
       "when": 1790931741798,
       "tag": "0006_last_penance",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790933618346,
+      "tag": "0007_wakeful_union_jack",
+      "breakpoints": true
     }
   ]
 }
