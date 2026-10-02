@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes } from "react";
+import type { ComponentProps } from "react";
 
 /** A round room control (mic, camera, share, …): `active` lit, `muted` red, else plain. */
 export const ControlBtn = ({
@@ -6,7 +6,7 @@ export const ControlBtn = ({
   className = "",
   children,
   ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & { state?: "active" | "muted" }) => {
+}: ComponentProps<"button"> & { state?: "active" | "muted" }) => {
   const st =
     state === "active"
       ? "bg-primary text-primary-ink border-transparent shadow-[0_0_18px_var(--color-primary-glow)]"
