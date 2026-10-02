@@ -8,6 +8,16 @@ import { z } from "zod";
 export const ROOM_KINDS = ["gaming", "code", "music", "art", "watch", "chat"] as const;
 export type RoomKind = (typeof ROOM_KINDS)[number];
 
+/** How a room kind reads on cards and in search. */
+export const ROOM_KIND_LABELS: Record<RoomKind, string> = {
+  gaming: "gaming",
+  code: "coding",
+  music: "music",
+  art: "art",
+  watch: "watch party",
+  chat: "just chatting",
+};
+
 export const ROOM_NAME_MAX = 60;
 export const ROOM_DESCRIPTION_MAX = 280;
 export const ROOM_TAGS_MAX = 10;

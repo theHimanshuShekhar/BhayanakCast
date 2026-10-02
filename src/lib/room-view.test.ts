@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { RoomParticipant } from "./realtime";
-import { roomDetailFor, withRoster } from "./room-view";
+import { roomDetailFor, stageZones, withRoster } from "./room-view";
 import type { LiveRoomCard } from "./rooms";
+import type { Participant } from "./types";
 
 const host = { id: "u-host", username: "host.discord", image: null };
 const viewer = { id: "u-viewer", username: "viewer.discord", image: null };
@@ -172,5 +173,66 @@ describe("withRoster", () => {
     expect(withRoster([], [live(me, "member")], me.id)).toEqual([
       expect.objectContaining({ userId: "u-me", you: true, viewerOnly: true }),
     ]);
+  });
+});
+
+describe("stageZones", () => {
+  const person = (id: string, extra: Partial<Participant> = {}): Participant => ({
+    id,
+    userId: id,
+    name: id,
+    image: null,
+    role: "member",
+    streaming: false,
+    speaking: false,
+    muted: true,
+    camera: false,
+    ...extra,
+  });
+  const ids = (z: ReturnType<typeof stageZones>) => ({
+    screens: z.screens.map((s) => `${s.p.id}:${s.variant}`),
+    cameras: z.cameras.map((p) => p.id),
+    chips: z.chips.map((p) => p.id),
+  });
+
+  it("puts shares in the screen zone, cameras in a row and everyone else in chips", () => {
+    const stage = [
+      person("cam", { camera: true }),
+      person("a", { streaming: true, size: "m" }),
+      person("quiet"),
+      person("b", { streaming: true, size: "l" }),
+      person("me", { you: true }),
+    ];
+    expect(ids(stageZones(stage, true))).toEqual({
+      screens: ["b:screen", "a:screen"],
+      cameras: ["cam"],
+      chips: ["quiet", "me"],
+    });
+  });
+
+  it("leads with the pinned share, or with a pinned camera", () => {
+    const shares = [
+      person("a", { streaming: true, size: "l" }),
+      person("b", { streaming: true, size: "m", pinned: true }),
+    ];
+    expect(ids(stageZones(shares, true)).screens).toEqual(["b:screen", "a:screen"]);
+    const camera = [
+      ...shares.map((p) => ({ ...p, pinned: false })),
+      person("c", { camera: true, pinned: true }),
+    ];
+    expect(ids(stageZones(camera, true))).toEqual({
+      screens: ["c:camera", "a:screen", "b:screen"],
+      cameras: [],
+      chips: [],
+    });
+  });
+
+  it("hides cameras and chips when the viewer hides people who aren't sharing", () => {
+    const stage = [person("a", { streaming: true }), person("cam", { camera: true }), person("q")];
+    expect(ids(stageZones(stage, false))).toEqual({
+      screens: ["a:screen"],
+      cameras: [],
+      chips: [],
+    });
   });
 });

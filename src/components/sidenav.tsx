@@ -10,7 +10,7 @@ export const tipCls =
   "max-sm:hidden pointer-events-none absolute left-[calc(100%+10px)] top-1/2 -translate-y-1/2 -translate-x-1 px-2.5 py-[5px] bg-surface-3 text-fg border border-border-strong rounded-md text-[11px] tracking-[0.02em] whitespace-nowrap opacity-0 transition-[opacity,transform] duration-150 z-[100] shadow-pop group-hover:opacity-100 group-hover:translate-x-0 group-focus-visible:opacity-100 group-focus-visible:translate-x-0";
 
 export const railBase =
-  "group relative w-10 h-10 rounded-[10px] grid place-items-center transition-[background-color,color] duration-150 cursor-pointer";
+  "group relative w-10 h-10 max-sm:w-11 max-sm:h-11 rounded-[10px] grid place-items-center transition-[background-color,color] duration-150 cursor-pointer";
 const railIdle = "text-muted hover:bg-surface hover:text-fg";
 const railActive =
   "bg-primary-soft text-primary shadow-[0_0_0_1px_color-mix(in_oklch,var(--color-primary)_40%,transparent),0_0_16px_var(--color-primary-glow)]";
@@ -34,7 +34,7 @@ const RailInner = ({
       <I size={16} />
     </span>
     {badge !== undefined && (
-      <span className="absolute -top-[3px] -right-[3px] min-w-4 h-4 px-1 rounded-full bg-primary text-primary-ink text-[9.5px] font-bold leading-none grid place-items-center border-2 border-canvas">
+      <span className="absolute -top-[3px] -right-[3px] min-w-4 h-4 px-1 rounded-full bg-primary text-primary-ink text-[10px] font-bold leading-none grid place-items-center border-2 border-canvas">
         {badge}
       </span>
     )}
@@ -70,12 +70,19 @@ const RailButton = ({
   onClick,
   label,
   children,
+  className = "",
 }: {
   onClick: () => void;
   label: string;
   children: ReactNode;
+  className?: string;
 }) => (
-  <button type="button" className={`${railBase} ${railIdle}`} onClick={onClick} aria-label={label}>
+  <button
+    type="button"
+    className={`${railBase} ${railIdle} ${className}`}
+    onClick={onClick}
+    aria-label={label}
+  >
     {children}
     <span className={tipCls}>{label}</span>
   </button>
@@ -105,10 +112,13 @@ const OnlineCount = () => {
 };
 
 export const SideNav = ({
+  inRoom = false,
   isAdmin,
   onCreate,
   profileMenu,
 }: {
+  /** On a room page: hidden on phones, where the room's control bar takes the bottom. */
+  inRoom?: boolean;
   isAdmin: boolean;
   onCreate: () => void;
   profileMenu: ReactNode;
@@ -123,10 +133,14 @@ export const SideNav = ({
   const dark = settings.theme === "dark";
 
   return (
-    <nav className="flex flex-col items-center gap-1 py-3 bg-canvas border-r border-border-subtle min-h-0 overflow-hidden max-sm:order-last max-sm:flex-row max-sm:justify-around max-sm:overflow-visible max-sm:py-1.5 max-sm:px-2 max-sm:pb-[max(6px,env(safe-area-inset-bottom))] max-sm:border-r-0 max-sm:border-t">
+    <nav
+      className={`${inRoom ? "max-sm:hidden " : ""}flex flex-col items-center gap-1 py-3 bg-canvas border-r border-border-subtle min-h-0 overflow-hidden max-sm:order-last max-sm:flex-row max-sm:justify-around max-sm:overflow-visible max-sm:py-1.5 max-sm:px-2 max-sm:pb-[max(6px,env(safe-area-inset-bottom))] max-sm:border-r-0 max-sm:border-t`}
+    >
       <Link
         to="/"
         aria-label="BhayanakCast home"
+        // "Active Rooms" below is the same link, so keyboard users get it once.
+        tabIndex={-1}
         className="max-sm:hidden w-10 h-10 rounded-[10px] grid place-items-center bg-surface-2 border border-border font-extrabold text-[11px] tracking-[0.08em] text-primary shadow-card mb-2 hover:shadow-[var(--shadow-card),0_0_18px_var(--color-primary-glow)] transition-shadow no-underline hover:no-underline"
       >
         BC
@@ -147,7 +161,13 @@ export const SideNav = ({
       <OnlineCount />
 
       <div className="flex flex-col items-center gap-1 pt-2 border-t border-border-subtle w-full max-sm:contents">
-        <RailButton onClick={cycleAccent} label={`Accent · ${accentName}`}>
+        {/* Off the phone bar, where one tap next to navigation would recolour the app; settings
+            has the accent picker. */}
+        <RailButton
+          onClick={cycleAccent}
+          label={`Accent · ${accentName}`}
+          className="max-sm:hidden"
+        >
           <span className="w-4 h-4 rounded-full bg-primary ring-2 ring-canvas shadow-[0_0_0_3px_var(--color-primary-soft),0_0_10px_var(--color-primary-glow)] transition-colors" />
         </RailButton>
         <RailButton

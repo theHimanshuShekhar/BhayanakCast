@@ -9,7 +9,7 @@ const panelSignIn = (page: Page) =>
     .getByRole("region", { name: "Sign in" })
     .getByRole("button", { name: /sign in with discord/i });
 
-test("a visitor sees the sign-in button in the rail and the home sidebar", async ({ page }) => {
+test("a visitor sees the sign-in button in the rail and the home intro", async ({ page }) => {
   await page.goto("/");
   await expect(railSignIn(page)).toBeVisible();
   await expect(panelSignIn(page)).toBeVisible();
@@ -18,7 +18,7 @@ test("a visitor sees the sign-in button in the rail and the home sidebar", async
 
 for (const [where, button] of [
   ["rail", railSignIn],
-  ["home sidebar", panelSignIn],
+  ["home intro", panelSignIn],
 ] as const) {
   test(`the ${where} sign-in button goes straight to Discord's consent page`, async ({ page }) => {
     // Never leave for the real Discord: stand in for its authorize page.

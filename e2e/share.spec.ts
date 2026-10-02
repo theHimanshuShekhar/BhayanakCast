@@ -183,7 +183,7 @@ test("a share plays with its audio for everyone, and a mod's force-stop removes 
   await instrument(context);
   await signIn(context, { username: "share.host" });
   // A gaming room: shares are tuned for motion.
-  const roomId = await createRoomOnPage(page, { name: uniqueRoomName("share") });
+  const roomId = await createRoomOnPage(page, { name: uniqueRoomName("share"), kind: "gaming" });
   const others = [];
   try {
     for (const username of ["share.streamer", "share.viewer"]) {
@@ -284,7 +284,7 @@ test("the browser's own stop ends a share; every slot both ways still fits a mes
   // A code room: shares are tuned for sharp text.
   const roomId = await createRoomOnPage(page, {
     name: uniqueRoomName("share code"),
-    kind: "Coding",
+    kind: "coding",
   });
   const guest = await joinAs(browser, "share.pair", roomId);
   try {

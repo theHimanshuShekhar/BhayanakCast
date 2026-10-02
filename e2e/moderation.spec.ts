@@ -16,8 +16,17 @@ async function joinAs(browser: Browser, username: string, roomId: string) {
 
 /** Open `name`'s moderation menu on `page` and pick `item`. */
 async function moderateOn(page: Page, name: string, item: string) {
+  // A person's controls show on hover (or keyboard focus), as for anyone using a mouse.
+  await tile(page, name).hover();
   await page.getByRole("button", { name: `Moderate ${name}` }).click();
   await page.getByRole("menuitem", { name: item }).click();
+  // A kick asks first (ADR 15: it's permanent for the room).
+  if (item === "kick from room") {
+    await page
+      .getByRole("dialog", { name: `kick ${name}?` })
+      .getByRole("button", { name: `kick ${name}` })
+      .click();
+  }
 }
 
 const tile = (page: Page, name: string) => page.getByRole("group", { name, exact: true });

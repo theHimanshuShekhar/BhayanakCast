@@ -6,6 +6,7 @@ import {
   Scripts,
   useNavigate,
   useRouter,
+  useRouterState,
   useSearch,
 } from "@tanstack/react-router";
 import { type ReactNode, Suspense, useEffect, useMemo, useState } from "react";
@@ -44,7 +45,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "BhayanakCast — live screen sharing" },
+      { title: "BhayanakCast · your crew, your screens, one room" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
@@ -83,6 +84,8 @@ function AppShell() {
   // A visitor sent home from a room URL arrives with ?join=<roomId>, which opens the prompt.
   // Home's loader prefetches that room, so its name is there on first paint.
   const { join } = useSearch({ strict: false });
+  // In a room on a phone, the room's own control bar is the bottom bar.
+  const inRoom = useRouterState({ select: (s) => s.location.pathname.startsWith("/room/") });
   const joinRoom = useQuery({ ...roomQuery(join ?? ""), enabled: !user && !!join }).data;
   const joinPrompt: SignInPrompt | null =
     !user && join ? { kind: "join", roomName: joinRoom?.name } : null;
@@ -124,8 +127,15 @@ function AppShell() {
   return (
     <AppActionsContext value={actions}>
       <div className="grid grid-rows-1 h-[100dvh] bg-bg text-fg">
+        <a
+          href="#main"
+          className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[200] focus:px-3 focus:py-2 focus:rounded-[var(--radius-sm)] focus:bg-surface-3 focus:text-fg focus:border focus:border-border-strong focus:shadow-pop"
+        >
+          skip to content
+        </a>
         <div className="grid grid-cols-[64px_minmax(0,1fr)] max-sm:grid-cols-1 max-sm:grid-rows-[minmax(0,1fr)_auto] min-h-0 overflow-hidden">
           <SideNav
+            inRoom={inRoom}
             isAdmin={role === "admin"}
             onCreate={actions.openCreateRoom}
             profileMenu={
@@ -144,7 +154,7 @@ function AppShell() {
               )
             }
           />
-          <main className="overflow-hidden min-h-0 relative">
+          <main id="main" tabIndex={-1} className="overflow-hidden min-h-0 relative outline-0">
             <Outlet />
             <Suspense>
               <HydrationMarker />

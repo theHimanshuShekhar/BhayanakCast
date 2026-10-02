@@ -1,8 +1,8 @@
 // Stage tile — screen share / camera / viewer-only. Ported from docs/design/prototype/room.jsx.
 import { Menu } from "@base-ui/react/menu";
-import { type CSSProperties, useRef, useState } from "react";
+import { type CSSProperties, type MouseEvent, type RefObject, useRef, useState } from "react";
 import { avatarFor } from "~/lib/format";
-import type { Participant, RoomRole, Settings } from "~/lib/types";
+import type { Participant, RoomRole } from "~/lib/types";
 import {
   toggleFullscreen,
   useFullscreenElement,
@@ -16,31 +16,8 @@ import { ScreenVideo } from "./screen-video";
 /** A reaction floating up the tile, drifting `dx` pixels sideways. */
 export type Reaction = { id: string; emoji: string; dx: number };
 
-const tileSpanDesktop = (p: Participant, layout: Settings["layout"], small: boolean) => {
-  if (small) return "col-span-2 row-span-1";
-  if (layout === "grid") return "col-span-3 row-span-2";
-  if (layout === "spotlight")
-    return p.size === "l" ? "col-span-8 row-span-4" : "col-span-4 row-span-2";
-  return (
-    { l: "col-span-6 row-span-3", m: "col-span-4 row-span-2", s: "col-span-3 row-span-2" }[
-      p.size ?? "m"
-    ] ?? "col-span-4 row-span-2"
-  );
-};
-
-// phones/tablets: 2-col grid — hero tiles full width, others half
-const tileSpan = (p: Participant, layout: Settings["layout"]) => {
-  const small = !!p.viewerOnly;
-  const m = small
-    ? " max-md:col-span-1 max-md:row-span-1"
-    : p.size === "l"
-      ? " max-md:col-span-2 max-md:row-span-2"
-      : " max-md:col-span-1 max-md:row-span-2";
-  return tileSpanDesktop(p, layout, small) + m;
-};
-
 const tileBase =
-  "@container group relative bg-surface border border-border rounded-[var(--radius)] overflow-hidden flex flex-col min-w-0 min-h-0";
+  "@container group relative bg-surface border border-border rounded-[var(--radius)] overflow-hidden flex flex-col min-w-0 min-h-0 animate-bc-enter transition-shadow duration-200";
 const glassPill = "bg-black/55 backdrop-blur-[8px] text-white";
 const overlayBtn =
   "w-[26px] h-[26px] pointer-coarse:w-8 pointer-coarse:h-8 inline-flex items-center justify-center rounded-[var(--radius-sm)] text-white cursor-pointer hover:bg-white/20 transition-colors data-popup-open:bg-white/20";
@@ -74,9 +51,16 @@ export const moderationFor = (p: Participant, myRole: RoomRole, admin: boolean) 
 
 const displayName = (p: Participant) => (p.you ? `${p.name} (you)` : p.name);
 
+/**
+ * How the stage shows someone (DESIGN.md "Stage"): their screen in the screen zone, their camera
+ * in the camera row, or a compact chip when they have neither on.
+ */
+export type TileVariant = "screen" | "camera" | "chip";
+
 export const Tile = ({
   p,
-  layout,
+  variant,
+  className = "",
   myRole,
   admin = false,
   locallyMuted,
@@ -95,7 +79,9 @@ export const Tile = ({
   onRetry,
 }: {
   p: Participant;
-  layout: Settings["layout"];
+  variant: TileVariant;
+  /** Placement on the stage (grid spans, size). */
+  className?: string;
   myRole: RoomRole;
   /** The viewer is a site admin: moderation in any room. */
   admin?: boolean;
@@ -126,27 +112,84 @@ export const Tile = ({
   const fullscreenElement = useFullscreenElement();
   const fullscreen = fullscreenElement !== null && fullscreenElement === ref.current;
   const canFullscreen = useFullscreenSupported();
-  // Touch has no hover: a tap on the tile shows its controls, another hides them (the styles
-  // below only act on `pointer: coarse`).
+  // Touch has no hover: a tap on the tile (or chip) shows its controls, another hides them (the
+  // styles below only act on `pointer: coarse`).
   const [tapped, setTapped] = useState(false);
-  const span = tileSpan(p, layout);
+  const onTap = (e: MouseEvent<HTMLDivElement>) => {
+    // A tap on a button, link or field is for that; so is one in a menu, which React
+    // bubbles here from its portal outside the tile.
+    const target = e.target as Element;
+    if (e.currentTarget.contains(target) && !target.closest(INTERACTIVE)) {
+      setTapped((t) => !t);
+    }
+  };
   const cantConnectState = cantConnect && <CantConnect name={p.name} onRetry={onRetry} />;
 
-  if (p.viewerOnly) {
+  if (variant === "chip") {
+    // Someone with neither a share nor a camera on: a compact chip, so screens keep the stage.
     return (
       // biome-ignore lint/a11y/useSemanticElements: a tile groups one person's view, not a form
-      <div role="group" aria-label={displayName(p)} className={`${tileBase} ${span} shadow-pop`}>
+      // biome-ignore lint/a11y/useKeyWithClickEvents: the tap only reveals controls that keyboard users reach by focus
+      <div
+        role="group"
+        aria-label={displayName(p)}
+        onClick={onTap}
+        className={`group relative inline-flex items-center gap-2 min-w-0 max-w-[220px] h-10 pl-1.5 pr-3 rounded-full bg-surface border transition-[border-color,box-shadow] duration-200 animate-bc-enter ${p.speaking ? "border-primary shadow-[0_0_0_1px_var(--color-primary),0_0_14px_var(--color-primary-glow)]" : "border-border"} ${className}`}
+      >
         {cantConnectState}
-        <div className="flex items-center gap-2.5 px-3 py-2.5 h-full">
-          <Avatar name={p.name} image={p.image} size="md" ring={p.speaking} />
-          <div className="flex-1 min-w-0">
-            <div className="text-xs font-semibold truncate">{displayName(p)}</div>
-            <div className="text-[10.5px] text-muted">viewer</div>
+        <Avatar name={p.name} image={p.image} size="md" />
+        <span className="text-xs font-semibold truncate">{displayName(p)}</span>
+        {p.role !== "member" && (
+          <span className="text-[10px] uppercase tracking-[0.06em] text-muted">{p.role}</span>
+        )}
+        <span className="text-muted shrink-0" title={p.muted ? "mic off" : "mic on"}>
+          {p.speaking ? <Wave on /> : p.muted ? <Icon.MicOff size={13} /> : <Icon.Mic size={13} />}
+        </span>
+        {!p.you && (
+          // Their controls, above the chip on hover or keyboard focus (like a tile's overlay).
+          // Above: chips sit at the stage's bottom, so below would overflow and scroll it.
+          <div
+            data-tapped={tapped || undefined}
+            className="absolute left-0 bottom-full z-[20] pb-1 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto has-data-popup-open:opacity-100 has-data-popup-open:pointer-events-auto pointer-coarse:data-tapped:opacity-100 pointer-coarse:data-tapped:pointer-events-auto transition-opacity duration-150"
+          >
+            <div
+              className={`flex items-center gap-1 p-[3px] rounded-[10px] border border-white/14 ${glassPill}`}
+            >
+              <button
+                type="button"
+                className={overlayBtn}
+                aria-label={`${locallyMuted ? "Unmute for me" : "Mute for me"}: ${p.name}`}
+                aria-pressed={locallyMuted}
+                title={locallyMuted ? "Unmute for me" : "Mute for me"}
+                onClick={() => onToggleMute(p.id)}
+              >
+                {locallyMuted ? <Icon.MicOff size={14} /> : <Icon.Headset size={14} />}
+              </button>
+              {onVolume && (
+                <label className="inline-flex items-center gap-1 pl-1" title="their voice, for me">
+                  <Icon.Mic size={12} aria-hidden="true" />
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={volume}
+                    aria-label={`Volume for ${p.name}`}
+                    onChange={(e) => onVolume(p.id, Number(e.target.value))}
+                    className="w-14 h-[26px] cursor-pointer accent-white"
+                  />
+                </label>
+              )}
+              <ModerateMenu
+                p={p}
+                myRole={myRole}
+                admin={admin}
+                onModerate={onModerate}
+                triggerClassName={overlayBtn}
+              />
+            </div>
           </div>
-          <div className="text-muted">
-            {p.muted ? <Icon.MicOff size={14} /> : <Icon.Mic size={14} />}
-          </div>
-        </div>
+        )}
         <FloatingReactions reactions={reactions} />
       </div>
     );
@@ -178,33 +221,24 @@ export const Tile = ({
       ref={ref}
       role="group"
       aria-label={displayName(p)}
-      className={`${tileBase} ${span} ${ring}`}
-      onClick={(e) => {
-        // A tap on a button, link or field is for that; so is one in a menu, which React
-        // bubbles here from its portal outside the tile.
-        const target = e.target as Element;
-        if (e.currentTarget.contains(target) && !target.closest(INTERACTIVE)) {
-          setTapped((t) => !t);
-        }
-      }}
+      className={`${tileBase} ${className} ${ring}`}
+      onClick={onTap}
     >
-      {p.streaming ? (
-        screenTrack ? (
-          <ScreenVideo userId={p.userId} name={p.name} track={screenTrack} />
-        ) : (
-          <ScreenPlaceholder kind={p.screen ?? "browser"} />
-        )
+      {variant === "screen" && p.streaming ? (
+        // Mounted when the share starts, so the screen switches on each time (DESIGN.md motion).
+        <div className="flex-1 relative min-h-0 flex flex-col animate-bc-power-on">
+          {screenTrack ? (
+            <ScreenVideo userId={p.userId} name={p.name} track={screenTrack} />
+          ) : (
+            <ScreenPlaceholder kind={p.screen ?? "browser"} />
+          )}
+        </div>
       ) : camera ? (
         <div className="flex-1 relative min-h-0 overflow-hidden bg-black">{camera}</div>
       ) : (
+        // Their camera is on but its picture hasn't arrived yet (or a pinned chip).
         <div className="flex-1 relative min-h-0 overflow-hidden grid place-items-center bg-[oklch(0.22_0.02_260)]">
-          <div className="absolute inset-0 bg-[repeating-linear-gradient(135deg,oklch(0.26_0.02_260)_0,oklch(0.26_0.02_260)_12px,oklch(0.20_0.02_260)_12px,oklch(0.20_0.02_260)_24px)]" />
-          <div className="relative z-[1] flex flex-col items-center gap-2.5">
-            <Avatar name={p.name} image={p.image} size="lg" ring={p.speaking} />
-            <div className="text-[10px] tracking-[0.14em] px-2 py-[3px] rounded-full text-[oklch(0.85_0.01_260)] bg-black/45 border border-white/12">
-              {p.camera ? "CAM · NO SHARE" : "AUDIO ONLY"}
-            </div>
-          </div>
+          <Avatar name={p.name} image={p.image} size="lg" ring={p.speaking} />
         </div>
       )}
 
@@ -212,7 +246,7 @@ export const Tile = ({
 
       <div className="absolute top-2.5 left-2.5 z-[3] flex gap-1.5">
         {p.streaming && (
-          <Chip kind="liveSolid" dot>
+          <Chip kind="liveSolid" dot className="animate-bc-enter [animation-delay:260ms]">
             LIVE
           </Chip>
         )}
@@ -234,7 +268,7 @@ export const Tile = ({
         <button
           type="button"
           className={overlayBtn}
-          aria-label={p.pinned ? "Unpin" : "Pin"}
+          aria-label={`${p.pinned ? "Unpin" : "Pin"} ${p.name}`}
           title={p.pinned ? "Unpin" : "Pin"}
           onClick={() => onPin(p.id)}
         >
@@ -244,7 +278,7 @@ export const Tile = ({
           <button
             type="button"
             className={overlayBtn}
-            aria-label={locallyMuted ? "Unmute for me" : "Mute for me"}
+            aria-label={`${locallyMuted ? "Unmute for me" : "Mute for me"}: ${p.name}`}
             aria-pressed={locallyMuted}
             title={locallyMuted ? "Unmute for me" : "Mute for me"}
             onClick={() => onToggleMute(p.id)}
@@ -253,36 +287,43 @@ export const Tile = ({
           </button>
         )}
         {!p.you && onVolume && (
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={volume}
-            aria-label={`Volume for ${p.name}`}
-            title="Volume for me"
-            onChange={(e) => onVolume(p.id, Number(e.target.value))}
-            className="w-16 h-[26px] cursor-pointer accent-[var(--color-primary)]"
-          />
+          <label className="inline-flex items-center gap-1 pl-1" title="their voice, for me">
+            <Icon.Mic size={12} aria-hidden="true" />
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={volume}
+              aria-label={`Volume for ${p.name}`}
+              onChange={(e) => onVolume(p.id, Number(e.target.value))}
+              className="w-14 h-[26px] cursor-pointer accent-white"
+            />
+          </label>
         )}
         {!p.you && p.streaming && onShareVolume && (
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={shareVolume}
-            aria-label={`Share volume for ${p.name}`}
-            title="Share volume for me"
-            onChange={(e) => onShareVolume(p.id, Number(e.target.value))}
-            className="w-16 h-[26px] cursor-pointer accent-[var(--color-live)]"
-          />
+          <label
+            className="inline-flex items-center gap-1 pl-1"
+            title="their screen's sound, for me"
+          >
+            <Icon.Screen size={12} aria-hidden="true" />
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={shareVolume}
+              aria-label={`Share volume for ${p.name}`}
+              onChange={(e) => onShareVolume(p.id, Number(e.target.value))}
+              className="w-14 h-[26px] cursor-pointer accent-white"
+            />
+          </label>
         )}
         {canFullscreen && (
           <button
             type="button"
             className={overlayBtn}
-            aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+            aria-label={`${fullscreen ? "Exit fullscreen" : "Fullscreen"} ${p.name}`}
             aria-pressed={fullscreen}
             title={fullscreen ? "Exit fullscreen" : "Fullscreen"}
             onClick={() => ref.current && toggleFullscreen(ref.current)}
@@ -291,47 +332,15 @@ export const Tile = ({
           </button>
         )}
         {canModerate && (
-          <Menu.Root>
-            <Menu.Trigger className={overlayBtn} aria-label={`Moderate ${p.name}`}>
-              <Icon.More size={14} />
-            </Menu.Trigger>
-            {/* Only the fullscreen element is shown, so the menu goes inside it then. */}
-            <Menu.Portal container={fullscreen ? ref : undefined}>
-              <Menu.Positioner
-                side="bottom"
-                align="end"
-                sideOffset={6}
-                className="z-[160] outline-0"
-              >
-                <Menu.Popup className="min-w-[170px] p-1 bg-surface border border-border-strong rounded-[var(--radius-sm)] shadow-deep outline-0">
-                  {can.stopShare && (
-                    <Menu.Item className={menuItem} onClick={() => onModerate(p.id, "stopShare")}>
-                      <Icon.Screen size={13} /> stop their share
-                    </Menu.Item>
-                  )}
-                  {can.setRole && (
-                    <Menu.Item
-                      className={menuItem}
-                      onClick={() => onModerate(p.id, p.role === "mod" ? "demote" : "promote")}
-                    >
-                      <Icon.Sparkle size={13} /> {p.role === "mod" ? "remove mod" : "make mod"}
-                    </Menu.Item>
-                  )}
-                  {can.kick && (
-                    <>
-                      <Menu.Separator className="h-px bg-border-subtle my-1" />
-                      <Menu.Item
-                        className={`${menuItem} !text-live-ink`}
-                        onClick={() => onModerate(p.id, "kick")}
-                      >
-                        <Icon.Leave size={13} /> kick from room
-                      </Menu.Item>
-                    </>
-                  )}
-                </Menu.Popup>
-              </Menu.Positioner>
-            </Menu.Portal>
-          </Menu.Root>
+          <ModerateMenu
+            p={p}
+            myRole={myRole}
+            admin={admin}
+            onModerate={onModerate}
+            triggerClassName={overlayBtn}
+            // Only the fullscreen element is shown, so the menu goes inside it then.
+            portalContainer={fullscreen ? ref : undefined}
+          />
         )}
       </div>
 
@@ -391,3 +400,64 @@ const FloatingReactions = ({ reactions }: { reactions: Reaction[] }) =>
       {r.emoji}
     </span>
   ));
+
+/**
+ * What a host, mod or admin can do to `p` (ADR 15): stop their share, change their role, kick
+ * them. A kick asks first (the room page confirms it). On tiles and in the people tab.
+ */
+export const ModerateMenu = ({
+  p,
+  myRole,
+  admin,
+  onModerate,
+  triggerClassName,
+  portalContainer,
+}: {
+  p: Participant;
+  myRole: RoomRole;
+  admin: boolean;
+  onModerate: (id: string, action: ModAction) => void;
+  triggerClassName: string;
+  /** Where the menu renders (a fullscreen tile, so it stays visible); else the body. */
+  portalContainer?: RefObject<HTMLElement | null>;
+}) => {
+  const can = moderationFor(p, myRole, admin);
+  if (!(can.kick || can.stopShare || can.setRole)) return null;
+  return (
+    <Menu.Root>
+      <Menu.Trigger className={triggerClassName} aria-label={`Moderate ${p.name}`}>
+        <Icon.More size={14} />
+      </Menu.Trigger>
+      <Menu.Portal container={portalContainer}>
+        <Menu.Positioner side="bottom" align="end" sideOffset={6} className="z-[160] outline-0">
+          <Menu.Popup className="min-w-[170px] p-1 bg-surface border border-border-strong rounded-[var(--radius-sm)] shadow-deep outline-0">
+            {can.stopShare && (
+              <Menu.Item className={menuItem} onClick={() => onModerate(p.id, "stopShare")}>
+                <Icon.Screen size={13} /> stop their share
+              </Menu.Item>
+            )}
+            {can.setRole && (
+              <Menu.Item
+                className={menuItem}
+                onClick={() => onModerate(p.id, p.role === "mod" ? "demote" : "promote")}
+              >
+                <Icon.Sparkle size={13} /> {p.role === "mod" ? "remove mod" : "make mod"}
+              </Menu.Item>
+            )}
+            {can.kick && (
+              <>
+                <Menu.Separator className="h-px bg-border-subtle my-1" />
+                <Menu.Item
+                  className={`${menuItem} !text-live-ink`}
+                  onClick={() => onModerate(p.id, "kick")}
+                >
+                  <Icon.Leave size={13} /> kick from room…
+                </Menu.Item>
+              </>
+            )}
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
+  );
+};

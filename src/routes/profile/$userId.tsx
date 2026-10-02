@@ -76,7 +76,7 @@ const StatCard = ({
   tone?: keyof typeof STAT_TONE_CARD;
 }) => (
   <div
-    className={`bg-surface border rounded-[var(--radius)] p-[14px_16px_18px] flex flex-col gap-2.5 transition-[border-color,transform] duration-[120ms] hover:border-border-strong hover:-translate-y-px ${STAT_TONE_CARD[tone]}`}
+    className={`bg-surface border rounded-[var(--radius)] p-[14px_16px_18px] flex flex-col gap-2.5 transition-[border-color,transform] duration-[120ms] hover:border-border-strong motion-safe:hover:-translate-y-px ${STAT_TONE_CARD[tone]}`}
   >
     <div className="flex items-center gap-2">
       <span

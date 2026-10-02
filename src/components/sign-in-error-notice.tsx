@@ -3,6 +3,7 @@
 import { BANNED_USER_ERROR, type SignInErrorSearch } from "~/lib/ban";
 import { HomeNotice } from "./home-notice";
 import { Icon } from "./icons";
+import { SignInButton } from "./sign-in-button";
 
 export const SignInErrorNotice = ({
   search,
@@ -17,7 +18,12 @@ export const SignInErrorNotice = ({
     <HomeNotice
       icon={Icon.Lock}
       title={banned ? "Your account is banned" : "Sign-in with Discord didn't complete"}
-      detail={banned ? search.error_description : "Please try again."}
+      detail={
+        banned
+          ? search.error_description
+          : "Discord didn't send you back signed in. Maybe the consent screen was cancelled."
+      }
+      action={banned ? undefined : <SignInButton variant="retry" />}
       onDismiss={onDismiss}
     />
   );
