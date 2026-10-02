@@ -11,6 +11,7 @@ dist/
 .env.*.local
 test-results/
 playwright-report/
+playwright-results.json
 blob-report/
 playwright/.cache/
 coverage/

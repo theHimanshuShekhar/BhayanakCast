@@ -83,6 +83,8 @@ describe("resolving the client IP", () => {
   });
 });
 
+// How `rewriteClientIpHeader` treats a request's headers. That the production server applies it
+// before anything reads the request is tested on the real server: ./prod-server.test.ts.
 describe("rewriting the header on a request", () => {
   it("replaces every cf-connecting-ip in headers and rawHeaders before handlers read it", async () => {
     const resolve = createClientIpResolver(["203.0.113.250"]);

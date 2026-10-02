@@ -3,7 +3,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { findSkippedMigrations, readJournal } from "./migrations.ts";
 
 const entry = (tag: string, when: number) => ({ tag, when, hash: `hash-${tag}` });
@@ -41,28 +41,31 @@ describe("findSkippedMigrations", () => {
 });
 
 describe("readJournal", () => {
-  // Boots PGlite and migrates inside the test, so it needs more than vitest's 5 s under load.
-  it("agrees with the rows Drizzle's own migrator records, so a migrated database is clean", {
-    timeout: 30_000,
-  }, async () => {
-    const migrationsFolder = fileURLToPath(new URL("../../drizzle", import.meta.url));
+  const migrationsFolder = fileURLToPath(new URL("../../drizzle", import.meta.url));
+  let client: PGlite;
+
+  // Booted in a hook: it gets `hookTimeout`, not the test's (shorter) budget, under load.
+  beforeEach(async () => {
     // Migration 0007 creates pg_trgm, which PGlite only has when it is loaded (see test-db.ts).
-    const client = new PGlite({ extensions: { pg_trgm } });
-    try {
-      await migrate(drizzle({ client }), { migrationsFolder });
-      const { rows } = await client.query<{ hash: string; created_at: string }>(
-        "select hash, created_at from drizzle.__drizzle_migrations",
-      );
-      const journal = readJournal(migrationsFolder);
-      expect(rows).toHaveLength(journal.length);
-      expect(journal.map((m) => m.tag)[0]).toMatch(/^0000_/);
-      const rowsApplied = rows.map((r) => ({ hash: r.hash, createdAt: Number(r.created_at) }));
-      expect(findSkippedMigrations(journal, rowsApplied)).toEqual([]);
-      // Drop a middle row: Drizzle would skip it (older than the newest), and so do we.
-      const middle = rowsApplied.filter((_, i) => i !== 1);
-      expect(findSkippedMigrations(journal, middle).map((m) => m.tag)).toEqual([journal[1]?.tag]);
-    } finally {
-      await client.close();
-    }
+    client = new PGlite({ extensions: { pg_trgm } });
+    await migrate(drizzle({ client }), { migrationsFolder });
+  });
+
+  afterEach(async () => {
+    await client.close();
+  });
+
+  it("agrees with the rows Drizzle's own migrator records, so a migrated database is clean", async () => {
+    const { rows } = await client.query<{ hash: string; created_at: string }>(
+      "select hash, created_at from drizzle.__drizzle_migrations",
+    );
+    const journal = readJournal(migrationsFolder);
+    expect(rows).toHaveLength(journal.length);
+    expect(journal.map((m) => m.tag)[0]).toMatch(/^0000_/);
+    const rowsApplied = rows.map((r) => ({ hash: r.hash, createdAt: Number(r.created_at) }));
+    expect(findSkippedMigrations(journal, rowsApplied)).toEqual([]);
+    // Drop a middle row: Drizzle would skip it (older than the newest), and so do we.
+    const middle = rowsApplied.filter((_, i) => i !== 1);
+    expect(findSkippedMigrations(journal, middle).map((m) => m.tag)).toEqual([journal[1]?.tag]);
   });
 });
