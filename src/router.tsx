@@ -4,6 +4,7 @@ import { setupRouterSsrQueryIntegration } from "@tanstack/react-router-ssr-query
 import { createIsomorphicFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
 import type { ServerRequest } from "srvx";
+import { RouteError, RouteNotFound, RoutePending } from "./components/route-error";
 import { CSP_NONCE_KEY } from "./lib/csp-nonce";
 import { routeTree } from "./routeTree.gen";
 
@@ -35,7 +36,15 @@ export function getRouter() {
     context: { queryClient },
     scrollRestoration: true,
     ssr: { nonce: requestNonce() },
-    defaultNotFoundComponent: () => <h1>Not found</h1>,
+    // A failing loader, a slow one and an unmatched URL show these (src/components/route-error.tsx).
+    // Routes with their own "not found" wording keep it. A navigation that settles within
+    // `defaultPendingMs` never shows the pending state, and one that does keeps it for at least
+    // `defaultPendingMinMs`, so it doesn't flash.
+    defaultErrorComponent: RouteError,
+    defaultNotFoundComponent: RouteNotFound,
+    defaultPendingComponent: RoutePending,
+    defaultPendingMs: 400,
+    defaultPendingMinMs: 300,
   });
   setupRouterSsrQueryIntegration({ router, queryClient });
   return router;
