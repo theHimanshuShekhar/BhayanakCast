@@ -1,6 +1,8 @@
 import type { Page } from "@playwright/test";
-import { expect, test } from "./fixtures";
+import { E2E_ADMIN_DISCORD_ID, signIn } from "./auth";
+import { expect, newPage, test } from "./fixtures";
 import { createUser, uniqueUsername } from "./profiles";
+import { minutesAgo, seedRoom, uniqueRoomName } from "./rooms";
 
 const HOUR = 3600;
 
@@ -75,6 +77,55 @@ test("home search finds a user by Discord username and opens their profile", asy
   await result.click();
   await expect(page).toHaveURL(new RegExp(`/profile/${found.id}$`));
   await expect(page.getByRole("heading", { level: 1, name: found.username })).toBeVisible();
+});
+
+test("a private room's time and company stay off a visitor's view of a profile, live or just ended", async ({
+  page,
+  browser,
+  context,
+}) => {
+  const host = await createUser(browser, uniqueUsername("secret.host"));
+  const guest = await createUser(browser, uniqueUsername("secret.guest"));
+  const hostedFor = (userId: string, startedAt: string, endedAt: string | null) => ({
+    userId,
+    startedAt,
+    endedAt,
+    lastSeenAt: minutesAgo(0),
+  });
+  const privateRoom = (name: string, endedAt: string | null) => ({
+    name,
+    hostUserId: host.id,
+    isPrivate: true,
+    createdAt: minutesAgo(70),
+    endedAt,
+    members: [{ userId: guest.id }],
+    presence: [
+      hostedFor(host.id, minutesAgo(70), endedAt),
+      hostedFor(guest.id, minutesAgo(70), endedAt),
+    ],
+    streams: [hostedFor(host.id, minutesAgo(70), endedAt)],
+  });
+  await seedRoom(context, privateRoom(uniqueRoomName("secret live"), null));
+  await seedRoom(context, privateRoom(uniqueRoomName("secret past"), minutesAgo(10)));
+
+  await page.goto(`/profile/${host.id}`);
+  await expect(page.getByRole("heading", { level: 1, name: host.username })).toBeVisible();
+  await expect(statValue(page, "hours streamed")).toContainText("0.0h");
+  await expect(statValue(page, "rooms hosted")).toContainText("0");
+  await expect(page.getByText("no shared time yet")).toBeVisible();
+  await expect(page.getByRole("link", { name: new RegExp(guest.username) })).toHaveCount(0);
+
+  // Admins see everything, private rooms included.
+  const adminContext = await browser.newContext();
+  try {
+    await signIn(adminContext, { discordId: E2E_ADMIN_DISCORD_ID, username: "admin_jpg" });
+    const adminPage = await newPage(adminContext);
+    await adminPage.goto(`/profile/${host.id}`);
+    await expect(statValue(adminPage, "rooms hosted")).toContainText("2");
+    await expect(adminPage.getByRole("link", { name: new RegExp(guest.username) })).toBeVisible();
+  } finally {
+    await adminContext.close();
+  }
 });
 
 test("an unknown profile id shows user not found", async ({ page }) => {

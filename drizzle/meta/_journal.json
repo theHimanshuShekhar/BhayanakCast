@@ -36,6 +36,13 @@
       "when": 1790666802406,
       "tag": "0004_furry_rawhide_kid",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790908474131,
+      "tag": "0005_modern_shiva",
+      "breakpoints": true
     }
   ]
 }
