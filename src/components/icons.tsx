@@ -99,6 +99,7 @@ export const Icon = {
     <path d="M9 3h5l-1 2 2 4-4 1v4l-2 2-2-2v-4L3 9l2-4-1-2z" transform="rotate(30 10 10)" />,
   ),
   Maximize: make(<path d="M4 8V4h4M12 4h4v4M16 12v4h-4M8 16H4v-4" />),
+  Minimize: make(<path d="M8 4v4H4M12 4v4h4M16 12h-4v4M4 12h4v4" />),
   More: make(
     <>
       <circle cx="4" cy="10" r="1.2" />
