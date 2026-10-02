@@ -152,10 +152,14 @@ export interface RealtimeHarness {
 export interface RealtimeHarnessOptions {
   /** Passed to `attachRealtime`; the default is generous so tests' anonymous sockets fit. */
   anonymousSocketsPerIp?: number;
+  /** Passed to `attachRealtime`; the default is generous so tests can open many sockets per user. */
+  socketsPerUser?: number;
   /** Passed to `attachRealtime`; the default trusts nobody's `cf-connecting-ip`. */
   trustedProxies?: readonly string[];
   /** Awaited before each upgrade is authenticated, to hold one in flight. */
   beforeAuthenticate?: (request: IncomingMessage) => Promise<void>;
+  /** Wraps the hub's store, to count or hold its calls. */
+  wrapStore?: (store: RoomStore) => RoomStore;
 }
 
 export async function startRealtimeHarness(
@@ -172,7 +176,8 @@ export async function startRealtimeHarness(
   });
   /** A hub that a simulated crash can kill, attached to `server`. */
   function boot() {
-    const mortal = mortalDeps(clock, createDbRoomStore(db));
+    const store = createDbRoomStore(db);
+    const mortal = mortalDeps(clock, options.wrapStore?.(store) ?? store);
     const hub = new RoomHub({ clock: mortal.clock, store: mortal.store });
     const realtime: RealtimeServer = attachRealtime(server, {
       hub,
@@ -181,6 +186,7 @@ export async function startRealtimeHarness(
         return callerFromSession(await resolveSession(auth, toHeaders(request)));
       },
       anonymousSocketsPerIp: options.anonymousSocketsPerIp ?? 100,
+      socketsPerUser: options.socketsPerUser ?? 100,
       trustedProxies: options.trustedProxies ?? [],
       // Like production: this server has no other upgrade listeners.
       closeUnknownUpgrades: true,

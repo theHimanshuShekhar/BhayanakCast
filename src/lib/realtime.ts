@@ -12,7 +12,8 @@
  * - Timestamps are ISO strings stamped by the server clock; clients never send times (ADR 12).
  * - A breaking change bumps `PROTOCOL_VERSION`; the server refuses a `hello` with another one.
  * - A refused client message gets `error` with a code from `ERROR_CODES` and `re`, the refused
- *   message's type. The server never closes the socket for a bad message.
+ *   message's type. The server never closes the socket for a bad message, only for a flood
+ *   (`CONNECTION_MESSAGE_BUDGET`, `MAX_PENDING_MESSAGES`).
  */
 import { z } from "zod";
 import { inviteToken } from "./invites.ts";
@@ -64,6 +65,46 @@ export const REACTION_RATE_LIMIT = { reactions: 5, windowMs: 3_000 } as const;
  * capping a flood at 40 a second.
  */
 export const SIGNAL_RATE_LIMIT = { messages: 400, windowMs: 10_000 } as const;
+/** A sliding-window rate limit: at most `messages` in any `windowMs` (server clock). */
+export interface RateLimit {
+  readonly messages: number;
+  readonly windowMs: number;
+}
+/**
+ * Per-connection rate limits on the messages that do database work on the hub's single queue
+ * (ADR 4 addendum): at most `messages` of that type from one socket in any `windowMs` (server
+ * clock). Over it the server answers `rate_limited` without queueing the message. A reconnect
+ * brings a fresh socket and so a fresh allowance, and normal use sits far inside: a rejoin
+ * after a reconnect is one join, one media announcement and (in a private room's doorway) one
+ * knock, and a mic or share toggle is one `media.state`.
+ */
+export const CONNECTION_RATE_LIMITS = {
+  "room.join": { messages: 10, windowMs: 10_000 },
+  "knock.request": { messages: 5, windowMs: 10_000 },
+  "media.state": { messages: 20, windowMs: 10_000 },
+} as const satisfies Record<string, RateLimit>;
+/**
+ * A budget across all of one socket's messages, whatever their type, for the ones above don't
+ * cover (moderation, say): at most `messages` frames in any `windowMs`, counted before a frame
+ * is parsed. Signalling is the busiest honest traffic and `SIGNAL_RATE_LIMIT` already caps it
+ * at 400 per 10 seconds, so this leaves room above it for everything else. Frames over it are
+ * dropped and answered with one `rate_limited` per window, not one each; a socket that keeps
+ * going until the dropped frames alone fill a budget (twice the budget in a window) is closed
+ * (`FLOOD_CLOSE_CODE`).
+ */
+export const CONNECTION_MESSAGE_BUDGET = {
+  messages: 600,
+  windowMs: 10_000,
+} as const satisfies RateLimit;
+/**
+ * How many of one socket's messages may wait on the hub's queue at once, whatever their type.
+ * Honest traffic only gets near it in signalling to a full room (about 20 steps to each of 9
+ * peers, and `SIGNAL_RATE_LIMIT` allows 400 per 10 seconds), so this leaves room above that.
+ * A socket past it is closed (`FLOOD_CLOSE_CODE`) instead of queueing more.
+ */
+export const MAX_PENDING_MESSAGES = 500;
+/** The close code the server uses for a socket that flooded it (`CONNECTION_MESSAGE_BUDGET`, `MAX_PENDING_MESSAGES`). */
+export const FLOOD_CLOSE_CODE = 4002;
 /** How many recent feed entries a live room keeps in memory for joiners. */
 export const FEED_HISTORY_SIZE = 50;
 /** A knock on a private room nobody decides within this long expires (ADR 16; server clock). */

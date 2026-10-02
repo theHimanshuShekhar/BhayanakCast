@@ -28,6 +28,7 @@ services:
       CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:-}
       CLOUDFLARE_ANALYTICS_API_TOKEN: ${CLOUDFLARE_ANALYTICS_API_TOKEN:-}
       REALTIME_ANONYMOUS_SOCKETS_PER_IP: ${REALTIME_ANONYMOUS_SOCKETS_PER_IP:-}
+      REALTIME_SOCKETS_PER_USER: ${REALTIME_SOCKETS_PER_USER:-}
       REALTIME_EMPTY_ROOM_TIMEOUT_MS: ${REALTIME_EMPTY_ROOM_TIMEOUT_MS:-}
     # Apply pending migrations, then start the server (the image's default command too).
     command: ["sh", "-c", "node src/db/migrate.ts && exec node server.prod.ts"]
