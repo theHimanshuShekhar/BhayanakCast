@@ -12,7 +12,7 @@ The stack has three services:
 
 | Service | What it does |
 |---|---|
-| `app` | Built from the `Dockerfile` (Node 26, pnpm via corepack; the base image, corepack and pnpm are pinned, see Pinned images). On start it applies pending Drizzle migrations (`node src/db/migrate.ts`), then serves pages, `/api/*` and the realtime socket `/ws` from one port (`node server.prod.ts`). Published only on `${HOST_BIND}:${HOST_PORT}` (default `10.1.1.160:3000`). Healthcheck: `GET /api/auth/ok`. |
+| `app` | Built from the `Dockerfile` (Node 26, pnpm via corepack; the base image, corepack and pnpm are pinned, see Pinned images). On start it applies pending Drizzle migrations (`node src/db/migrate.ts`), then serves pages, `/api/*` and the realtime socket `/ws` from one port (`node server.prod.ts`). Published only on `${HOST_BIND}:${HOST_PORT}` (default `10.1.1.160:3000`). Healthcheck: `GET /api/health`, healthy only while Postgres answers `select 1`. |
 | `db` | `postgres:17-alpine`, pinned by digest, with a named local Docker volume (`pgdata`). Never put it on the NAS CIFS share (ADR 9 addendum). Not published on any host port. Healthcheck: `pg_isready`. |
 | `backup` | Built from `backup/` (`postgres:17-alpine`, pinned by digest, plus pinned `rsync` and `supercronic`). Once at start, and then on `BACKUP_SCHEDULE` (nightly by default), it writes a compressed `pg_dump` to its `backups` volume, rsyncs it to the NAS share and prunes old dumps (section 5, Backups to the NAS). Healthcheck: the last run succeeded, recently. |
 
@@ -211,13 +211,42 @@ do this). Then start `app` again.
 - `TRUSTED_PROXY_IPS` is required in production, so a spoofed `cf-connecting-ip` from the LAN is ignored.
 - Postgres is reachable only on the stack's internal network. The app is published only on the LAN address.
 
+## Who can see the secrets on the host
+
+Compose passes secrets as container environment variables and volume options, so they are readable
+by anyone who can talk to the Docker daemon on the dockhand LXC (root, the `docker` group, and
+Dockhand itself, which also stores the stack variables):
+
+- **Every stack variable the app uses** shows in
+  `docker inspect <container> --format '{{json .Config.Env}}'`. That includes `DATABASE_URL`, which
+  carries `POSTGRES_PASSWORD` (`postgres://user:password@db:5432/…`), `BETTER_AUTH_SECRET` and the
+  Discord and Cloudflare tokens. `POSTGRES_PASSWORD` is also in `db`'s and `backup`'s environment
+  (`PGPASSWORD`).
+- **`BACKUP_NAS_PASSWORD`** is also in the `nas` volume's options, so `docker volume inspect
+  bhayanakcast_nas` prints it in clear text, along with the username.
+- Nothing is passed on a command line, and the app's startup errors name a bad variable without
+  echoing its value, so `ps` and `docker logs` don't show the secrets.
+
+This is accepted, not fixed: the host's Docker admins already hold root on the LXC, the stack has
+no secret store (Dockhand's own variables are the same plaintext), and every alternative needs a
+file or mount on the host, which this git-backed stack avoids (ADR 9 addendum). To limit the damage:
+
+- Give `BACKUP_NAS_USERNAME` an account that can write only to the backup share, with a password
+  used nowhere else, so a leaked one reaches only the dumps (which the same people can already
+  read through `pg_dump`).
+- Keep the Docker group and Dockhand logins to people you'd trust with root on the LXC, and don't
+  paste `docker inspect` or `docker volume inspect` output into chats or issues.
+- Rotating a secret after it leaked: `POSTGRES_PASSWORD` needs `ALTER USER` too (step 3),
+  `BETTER_AUTH_SECRET` signs everyone out, and `BACKUP_NAS_PASSWORD` needs the `nas` volume removed
+  and the stack redeployed, since Docker fixes the volume's options when it creates it (section 5).
+
 ## First-deploy checklist
 
 - [ ] The Discord app has both redirect URIs (step 1).
 - [ ] The tunnel's public hostname `cast.bhayanak.net` → `HTTP 10.1.1.160:3000`, with no Host header override (step 2).
 - [ ] All required variables are set in Dockhand: `POSTGRES_PASSWORD`, `BETTER_AUTH_SECRET`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` and `TRUSTED_PROXY_IPS`. `ADMIN_DISCORD_IDS` contains your own ID.
-- [ ] The stack deploys, and both containers show **healthy**. The app log shows `Migrations applied`.
-- [ ] From the LAN, `curl http://10.1.1.160:3000/api/auth/ok` returns `{"ok":true}`.
+- [ ] The stack deploys, and all three containers (`app`, `db`, `backup`) show **healthy**. The app log shows `Migrations applied`.
+- [ ] From the LAN, `curl http://10.1.1.160:3000/api/health` returns `{"ok":true}` (the database answered), and `curl http://10.1.1.160:3000/api/auth/ok` returns `{"ok":true}` too.
 - [ ] `https://cast.bhayanak.net/api/auth/ok` returns `{"ok":true}`, and `https://cast.bhayanak.net` loads the home page.
 - [ ] "Sign in with Discord" completes and returns to home. Your account has admin (`/admin` opens).
 - [ ] The realtime socket connects through the tunnel: the lobby's online count updates, and a room opens.
@@ -236,7 +265,13 @@ do this). Then start `app` again.
   which Drizzle would skip for good: regenerate it with a newer one (ADR 8).
 - **Pinned images:** see below.
 - **Logs:** Dockhand's container logs, or `docker logs <container>`. They're rotated at 3 × 10 MB.
-- **Restarts** drop live room state. Clients reconnect on their own (ADR 9).
+- **Restarts** keep live rooms: the app reloads them, their roles and who was inside from Postgres,
+  and clients reconnect on their own. Anyone back within 30 s continues as if nothing happened;
+  the rest leave at their last checkpoint (up to a minute before the restart). Chat, the feed,
+  pending knocks and mic and camera state are memory only and are lost until clients re-announce.
+  Calls already connected keep flowing, as media is peer-to-peer. After an outage longer than about
+  90 s nobody can resume, and a room nobody returns to ends at its last-seen time (ADR 4, 2026-10-02
+  addendum).
 - **TURN and NAT (ADR 3):** each signed-in user gets TURN credentials that last 4 hours. They're
   cached per user and minted again 30 minutes before they expire. If minting fails, the app logs
   `[ice] minting TURN credentials failed; STUN only` and pages get STUN only until the next try.
@@ -257,7 +292,7 @@ in `docker-compose.yml` pin `postgres:17-alpine` by digest, and the backup image
 
 To bump:
 
-- **Digests:** `.github/dependabot.yml` opens weekly PRs for the Dockerfiles and the compose file. By hand,
+- **Digests:** `.github/dependabot.yml` opens weekly PRs for the Dockerfiles and the compose file (and for npm packages and GitHub Actions, which aren't pinned images). By hand,
   `docker buildx imagetools inspect node:26-alpine` (or `postgres:17-alpine`) prints the index digest;
   put it after the tag as `@sha256:...`. The `node` digest appears twice in `Dockerfile` (`base` and
   `runtime`); the `postgres` digest appears in `backup/Dockerfile` and `docker-compose.yml`. Keep each pair identical.

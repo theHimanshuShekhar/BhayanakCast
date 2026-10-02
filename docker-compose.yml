@@ -41,9 +41,10 @@ services:
       - "${HOST_BIND:-10.1.1.160}:${HOST_PORT:-3000}:3000"
     restart: unless-stopped
     healthcheck:
+      # /api/health runs `select 1` against db, so a lost database turns the app unhealthy.
       test:
         - CMD-SHELL
-        - node -e "fetch('http://127.0.0.1:3000/api/auth/ok').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        - node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
       interval: 30s
       timeout: 10s
       retries: 3
