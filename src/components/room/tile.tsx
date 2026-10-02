@@ -35,7 +35,7 @@ const tileSpan = (p: Participant, layout: Settings["layout"]) => {
 };
 
 const tileBase =
-  "@container group relative bg-surface border border-border rounded-[var(--radius)] overflow-hidden flex flex-col min-w-0 min-h-0";
+  "@container group relative bg-surface border border-border rounded-[var(--radius)] overflow-hidden flex flex-col min-w-0 min-h-0 animate-bc-enter transition-shadow duration-200";
 const glassPill = "bg-black/55 backdrop-blur-[8px] text-white";
 const overlayBtn =
   "w-[26px] h-[26px] inline-flex items-center justify-center rounded-[var(--radius-sm)] text-white cursor-pointer hover:bg-white/20 transition-colors data-popup-open:bg-white/20";
@@ -166,11 +166,14 @@ export const Tile = ({
       className={`${tileBase} ${span} ${ring}`}
     >
       {p.streaming ? (
-        screenTrack ? (
-          <ScreenVideo userId={p.userId} name={p.name} track={screenTrack} />
-        ) : (
-          <ScreenPlaceholder kind={p.screen ?? "browser"} />
-        )
+        // Mounted when the share starts, so the screen switches on each time (DESIGN.md motion).
+        <div className="flex-1 relative min-h-0 flex flex-col animate-bc-power-on">
+          {screenTrack ? (
+            <ScreenVideo userId={p.userId} name={p.name} track={screenTrack} />
+          ) : (
+            <ScreenPlaceholder kind={p.screen ?? "browser"} />
+          )}
+        </div>
       ) : camera ? (
         <div className="flex-1 relative min-h-0 overflow-hidden bg-black">{camera}</div>
       ) : (
@@ -189,7 +192,7 @@ export const Tile = ({
 
       <div className="absolute top-2.5 left-2.5 z-[3] flex gap-1.5">
         {p.streaming && (
-          <Chip kind="liveSolid" dot>
+          <Chip kind="liveSolid" dot className="animate-bc-enter [animation-delay:260ms]">
             LIVE
           </Chip>
         )}

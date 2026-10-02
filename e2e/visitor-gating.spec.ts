@@ -71,7 +71,7 @@ test.describe("a visitor", () => {
 
   test('"Start a Room" asks to sign in instead of opening the create dialog', async ({ page }) => {
     await page.goto("/profile/no-such-user");
-    await page.getByRole("button", { name: "Start a Room" }).click();
+    await page.getByRole("navigation").getByRole("button", { name: "Start a Room" }).click();
     const dialog = createPrompt(page);
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole("button", { name: /sign in with discord/i })).toBeVisible();
@@ -143,7 +143,7 @@ test.describe("a signed-in user", () => {
 
   test('"Start a Room" opens the create dialog', async ({ page }) => {
     await page.goto("/profile/no-such-user");
-    await page.getByRole("button", { name: "Start a Room" }).click();
+    await page.getByRole("navigation").getByRole("button", { name: "Start a Room" }).click();
     const dialog = page.getByRole("dialog", { name: "start a hang" });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByLabel("room name")).toBeVisible();

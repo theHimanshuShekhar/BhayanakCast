@@ -73,14 +73,14 @@ const ChatLine = ({
 }) => {
   if (m.system)
     return (
-      <div className="my-1.5 py-1.5 text-center text-[10.5px] text-muted tracking-[0.04em] border-y border-dashed border-border">
+      <div className="my-1.5 py-1.5 text-center text-[10.5px] text-muted tracking-[0.04em] border-y border-dashed border-border animate-bc-enter">
         — {m.text} —
       </div>
     );
   const role: RoomRole = m.role;
   const whoCls = role === "member" ? "" : "text-primary-strong";
   return (
-    <div className="flex gap-2 py-1.5">
+    <div className="flex gap-2 py-1.5 animate-bc-enter">
       <button
         type="button"
         onClick={() => onOpenProfile(m.user)}

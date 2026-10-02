@@ -1,0 +1,429 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-30T03:41:47.053356+00:00",
+  "title": "Design System: BhayanakCast",
+  "extensions": {
+    "colorMeta": {
+      "on-air-glow": {
+        "role": "primary",
+        "displayName": "On-Air Glow",
+        "canonical": "oklch(0.68 0.19 var(--accent-h))",
+        "tonalRamp": [
+          "oklch(0.15 0.19 265)",
+          "oklch(0.26 0.19 265)",
+          "oklch(0.37 0.19 265)",
+          "oklch(0.48 0.19 265)",
+          "oklch(0.60 0.19 265)",
+          "oklch(0.71 0.19 265)",
+          "oklch(0.83 0.19 265)",
+          "oklch(0.95 0.19 265)"
+        ]
+      },
+      "on-air-glow-soft": {
+        "role": "primary",
+        "displayName": "On-Air Glow Soft",
+        "canonical": "oklch(0.68 0.19 var(--accent-h) / 0.18)"
+      },
+      "on-air-glow-halo": {
+        "role": "primary",
+        "displayName": "On-Air Glow Halo",
+        "canonical": "oklch(0.68 0.19 var(--accent-h) / 0.55)"
+      },
+      "on-air-glow-ink": {
+        "role": "primary",
+        "displayName": "On-Air Glow Ink",
+        "canonical": "oklch(0.2 0.04 var(--accent-h))"
+      },
+      "tally-light-red": {
+        "role": "secondary",
+        "displayName": "Tally Light Red",
+        "canonical": "oklch(0.72 0.22 25)",
+        "tonalRamp": [
+          "oklch(0.15 0.22 25)",
+          "oklch(0.26 0.22 25)",
+          "oklch(0.37 0.22 25)",
+          "oklch(0.48 0.22 25)",
+          "oklch(0.60 0.22 25)",
+          "oklch(0.71 0.22 25)",
+          "oklch(0.83 0.22 25)",
+          "oklch(0.95 0.22 25)"
+        ]
+      },
+      "tally-light-red-ink": {
+        "role": "secondary",
+        "displayName": "Tally Light Red Ink",
+        "canonical": "oklch(0.98 0.02 25)",
+        "lightTheme": "oklch(0.47 0.19 25)"
+      },
+      "signal-green": {
+        "role": "tertiary",
+        "displayName": "Signal Green",
+        "canonical": "oklch(0.78 0.18 150)",
+        "tonalRamp": [
+          "oklch(0.15 0.18 150)",
+          "oklch(0.26 0.18 150)",
+          "oklch(0.37 0.18 150)",
+          "oklch(0.48 0.18 150)",
+          "oklch(0.60 0.18 150)",
+          "oklch(0.71 0.18 150)",
+          "oklch(0.83 0.18 150)",
+          "oklch(0.95 0.18 150)"
+        ]
+      },
+      "standby-amber": {
+        "role": "tertiary",
+        "displayName": "Standby Amber",
+        "canonical": "oklch(0.8 0.17 70)",
+        "tonalRamp": [
+          "oklch(0.15 0.17 70)",
+          "oklch(0.26 0.17 70)",
+          "oklch(0.37 0.17 70)",
+          "oklch(0.48 0.17 70)",
+          "oklch(0.60 0.17 70)",
+          "oklch(0.71 0.17 70)",
+          "oklch(0.83 0.17 70)",
+          "oklch(0.95 0.17 70)"
+        ]
+      },
+      "midnight-ink": {
+        "role": "neutral",
+        "displayName": "Midnight Ink",
+        "canonical": "oklch(0.17 0.025 265)",
+        "tonalRamp": [
+          "oklch(0.15 0.025 265)",
+          "oklch(0.26 0.025 265)",
+          "oklch(0.37 0.025 265)",
+          "oklch(0.48 0.025 265)",
+          "oklch(0.60 0.025 265)",
+          "oklch(0.71 0.025 265)",
+          "oklch(0.83 0.025 265)",
+          "oklch(0.95 0.025 265)"
+        ],
+        "lightTheme": "oklch(0.94 0.01 260)"
+      },
+      "deep-slate": {
+        "role": "neutral",
+        "displayName": "Deep Slate",
+        "canonical": "oklch(0.2 0.028 265)",
+        "lightTheme": "oklch(0.96 0.008 260)"
+      },
+      "slate-panel": {
+        "role": "neutral",
+        "displayName": "Slate Panel",
+        "canonical": "oklch(0.255 0.03 265)",
+        "lightTheme": "oklch(0.995 0.004 260)"
+      },
+      "lifted-slate": {
+        "role": "neutral",
+        "displayName": "Lifted Slate",
+        "canonical": "oklch(0.305 0.032 265)",
+        "lightTheme": "oklch(0.92 0.01 260)"
+      },
+      "lifted-slate-high": {
+        "role": "neutral",
+        "displayName": "Lifted Slate High",
+        "canonical": "oklch(0.355 0.034 265)",
+        "lightTheme": "oklch(0.88 0.012 260)"
+      },
+      "screen-well": {
+        "role": "neutral",
+        "displayName": "Screen Well",
+        "canonical": "oklch(0.14 0.02 260)"
+      },
+      "readout-white": {
+        "role": "neutral",
+        "displayName": "Readout White",
+        "canonical": "oklch(0.98 0.005 260)",
+        "tonalRamp": [
+          "oklch(0.15 0.01 260)",
+          "oklch(0.26 0.01 260)",
+          "oklch(0.37 0.01 260)",
+          "oklch(0.48 0.01 260)",
+          "oklch(0.60 0.01 260)",
+          "oklch(0.71 0.01 260)",
+          "oklch(0.83 0.01 260)",
+          "oklch(0.95 0.01 260)"
+        ],
+        "lightTheme": "oklch(0.16 0.015 260)"
+      },
+      "readout-dim": {
+        "role": "neutral",
+        "displayName": "Readout Dim",
+        "canonical": "oklch(0.82 0.01 260)",
+        "lightTheme": "oklch(0.28 0.015 260)"
+      },
+      "readout-muted": {
+        "role": "neutral",
+        "displayName": "Readout Muted",
+        "canonical": "oklch(0.68 0.012 260)",
+        "lightTheme": "oklch(0.42 0.014 260)"
+      },
+      "readout-faint": {
+        "role": "neutral",
+        "displayName": "Readout Faint",
+        "canonical": "oklch(0.45 0.012 260)",
+        "lightTheme": "oklch(0.55 0.012 260)"
+      },
+      "hairline-subtle": {
+        "role": "neutral",
+        "displayName": "Hairline Subtle",
+        "canonical": "oklch(1 0 0 / 0.09)",
+        "lightTheme": "oklch(0 0 0 / 0.08)"
+      },
+      "hairline": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "oklch(1 0 0 / 0.14)",
+        "lightTheme": "oklch(0 0 0 / 0.14)"
+      },
+      "hairline-strong": {
+        "role": "neutral",
+        "displayName": "Hairline Strong",
+        "canonical": "oklch(1 0 0 / 0.21)",
+        "lightTheme": "oklch(0 0 0 / 0.22)"
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Big stat numbers on profile and admin tiles."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Page titles: recaps, profiles, admin (22px mobile, 26-28px desktop)."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Section heads (with a status dot) and room card names."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Base UI and chat text."
+      },
+      "body-small": {
+        "displayName": "Body small",
+        "purpose": "Buttons, fields, metadata."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Uppercase tracked section subtitles and stat labels."
+      },
+      "chip": {
+        "displayName": "Chip",
+        "purpose": "Status and role chips."
+      }
+    },
+    "shadows": [
+      {
+        "name": "card",
+        "value": "0 1px 0 oklch(1 0 0 / 0.05) inset, 0 -1px 0 oklch(0 0 0 / 0.35) inset, 0 1px 2px oklch(0 0 0 / 0.3)",
+        "purpose": "Resting bevel for cards, default buttons, active segments (dark theme)."
+      },
+      {
+        "name": "pop",
+        "value": "0 1px 0 oklch(1 0 0 / 0.05) inset, 0 -1px 0 oklch(0 0 0 / 0.35) inset, 0 4px 14px oklch(0 0 0 / 0.35)",
+        "purpose": "Tooltips, menus, popovers."
+      },
+      {
+        "name": "deep",
+        "value": "0 1px 0 oklch(1 0 0 / 0.05) inset, 0 -1px 0 oklch(0 0 0 / 0.35) inset, 0 10px 30px oklch(0 0 0 / 0.45)",
+        "purpose": "Dialogs."
+      },
+      {
+        "name": "glow",
+        "value": "0 0 24px var(--color-primary-glow)",
+        "purpose": "Accent emphasis only: selection, primary, speaking, self."
+      }
+    ],
+    "motion": [
+      {
+        "name": "press",
+        "value": "120ms; active:translate-y-px",
+        "purpose": "Button press and hover color transitions."
+      },
+      {
+        "name": "ui-standard",
+        "value": "150ms",
+        "purpose": "Rail, tooltip, switch transitions."
+      },
+      {
+        "name": "bc-pulse",
+        "value": "1.6s infinite",
+        "purpose": "Live dot pulse (opacity + scale)."
+      },
+      {
+        "name": "bc-wave",
+        "value": "1.2s ease-in-out infinite, 0.1s stagger",
+        "purpose": "Speaking wave bars 3px to 12px."
+      },
+      {
+        "name": "bc-fade",
+        "value": "600ms ease",
+        "purpose": "Mosaic thumbnail refresh."
+      },
+      {
+        "name": "bc-float",
+        "value": "2.4s ease-out forwards",
+        "purpose": "Floating emoji reactions."
+      },
+      {
+        "name": "bc-power-on",
+        "value": "520ms cubic-bezier(0.16, 1, 0.3, 1) both",
+        "purpose": "Signature: a screen switching on when a share starts or a room goes live on home."
+      },
+      {
+        "name": "bc-enter",
+        "value": "220ms cubic-bezier(0.16, 1, 0.3, 1) both",
+        "purpose": "New tiles, chat lines, lit chips settling in."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "md",
+        "value": "768px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Default Button",
+      "kind": "button",
+      "refersTo": "button-default",
+      "description": "Everyday action; lit bevel, presses down.",
+      "html": "<button class=\"ds-btn\">copy invite link</button>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 14px;font:500 12px/1 'JetBrains Mono Variable','JetBrains Mono',monospace;letter-spacing:.01em;color:var(--color-fg,oklch(0.98 0.005 260));background:var(--color-surface,oklch(0.255 0.03 265));border:1px solid var(--color-border,oklch(1 0 0/.14));border-radius:var(--radius-sm,8px);box-shadow:var(--shadow-card);cursor:pointer;transition:background-color 120ms,border-color 120ms,transform 120ms}.ds-btn:hover{background:var(--color-surface-2,oklch(0.305 0.032 265));border-color:var(--color-border-strong,oklch(1 0 0/.21))}.ds-btn:active{transform:translateY(1px)}.ds-btn:focus-visible{outline:2px solid var(--color-primary,oklch(0.68 0.19 265));outline-offset:2px}"
+    },
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one main action; accent fill with underglow.",
+      "html": "<button class=\"ds-btn-primary\">start a room</button>",
+      "css": ".ds-btn-primary{display:inline-flex;align-items:center;height:34px;padding:0 14px;font:600 12px/1 'JetBrains Mono Variable','JetBrains Mono',monospace;color:var(--color-primary-ink,oklch(0.2 0.04 265));background:var(--color-primary,oklch(0.68 0.19 265));border:1px solid transparent;border-radius:var(--radius-sm,8px);box-shadow:0 1px 0 oklch(1 0 0/.35) inset,0 -1px 0 oklch(0 0 0/.2) inset,0 6px 20px var(--color-primary-glow,oklch(0.68 0.19 265/.55));cursor:pointer;transition:filter 120ms,transform 120ms}.ds-btn-primary:hover{filter:brightness(1.1)}.ds-btn-primary:active{transform:translateY(1px)}.ds-btn-primary:focus-visible{outline:2px solid var(--color-primary,oklch(0.68 0.19 265));outline-offset:2px}"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Cut-the-feed actions: leave, stop share, remove.",
+      "html": "<button class=\"ds-btn-danger\">leave</button>",
+      "css": ".ds-btn-danger{display:inline-flex;align-items:center;height:34px;padding:0 14px;font:500 12px/1 'JetBrains Mono Variable','JetBrains Mono',monospace;color:var(--color-live-ink,oklch(0.98 0.02 25));background:color-mix(in oklch,oklch(0.72 0.22 25) 18%,oklch(0.255 0.03 265));border:1px solid color-mix(in oklch,oklch(0.72 0.22 25) 45%,transparent);border-radius:var(--radius-sm,8px);cursor:pointer}.ds-btn-danger:active{transform:translateY(1px)}.ds-btn-danger:focus-visible{outline:2px solid var(--color-primary,oklch(0.68 0.19 265));outline-offset:2px}"
+    },
+    {
+      "name": "Live Chip",
+      "kind": "chip",
+      "refersTo": "chip-live-solid",
+      "description": "The on-air badge on live tiles and room cards.",
+      "html": "<span class=\"ds-chip-live\"><i></i>LIVE</span>",
+      "css": ".ds-chip-live{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border-radius:9999px;font:600 10.5px/1.2 'JetBrains Mono Variable','JetBrains Mono',monospace;letter-spacing:.06em;color:#fff;background:color-mix(in oklch,oklch(0.72 0.22 25) 85%,black)}.ds-chip-live i{width:6px;height:6px;border-radius:9999px;background:#fff;animation:ds-pulse 1.6s infinite}@keyframes ds-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.55;transform:scale(.85)}}"
+    },
+    {
+      "name": "Status Chip",
+      "kind": "chip",
+      "refersTo": "chip-default",
+      "description": "Neutral and ok status chips (e.g. capacity).",
+      "html": "<span class=\"ds-chip\">4/10</span> <span class=\"ds-chip ds-chip-ok\">9/10</span>",
+      "css": ".ds-chip{display:inline-flex;align-items:center;padding:3px 8px;border-radius:9999px;border:1px solid var(--color-border,oklch(1 0 0/.14));background:var(--color-surface-2,oklch(0.305 0.032 265));color:var(--color-fg-muted,oklch(0.82 0.01 260));font:500 10.5px/1.2 'JetBrains Mono Variable','JetBrains Mono',monospace;letter-spacing:.06em;font-variant-numeric:tabular-nums}.ds-chip-ok{background:color-mix(in oklch,oklch(0.78 0.18 150) 22%,transparent);border-color:color-mix(in oklch,oklch(0.78 0.18 150) 40%,transparent);color:oklch(0.78 0.18 150)}"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "input-field",
+      "description": "Inset well input with accent focus halo.",
+      "html": "<label class=\"ds-field\"><span>room name</span><input placeholder=\"midnight speedrun club\"></label>",
+      "css": ".ds-field{display:flex;flex-direction:column;gap:6px;font-family:'JetBrains Mono Variable','JetBrains Mono',monospace}.ds-field span{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--color-muted,oklch(0.68 0.012 260))}.ds-field input{background:var(--color-canvas,oklch(0.2 0.028 265));border:1px solid var(--color-border,oklch(1 0 0/.14));border-radius:var(--radius-sm,8px);padding:10px 12px;font:inherit;font-size:12.5px;color:var(--color-fg,oklch(0.98 0.005 260));outline:0;transition:box-shadow 150ms,border-color 150ms}.ds-field input:focus{border-color:var(--color-primary,oklch(0.68 0.19 265));box-shadow:0 0 0 3px var(--color-primary-soft,oklch(0.68 0.19 265/.18))}"
+    },
+    {
+      "name": "Room Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Live room card: 16:9 mosaic in a screen well, name, footer with dashed rule.",
+      "html": "<div class=\"ds-card\"><div class=\"ds-well\"><span class=\"ds-chip-live\"><i></i>LIVE</span></div><b>midnight speedrun club</b><div class=\"ds-foot\">9/10 · <em>streaming</em></div></div>",
+      "css": ".ds-card{display:flex;flex-direction:column;gap:10px;padding:14px;width:320px;background:var(--color-surface,oklch(0.255 0.03 265));border:1px solid var(--color-border,oklch(1 0 0/.14));border-radius:var(--radius,12px);box-shadow:var(--shadow-card);font:13px/1.45 'JetBrains Mono Variable','JetBrains Mono',monospace;color:var(--color-fg,oklch(0.98 0.005 260))}.ds-card b{font-size:15px;font-weight:700}.ds-well{position:relative;aspect-ratio:16/9;border-radius:var(--radius-sm,8px);border:1px solid var(--color-border-subtle,oklch(1 0 0/.09));background:repeating-linear-gradient(135deg,oklch(0.18 0.02 25) 0 14px,oklch(0.14 0.02 25) 14px 28px);padding:8px}.ds-chip-live{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border-radius:9999px;font-size:10.5px;font-weight:600;letter-spacing:.06em;color:#fff;background:color-mix(in oklch,oklch(0.72 0.22 25) 85%,black)}.ds-chip-live i{width:6px;height:6px;border-radius:9999px;background:#fff}.ds-foot{padding-top:10px;border-top:1px dashed var(--color-border-subtle,oklch(1 0 0/.09));color:var(--color-muted,oklch(0.68 0.012 260));font-size:11.5px;font-variant-numeric:tabular-nums}.ds-foot em{font-style:normal;color:oklch(0.78 0.18 150)}"
+    },
+    {
+      "name": "Rail Item",
+      "kind": "nav",
+      "refersTo": "rail-item",
+      "description": "Icon rail entry: idle vs active with accent ring, glow and edge bar.",
+      "html": "<nav class=\"ds-rail\"><a class=\"ds-rail-item is-active\" aria-label=\"Active Rooms\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\"><circle cx=\"9\" cy=\"8\" r=\"3.5\"/><path d=\"M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5\"/><circle cx=\"17\" cy=\"9\" r=\"2.5\"/><path d=\"M16 14.6c2.6.2 4.6 1.9 5.3 4.9\"/></svg></a><a class=\"ds-rail-item\" aria-label=\"Start a Room\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\"><path d=\"M12 5v14M5 12h14\"/></svg></a></nav>",
+      "css": ".ds-rail{display:flex;flex-direction:column;gap:4px;padding:12px;width:64px;background:var(--color-canvas,oklch(0.2 0.028 265));border-right:1px solid var(--color-border-subtle,oklch(1 0 0/.09))}.ds-rail-item{position:relative;width:40px;height:40px;display:grid;place-items:center;border-radius:10px;color:var(--color-muted,oklch(0.68 0.012 260));cursor:pointer;transition:background-color 150ms,color 150ms}.ds-rail-item:hover{background:var(--color-surface,oklch(0.255 0.03 265));color:var(--color-fg,oklch(0.98 0.005 260))}.ds-rail-item:focus-visible{outline:2px solid var(--color-primary,oklch(0.68 0.19 265));outline-offset:2px}.ds-rail-item.is-active{background:var(--color-primary-soft,oklch(0.68 0.19 265/.18));color:var(--color-primary,oklch(0.68 0.19 265));box-shadow:0 0 0 1px color-mix(in oklch,oklch(0.68 0.19 265) 40%,transparent),0 0 16px var(--color-primary-glow,oklch(0.68 0.19 265/.55))}.ds-rail-item.is-active::before{content:'';position:absolute;left:-12px;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;background:var(--color-primary,oklch(0.68 0.19 265));box-shadow:0 0 10px var(--color-primary-glow,oklch(0.68 0.19 265/.55))}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Late-Night Control Room",
+    "overview": "BhayanakCast looks like a broadcast booth after midnight. The lights are down, everything is set in one monospace face, and the only color comes from the signals that matter: red tally lights on whoever is live, an accent glow on what you've selected or what is you, and a green dot for \"streaming\" or \"online\". The room is dark by default (`theme: dark`). Surfaces are near-black panels tinted blue-violet, and depth comes from tonal steps plus a thin lit top edge. Heavy drop shadows aren't used.\n\nThe system is dense and reads like instruments. Readouts use tabular numbers, and small uppercase labels are tracked wide (0.12em). Streams sit in dark screen wells inside panels, which makes the screens themselves the brightest things on the page. The copy is lowercase and casual (\"nobody's sharing yet\", \"say something…\", \"leave\"). The feel should be a control room for friends, not an ops dashboard.\n\nAppearance can be tuned per user: accent hue (six presets, any 0–360), corner radius (0–32px, with `sm`/`lg` derived from it), tile density, room layout, and light or dark theme. Every rule below has to survive those settings. Treat the accent as a role, not a hue, and never hard-code a radius where a radius token exists.\n\nIt rejects two looks: corporate meeting UI (SaaS blue, polite white-glove chrome) and esports streamer neon (glow on everything, angular gamer chrome, gradient overload). Glow is a signal. It is not decoration.",
+    "keyCharacteristics": [
+      "One typeface, JetBrains Mono, carries every role from 32px stat numbers to 6px avatar initials.",
+      "Dark by default, with blue-violet-tinted neutrals stepped in small oklch lightness increments.",
+      "Color is reserved for state: live (red), selected or self (accent), healthy (green), caution (amber).",
+      "Tactile, lit surfaces: an inset top highlight and a shadow underneath. Primary and active elements get a glow.",
+      "Small, dense type (13px body, 10–11.5px labels) with tabular numbers for every count."
+    ],
+    "rules": [
+      {
+        "name": "The Tally Rule",
+        "body": "Red means someone is live. Don't use it for decoration, emphasis or brand. The one allowed crossover is destructive \"leave/stop\" actions, and those use the muted mix, never the solid chip.",
+        "section": "colors"
+      },
+      {
+        "name": "The Role-Not-Hue Rule",
+        "body": "Always reference the accent through `--color-primary*` tokens. A hard-coded violet breaks the first time a user picks lime.",
+        "section": "colors"
+      },
+      {
+        "name": "The Ten Pixel Floor Rule",
+        "body": "Readable text is never smaller than 10px. The one exception is avatar initials, which are a glyph mark that always sits next to the person's name.",
+        "section": "typography"
+      },
+      {
+        "name": "The Lowercase Action Rule",
+        "body": "Headings and nav labels use Title Case (\"Active Rooms\", \"Start a Room\"). Actions and copy use lowercase, in the room's voice (\"start a room\", \"sign in with discord\", \"leave\", \"try again\").",
+        "section": "typography"
+      },
+      {
+        "name": "The One Face Rule",
+        "body": "JetBrains Mono is the only typeface. Never introduce a sans or serif pairing.",
+        "section": "typography"
+      },
+      {
+        "name": "The Tabular Readout Rule",
+        "body": "Every count, duration and capacity (9/10, 1h 42m, +5) uses `tabular-nums`, so numbers stay put while they update live.",
+        "section": "typography"
+      },
+      {
+        "name": "The Lit Edge Rule",
+        "body": "Raised surfaces are beveled, not floated. Use the shadow tokens, which already include the inset highlight, and don't write a bare `box-shadow: 0 4px …` drop shadow.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Glow Means Signal Rule",
+        "body": "Glow appears only on the accent (selection, primary action, speaking, self) and on status dots. A card that glows is shouting.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** reference color through tokens (`bg-primary`, `text-live-ink`, `border-border`) so theme and accent hue changes apply everywhere.",
+      "**Do** use `tabular-nums` for every live count, capacity and duration.",
+      "**Do** mark section heads with a 6px status dot (primary, live, livePulse, success or muted) that matches what the section contains.",
+      "**Do** keep screens in the dark Screen Well (`oklch(0.14 0.02 260)`) regardless of theme.",
+      "**Do** use `--radius-sm` or `--radius` rather than fixed pixel radii, so the user's radius setting applies.",
+      "**Do** write UI copy in lowercase and casual, matching the room's voice (\"nobody's sharing yet\", \"leave\").",
+      "**Do** give every animation a `prefers-reduced-motion` path that keeps the state change visible (a fade), and gate spatial movement with `motion-safe:`."
+    ],
+    "donts": [
+      "**Don't** use Tally Light Red for anything except live state and destructive feed-cutting actions.",
+      "**Don't** introduce a second typeface. JetBrains Mono is the whole type system.",
+      "**Don't** make it look like corporate meeting software: no SaaS blue, no white-glove chrome, no stock-photo friendliness.",
+      "**Don't** drift into esports streamer neon: no glow on non-signal elements, no angular gamer chrome, no gradient overload.",
+      "**Don't** add bare offset drop shadows. Use `--shadow-card`, `--shadow-pop` or `--shadow-deep`, which carry the lit edge.",
+      "**Don't** hard-code the violet hue. The accent is whatever the user picked.",
+      "**Don't** set text on the accent in white or near-white. Use `text-primary-ink`.",
+      "**Don't** add page-load choreography. Motion marks something changing, and the switch-on is saved for going live."
+    ]
+  }
+}

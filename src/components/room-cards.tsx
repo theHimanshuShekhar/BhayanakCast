@@ -2,9 +2,15 @@
 // Ported from docs/design/prototype/home.jsx.
 import { useEffect, useState } from "react";
 import { fmtAgo, fmtMins } from "~/lib/format";
-import type { LiveRoomCard, PastRoomCard, RoomPerson } from "~/lib/rooms";
+import {
+  type LiveRoomCard,
+  type PastRoomCard,
+  ROOM_KIND_LABELS,
+  type RoomKind,
+  type RoomPerson,
+} from "~/lib/rooms";
 import { thumbnailUrl } from "~/lib/thumbnails";
-import type { Stream } from "~/lib/types";
+import type { ScreenKind, Stream } from "~/lib/types";
 import { Icon } from "./icons";
 import { Avatar, AvatarStack, Chip, ScreenPlaceholder } from "./ui";
 
@@ -42,15 +48,20 @@ export const StreamMosaic = ({
   streams,
   cached = false,
   freshness,
+  poweringOn = false,
 }: {
   streams: Stream[];
   cached?: boolean;
   freshness?: string;
+  /** Switch the screens on as the mosaic appears: a room that just went live. */
+  poweringOn?: boolean;
 }) => {
   const list = streams.slice(0, 3);
   const n = Math.max(1, list.length);
   return (
-    <div className="relative aspect-video rounded-[var(--radius-sm)] overflow-hidden bg-[oklch(0.14_0.02_260)] border border-border-subtle">
+    <div
+      className={`relative aspect-video rounded-[var(--radius-sm)] overflow-hidden bg-[oklch(0.14_0.02_260)] border border-border-subtle ${poweringOn ? "animate-bc-power-on" : ""}`}
+    >
       {list.length === 0 && (
         <div className="absolute inset-0 grid place-items-center text-[11px] text-white/60">
           nobody's sharing yet
@@ -63,13 +74,8 @@ export const StreamMosaic = ({
           <div key={s.user} className="relative min-w-0 min-h-0 overflow-hidden">
             <StreamScreen stream={s} />
             {(n > 1 || s.thumbnail) && (
-              <span className="absolute bottom-1.5 left-1.5 z-[2] inline-flex items-center gap-1 max-w-[calc(100%-12px)] pl-0.5 pr-1.5 py-0.5 rounded-full bg-black/55 backdrop-blur-[6px] text-[9.5px] font-semibold text-white">
-                <Avatar
-                  name={s.user}
-                  image={s.image}
-                  size="sm"
-                  className="!w-3.5 !h-3.5 !text-[6px]"
-                />
+              <span className="absolute bottom-1.5 left-1.5 z-[2] inline-flex items-center gap-1 max-w-[calc(100%-12px)] pl-0.5 pr-1.5 py-0.5 rounded-full bg-black/55 backdrop-blur-[6px] text-[10px] font-semibold text-white">
+                <Avatar name={s.user} image={s.image} size="sm" className="!w-4 !h-4 !text-[7px]" />
                 <span className="truncate">{s.user}</span>
               </span>
             )}
@@ -91,7 +97,7 @@ export const StreamMosaic = ({
           </span>
           {freshness && (
             // Relative times can tick between the server render and hydration.
-            <span className={`${pill} !text-[9.5px] !text-white/85`} suppressHydrationWarning>
+            <span className={`${pill} !text-white/85`} suppressHydrationWarning>
               {freshness}
             </span>
           )}
@@ -123,47 +129,86 @@ export const newestThumbnail = (streamers: { thumbnailAt?: string | null }[]): s
 export const endedLabel = (newest: string | null, endedAt: string): string =>
   newest ? `cached · ${fmtAgo(newest)}` : `ended · ${fmtAgo(endedAt)}`;
 
+// The placeholder screen's tint follows the room kind, so rooms without thumbnails yet don't
+// all look the same.
+const PLACEHOLDER_SCREEN: Record<RoomKind, ScreenKind> = {
+  gaming: "game",
+  code: "cli",
+  music: "ableton",
+  art: "fl-studio",
+  watch: "browser",
+  chat: "browser",
+};
+
 /**
  * A room's shares for its mosaic: each streamer's thumbnail once they have one (`thumbnailAt`,
- * in `roomId`), else a placeholder screen (ADR 10, spec #5).
+ * in `roomId`), else a placeholder screen tinted for the room's `kind` (ADR 10, spec #5).
  */
 export const placeholderStreams = (
   streamers: (RoomPerson & { thumbnailAt?: string | null })[],
   roomId?: string,
+  kind: RoomKind = "chat",
 ): Stream[] =>
   streamers.map((s) => ({
     user: s.username,
     image: s.image,
-    screen: "browser",
+    screen: PLACEHOLDER_SCREEN[kind],
     thumbnail: roomId && s.thumbnailAt ? thumbnailUrl(roomId, s.id, s.thumbnailAt) : undefined,
   }));
+
+/** A full room lets a newcomer wait in the lobby until a spot frees up (ADR 2). */
+export const isFull = (room: LiveRoomCard) => room.participantCount >= room.capacity;
+
+/**
+ * A live card's accessible name: what the card shows, not just its title, so a screen reader
+ * hears who hosts, how full it is, whether anyone is sharing and that it's private.
+ */
+export const liveCardLabel = (room: LiveRoomCard): string =>
+  [
+    `Join ${room.name}`,
+    room.host ? `hosted by ${room.host.username}` : null,
+    isFull(room)
+      ? "full: you'll wait for a spot"
+      : `${room.participantCount} of ${room.capacity} people`,
+    room.streamCount > 0 ? `${room.streamCount} sharing` : null,
+    room.isPrivate ? "private" : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
 
 export const LiveCard = ({
   room,
   onOpen,
   now,
+  justLive = false,
 }: {
   room: LiveRoomCard;
   onOpen: (room: LiveRoomCard) => void;
   now?: number;
+  /** It went live while the page was open (not on the first render), so it switches on. */
+  justLive?: boolean;
 }) => {
-  const hostName = room.host?.username ?? "no host";
+  const hostName = room.host?.username ?? "deleted account";
+  const full = isFull(room);
   const newest = newestThumbnail(room.streamers);
   const viewers = room.participants.filter((p) => p.id !== room.host?.id).length;
   const faces = room.participants.length ? room.participants : room.host ? [room.host] : [];
   return (
     <button
       type="button"
-      aria-label={`Join ${room.name}`}
+      aria-label={liveCardLabel(room)}
       onClick={() => onOpen(room)}
-      className={`${cardBase} shadow-pop transition-[transform,border-color] duration-[160ms] ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-0.5 hover:border-[color-mix(in_oklch,var(--color-primary)_40%,var(--color-border))]`}
+      className={`${cardBase} shadow-pop transition-[transform,border-color] duration-[160ms] ease-[cubic-bezier(.2,.7,.2,1)] motion-safe:hover:-translate-y-0.5 hover:border-[color-mix(in_oklch,var(--color-primary)_40%,var(--color-border))]`}
     >
       <StreamMosaic
-        streams={placeholderStreams(room.streamers, room.id)}
+        streams={placeholderStreams(room.streamers, room.id, room.kind)}
         freshness={newest ? `updated ${fmtAgo(newest, now)}` : undefined}
+        poweringOn={justLive}
       />
       <div className="flex items-center gap-2 min-w-0">
-        <span className="text-[15px] font-bold tracking-[-0.005em] truncate">{room.name}</span>
+        <span className="text-[15px] font-bold tracking-[-0.005em] truncate" title={room.name}>
+          {room.name}
+        </span>
         {room.isPrivate && (
           <span className="text-muted" title="private room">
             <Icon.Lock size={12} />
@@ -173,22 +218,24 @@ export const LiveCard = ({
       <div className="flex items-center gap-2.5 w-full">
         <AvatarStack people={faces} max={4} size="md" />
         <div className="flex-1 min-w-0">
-          <div className="text-xs font-semibold">{hostName}</div>
+          <div className="text-xs font-semibold truncate">{hostName}</div>
           <div className="text-[10.5px] text-muted">
             Host · {viewers} viewer{viewers === 1 ? "" : "s"}
           </div>
         </div>
       </div>
       <div className={`${cardFoot} gap-3 text-[11px] w-full`}>
-        <span className="inline-flex items-center gap-1.5">
+        <span className="inline-flex items-center gap-1.5 tabular-nums">
           <Icon.Users size={12} /> {room.participantCount}/{room.capacity}
         </span>
+        {full && <Chip>full · wait for a spot</Chip>}
         {room.streamCount > 0 && (
           <span className="inline-flex items-center gap-1.5 text-success">
             <span className="w-1.5 h-1.5 rounded-full bg-success shadow-[0_0_6px_var(--color-success)]" />{" "}
             Streaming
           </span>
         )}
+        <span className="ml-auto truncate">{ROOM_KIND_LABELS[room.kind]}</span>
       </div>
     </button>
   );
@@ -207,15 +254,17 @@ export const PastCard = ({
       type="button"
       aria-label={`View recap of ${room.name}`}
       onClick={() => onOpen(room)}
-      className={`${cardBase} shadow-card transition-[transform,border-color] duration-[120ms] hover:-translate-y-px hover:border-border-strong`}
+      className={`${cardBase} shadow-card transition-[transform,border-color] duration-[120ms] motion-safe:hover:-translate-y-px hover:border-border-strong`}
     >
       <StreamMosaic
-        streams={placeholderStreams(room.streamers, room.id)}
+        streams={placeholderStreams(room.streamers, room.id, room.kind)}
         cached
         freshness={endedLabel(newest, room.endedAt)}
       />
       <div className="flex items-center gap-2 min-w-0">
-        <span className="text-[13.5px] font-semibold truncate">{room.name}</span>
+        <span className="text-[13.5px] font-semibold truncate" title={room.name}>
+          {room.name}
+        </span>
         {room.isPrivate && (
           <span className="text-muted" title="private room">
             <Icon.Lock size={12} />
@@ -225,7 +274,9 @@ export const PastCard = ({
       <div className="flex items-center gap-2.5 w-full">
         <AvatarStack people={room.people} max={3} size="md" />
         <div className="flex-1 min-w-0">
-          <div className="text-xs font-semibold truncate">{room.host?.username ?? "no host"}</div>
+          <div className="text-xs font-semibold truncate">
+            {room.host?.username ?? "deleted account"}
+          </div>
           <div className="text-[10.5px] text-muted">Host</div>
         </div>
       </div>
@@ -236,6 +287,7 @@ export const PastCard = ({
         <span className="inline-flex items-center gap-1">
           <Icon.Clock size={11} /> lasted {fmtMins(room.durationMinutes)}
         </span>
+        <span className="ml-auto truncate">{ROOM_KIND_LABELS[room.kind]}</span>
       </div>
     </button>
   );

@@ -39,7 +39,7 @@ export const Sheet = ({
     <Dialog.Portal>
       <Dialog.Backdrop className="fixed inset-0 z-[200] bg-black/55 backdrop-blur-[3px] animate-bc-fade" />
       <Dialog.Popup
-        className={`fixed z-[201] left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 ${width} max-h-[calc(100dvh-2rem)] flex flex-col bg-surface border border-border rounded-[var(--radius)] shadow-deep overflow-hidden outline-0 max-sm:top-auto max-sm:bottom-0 max-sm:translate-y-0 max-sm:w-full max-sm:max-h-[92dvh] max-sm:rounded-b-none max-sm:border-b-0`}
+        className={`fixed z-[201] left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 ${width} transition-[opacity,scale,translate] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] data-ending-style:duration-[120ms] data-starting-style:opacity-0 data-ending-style:opacity-0 motion-safe:sm:data-starting-style:scale-[0.98] motion-safe:max-sm:data-starting-style:translate-y-full motion-safe:max-sm:data-ending-style:translate-y-full max-h-[calc(100dvh-2rem)] flex flex-col bg-surface border border-border rounded-[var(--radius)] shadow-deep overflow-hidden outline-0 max-sm:top-auto max-sm:bottom-0 max-sm:translate-y-0 max-sm:w-full max-sm:max-h-[92dvh] max-sm:rounded-b-none max-sm:border-b-0`}
       >
         <div className="flex items-center gap-3 px-5 py-3.5 border-b border-border-subtle">
           <Dialog.Title className="m-0 text-[15px] tracking-[-0.005em] font-bold flex-1">
@@ -388,7 +388,7 @@ export const ProfileMenu = ({
 }) => (
   <Menu.Root>
     <Menu.Trigger
-      className="w-9 h-9 p-0 rounded-[10px] bg-transparent grid place-items-center cursor-pointer"
+      className="w-9 h-9 max-sm:w-11 max-sm:h-11 p-0 rounded-[10px] bg-transparent grid place-items-center cursor-pointer"
       aria-label="Account menu"
     >
       <Avatar name={username} image={image} size="md" ring />

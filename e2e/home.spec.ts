@@ -51,7 +51,7 @@ test("the home sidebar counts real rooms, members and lifetime stats", async ({
 
     await page.reload();
     await expect(page.getByRole("button", { name: `Join ${name}` })).toBeVisible();
-    expect(await rightNow(page, "Live Rooms")).toBeGreaterThanOrEqual(1);
+    expect(await rightNow(page, "Watching")).toBeGreaterThanOrEqual(1);
     expect(await community(page, "Members")).toBeGreaterThanOrEqual(membersBefore + 2);
     expect(await community(page, "Hours Watched")).toBeGreaterThanOrEqual(watchedBefore + 499);
     expect(await community(page, "Hours Streamed")).toBeGreaterThanOrEqual(streamedBefore + 199);
@@ -67,7 +67,7 @@ test("every Right Now tile shows a number, the online count from the lobby socke
   await page.goto("/");
   const panel = page.getByRole("region", { name: "Right Now" });
   await expect(panel.getByTitle("Connecting to the live count")).toHaveCount(0);
-  for (const label of ["Online", "Live Rooms", "Watching", "Streaming"]) {
+  for (const label of ["Online", "Watching", "Streaming"]) {
     expect(Number.isInteger(await rightNow(page, label)), label).toBe(true);
   }
 });

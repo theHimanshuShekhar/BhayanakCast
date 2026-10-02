@@ -93,7 +93,7 @@ export async function enterRoom(page: Page, roomId?: string): Promise<void> {
  */
 export async function createRoomOnPage(page: Page, room: NewRoom): Promise<string> {
   await hydrating(page).goto("/");
-  // The rail's button; an empty home has a second "Start a Room" button.
+  // The rail's button (home has its own "start a room" button too).
   await page.getByRole("button", { name: "Start a Room" }).first().click();
   const dialog = page.getByRole("dialog", { name: "start a hang" });
   await dialog.getByLabel("room name").fill(room.name);

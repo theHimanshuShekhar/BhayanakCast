@@ -10,7 +10,9 @@
   --color-primary: oklch(0.68 0.19 var(--accent-h));
   --color-primary-soft: oklch(0.68 0.19 var(--accent-h) / 0.18);
   --color-primary-glow: oklch(0.68 0.19 var(--accent-h) / 0.55);
-  --color-primary-ink: oklch(0.98 0.01 var(--accent-h));
+  /* Dark ink on the accent: near-white on an L 0.68 fill is under 3:1 at every hue, dark ink
+     is about 6:1 at every hue (ADR 13 addendum). */
+  --color-primary-ink: oklch(0.2 0.04 var(--accent-h));
 
   --color-live: oklch(0.72 0.22 25);
   --color-success: oklch(0.78 0.18 150);
@@ -53,6 +55,11 @@
   --animate-bc-wave: bc-wave 1.2s ease-in-out infinite;
   --animate-bc-fade: bc-fade 600ms ease;
   --animate-bc-float: bc-float 2.4s ease-out forwards;
+  /* "On air": a screen switching on like a monitor, from a bright line to the full frame. The one
+     authored moment: a share starting in a room, a room going live on home. */
+  --animate-bc-power-on: bc-power-on 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  /* Something new settling in: a tile, a chat line, a lit chip. */
+  --animate-bc-enter: bc-enter 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
   @keyframes bc-pulse {
     0%,
     100% {
@@ -79,6 +86,26 @@
     }
     to {
       opacity: 1;
+    }
+  }
+  @keyframes bc-power-on {
+    0% {
+      clip-path: inset(49.5% 0 49.5% 0);
+      filter: brightness(2.4) saturate(0);
+    }
+    40% {
+      clip-path: inset(0 0 0 0);
+      filter: brightness(1.5) saturate(0.5);
+    }
+    100% {
+      clip-path: inset(0 0 0 0);
+      filter: none;
+    }
+  }
+  @keyframes bc-enter {
+    from {
+      opacity: 0;
+      transform: translateY(4px) scale(0.985);
     }
   }
   @keyframes bc-float {
@@ -110,7 +137,8 @@
 
   --color-fg: oklch(0.98 0.005 260);
   --color-fg-muted: oklch(0.82 0.01 260);
-  --color-muted: oklch(0.62 0.012 260);
+  /* 4.5:1 on surface-2, the lightest panel muted text sits on (ADR 13 addendum). */
+  --color-muted: oklch(0.68 0.012 260);
   --color-subtle: oklch(0.45 0.012 260);
 
   --color-border-subtle: oklch(1 0 0 / 0.09);
@@ -129,6 +157,43 @@
   --shadow-deep:
     0 1px 0 oklch(1 0 0 / 0.05) inset, 0 -1px 0 oklch(0 0 0 / 0.35) inset,
     0 10px 30px oklch(0 0 0 / 0.45);
+}
+
+/* Reduced motion: no looping pulses or waves, reactions fade in place instead of floating up,
+   and screens and new items fade in without moving. Motion-driven hover lifts and dialog
+   movement use `motion-safe:` at their call sites. */
+@keyframes bc-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes bc-float-still {
+  0% {
+    transform: translate(-50%, 0);
+    opacity: 0;
+  }
+  15%,
+  70% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, 0);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-bc-pulse,
+  .animate-bc-wave {
+    animation: none;
+  }
+  .animate-bc-float {
+    animation-name: bc-float-still;
+  }
+  .animate-bc-power-on,
+  .animate-bc-enter {
+    animation-name: bc-fade-in;
+    animation-duration: 200ms;
+  }
 }
 
 ::-webkit-scrollbar {
@@ -187,6 +252,15 @@
   }
   a:hover {
     text-decoration: underline;
+  }
+  ::selection {
+    background: var(--color-primary-soft);
+    color: var(--color-fg);
+  }
+  input,
+  textarea {
+    caret-color: var(--color-primary);
+    accent-color: var(--color-primary);
   }
   :focus-visible {
     outline: 2px solid var(--color-primary);

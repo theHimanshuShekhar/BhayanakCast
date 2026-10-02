@@ -159,7 +159,7 @@ export const Btn = ({
 }) => (
   <button
     type={type}
-    className={`inline-flex items-center justify-center gap-2 border rounded-[var(--radius-sm)] font-medium whitespace-nowrap cursor-pointer transition-[background-color,border-color,filter,transform] duration-[120ms] active:translate-y-px disabled:opacity-50 disabled:cursor-not-allowed ${BTN_SIZES[size]} ${BTN_VARIANTS[variant]} ${className}`}
+    className={`inline-flex items-center justify-center gap-2 border rounded-[var(--radius-sm)] font-medium whitespace-nowrap cursor-pointer transition-[background-color,border-color,filter,transform] duration-[120ms] motion-safe:active:translate-y-px disabled:opacity-50 disabled:cursor-not-allowed ${BTN_SIZES[size]} ${BTN_VARIANTS[variant]} ${className}`}
     {...rest}
   >
     {children}

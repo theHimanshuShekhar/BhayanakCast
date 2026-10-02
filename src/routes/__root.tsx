@@ -41,7 +41,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "BhayanakCast — live screen sharing" },
+      { title: "BhayanakCast · your crew, your screens, one room" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
@@ -115,6 +115,12 @@ function AppShell() {
   return (
     <AppActionsContext value={actions}>
       <div className="grid grid-rows-1 h-[100dvh] bg-bg text-fg">
+        <a
+          href="#main"
+          className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[200] focus:px-3 focus:py-2 focus:rounded-[var(--radius-sm)] focus:bg-surface-3 focus:text-fg focus:border focus:border-border-strong focus:shadow-pop"
+        >
+          skip to content
+        </a>
         <div className="grid grid-cols-[64px_minmax(0,1fr)] max-sm:grid-cols-1 max-sm:grid-rows-[minmax(0,1fr)_auto] min-h-0 overflow-hidden">
           <SideNav
             isAdmin={role === "admin"}
@@ -135,7 +141,7 @@ function AppShell() {
               )
             }
           />
-          <main className="overflow-hidden min-h-0 relative">
+          <main id="main" tabIndex={-1} className="overflow-hidden min-h-0 relative outline-0">
             <Outlet />
             <Suspense>
               <HydrationMarker />
