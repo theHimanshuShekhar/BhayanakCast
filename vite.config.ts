@@ -32,6 +32,11 @@ export default defineConfig({
   server: {
     port: 3000,
   },
+  build: {
+    // Vite inlines assets under 4 KB as data: URLs, and the smallest JetBrains Mono subset
+    // becomes one in the CSS. Keep fonts as files, so the CSP's `font-src 'self'` needs no `data:`.
+    assetsInlineLimit: (file) => (/\.woff2?$/.test(file) ? false : undefined),
+  },
   resolve: {
     tsconfigPaths: true,
   },
