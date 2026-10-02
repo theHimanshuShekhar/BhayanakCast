@@ -34,6 +34,17 @@ describe("empty values", () => {
   });
 });
 
+describe("DATABASE_URL", () => {
+  it("fails startup on a password that breaks the URL compose builds", () => {
+    const withPassword = (password: string) =>
+      parseEnv({ ...productionEnv, DATABASE_URL: `postgres://app:${password}@db:5432/app` });
+    expect(() => withPassword("pa/ss")).toThrow(/DATABASE_URL: .*URL-safe password/);
+    expect(() => withPassword("pa#ss")).toThrow(/DATABASE_URL/);
+    expect(withPassword("0123abcd").DATABASE_URL).toContain("0123abcd");
+    expect(withPassword(encodeURIComponent("pa/ss#1")).DATABASE_URL).toBeTruthy();
+  });
+});
+
 describe("trusted proxies", () => {
   it("parses a comma-separated list of IPs and CIDR ranges", () => {
     expect(
