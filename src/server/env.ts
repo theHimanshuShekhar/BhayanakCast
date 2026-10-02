@@ -44,6 +44,8 @@ const baseSchema = z.object({
   }),
   /** Open anonymous (lobby-only) realtime sockets allowed per client IP (ADR 20). */
   REALTIME_ANONYMOUS_SOCKETS_PER_IP: z.coerce.number().int().positive().default(20),
+  /** Open realtime sockets allowed per signed-in user: their tabs and devices (ADR 4 addendum). */
+  REALTIME_SOCKETS_PER_USER: z.coerce.number().int().positive().default(10),
   /**
    * Multiplies the per-IP budgets of the public reads (profile, search, home; ADR 20 addendum).
    * Only e2e runs raise it: every test's browser connects from one IP.

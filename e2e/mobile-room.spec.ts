@@ -58,6 +58,46 @@ test("tile controls are reachable by tap, and a second tap on the tile hides the
   }
 });
 
+test("a tile's fullscreen button works from a tap, and its controls stay reachable in fullscreen", async ({
+  page,
+  context,
+  browser,
+}) => {
+  await signIn(context, { username: "mob.full" });
+  const roomId = await createRoomOnPage(page, { name: uniqueRoomName("mobile fullscreen") });
+
+  const guestContext = await browser.newContext();
+  try {
+    await signIn(guestContext, { username: "mob.fullguest" });
+    await enterRoom(await newPage(guestContext), roomId);
+
+    const tile = page.getByRole("group", { name: "mob.fullguest", exact: true });
+    await tile.tap({ position: { x: 20, y: 60 } });
+    await tile.getByRole("button", { name: "Fullscreen", exact: true }).tap();
+    const exit = tile.getByRole("button", { name: "Exit fullscreen" });
+    await expect(exit).toHaveAttribute("aria-pressed", "true");
+
+    // The bar is still reachable, and so is the moderation menu: only the fullscreen element
+    // shows, so the menu opens inside it.
+    await expect(tile.getByRole("button", { name: "Pin" })).toBeVisible();
+    await tile.getByRole("button", { name: "Moderate mob.fullguest" }).tap();
+    const kick = page.getByRole("menuitem", { name: "kick from room" });
+    await expect(kick).toBeVisible();
+    expect(await kick.evaluate((el) => document.fullscreenElement?.contains(el))).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(kick).toBeHidden();
+
+    await exit.tap();
+    await expect(tile.getByRole("button", { name: "Fullscreen", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(await page.evaluate(() => document.fullscreenElement)).toBeNull();
+  } finally {
+    await guestContext.close();
+  }
+});
+
 test("the host copies the invite link from the control bar", async ({ page, context }) => {
   await signIn(context, { username: "mob.invite" });
   await fakeClipboard(context);

@@ -55,7 +55,11 @@
  *
  * Video is adaptive and per pair (ADR 2). `adjust` (run every `QUALITY_INTERVAL_MS`) reads each
  * screen and camera sender's stats and moves it along its quality ladder (./quality.ts), applied
- * with `setParameters` to that peer's sender alone. Each side also tells the other which video
+ * with `setParameters` to that peer's sender alone. The pairs share this page's uplink, though:
+ * an `UplinkBudget` bounds the sum of all the senders' target bitrates, a new sender starts at
+ * the highest rung the others leave room for, a probe up has to fit it, and when most pairs show
+ * strain at once the budget drops towards what was being sent and the heaviest senders step down
+ * until the targets fit (ADR 2 addendum). Each side also tells the other which video
  * codecs it can decode (in `hello` and every description), and orders its own senders' codecs
  * best first, AV1 > VP9 > H.264 > VP8, among those (./codecs.ts). A codec preference takes effect
  * in the next offer, which browsers version as they do any other.
@@ -68,14 +72,19 @@ import {
   CAMERA_DEFAULT_RUNG,
   CAMERA_LADDER,
   captureCap,
+  fitRung,
   freshLadderState,
+  INITIAL_UPLINK,
   type LadderState,
+  probeDue,
   type Rung,
   readSample,
   SCREEN_DEFAULT_RUNG,
   SCREEN_LADDER,
   type StatsSample,
   step,
+  strained,
+  UplinkBudget,
 } from "./quality";
 import type { MediaSlot, SignalPayload } from "./realtime";
 
@@ -133,6 +142,20 @@ export interface PeerQuality {
   cam?: SlotQuality;
 }
 
+/** What one pair's pass over its senders showed, for the uplink budget. */
+interface PairReading {
+  /** Whether a sender past its warm-up showed strain on the network; absent if none was past it. */
+  strained?: boolean;
+}
+
+/** A video sender being sent, with the pair and ladder state it belongs to. */
+interface VideoSender {
+  link: Link;
+  slot: VideoSlot;
+  state: Adaptation;
+  sender: RTCRtpSender;
+}
+
 /** How long a connection may take to connect (or reconnect) before it gets an ICE restart. */
 export const CONNECT_TIMEOUT_MS = 20_000;
 
@@ -147,6 +170,8 @@ export interface MeshOptions {
   log?: (message: string, error?: unknown) => void;
   /** This browser's video codecs. Defaults to what it reports. For tests. */
   codecs?: VideoCodecs;
+  /** The uplink budget to start from, bits per second. Defaults to `INITIAL_UPLINK`. For tests. */
+  uplink?: number;
   /** For tests. */
   RTCPeerConnection?: typeof RTCPeerConnection;
 }
@@ -299,6 +324,10 @@ export class Mesh {
   readonly #log: (message: string, error?: unknown) => void;
   readonly #RTCPeerConnection: typeof RTCPeerConnection;
   readonly #codecs: VideoCodecs | undefined;
+  /** What all the video senders' targets may add up to (their sum is `#committed`). */
+  readonly #budget: UplinkBudget;
+  /** What `setParameters` last gave each screen sender, for browsers that don't report it. */
+  readonly #degradation = new WeakMap<RTCRtpSender, RTCDegradationPreference>();
   readonly #links = new Map<string, Link>();
   readonly #listeners = new Set<(event: MeshEvent) => void>();
   readonly #local: Partial<Record<MediaSlot, MediaStreamTrack | null>> = {};
@@ -314,6 +343,7 @@ export class Mesh {
     this.#log = options.log ?? ((message, error) => console.warn(`[mesh] ${message}`, error));
     this.#RTCPeerConnection = options.RTCPeerConnection ?? RTCPeerConnection;
     this.#codecs = options.codecs ?? localVideoCodecs();
+    this.#budget = new UplinkBudget(options.uplink ?? INITIAL_UPLINK);
   }
 
   /**
@@ -493,7 +523,27 @@ export class Mesh {
    * returns, and the other peers carry on.
    */
   async adjust(): Promise<void> {
-    await Promise.all([...this.#links.values()].map((link) => this.#adjustLink(link)));
+    const links = [...this.#links.values()];
+    const readings = await Promise.all(links.map((link) => this.#adjustLink(link)));
+    // A pair skipped this pass (its last read hasn't returned) has no say; what it sends counts.
+    const judged = readings.filter((reading) => reading?.strained !== undefined);
+    if (judged.length > 0) {
+      let sent = 0;
+      for (const { link, state } of this.#videoSenders()) {
+        if (this.#live(link)) sent += state.last?.sendBitrate ?? 0;
+      }
+      this.#budget.observe({
+        pairs: judged.length,
+        strainedPairs: judged.filter((reading) => reading?.strained).length,
+        sent,
+      });
+    }
+    this.#fitBudget();
+  }
+
+  /** The uplink budget and what all the video senders' targets add up to. For tests. */
+  uplink(): { budget: number; targeted: number } {
+    return { budget: this.#budget.limit, targeted: this.#committed() };
   }
 
   /** Each peer's current rung and codec, per video sender that is sending (for the dev overlay). */
@@ -617,10 +667,17 @@ export class Mesh {
     transceiver.sender
       .replaceTrack(this.#outgoing(link, slot))
       .then(() => {
-        // A resumed or replaced track: the readings so far were of something else.
+        // A resumed or replaced track: the readings so far were of something else. It comes
+        // back at the rung it had, if the budget has room for it now, like a new pair.
         const state = isVideoSlot(slot) ? link.quality[slot] : undefined;
-        if (state)
-          Object.assign(state, freshLadderState(state.rung), { readings: 0, last: undefined });
+        if (state && isVideoSlot(slot)) {
+          const own = transceiver.sender.track ? rungOf(slot, state.rung).maxBitrate : 0;
+          const room = this.#budget.room(this.#committed() - own);
+          const rung = transceiver.sender.track
+            ? fitRung(LADDERS[slot].rungs, room, state.rung)
+            : state.rung;
+          Object.assign(state, freshLadderState(rung), { readings: 0, last: undefined });
+        }
         this.#tune(link, slot, transceiver.sender);
       })
       .catch((error: unknown) => this.#log(`sending ${slot} to ${link.userId} failed`, error));
@@ -653,10 +710,13 @@ export class Mesh {
       maxFramerate: rung.frameRate,
       ...(height && { scaleResolutionDownBy: Math.max(1, height / rung.height) }),
     };
-    const degradationPreference =
-      slot === "screen" ? degradationFor(track.contentHint) : parameters.degradationPreference;
+    // A camera keeps whatever it has. A browser that doesn't report its degradation preference
+    // (Firefox, probably Safari) is taken to have what was last set, or it would never match.
+    const degradationPreference = slot === "screen" ? degradationFor(track.contentHint) : undefined;
     const unchanged =
-      parameters.degradationPreference === degradationPreference &&
+      (degradationPreference === undefined ||
+        (parameters.degradationPreference ?? this.#degradation.get(sender)) ===
+          degradationPreference) &&
       Object.entries(wanted).every(([key, value]) => first[key as keyof typeof first] === value);
     if (unchanged) return;
     await sender.setParameters({
@@ -664,13 +724,16 @@ export class Mesh {
       encodings: [{ ...first, ...wanted }, ...others],
       ...(degradationPreference && { degradationPreference }),
     });
+    if (degradationPreference) this.#degradation.set(sender, degradationPreference);
   }
 
   /** `slot`'s ladder state for `link`: its default rung, or the highest its capture feeds. */
   #adaptation(link: Link, slot: VideoSlot, track: MediaStreamTrack): Adaptation {
     let state = link.quality[slot];
     if (!state) {
-      const rung = Math.min(LADDERS[slot].start, this.#cap(slot, track));
+      // The highest rung it may start at that the other senders leave room for.
+      const top = Math.min(LADDERS[slot].start, this.#cap(slot, track));
+      const rung = fitRung(LADDERS[slot].rungs, this.#budget.room(this.#committed()), top);
       state = { ...freshLadderState(rung), readings: 0 };
       link.quality[slot] = state;
     }
@@ -688,21 +751,94 @@ export class Mesh {
     return link.own.get(other)?.sender.track ? (link.quality[other]?.last?.sendBitrate ?? 0) : 0;
   }
 
+  /** Every video sender being sent (one with a track and a place on its ladder). */
+  *#videoSenders(): Generator<VideoSender> {
+    for (const link of this.#links.values()) {
+      for (const slot of VIDEO_SLOTS) {
+        const state = link.quality[slot];
+        const sender = link.own.get(slot)?.sender;
+        if (state && sender?.track) yield { link, slot, state, sender };
+      }
+    }
+  }
+
+  /** What every video sender being sent targets together (each one's rung `maxBitrate`). */
+  #committed(): number {
+    let total = 0;
+    for (const { slot, state } of this.#videoSenders())
+      total += rungOf(slot, state.rung).maxBitrate;
+    return total;
+  }
+
+  /** The pair's connection is up, so its senders are read (and can probe). */
+  #live(link: Link): boolean {
+    return link.state === "connected" || link.state === "relayed";
+  }
+
+  /**
+   * Whether `state` may grow the budget now: no other sender of `slot` that can probe (a live
+   * pair, clean for a window, below its capture's cap) sits on a lower rung. A viewer on a
+   * mediocre link, or a pair that isn't connected, never probes and so never holds the turn.
+   */
+  #hasTurn(slot: VideoSlot, state: Adaptation): boolean {
+    for (const other of this.#videoSenders()) {
+      if (other.slot !== slot || other.state === state || !this.#live(other.link)) continue;
+      const canProbe = other.state.rung < this.#cap(slot, other.sender.track as MediaStreamTrack);
+      if (
+        canProbe &&
+        probeDue(other.state.window, other.state.backoff) &&
+        other.state.rung < state.rung
+      ) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Whether `state` may step up to `rung` (it proposes a probe): within the room the budget has
+   * left, or else on its turn after a clean spell, which grows the budget by just that probe.
+   */
+  #admit(slot: VideoSlot, state: Adaptation, rung: number): boolean {
+    const extra = rungOf(slot, rung).maxBitrate - rungOf(slot, state.rung).maxBitrate;
+    return this.#budget.admit(this.#committed(), extra, this.#hasTurn(slot, state));
+  }
+
+  /**
+   * Step the heaviest senders down, a rung at a time, until their targets fit the budget. A
+   * pair whose pass is still running (a stats read that hasn't returned) is left alone.
+   */
+  #fitBudget(): void {
+    while (this.#committed() > this.#budget.limit) {
+      let heaviest: VideoSender | undefined;
+      for (const candidate of this.#videoSenders()) {
+        if (candidate.state.rung === 0 || candidate.link.adjusting) continue;
+        const bitrate = (c: VideoSender) => rungOf(c.slot, c.state.rung).maxBitrate;
+        if (!heaviest || bitrate(candidate) > bitrate(heaviest)) heaviest = candidate;
+      }
+      if (!heaviest) return;
+      const { link, slot, state, sender } = heaviest;
+      Object.assign(state, freshLadderState(state.rung - 1), { backoff: state.backoff });
+      this.#tune(link, slot, sender);
+    }
+  }
+
   #watchQuality(): void {
     this.#adjustTimer ??= setInterval(() => void this.adjust(), QUALITY_INTERVAL_MS);
   }
 
-  async #adjustLink(link: Link): Promise<void> {
-    if (link.adjusting || (link.state !== "connected" && link.state !== "relayed")) return;
+  async #adjustLink(link: Link): Promise<PairReading | undefined> {
+    if (link.adjusting || !this.#live(link)) return undefined;
     link.adjusting = true;
     try {
-      await this.#adjustSenders(link);
+      return await this.#adjustSenders(link);
     } finally {
       link.adjusting = false;
     }
   }
 
-  async #adjustSenders(link: Link): Promise<void> {
+  async #adjustSenders(link: Link): Promise<PairReading> {
+    const reading: PairReading = {};
     for (const slot of VIDEO_SLOTS) {
       const sender = link.own.get(slot)?.sender;
       const track = sender?.track;
@@ -719,16 +855,18 @@ export class Mesh {
       if (sample.codec) state.codec = sample.codec;
       state.last = sample;
       if (state.readings++ >= WARMUP_READINGS) {
-        Object.assign(
-          state,
-          step(LADDERS[slot].rungs, state, sample, {
-            max: this.#cap(slot, track),
-            reserved: this.#reservedFor(link, slot),
-          }),
-        );
+        reading.strained = (reading.strained ?? false) || strained(sample);
+        const options = { max: this.#cap(slot, track), reserved: this.#reservedFor(link, slot) };
+        let next = step(LADDERS[slot].rungs, state, sample, options);
+        // A probe the budget refuses is no probe: the window carries on as it was.
+        if (next.rung > state.rung && !this.#admit(slot, state, next.rung)) {
+          next = step(LADDERS[slot].rungs, state, sample, { ...options, max: state.rung });
+        }
+        Object.assign(state, next);
       }
       this.#tune(link, slot, sender);
     }
+    return reading;
   }
 
   #shut(link: Link): void {
