@@ -1,3 +1,4 @@
+import { connect as connectTcp } from "node:net";
 import { asc, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { presenceIntervals, rooms } from "../db/schema/index.ts";
@@ -61,6 +62,26 @@ describe("upgrade", () => {
 
   it("refuses upgrades from another origin", async () => {
     expect(await h.upgradeStatus(ana, { origin: "https://evil.example" })).toBe(403);
+  });
+
+  it("refuses an upgrade whose target isn't a valid URL, and keeps serving", async () => {
+    const { port } = new URL(h.url);
+    const reply = await new Promise<string>((resolve, reject) => {
+      const socket = connectTcp(Number(port), "127.0.0.1");
+      let data = "";
+      socket.on("data", (chunk) => {
+        data += chunk;
+      });
+      socket.on("close", () => resolve(data));
+      socket.on("error", reject);
+      socket.write(
+        "GET // HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n",
+      );
+    });
+    expect(reply).toMatch(/^HTTP\/1\.1 400 /);
+    const a = await h.connect(ana);
+    a.send({ type: "hello", v: PROTOCOL_VERSION });
+    expect(await a.waitFor("welcome")).toMatchObject({ type: "welcome" });
   });
 });
 

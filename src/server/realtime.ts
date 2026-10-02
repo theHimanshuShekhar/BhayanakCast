@@ -122,7 +122,15 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
   }
 
   const onUpgrade = (request: IncomingMessage, socket: Duplex, head: Buffer) => {
-    const { pathname } = new URL(request.url ?? "/", "http://localhost");
+    // Runs synchronously in the server's `upgrade` listener: anything thrown here (an
+    // unparseable request target, say) would be uncaught and take the whole process down.
+    let pathname: string;
+    try {
+      ({ pathname } = new URL(request.url ?? "/", "http://localhost"));
+    } catch {
+      socket.on("error", () => socket.destroy());
+      return refuse(socket, 400, "Bad Request");
+    }
     if (pathname !== REALTIME_PATH) return;
     void upgrade(request, socket, head);
   };
