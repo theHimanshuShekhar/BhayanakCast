@@ -105,6 +105,14 @@ export const CONNECTION_MESSAGE_BUDGET = {
 export const MAX_PENDING_MESSAGES = 500;
 /** The close code the server uses for a socket that flooded it (`CONNECTION_MESSAGE_BUDGET`, `MAX_PENDING_MESSAGES`). */
 export const FLOOD_CLOSE_CODE = 4002;
+/**
+ * How many bytes the server lets pile up unsent to one socket (`WebSocket.bufferedAmount`)
+ * before it drops the socket (ADR 4 addendum): a client that stops reading mustn't make the
+ * server hold what it relays to it in memory without limit. A message is at most about 64 KB
+ * (`MAX_CLIENT_MESSAGE_BYTES`, relayed) and a client that reads drains its buffer at once, so
+ * 2 MiB is well above any honest backlog, even behind a briefly stalled link.
+ */
+export const MAX_BUFFERED_BYTES = 2 * 1024 * 1024;
 /** How many recent feed entries a live room keeps in memory for joiners. */
 export const FEED_HISTORY_SIZE = 50;
 /** A knock on a private room nobody decides within this long expires (ADR 16; server clock). */

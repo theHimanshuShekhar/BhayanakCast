@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
+import { Route as ApiHealthRouteImport } from './routes/api/health'
 import { Route as JoinInviteTokenRouteImport } from './routes/join/$inviteToken'
 import { Route as PastRoomIdRouteImport } from './routes/past/$roomId'
 import { Route as ProfileUserIdRouteImport } from './routes/profile/$userId'
@@ -27,6 +28,11 @@ const IndexRoute = IndexRouteImport.update({
 const AdminRoute = AdminRouteImport.update({
   id: '/admin',
   path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiHealthRoute = ApiHealthRouteImport.update({
+  id: '/api/health',
+  path: '/api/health',
   getParentRoute: () => rootRouteImport,
 } as any)
 const JoinInviteTokenRoute = JoinInviteTokenRouteImport.update({
@@ -70,6 +76,7 @@ const ApiThumbnailsRoomIdUserIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/api/health': typeof ApiHealthRoute
   '/join/$inviteToken': typeof JoinInviteTokenRoute
   '/past/$roomId': typeof PastRoomIdRoute
   '/profile/$userId': typeof ProfileUserIdRoute
@@ -81,6 +88,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/api/health': typeof ApiHealthRoute
   '/join/$inviteToken': typeof JoinInviteTokenRoute
   '/past/$roomId': typeof PastRoomIdRoute
   '/profile/$userId': typeof ProfileUserIdRoute
@@ -93,6 +101,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/api/health': typeof ApiHealthRoute
   '/join/$inviteToken': typeof JoinInviteTokenRoute
   '/past/$roomId': typeof PastRoomIdRoute
   '/profile/$userId': typeof ProfileUserIdRoute
@@ -106,6 +115,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/admin'
+    | '/api/health'
     | '/join/$inviteToken'
     | '/past/$roomId'
     | '/profile/$userId'
@@ -117,6 +127,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/admin'
+    | '/api/health'
     | '/join/$inviteToken'
     | '/past/$roomId'
     | '/profile/$userId'
@@ -128,6 +139,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/admin'
+    | '/api/health'
     | '/join/$inviteToken'
     | '/past/$roomId'
     | '/profile/$userId'
@@ -140,6 +152,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
+  ApiHealthRoute: typeof ApiHealthRoute
   JoinInviteTokenRoute: typeof JoinInviteTokenRoute
   PastRoomIdRoute: typeof PastRoomIdRoute
   ProfileUserIdRoute: typeof ProfileUserIdRoute
@@ -163,6 +176,13 @@ declare module '@tanstack/react-router' {
       path: '/admin'
       fullPath: '/admin'
       preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/health': {
+      id: '/api/health'
+      path: '/api/health'
+      fullPath: '/api/health'
+      preLoaderRoute: typeof ApiHealthRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/join/$inviteToken': {
@@ -220,6 +240,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
+  ApiHealthRoute: ApiHealthRoute,
   JoinInviteTokenRoute: JoinInviteTokenRoute,
   PastRoomIdRoute: PastRoomIdRoute,
   ProfileUserIdRoute: ProfileUserIdRoute,

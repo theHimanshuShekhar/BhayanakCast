@@ -72,6 +72,8 @@ export default defineConfig({
       TRUSTED_PROXY_IPS: "127.0.0.1,::1",
       // Every test's visitor pages connect from 127.0.0.1 at once.
       REALTIME_ANONYMOUS_SOCKETS_PER_IP: "1000",
+      // Nor can they share one IP's budget of profile, search and home reads (ADR 20 addendum).
+      PUBLIC_READ_LIMIT_SCALE: "1000",
       // Empty rooms end after 60s, not 5 minutes, so a test can watch one end
       // (e2e/lifecycle.spec.ts). A room is empty from its creation too (its creator is still in
       // the pre-join lobby), and tests leave and revisit rooms: 60s leaves room to spare on a

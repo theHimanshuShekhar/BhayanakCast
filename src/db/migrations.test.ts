@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
+import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -45,7 +46,8 @@ describe("readJournal", () => {
 
   // Booted in a hook: it gets `hookTimeout`, not the test's (shorter) budget, under load.
   beforeEach(async () => {
-    client = new PGlite();
+    // Migration 0007 creates pg_trgm, which PGlite only has when it is loaded (see test-db.ts).
+    client = new PGlite({ extensions: { pg_trgm } });
     await migrate(drizzle({ client }), { migrationsFolder });
   });
 

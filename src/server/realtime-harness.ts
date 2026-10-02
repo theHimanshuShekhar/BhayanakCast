@@ -106,6 +106,10 @@ export interface TestClient {
   /** Unconsumed `feed.entry` messages, in order. */
   pendingFeed(): ServerMessage[];
   readonly isClosed: boolean;
+  /** Stop reading from the socket, like a frozen tab: the server's sends back up. */
+  stopReading(): void;
+  /** Read again after `stopReading`. */
+  resumeReading(): void;
   /** Wait until the socket is closed (by either side); resolves with the close code. */
   closed(): Promise<number>;
   /** Close the socket and wait until it's closed. */
@@ -160,6 +164,8 @@ export interface RealtimeHarnessOptions {
   socketsPerUser?: number;
   /** Passed to `attachRealtime`; the default trusts nobody's `cf-connecting-ip`. */
   trustedProxies?: readonly string[];
+  /** Passed to `attachRealtime`; the default is `MAX_BUFFERED_BYTES`. */
+  maxBufferedBytes?: number;
   /** Awaited before each upgrade is authenticated, to hold one in flight. */
   beforeAuthenticate?: (request: IncomingMessage) => Promise<void>;
   /** Wraps the hub's store, to count or hold its calls. */
@@ -192,6 +198,7 @@ export async function startRealtimeHarness(
       anonymousSocketsPerIp: options.anonymousSocketsPerIp ?? 100,
       socketsPerUser: options.socketsPerUser ?? 100,
       trustedProxies: options.trustedProxies ?? [],
+      maxBufferedBytes: options.maxBufferedBytes,
       // Like production: this server has no other upgrade listeners.
       closeUnknownUpgrades: true,
     });
@@ -467,6 +474,8 @@ function wrap(ws: WebSocket, user: TestUser | null, heartbeat: boolean): Harness
     get isClosed() {
       return closed;
     },
+    stopReading: () => ws.pause(),
+    resumeReading: () => ws.resume(),
     async closed() {
       await closedPromise;
       return closeCode;

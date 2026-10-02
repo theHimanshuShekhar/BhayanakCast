@@ -1,7 +1,10 @@
 name: CI
 
+# Pushes to main, and every pull request: a push to a PR branch is covered by the PR run, so
+# branches aren't built twice.
 on:
   push:
+    branches: [main]
   pull_request:
 
 # A newer run on the same branch/PR supersedes the older one.
@@ -36,6 +39,20 @@ jobs:
 
       - name: Typecheck
         run: pnpm typecheck
+
+      # `check` catches a broken migration history (colliding or out-of-order snapshots);
+      # `generate` finds a schema change with no migration. Neither needs a database. `generate`
+      # exits 0 even when it fails (a column rename needs a prompt, and CI has no TTY), so the
+      # step passes only on its "No schema changes" line, not on its exit code.
+      - name: Schema and migration drift
+        run: |
+          pnpm exec drizzle-kit check
+          out=$(pnpm exec drizzle-kit generate 2>&1) || true
+          echo "$out"
+          if ! grep -q "No schema changes, nothing to migrate" <<<"$out"; then
+            echo "::error::src/db/schema differs from drizzle/. Run pnpm db:generate and commit the migration."
+            exit 1
+          fi
 
       - name: Unit tests
         run: pnpm test

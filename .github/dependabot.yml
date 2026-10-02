@@ -1,7 +1,7 @@
 version: 2
 
 # Container image pins (issue #83): bumps the digests in the Dockerfiles and docker-compose.yml.
-# Ticket #84 adds `npm` and `github-actions` entries to this list; add them below the images.
+# The `npm` and `github-actions` entries (ticket #84) follow the images.
 # Pinned images and how to bump them by hand: docs/deploy.md ("Pinned images").
 updates:
   # Dockerfile: the app image's node base.
@@ -33,3 +33,22 @@ updates:
     ignore:
       - dependency-name: postgres
         update-types: ["version-update:semver-major"]
+
+  # package.json and pnpm-lock.yaml. Minor and patch bumps arrive as one PR a week; a major gets its
+  # own, so it can be read and tested alone. Node itself follows .nvmrc and `engines`.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+
+  # .github/workflows: the actions' versions.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
