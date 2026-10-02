@@ -11,12 +11,18 @@
  * the stored totals (`userStatsNow` and friends), computing them with the same
  * SQL as the roll-up. The roll-up stays the only write.
  *
+ * The per-user aggregates and co-time are stored over every room and again over public rooms
+ * only (`public_*`, ADR 16 addendum). `userStatsNow` and `userCotimeNow` read all rooms, for
+ * admins and anonymous platform totals; `publicUserStatsNow` and `publicUserCotimeNow` read
+ * public rooms only, for everyone else (`userStatsVisibleTo` picks by caller).
+ *
  * All functions take a driver-agnostic `Db`, so they run against postgres-js
  * in production and PGlite in tests.
  */
 import { and, eq, isNotNull, isNull, lt, type SQL, sql } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import { dailyPlatformStats, rooms } from "../db/schema/index.ts";
+import type { Caller } from "./caller.ts";
 import { inRoom, mergedIntervals, roomTimes, seconds } from "./intervals.ts";
 
 export const RETENTION_DAYS = 30;
@@ -50,6 +56,25 @@ export async function recordNewUser(db: Executor, at: Date = new Date()): Promis
 
 /** The rooms not yet folded into the stored stats: live ones, and ended ones awaiting roll-up. */
 const unrolledRooms = sql`r.stats_rolled_up_at is null`;
+
+/** Which rooms a read counts: every room, or public ones only (ADR 16 addendum). */
+type StatsView = "all" | "public";
+
+/** The rooms of `view` among those of `scope`. */
+const inView = (view: StatsView, scope: SQL): SQL =>
+  view === "public" ? sql`(${scope}) and not r.is_private` : scope;
+
+type StoredColumn =
+  | "seconds_streamed"
+  | "seconds_watched"
+  | "rooms_hosted"
+  | "rooms_joined"
+  | "peak_viewers"
+  | "seconds_together";
+
+/** The stored column of `column` for `view`: `public_<column>` over public rooms only. */
+const stored = (view: StatsView, column: StoredColumn): SQL =>
+  sql.raw(view === "public" ? `public_${column}` : column);
 
 /**
  * CTE fragment: what the rooms of `scope` add to each user's stats. Defines
@@ -140,11 +165,13 @@ function pairContributions(scope: SQL): SQL {
  * Every user's stats as read: `user_stats` plus the contribution of the rooms not yet
  * rolled up, worked out by the same SQL as the roll-up, so a room's numbers don't
  * change when it rolls up. `from` is a subquery source and the rest are its columns;
- * a user with no stats has no row (so null when left-joined).
+ * a user with no stats has no row (so null when left-joined). `view` picks every room
+ * or public rooms only.
  */
-export const userStatsNow = {
-  from: sql`(
-    with ${userContributions(unrolledRooms)}
+function userStatsRead(view: StatsView) {
+  return {
+    from: sql`(
+    with ${userContributions(inView(view, unrolledRooms))}
     select user_id,
            sum(seconds_streamed)::bigint as seconds_streamed,
            sum(seconds_watched)::bigint as seconds_watched,
@@ -152,37 +179,65 @@ export const userStatsNow = {
            sum(rooms_joined)::int as rooms_joined,
            max(peak_viewers)::int as peak_viewers
     from (
-      select user_id, seconds_streamed, seconds_watched, rooms_hosted, rooms_joined, peak_viewers
+      select user_id, ${stored(view, "seconds_streamed")} as seconds_streamed,
+             ${stored(view, "seconds_watched")} as seconds_watched,
+             ${stored(view, "rooms_hosted")} as rooms_hosted,
+             ${stored(view, "rooms_joined")} as rooms_joined,
+             ${stored(view, "peak_viewers")} as peak_viewers
       from user_stats
       union all
       select user_id, streamed, watched, hosted, joined, peak from contribution
     ) all_stats
     group by user_id
   ) as user_stats_now`,
-  userId: sql<string>`user_stats_now.user_id`,
-  secondsStreamed: sql<number | null>`user_stats_now.seconds_streamed`.mapWith(Number),
-  secondsWatched: sql<number | null>`user_stats_now.seconds_watched`.mapWith(Number),
-  roomsHosted: sql<number | null>`user_stats_now.rooms_hosted`.mapWith(Number),
-  roomsJoined: sql<number | null>`user_stats_now.rooms_joined`.mapWith(Number),
-  peakViewers: sql<number | null>`user_stats_now.peak_viewers`.mapWith(Number),
-};
+    userId: sql<string>`user_stats_now.user_id`,
+    secondsStreamed: sql<number | null>`user_stats_now.seconds_streamed`.mapWith(Number),
+    secondsWatched: sql<number | null>`user_stats_now.seconds_watched`.mapWith(Number),
+    roomsHosted: sql<number | null>`user_stats_now.rooms_hosted`.mapWith(Number),
+    roomsJoined: sql<number | null>`user_stats_now.rooms_joined`.mapWith(Number),
+    peakViewers: sql<number | null>`user_stats_now.peak_viewers`.mapWith(Number),
+  };
+}
 
-/** Pairwise co-time as read: `user_cotime` plus the rooms not yet rolled up. See `userStatsNow`. */
-export const userCotimeNow = {
-  from: sql`(
-    with ${pairContributions(unrolledRooms)}
+/** Pairwise co-time as read: `user_cotime` plus the rooms not yet rolled up. See `userStatsRead`. */
+function userCotimeRead(view: StatsView) {
+  return {
+    from: sql`(
+    with ${pairContributions(inView(view, unrolledRooms))}
     select user_a, user_b, sum(seconds_together)::bigint as seconds_together
     from (
-      select user_a, user_b, seconds_together from user_cotime
+      select user_a, user_b, ${stored(view, "seconds_together")} as seconds_together
+      from user_cotime
       union all
       select user_a, user_b, secs from pair_contribution
     ) all_pairs
     group by user_a, user_b
   ) as user_cotime_now`,
-  userA: sql<string>`user_cotime_now.user_a`,
-  userB: sql<string>`user_cotime_now.user_b`,
-  secondsTogether: sql<number>`user_cotime_now.seconds_together`.mapWith(Number),
-};
+    userA: sql<string>`user_cotime_now.user_a`,
+    userB: sql<string>`user_cotime_now.user_b`,
+    secondsTogether: sql<number>`user_cotime_now.seconds_together`.mapWith(Number),
+  };
+}
+
+/** Stats and co-time over every room, private ones included: for admins and platform totals. */
+export const userStatsNow = userStatsRead("all");
+export const userCotimeNow = userCotimeRead("all");
+
+/** Stats and co-time over public rooms only: what a profile or search shows non-admins. */
+export const publicUserStatsNow = userStatsRead("public");
+export const publicUserCotimeNow = userCotimeRead("public");
+
+/**
+ * The stats `caller` may see: every room for an admin, public rooms only for anyone else (ADR 16
+ * addendum). The stored aggregates don't record their rooms, so this can't follow the room
+ * visibility of the viewer (`roomVisibleTo`), whose private rooms differ by member.
+ */
+export const userStatsVisibleTo = (caller: Caller) =>
+  caller.role === "admin" ? userStatsNow : publicUserStatsNow;
+
+/** Co-time `caller` may see, as `userStatsVisibleTo`. */
+export const userCotimeVisibleTo = (caller: Caller) =>
+  caller.role === "admin" ? userCotimeNow : publicUserCotimeNow;
 
 /**
  * The daily platform counters as read: `daily_platform_stats` plus each room not yet
@@ -214,7 +269,8 @@ export const dailyStatsNow = {
  * `pairContributions` hold the maths). Idempotent: the room is claimed by setting
  * `stats_rolled_up_at` in the same transaction, so a second call (or a concurrent
  * one) is a no-op. Returns whether this call did the roll-up. Rooms that haven't
- * ended are left alone.
+ * ended are left alone. A private room is folded into the all-rooms columns only (a room's
+ * privacy is fixed when it's created).
  */
 export async function rollupEndedRoom(db: Db, roomId: string, now = new Date()): Promise<boolean> {
   return db.transaction(async (tx) => {
@@ -222,28 +278,64 @@ export async function rollupEndedRoom(db: Db, roomId: string, now = new Date()):
       .update(rooms)
       .set({ statsRolledUpAt: now })
       .where(and(eq(rooms.id, roomId), isNotNull(rooms.endedAt), isNull(rooms.statsRolledUpAt)))
-      .returning({ createdAt: rooms.createdAt, endedAt: rooms.endedAt });
+      .returning({
+        createdAt: rooms.createdAt,
+        endedAt: rooms.endedAt,
+        isPrivate: rooms.isPrivate,
+      });
     if (!room?.endedAt) return false;
 
+    // A private room writes the all-rooms columns only; a public one writes both sets.
+    const isPublic = !room.isPrivate;
+    const none = sql``;
     await tx.execute(sql`
       with ${userContributions(inRoom(roomId))}
       insert into user_stats
-        (user_id, seconds_streamed, seconds_watched, rooms_hosted, rooms_joined, peak_viewers)
-      select user_id, streamed, watched, hosted, joined, peak from contribution
+        (user_id, seconds_streamed, seconds_watched, rooms_hosted, rooms_joined, peak_viewers
+         ${
+           isPublic
+             ? sql`, public_seconds_streamed, public_seconds_watched, public_rooms_hosted,
+                public_rooms_joined, public_peak_viewers`
+             : none
+         })
+      select user_id, streamed, watched, hosted, joined, peak
+             ${isPublic ? sql`, streamed, watched, hosted, joined, peak` : none}
+      from contribution
+      order by user_id
       on conflict (user_id) do update set
         seconds_streamed = user_stats.seconds_streamed + excluded.seconds_streamed,
         seconds_watched = user_stats.seconds_watched + excluded.seconds_watched,
         rooms_hosted = user_stats.rooms_hosted + excluded.rooms_hosted,
         rooms_joined = user_stats.rooms_joined + excluded.rooms_joined,
         peak_viewers = greatest(user_stats.peak_viewers, excluded.peak_viewers)
+        ${
+          isPublic
+            ? sql`,
+        public_seconds_streamed =
+          user_stats.public_seconds_streamed + excluded.public_seconds_streamed,
+        public_seconds_watched = user_stats.public_seconds_watched + excluded.public_seconds_watched,
+        public_rooms_hosted = user_stats.public_rooms_hosted + excluded.public_rooms_hosted,
+        public_rooms_joined = user_stats.public_rooms_joined + excluded.public_rooms_joined,
+        public_peak_viewers = greatest(user_stats.public_peak_viewers, excluded.public_peak_viewers)`
+            : none
+        }
     `);
 
     await tx.execute(sql`
       with ${pairContributions(inRoom(roomId))}
-      insert into user_cotime (user_a, user_b, seconds_together)
-      select user_a, user_b, secs from pair_contribution
+      insert into user_cotime
+        (user_a, user_b, seconds_together ${isPublic ? sql`, public_seconds_together` : none})
+      select user_a, user_b, secs ${isPublic ? sql`, secs` : none}
+      from pair_contribution
+      order by user_a, user_b
       on conflict (user_a, user_b) do update set
         seconds_together = user_cotime.seconds_together + excluded.seconds_together
+        ${
+          isPublic
+            ? sql`, public_seconds_together =
+          user_cotime.public_seconds_together + excluded.public_seconds_together`
+            : none
+        }
     `);
 
     await bumpDaily(tx, room.createdAt, "roomsCreated");
@@ -260,7 +352,9 @@ export interface PurgeResult {
 /**
  * Daily retention job: roll up any ended room that was missed, then delete
  * rooms that ended more than RETENTION_DAYS ago. Stats tables have no FK to
- * rooms, so they survive the delete.
+ * rooms, so they survive the delete. A room whose roll-up fails is logged and
+ * skipped, so one bad room can't stop retention; it stays un-rolled-up (and is
+ * never deleted) and is retried on the next run.
  */
 export async function purgeExpiredRooms(db: Db, now: Date = new Date()): Promise<PurgeResult> {
   const pending = await db
@@ -270,7 +364,11 @@ export async function purgeExpiredRooms(db: Db, now: Date = new Date()): Promise
 
   let rolledUp = 0;
   for (const { id } of pending) {
-    if (await rollupEndedRoom(db, id, now)) rolledUp++;
+    try {
+      if (await rollupEndedRoom(db, id, now)) rolledUp++;
+    } catch (error) {
+      console.error(`[maintenance] roll-up of room ${id} failed, skipping`, error);
+    }
   }
 
   const cutoff = new Date(now.getTime() - RETENTION_DAYS * DAY_MS);

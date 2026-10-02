@@ -16,7 +16,11 @@
  * (./room-store.ts), so tests use a fake clock and PGlite.
  *
  * Every operation (message, disconnect, timer) runs on one serial queue, so state changes and
- * their DB writes never interleave; `idle()` resolves once the queue is drained.
+ * their DB writes never interleave; `idle()` resolves once the queue is drained. One socket
+ * mustn't be able to fill it: `handle` refuses messages over a per-connection budget
+ * (`CONNECTION_MESSAGE_BUDGET`, and `CONNECTION_RATE_LIMITS` for the ones that do database work)
+ * before they are queued, and closes a socket that floods it or has `MAX_PENDING_MESSAGES`
+ * waiting (ADR 4 addendum).
  *
  * Adding a client message: add it to the protocol (src/lib/realtime.ts) and a handler to
  * `#handlers` below (the type checker insists). Refusals go through `#refuse(conn, code, …)`.
@@ -33,18 +37,23 @@ import {
   type ClientMessage,
   type ClientMessageOf,
   type ClientMessageType,
+  CONNECTION_MESSAGE_BUDGET,
+  CONNECTION_RATE_LIMITS,
   type ErrorCode,
   FEED_HISTORY_SIZE,
   type FeedEntry,
+  FLOOD_CLOSE_CODE,
   IDLE_CLOSE_CODE,
   IDLE_TIMEOUT_MS,
   KNOCK_EXPIRY_MS,
   type KnockStatus,
   type LobbyRoomChange,
+  MAX_PENDING_MESSAGES,
   MEDIA_OFF,
   type MediaState,
   PROTOCOL_VERSION,
   parseClientMessage,
+  type RateLimit,
   REACTION_RATE_LIMIT,
   type RoomEvent,
   type RoomParticipant,
@@ -55,7 +64,7 @@ import {
 import { createRoomInput, ROOM_NAME_MAX } from "../lib/rooms.ts";
 import type { Caller, SignedInCaller } from "./caller.ts";
 import type { Clock, Timer } from "./clock.ts";
-import { withinRateLimit } from "./rate-limit.ts";
+import { withinRateLimit, withinWindow } from "./rate-limit.ts";
 import type { RoomAnnouncement } from "./room-announcements.ts";
 import type { PresenceSeen, RoomStore, StoredRoom } from "./room-store.ts";
 
@@ -122,6 +131,16 @@ class HubConnection implements Connection {
   roomId: string | null = null;
   /** Closes the socket if it stays silent for `IDLE_TIMEOUT_MS` (heartbeats, ADR 9). */
   idle: Timer | null = null;
+  /** Its messages on the queue now, run or not yet. */
+  pending = 0;
+  /** Closed for flooding the queue: whatever of its work is still queued is skipped. */
+  flooded = false;
+  /** When (epoch ms) its recent frames arrived, for `CONNECTION_MESSAGE_BUDGET`. */
+  readonly budget: number[] = [];
+  /** When (epoch ms) its recent frames over that budget arrived. */
+  readonly overBudget: number[] = [];
+  /** Per message type, when (epoch ms) its recent accepted messages arrived (`LIMITS_BY_TYPE`). */
+  readonly recentByType = new Map<string, number[]>();
 
   constructor(id: number, caller: Caller, transport: Transport) {
     this.id = id;
@@ -230,6 +249,9 @@ const ANONYMOUS_MESSAGES: ReadonlySet<ClientMessageType> = new Set<ClientMessage
   "ping",
 ]);
 
+/** `CONNECTION_RATE_LIMITS`, looked up by any message type. */
+const LIMITS_BY_TYPE: Partial<Record<ClientMessageType, RateLimit>> = CONNECTION_RATE_LIMITS;
+
 type Handler<T extends ClientMessageType> = (
   conn: HubConnection,
   message: ClientMessageOf<T>,
@@ -266,6 +288,7 @@ export class RoomHub {
    */
   readonly #endedWhileAway = new Map<string, Set<string>>();
   #queue: Promise<void> = Promise.resolve();
+  #queued = 0;
 
   constructor(deps: RoomHubDeps) {
     this.#clock = deps.clock;
@@ -327,30 +350,83 @@ export class RoomHub {
 
   /**
    * Handle one frame from `connection`: a JSON string (or decoded value). Invalid or refused
-   * messages are answered with `error`; nothing a client sends makes this reject.
+   * messages are answered with `error`; nothing a client sends makes this reject. A socket
+   * past its limits never reaches the queue: over its type's `CONNECTION_RATE_LIMITS` a frame
+   * is refused `rate_limited` here, over `CONNECTION_MESSAGE_BUDGET` it is dropped (see
+   * `#overBudget`), and a socket with `MAX_PENDING_MESSAGES` already waiting is closed
+   * (`FLOOD_CLOSE_CODE`).
    */
   handle(connection: Connection, data: unknown): Promise<void> {
     const conn = this.#own(connection);
+    if (conn.flooded) return Promise.resolve();
     // Any frame counts as a sign of life.
     if (!conn.closed) this.#armIdle(conn);
+    if (conn.pending >= MAX_PENDING_MESSAGES)
+      return this.#closeFlooder(conn, "too many pending messages");
+    const at = this.#clock.now();
+    const budget = CONNECTION_MESSAGE_BUDGET;
+    if (!withinWindow(conn.budget, budget.messages, budget.windowMs, at)) {
+      return this.#overBudget(conn, at);
+    }
+    const parsed = parseClientMessage(data);
+    const limit = parsed.ok ? LIMITS_BY_TYPE[parsed.message.type] : undefined;
+    if (
+      parsed.ok &&
+      limit &&
+      !withinRateLimit(conn.recentByType, parsed.message.type, limit.messages, limit.windowMs, at)
+    ) {
+      this.#refuse(conn, "rate_limited", "Too many requests; wait a moment", parsed.message.type);
+      return Promise.resolve();
+    }
+    conn.pending++;
     return this.#enqueue(async () => {
-      if (conn.closed) return;
-      const parsed = parseClientMessage(data);
-      if (!parsed.ok) return this.#refuse(conn, "bad_request", parsed.error, parsed.type);
-      const message = parsed.message;
-      if (!conn.caller.user && !ANONYMOUS_MESSAGES.has(message.type)) {
-        return this.#refuse(conn, "forbidden", "Sign in first", message.type);
-      }
-      if (message.type !== "hello" && !conn.greeted) {
-        return this.#refuse(conn, "bad_request", "Send hello first", message.type);
-      }
       try {
-        await this.#dispatch(conn, message);
-      } catch (error) {
-        this.#log(`${message.type} failed`, error);
-        this.#refuse(conn, "internal", "Something went wrong, try again", message.type);
+        if (conn.closed || conn.flooded) return;
+        if (!parsed.ok) return this.#refuse(conn, "bad_request", parsed.error, parsed.type);
+        const message = parsed.message;
+        if (!conn.caller.user && !ANONYMOUS_MESSAGES.has(message.type)) {
+          return this.#refuse(conn, "forbidden", "Sign in first", message.type);
+        }
+        if (message.type !== "hello" && !conn.greeted) {
+          return this.#refuse(conn, "bad_request", "Send hello first", message.type);
+        }
+        try {
+          await this.#dispatch(conn, message);
+        } catch (error) {
+          this.#log(`${message.type} failed`, error);
+          this.#refuse(conn, "internal", "Something went wrong, try again", message.type);
+        }
+      } finally {
+        conn.pending--;
       }
     });
+  }
+
+  /**
+   * A frame over `CONNECTION_MESSAGE_BUDGET`: dropped, and the socket told once per window, so
+   * a client that doesn't read can't make the server buffer a reply per frame. Dropped frames
+   * past a budget's worth in a window close the socket.
+   */
+  #overBudget(conn: HubConnection, at: Date): Promise<void> {
+    const { messages, windowMs } = CONNECTION_MESSAGE_BUDGET;
+    const first = !conn.overBudget.some((t) => t > at.getTime() - windowMs);
+    if (!withinWindow(conn.overBudget, messages, windowMs, at)) {
+      return this.#closeFlooder(conn, "too many messages");
+    }
+    if (first) this.#refuse(conn, "rate_limited", "Too many messages; wait a moment");
+    return Promise.resolve();
+  }
+
+  /** `conn` is flooding: tell it why, close it and skip what's queued for it. */
+  #closeFlooder(conn: HubConnection, reason: string): Promise<void> {
+    conn.flooded = true;
+    this.#refuse(conn, "rate_limited", "Too many messages; closing the connection");
+    try {
+      conn.transport.close(FLOOD_CLOSE_CODE, reason);
+    } catch (error) {
+      this.#log("closing a flooding socket failed", error);
+    }
+    return this.#enqueue(() => this.#drop(conn));
   }
 
   /**
@@ -465,6 +541,11 @@ export class RoomHub {
       ended = await this.#endRoom(room, at);
     });
     return ended;
+  }
+
+  /** Operations waiting on the queue or running (messages, disconnects, timers). */
+  get queued(): number {
+    return this.#queued;
   }
 
   /** Resolves once every queued operation (messages, disconnects, timers) has finished. */
@@ -1778,9 +1859,13 @@ export class RoomHub {
   }
 
   #enqueue(operation: () => Promise<void> | void): Promise<void> {
-    const run = this.#queue.then(operation).catch((error: unknown) => {
-      this.#log("operation failed", error);
-    });
+    this.#queued++;
+    const run = this.#queue
+      .then(operation)
+      .catch((error: unknown) => {
+        this.#log("operation failed", error);
+      })
+      .finally(() => this.#queued--);
     this.#queue = run;
     return run;
   }

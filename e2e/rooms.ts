@@ -112,6 +112,16 @@ export async function enterRoom(page: Page, roomId?: string): Promise<void> {
 }
 
 /**
+ * Enter like `enterRoom`, then turn the camera on: someone with a camera gets a tile on the
+ * stage (with its controls); someone with neither a camera nor a share is a compact chip.
+ */
+export async function enterWithCamera(page: Page, roomId?: string): Promise<void> {
+  await enterRoom(page, roomId);
+  await page.getByRole("button", { name: "Turn camera on" }).click();
+  await expect(page.getByRole("button", { name: "Turn camera off" })).toBeEnabled();
+}
+
+/**
  * Create a room through the create dialog on `page` (signed in), enter it through the lobby,
  * and return its id.
  */
@@ -135,6 +145,23 @@ export async function createRoomOnPage(page: Page, room: NewRoom): Promise<strin
   if (!id) throw new Error(`Not on a room page: ${page.url()}`);
   await enterRoom(page);
   return id;
+}
+
+/**
+ * Record what the page copies instead of touching the real clipboard, which needs permissions
+ * Playwright can't grant in every browser. Read it back from `window.copied`.
+ */
+export async function fakeClipboard(context: BrowserContext) {
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          (window as unknown as { copied?: string }).copied = text;
+        },
+      },
+    });
+  });
 }
 
 /** Create a room hosted by a fresh user `hostUsername` in a separate browser context. */

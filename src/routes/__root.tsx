@@ -31,6 +31,9 @@ import { getSettings } from "~/lib/settings-fns";
 import type { RouterContext } from "~/router";
 import appCss from "~/styles/app.css?url";
 
+/** What `z.config({ jitless: true })` stores; zod reads this global as it loads. */
+const ZOD_JITLESS_SCRIPT = "globalThis.__zod_globalConfig={jitless:true};";
+
 export const Route = createRootRouteWithContext<RouterContext>()({
   // Runs on the server for SSR and again on each client navigation (via the server fn).
   beforeLoad: async () => ({ session: await loadCurrentSession() }),
@@ -48,6 +51,12 @@ export const Route = createRootRouteWithContext<RouterContext>()({
       { rel: "stylesheet", href: appCss },
       { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
     ],
+    // Zod 4 probes for `new Function` as each object schema is created, and a CSP without
+    // `unsafe-eval` reports the caught throw as a violation (ADR 9 addendum on security headers).
+    // Its setting has to exist before zod's module runs, which a module in our own bundle can't
+    // promise (the chunk holding zod and the schemas evaluates before the entry's own code), so
+    // this inline script, nonced like Start's own, runs first. The server keeps compiled parsers.
+    scripts: [{ children: ZOD_JITLESS_SCRIPT }],
   }),
   component: RootComponent,
 });

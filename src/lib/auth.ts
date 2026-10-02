@@ -20,9 +20,10 @@ import { testSignIn } from "./test-sign-in.ts";
 /**
  * Fields users may never change through Better Auth's own `/update-user` endpoint. `image` is
  * shown to everyone who sees the user, so only the Discord sign-in sets it (a user-chosen URL
- * would let them log their viewers' IPs).
+ * would let them log their viewers' IPs). So is `name`, the display name in profiles and search:
+ * it would otherwise be unbounded and could impersonate another user.
  */
-const SERVER_OWNED_USER_FIELDS = ["discordId", "discordUsername", "image"] as const;
+const SERVER_OWNED_USER_FIELDS = ["name", "discordId", "discordUsername", "image"] as const;
 
 /** Account-linking and session-editing endpoints the app doesn't use. */
 const UNUSED_ACCOUNT_PATHS = ["/link-social", "/unlink-account", "/update-session"];

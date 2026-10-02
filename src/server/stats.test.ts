@@ -1,5 +1,7 @@
-import { and, eq, isNull } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { readdirSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { and, eq, isNull, sql } from "drizzle-orm";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Db } from "../db/client.ts";
 import {
   dailyPlatformStats,
@@ -15,6 +17,8 @@ import {
 import { createTestDb } from "../db/test-db.ts";
 import {
   dailyStatsNow,
+  publicUserCotimeNow,
+  publicUserStatsNow,
   purgeExpiredRooms,
   recordNewUser,
   rollupEndedRoom,
@@ -47,6 +51,7 @@ async function seedRoom(
   id: string,
   opts: {
     createdBy?: string;
+    isPrivate?: boolean;
     createdAt?: Date;
     endedAt?: Date | null;
     presence?: Span[];
@@ -60,6 +65,7 @@ async function seedRoom(
     name: id,
     createdBy: opts.createdBy ?? "a",
     hostUserId: opts.createdBy ?? "a",
+    isPrivate: opts.isPrivate ?? false,
     createdAt,
     endedAt: opts.endedAt === undefined ? at(60) : opts.endedAt,
   });
@@ -116,6 +122,12 @@ describe("rollupEndedRoom", () => {
       roomsJoined: 1,
       // b and c were both present at minute 20 while a streamed.
       peakViewers: 2,
+      // A public room, so the public columns match.
+      publicSecondsWatched: 30 * 60,
+      publicSecondsStreamed: 30 * 60,
+      publicRoomsHosted: 1,
+      publicRoomsJoined: 1,
+      publicPeakViewers: 2,
     });
     expect(await statsFor("b")).toMatchObject({
       secondsWatched: 35 * 60,
@@ -224,6 +236,46 @@ describe("rollupEndedRoom", () => {
     expect(await statsFor("a")).toMatchObject({ roomsHosted: 1 });
     expect(await statsFor("b")).toMatchObject({ roomsHosted: 1 });
     expect(await statsFor("c")).toMatchObject({ roomsHosted: 1 });
+  });
+
+  it("folds a private room into the all-rooms columns only, and a public one into both", async () => {
+    const spans: Span[] = [
+      ["a", 0, 60],
+      ["b", 0, 30],
+    ];
+    await seedRoom("priv", { isPrivate: true, presence: spans, streams: [["a", 0, 20]] });
+    await rollupEndedRoom(db, "priv");
+    expect(await statsFor("a")).toEqual({
+      userId: "a",
+      secondsStreamed: 20 * 60,
+      secondsWatched: 40 * 60,
+      roomsHosted: 1,
+      roomsJoined: 1,
+      peakViewers: 1,
+      publicSecondsStreamed: 0,
+      publicSecondsWatched: 0,
+      publicRoomsHosted: 0,
+      publicRoomsJoined: 0,
+      publicPeakViewers: 0,
+    });
+    expect(await db.select().from(userCotime)).toEqual([
+      { userA: "a", userB: "b", secondsTogether: 30 * 60, publicSecondsTogether: 0 },
+    ]);
+
+    await seedRoom("pub", { presence: spans, streams: [["a", 0, 10]] });
+    await rollupEndedRoom(db, "pub");
+    expect(await statsFor("a")).toMatchObject({
+      secondsStreamed: 30 * 60,
+      roomsJoined: 2,
+      publicSecondsStreamed: 10 * 60,
+      publicSecondsWatched: 50 * 60,
+      publicRoomsHosted: 1,
+      publicRoomsJoined: 1,
+      publicPeakViewers: 1,
+    });
+    expect(await db.select().from(userCotime)).toEqual([
+      { userA: "a", userB: "b", secondsTogether: 60 * 60, publicSecondsTogether: 30 * 60 },
+    ]);
   });
 
   it("leaves rooms that haven't ended alone", async () => {
@@ -479,6 +531,226 @@ describe("stats including rooms in progress", () => {
   });
 });
 
+/**
+ * The public-only views, as `statsNow` reads the all-rooms ones. A user or pair with nothing
+ * but zeros is left out: it reads the same as no row, and a private room's roll-up leaves one.
+ */
+async function publicStatsNow() {
+  const stats = await db
+    .select({
+      userId: publicUserStatsNow.userId,
+      secondsStreamed: publicUserStatsNow.secondsStreamed,
+      secondsWatched: publicUserStatsNow.secondsWatched,
+      roomsHosted: publicUserStatsNow.roomsHosted,
+      roomsJoined: publicUserStatsNow.roomsJoined,
+      peakViewers: publicUserStatsNow.peakViewers,
+    })
+    .from(publicUserStatsNow.from)
+    .orderBy(publicUserStatsNow.userId);
+  const nonZero = (row: object) =>
+    Object.values(row).some((value) => typeof value === "number" && value > 0);
+  const pairs = await db
+    .select({
+      userA: publicUserCotimeNow.userA,
+      userB: publicUserCotimeNow.userB,
+      secondsTogether: publicUserCotimeNow.secondsTogether,
+    })
+    .from(publicUserCotimeNow.from)
+    .orderBy(publicUserCotimeNow.userA, publicUserCotimeNow.userB);
+  return { stats: stats.filter(nonZero), pairs: pairs.filter(nonZero) };
+}
+
+describe("public-only stats (private rooms left out)", () => {
+  // Live private room (a, b, c) and a live public one (a, b), plus a rolled-up room of each kind.
+  const seedAll = async () => {
+    await seedRoom("live-private", {
+      createdBy: "c",
+      isPrivate: true,
+      endedAt: null,
+      presence: [
+        ["a", 0, null, 40],
+        ["b", 0, null, 40],
+        ["c", 0, null, 40],
+      ],
+      streams: [["c", 0, null, 40]],
+    });
+    await seedRoom("live-public", {
+      createdBy: "a",
+      endedAt: null,
+      presence: [
+        ["a", 0, null, 30],
+        ["b", 10, null, 30],
+      ],
+      streams: [["a", 0, null, 30]],
+    });
+    const earlier = (id: string, isPrivate: boolean) =>
+      seedRoom(id, {
+        createdBy: "a",
+        isPrivate,
+        createdAt: new Date(T0.getTime() - DAY),
+        endedAt: new Date(T0.getTime() - DAY + 30 * MIN),
+        presence: [
+          ["a", 0, 30],
+          ["d", 0, 30],
+        ],
+        streams: [["a", 0, 30]],
+      });
+    await earlier("earlier-private", true);
+    await earlier("earlier-public", false);
+    await rollupEndedRoom(db, "earlier-private");
+    await rollupEndedRoom(db, "earlier-public");
+  };
+
+  it("counts public rooms only, live or rolled up", async () => {
+    await seedAll();
+    expect(await publicStatsNow()).toEqual({
+      stats: [
+        {
+          userId: "a",
+          // live public: present 0-30 and streaming all of it; earlier public: the same again
+          secondsStreamed: 60 * 60,
+          secondsWatched: 0,
+          roomsHosted: 2,
+          roomsJoined: 2,
+          peakViewers: 1,
+        },
+        {
+          userId: "b",
+          secondsStreamed: 0,
+          secondsWatched: 20 * 60,
+          roomsHosted: 0,
+          roomsJoined: 1,
+          peakViewers: 0,
+        },
+        {
+          userId: "d",
+          secondsStreamed: 0,
+          secondsWatched: 30 * 60,
+          roomsHosted: 0,
+          roomsJoined: 1,
+          peakViewers: 0,
+        },
+      ],
+      // c was only ever in the private rooms, so has no pairs; a-b's private 40 minutes and
+      // a-d's private 30 are out.
+      pairs: [
+        { userA: "a", userB: "b", secondsTogether: 20 * 60 },
+        { userA: "a", userB: "d", secondsTogether: 30 * 60 },
+      ],
+    });
+
+    // The all-rooms view still has everything.
+    const all = await statsNow();
+    expect(all.pairs).toEqual([
+      { userA: "a", userB: "b", secondsTogether: (40 + 20) * 60 },
+      { userA: "a", userB: "c", secondsTogether: 40 * 60 },
+      { userA: "a", userB: "d", secondsTogether: 60 * 60 },
+      { userA: "b", userB: "c", secondsTogether: 40 * 60 },
+    ]);
+    expect(all.stats.find((row) => row.userId === "c")).toMatchObject({
+      secondsStreamed: 40 * 60,
+      roomsJoined: 1,
+    });
+  });
+
+  it.each([
+    ["open intervals left as the crash left them", false],
+    ["intervals closed at their checkpoint", true],
+  ])("shows the same totals just before and just after the roll-up: %s", async (_, closed) => {
+    await seedAll();
+    const before = { all: await statsNow(), public: await publicStatsNow() };
+
+    for (const id of ["live-private", "live-public"]) {
+      await db
+        .update(rooms)
+        .set({ endedAt: at(60) })
+        .where(eq(rooms.id, id));
+      if (closed) {
+        for (const table of [presenceIntervals, streamIntervals]) {
+          await db
+            .update(table)
+            .set({ endedAt: table.lastSeenAt })
+            .where(and(eq(table.roomId, id), isNull(table.endedAt)));
+        }
+      }
+    }
+    // Ended but not rolled up: still counted once.
+    expect(await publicStatsNow()).toEqual(before.public);
+
+    expect(await rollupEndedRoom(db, "live-private")).toBe(true);
+    expect(await publicStatsNow()).toEqual(before.public);
+    expect(await statsNow()).toEqual(before.all);
+    expect(await rollupEndedRoom(db, "live-public")).toBe(true);
+    expect(await publicStatsNow()).toEqual(before.public);
+    expect(await statsNow()).toEqual(before.all);
+  });
+});
+
+describe("public-only backfill (migration 0005)", () => {
+  /** The migration's UPDATE statements: the part after its column additions. */
+  const backfill = () => {
+    const folder = fileURLToPath(new URL("../../drizzle", import.meta.url));
+    const file = readdirSync(folder).find((name) => name.startsWith("0005_"));
+    const statements = readFileSync(`${folder}/${file}`, "utf8").split("--> statement-breakpoint");
+    return statements.filter((statement) => !/^\s*ALTER TABLE/.test(statement));
+  };
+
+  it("recomputes the public columns from the rooms that still exist, as the roll-up wrote them", async () => {
+    const spans: Span[] = [
+      ["a", 0, 60],
+      ["b", 0, 30],
+      ["c", 20, 60],
+    ];
+    await seedRoom("pub", { presence: spans, streams: [["a", 0, 30]] });
+    await seedRoom("priv", {
+      isPrivate: true,
+      createdBy: "c",
+      presence: spans,
+      streams: [["c", 20, 60]],
+    });
+    await rollupEndedRoom(db, "pub");
+    await rollupEndedRoom(db, "priv");
+    const written = await db.select().from(userStats).orderBy(userStats.userId);
+    const writtenCotime = await db
+      .select()
+      .from(userCotime)
+      .orderBy(userCotime.userA, userCotime.userB);
+    expect(written.find((row) => row.userId === "c")).toMatchObject({
+      publicRoomsHosted: 0,
+      publicPeakViewers: 0,
+    });
+
+    // The state migration 0005 meets: stored totals with no public columns, plus time from
+    // rooms the purge deleted since, which can't be told public from private.
+    await db.update(userStats).set({
+      publicSecondsStreamed: 0,
+      publicSecondsWatched: 0,
+      publicRoomsHosted: 0,
+      publicRoomsJoined: 0,
+      publicPeakViewers: 0,
+    });
+    await db.update(userCotime).set({ publicSecondsTogether: 0 });
+    await db.execute(sql`update user_stats set seconds_watched = seconds_watched + 999`);
+    await db.execute(sql`update user_cotime set seconds_together = seconds_together + 999`);
+    // A room in progress, which the roll-up (and so the backfill) doesn't cover yet.
+    await seedRoom("live", { endedAt: null, presence: [["a", 0, null, 10]] });
+
+    for (const statement of backfill()) await db.execute(sql.raw(statement));
+
+    expect(await db.select().from(userStats).orderBy(userStats.userId)).toEqual(
+      written.map((row) => ({ ...row, secondsWatched: row.secondsWatched + 999 })),
+    );
+    expect(await db.select().from(userCotime).orderBy(userCotime.userA, userCotime.userB)).toEqual(
+      writtenCotime.map((row) => ({ ...row, secondsTogether: row.secondsTogether + 999 })),
+    );
+    // So the public view reads only the public room (and the live one), not the private one.
+    expect((await publicStatsNow()).stats.find((row) => row.userId === "c")).toMatchObject({
+      secondsWatched: 40 * 60,
+      roomsHosted: 0,
+    });
+  });
+});
+
 describe("purgeExpiredRooms", () => {
   it("rolls up missed rooms, deletes expired ones, and keeps stats", async () => {
     const now = new Date(T0.getTime() + 40 * DAY);
@@ -532,6 +804,43 @@ describe("purgeExpiredRooms", () => {
     // Running again is a no-op.
     expect(await purgeExpiredRooms(db, now)).toEqual({ rolledUp: 0, purged: 0 });
     expect(await statsFor("a")).toMatchObject({ secondsStreamed: 60 * 60 });
+  });
+
+  it("logs and skips a room whose roll-up fails, and still deletes expired rooms", async () => {
+    const now = new Date(T0.getTime() + 40 * DAY);
+    // "bad" fails to roll up: a trigger rejects its host's stats row.
+    await db.execute(sql`
+      create function reject_user_d() returns trigger language plpgsql as $$
+      begin
+        if new.user_id = 'd' then raise exception 'boom'; end if;
+        return new;
+      end $$`);
+    await db.execute(sql`
+      create trigger reject_user_d before insert on user_stats
+      for each row execute function reject_user_d()`);
+    await seedRoom("bad", { createdBy: "d", presence: [["d", 0, 60]] });
+    await seedRoom("good", { createdBy: "a", presence: [["a", 0, 60]] });
+    // Already rolled up and expired: the purge must still delete it.
+    await seedRoom("expired", { createdBy: "b", presence: [["b", 0, 60]] });
+    expect(await rollupEndedRoom(db, "expired", at(61))).toBe(true);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      expect(await purgeExpiredRooms(db, now)).toEqual({ rolledUp: 1, purged: 2 });
+      expect(logged).toHaveBeenCalledOnce();
+      expect(String(logged.mock.calls[0]?.[0])).toContain("bad");
+    } finally {
+      logged.mockRestore();
+    }
+
+    // The failed room rolled back whole: not rolled up, not deleted, ready for a retry.
+    const left = await db
+      .select({ id: rooms.id, rolledUp: rooms.statsRolledUpAt })
+      .from(rooms)
+      .orderBy(rooms.id);
+    expect(left).toEqual([{ id: "bad", rolledUp: null }]);
+    expect(await statsFor("d")).toBeUndefined();
+    expect(await statsFor("a")).toMatchObject({ secondsWatched: 60 * 60 });
   });
 
   it("keeps rooms ended less than 30 days ago", async () => {

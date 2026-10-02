@@ -10,7 +10,7 @@
  * the user's open sockets. Every action writes an `admin_actions` row (kept indefinitely, ADR 6
  * and 11 addenda).
  */
-import { and, count, desc, eq, gt, isNull, max, notExists, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, inArray, isNull, max, notExists, or, sql } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import { type AdminActionKind, adminActions, presenceIntervals, user } from "../db/schema/index.ts";
 import {
@@ -88,6 +88,27 @@ const bannedAt = (now: Date) =>
   and(eq(user.banned, true), or(isNull(user.banExpires), gt(user.banExpires, now)));
 
 /**
+ * When each of `userIds` was last in a room (an open interval counts until its last-seen
+ * checkpoint). Only these users' intervals are read, through the per-user index, so the cost
+ * follows the page, not the whole presence table. EXPLAIN ANALYZE on PGlite with 3000 users and
+ * 30,000 presence rows, for a page of 25: the old all-users aggregate was a Seq Scan of every
+ * presence row (396 buffers, 13.3 ms); this is a Bitmap Index Scan on `presence_intervals_user_idx`
+ * reading 250 rows (120 buffers, 0.64 ms).
+ */
+async function lastSeenByUser(db: Db, userIds: string[]): Promise<Map<string, Date>> {
+  if (userIds.length === 0) return new Map();
+  const rows = await db
+    .select({
+      userId: presenceIntervals.userId,
+      at: max(sql<Date>`coalesce(${presenceIntervals.endedAt}, ${presenceIntervals.lastSeenAt})`),
+    })
+    .from(presenceIntervals)
+    .where(inArray(presenceIntervals.userId, userIds))
+    .groupBy(presenceIntervals.userId);
+  return new Map(rows.flatMap((row) => (row.at ? [[row.userId, new Date(row.at)] as const] : [])));
+}
+
+/**
  * A page of users, newest first, whose username contains `q` (case-insensitive), with their
  * lifetime hours and when they were last in a room. `envAdminIds` are the Discord ids in
  * `ADMIN_DISCORD_IDS`, whose users are marked as env admins.
@@ -105,16 +126,6 @@ export async function listAdminUsers(
     q ? sql`${username} ilike ${`%${escapeLike(q)}%`}` : undefined,
     banned ? bannedAt(now) : undefined,
   );
-  const lastSeen = db
-    .select({
-      userId: presenceIntervals.userId,
-      at: max(
-        sql<Date>`coalesce(${presenceIntervals.endedAt}, ${presenceIntervals.lastSeenAt})`,
-      ).as("last_seen"),
-    })
-    .from(presenceIntervals)
-    .groupBy(presenceIntervals.userId)
-    .as("last_seen");
   const [rows, [totalRow]] = await Promise.all([
     db
       .select({
@@ -127,19 +138,21 @@ export async function listAdminUsers(
         banned: user.banned,
         banReason: user.banReason,
         banExpires: user.banExpires,
-        lastSeenAt: lastSeen.at,
         secondsStreamed: userStatsNow.secondsStreamed,
         secondsWatched: userStatsNow.secondsWatched,
       })
       .from(user)
       .leftJoin(userStatsNow.from, eq(userStatsNow.userId, user.id))
-      .leftJoin(lastSeen, eq(lastSeen.userId, user.id))
       .where(where)
       .orderBy(desc(user.createdAt), desc(user.id))
       .limit(ADMIN_USERS_PAGE_SIZE)
       .offset((page - 1) * ADMIN_USERS_PAGE_SIZE),
     db.select({ n: count() }).from(user).where(where),
   ]);
+  const lastSeen = await lastSeenByUser(
+    db,
+    rows.map((row) => row.id),
+  );
   return {
     users: rows.map((row) => {
       const ban: AdminBan | null = banInForce(row, now)
@@ -154,7 +167,7 @@ export async function listAdminUsers(
         role,
         envAdmin: role === "admin" && row.discordId !== null && envAdminIds.has(row.discordId),
         ban,
-        lastSeenAt: row.lastSeenAt ? new Date(row.lastSeenAt).toISOString() : null,
+        lastSeenAt: lastSeen.get(row.id)?.toISOString() ?? null,
         hours: secondsToHours((row.secondsStreamed ?? 0) + (row.secondsWatched ?? 0)),
       };
     }),

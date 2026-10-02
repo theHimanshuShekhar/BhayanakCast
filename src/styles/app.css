@@ -268,3 +268,13 @@
     border-radius: 6px;
   }
 }
+
+/* iOS Safari zooms the page when a field under 16px takes focus, so touch devices get 16px
+   fields. Outside any layer, so it beats the fields' own `text-*` classes. */
+@media (pointer: coarse) {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}

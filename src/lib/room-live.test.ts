@@ -10,6 +10,7 @@ import {
   applyRoomMessage,
   CHAT_LINES_KEPT,
   feedLine,
+  mediaAfterRefusal,
   pendingShareAnswer,
   type RoomLive,
   SHARE_ACK_TIMEOUT_MS,
@@ -292,5 +293,26 @@ describe("pendingShareAnswer", () => {
     settle("refused");
     await vi.advanceTimersByTimeAsync(SHARE_ACK_TIMEOUT_MS);
     expect(await answer).toBe("accepted");
+  });
+});
+
+describe("mediaAfterRefusal", () => {
+  const confirmed = { mic: true, cam: false, share: false };
+  const asked = { mic: false, cam: true, share: true };
+
+  it("turns only the share off when the share limit refused it", () => {
+    expect(mediaAfterRefusal("share_limit", asked, confirmed)).toEqual({
+      mic: false,
+      cam: true,
+      share: false,
+    });
+  });
+
+  it("falls back to what the server confirmed when the message was rate limited", () => {
+    expect(mediaAfterRefusal("rate_limited", asked, confirmed)).toBe(confirmed);
+  });
+
+  it("keeps the state for any other refusal", () => {
+    expect(mediaAfterRefusal("forbidden", asked, confirmed)).toBe(asked);
   });
 });

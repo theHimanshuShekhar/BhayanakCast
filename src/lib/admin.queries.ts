@@ -3,7 +3,7 @@
  * the dashboard reads them with `useSuspenseQuery`.
  */
 import { queryOptions } from "@tanstack/react-query";
-import type { ListAdminUsersInput } from "./admin";
+import type { ListAdminRecentRoomsInput, ListAdminUsersInput } from "./admin";
 import {
   getAdminDailySeriesFn,
   getAdminLeaderboardsFn,
@@ -27,7 +27,9 @@ export const adminKeys = {
   overview: () => [...adminKeys.all, "overview"] as const,
   daily: () => [...adminKeys.all, "daily"] as const,
   live: () => [...adminKeys.all, "live"] as const,
+  /** Every page of the recent-rooms table. */
   recent: () => [...adminKeys.all, "recent"] as const,
+  recentPage: (input: ListAdminRecentRoomsInput) => [...adminKeys.recent(), input] as const,
   turnUsage: () => [...adminKeys.all, "turn-usage"] as const,
   leaderboards: () => [...adminKeys.all, "leaderboards"] as const,
   /** Every page of the users table: bans and role changes refetch them all. */
@@ -55,9 +57,12 @@ export const adminDailySeriesQuery = () =>
 export const adminLiveRoomsQuery = () =>
   queryOptions({ queryKey: adminKeys.live(), queryFn: () => listAdminLiveRoomsFn() });
 
-/** Live rooms and rooms ended within 30 days, private ones included. */
-export const adminRecentRoomsQuery = () =>
-  queryOptions({ queryKey: adminKeys.recent(), queryFn: () => listAdminRecentRoomsFn() });
+/** A page of live rooms and rooms ended within 30 days, private ones included, as searched. */
+export const adminRecentRoomsQuery = (input: ListAdminRecentRoomsInput) =>
+  queryOptions({
+    queryKey: adminKeys.recentPage(input),
+    queryFn: () => listAdminRecentRoomsFn({ data: input }),
+  });
 
 /** Relayed TURN egress this month (the server caches Cloudflare's answer for about 15 minutes). */
 export const turnUsageQuery = () =>

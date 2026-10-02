@@ -57,6 +57,10 @@ export const rooms = pgTable(
   (table) => [
     index("rooms_live_idx").on(table.createdAt).where(sql`${table.endedAt} is null`),
     index("rooms_ended_at_idx").on(table.endedAt),
+    /** Ended rooms awaiting roll-up, for the daily purge (ADR 11). */
+    index("rooms_unrolled_idx")
+      .on(table.id)
+      .where(sql`${table.endedAt} is not null and ${table.statsRolledUpAt} is null`),
     index("rooms_created_by_idx").on(table.createdBy),
   ],
 );

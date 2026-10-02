@@ -27,3 +27,9 @@ The stats shown include rooms in progress. Every read of the per-user aggregates
 - The live part is computed at read time by the same SQL as the roll-up (`src/server/stats.ts`, on the interval rules of `src/server/intervals.ts`), so a room's numbers don't change when it rolls up. Open intervals count up to their last-seen checkpoint (ADR 12). Peak viewers combine with `greatest`, not a sum.
 - The roll-up at room end stays the only write. It claims the room with `stats_rolled_up_at` in the same transaction as its upsert, so a room is in the stored totals or in the live part, never both. `rooms_ended` still moves only at the roll-up.
 - Only un-rolled-up rooms are scanned. There are few, and live rooms are capped, so nothing is cached.
+- Per-user stats and co-time are also stored over public rooms only, and profiles and search show those to non-admins (ADR 16 addendum).
+
+## Addendum: resilient purge (2026-10-02)
+- The daily purge logs and skips a room whose roll-up fails, so one bad room no longer stops the deletes. That room stays un-rolled-up (and so is never deleted) and is retried on the next run.
+- The roll-up upserts take their row locks in a stable order (`user_id`; `user_a, user_b`), so concurrent roll-ups (the boot purge alongside the hub) cannot deadlock. A partial index (`rooms_unrolled_idx`) covers ended rooms awaiting roll-up.
+- The same daily job deletes Better Auth sessions past `expires_at` and logs the count. Sessions are not room-level data; this is housekeeping, not retention.

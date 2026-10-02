@@ -18,6 +18,11 @@ import {
 import { env } from "./src/server/env.ts";
 import { startMaintenance } from "./src/server/maintenance.ts";
 import { attachRealtime } from "./src/server/realtime.ts";
+import {
+  hashedAssetCaching,
+  securityHeaders,
+  withPrivateCaching,
+} from "./src/server/security-headers.ts";
 
 type ServerEntry = { fetch(request: Request): Response | Promise<Response> };
 
@@ -27,8 +32,9 @@ const serverEntryUrl = new URL("./dist/server/server.js", import.meta.url).href;
 const { default: app } = (await import(serverEntryUrl)) as { default: ServerEntry };
 
 const server = serve({
-  fetch: (request) => app.fetch(request),
-  middleware: [staticMiddleware({ dir: clientDir })],
+  fetch: withPrivateCaching((request) => app.fetch(request)),
+  // Security headers wrap everything, so they come first (ADR 9 addendum).
+  middleware: [securityHeaders, hashedAssetCaching, staticMiddleware({ dir: clientDir })],
   port: Number(process.env.PORT ?? 3000),
   hostname: process.env.HOST ?? "0.0.0.0",
   manual: true,
@@ -52,7 +58,8 @@ httpServer.prependListener("request", (request: IncomingMessage) => {
   );
 });
 
-attachRealtime(httpServer);
+// Nothing else takes upgrades here, so refuse any that aren't for the realtime socket.
+attachRealtime(httpServer, { closeUnknownUpgrades: true });
 
 // Daily retention purge + stats roll-up (ADR 11).
 startMaintenance(getDb());

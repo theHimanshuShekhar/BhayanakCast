@@ -180,7 +180,7 @@ describe("test-only sign-in", () => {
       }),
     ]);
     expect(await db.select().from(userCotime)).toEqual([
-      { userA: a, userB: b, secondsTogether: 600 },
+      { userA: a, userB: b, secondsTogether: 600, publicSecondsTogether: 600 },
     ]);
     expect((await setStats({ discordId: "9999" })).status).toBe(404);
   });
@@ -220,12 +220,26 @@ describe("settings column", () => {
       const [row] = await db.select().from(user).where(eq(user.id, userId));
       return row;
     };
-    // Control: the same request can change a writable field.
-    expect((await updateUser({ name: "renamed" })).ok).toBe(true);
-    expect((await rowOf())?.name).toBe("renamed");
-
     await updateUser({ settings: { ...DEFAULT_USER_SETTINGS, theme: "light" } });
     expect((await rowOf())?.settings).toEqual(DEFAULT_USER_SETTINGS);
+  });
+});
+
+describe("name column", () => {
+  it("can't be written through Better Auth's /update-user", async () => {
+    const signedIn = await testSignInRequest("4300", "kodama_jpg");
+    const { userId } = (await signedIn.clone().json()) as { userId: string };
+    const nameOf = async () => {
+      const [row] = await db.select({ name: user.name }).from(user).where(eq(user.id, userId));
+      return row?.name;
+    };
+    const before = await nameOf();
+
+    // The display name shows in profiles and search: not an unbounded or borrowed one.
+    for (const name of ["x".repeat(300_000), "someone else"]) {
+      expect((await updateUserRequest(signedIn, { name })).status).toBe(403);
+    }
+    expect(await nameOf()).toBe(before);
   });
 });
 
@@ -348,14 +362,13 @@ describe("image column", () => {
         .where(eq(user.id, userId));
       return row;
     };
-    expect((await updateUserRequest(signedIn, { name: "renamed" })).ok).toBe(true);
+    const before = await rowOf();
 
     // Anyone shown this picture would load it: a URL of the user's own would log their IPs.
     const image = "https://tracker.example/pixel.png";
-    const response = await updateUserRequest(signedIn, { name: "renamed again", image });
+    const response = await updateUserRequest(signedIn, { image });
     expect(response.status).toBe(403);
-    // Refused whole: nothing of that request applied.
-    expect(await rowOf()).toEqual({ name: "renamed", image: null });
+    expect(await rowOf()).toEqual({ ...before, image: null });
   });
 
   it("keeps the Discord picture a user signed in with, whatever they send", async () => {
@@ -509,6 +522,19 @@ describe("bans", () => {
 
       discordProfile.avatar = "a_abc123";
       expect(await imageOf()).toBe("https://cdn.discordapp.com/avatars/5000/a_abc123.gif");
+    });
+
+    it("keeps the display name current from Discord on every sign-in", async () => {
+      // Sign-in is rate limited per IP, and other tests here sign in from the default one.
+      let signIns = 0;
+      const nameOf = async () => {
+        const response = await completeDiscordSignIn({ ip: `10.57.0.${++signIns}` });
+        return (await resolveSession(auth, cookiesFrom(response)))?.user.name;
+      };
+      expect(await nameOf()).toBe("discord_user");
+
+      discordProfile.global_name = "Discord User";
+      expect(await nameOf()).toBe("Discord User");
     });
 
     it("returns to the invite link signed in from, not home (ADR 16)", async () => {

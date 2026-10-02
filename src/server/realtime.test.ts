@@ -1,9 +1,14 @@
-import { connect as connectTcp } from "node:net";
+import { createServer } from "node:http";
+import { type AddressInfo, connect as connectTcp } from "node:net";
 import { asc, eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import WebSocket, { WebSocketServer } from "ws";
 import { presenceIntervals, rooms } from "../db/schema/index.ts";
 import { MEDIA_OFF, PROTOCOL_VERSION } from "../lib/realtime.ts";
+import { attachRealtime } from "./realtime.ts";
 import { type RealtimeHarness, startRealtimeHarness, type TestUser } from "./realtime-harness.ts";
+import { RoomHub } from "./room-hub.ts";
+import { createDbRoomStore } from "./room-store.ts";
 
 let h: RealtimeHarness;
 let ana: TestUser;
@@ -18,6 +23,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await h.close();
 });
 
@@ -64,9 +70,9 @@ describe("upgrade", () => {
     expect(await h.upgradeStatus(ana, { origin: "https://evil.example" })).toBe(403);
   });
 
-  it("refuses an upgrade whose target isn't a valid URL, and keeps serving", async () => {
-    const { port } = new URL(h.url);
-    const reply = await new Promise<string>((resolve, reject) => {
+  /** Send a bare upgrade request for `target` over TCP; resolves with the reply once the server closes. */
+  function rawUpgrade(target: string, port = new URL(h.url).port): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
       const socket = connectTcp(Number(port), "127.0.0.1");
       let data = "";
       socket.on("data", (chunk) => {
@@ -75,13 +81,81 @@ describe("upgrade", () => {
       socket.on("close", () => resolve(data));
       socket.on("error", reject);
       socket.write(
-        "GET // HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n",
+        `GET ${target} HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n`,
       );
     });
-    expect(reply).toMatch(/^HTTP\/1\.1 400 /);
+  }
+
+  async function expectStillServing() {
     const a = await h.connect(ana);
     a.send({ type: "hello", v: PROTOCOL_VERSION });
     expect(await a.waitFor("welcome")).toMatchObject({ type: "welcome" });
+  }
+
+  it("refuses an upgrade whose target isn't a valid URL, and keeps serving", async () => {
+    expect(await rawUpgrade("//")).toMatch(/^HTTP\/1\.1 400 /);
+    await expectStillServing();
+  });
+
+  it("refuses an upgrade to an unknown path and closes the socket", async () => {
+    expect(await rawUpgrade("/not-the-realtime-path")).toMatch(/^HTTP\/1\.1 404 /);
+    await expectStillServing();
+  });
+
+  it("leaves unknown paths to other upgrade listeners unless told to close them", async () => {
+    const server = createServer();
+    // Stands in for Vite's HMR socket in dev.
+    server.on("upgrade", (_request, socket) => {
+      socket.end("HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n");
+    });
+    const realtime = attachRealtime(server, {
+      hub: new RoomHub({ clock: h.clock, store: createDbRoomStore(h.db) }),
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const { port } = server.address() as AddressInfo;
+      expect(await rawUpgrade("/__hmr", String(port))).toMatch(/^HTTP\/1\.1 204 /);
+    } finally {
+      await realtime.close();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it("drops the socket cleanly when setting it up throws after the handshake", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(RoomHub.prototype, "connect").mockImplementationOnce(() => {
+      throw new Error("boom");
+    });
+    const ws = new WebSocket(h.url);
+    const events = await new Promise<string[]>((resolve) => {
+      const seen: string[] = [];
+      ws.on("open", () => seen.push("open"));
+      ws.on("error", (e) => seen.push(`error: ${e.message}`));
+      ws.on("close", (code) => {
+        seen.push(`close ${code}`);
+        resolve(seen);
+      });
+    });
+    // A 500 written into the open stream would show up as a frame error.
+    expect(events).toEqual(["open", "close 1006"]);
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining("serving a new socket failed"),
+      expect.objectContaining({ message: "boom" }),
+    );
+    await expectStillServing();
+  });
+
+  it("logs a throw on the upgrade path, answers 500, and keeps serving", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(WebSocketServer.prototype, "handleUpgrade").mockImplementationOnce(() => {
+      throw new Error("boom");
+    });
+    expect(await h.upgradeStatus(ana)).toBe(500);
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining("handling an upgrade failed"),
+      expect.objectContaining({ message: "boom" }),
+    );
+    await expectStillServing();
   });
 });
 

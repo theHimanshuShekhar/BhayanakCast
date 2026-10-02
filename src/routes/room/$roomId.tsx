@@ -1,7 +1,15 @@
 import { Menu } from "@base-ui/react/menu";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound, redirect, useNavigate } from "@tanstack/react-router";
-import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Icon } from "~/components/icons";
 import { Sheet } from "~/components/overlays";
 import { ControlBtn } from "~/components/room/control-btn";
@@ -50,6 +58,11 @@ import { roomQuery } from "~/lib/rooms.queries";
 import { useSettings } from "~/lib/settings";
 import { startThumbnailUploads } from "~/lib/thumbnail-capture";
 import type { ActivityItem, ChatMessage, Participant, RoomDetail, RoomRole } from "~/lib/types";
+import {
+  toggleFullscreen,
+  useFullscreenElement,
+  useFullscreenSupported,
+} from "~/lib/use-fullscreen";
 
 export const Route = createFileRoute("/room/$roomId")({
   // Visitors go home with the "sign in to join" prompt open. A UX guard only: the room
@@ -177,7 +190,9 @@ function RoomVisit({ room, admin }: { room: LiveRoomCard; admin: boolean }) {
 /**
  * The room-info menu. In a private room the host, mods and admins can copy its invite link,
  * and the host can regenerate it so old links stop working (ADR 16); `onInviteResult` gets what
- * to tell them, done or not.
+ * to tell them, done or not. Everyone else can copy the room's own link and see who hosts.
+ * `compact` is the round icon for the control bar below the desktop breakpoint, where there is
+ * no room for the labelled button.
  */
 function RoomInfoMenu({
   roomId,
@@ -185,6 +200,7 @@ function RoomInfoMenu({
   canInvite,
   canRegenerate,
   onInviteResult,
+  compact = false,
 }: {
   roomId: string;
   /** The host's username, if the room has one. */
@@ -192,6 +208,7 @@ function RoomInfoMenu({
   canInvite: boolean;
   canRegenerate: boolean;
   onInviteResult: (notice: { message: string }) => void;
+  compact?: boolean;
 }) {
   const trigger = (
     <>
@@ -231,9 +248,17 @@ function RoomInfoMenu({
     "flex items-center gap-2 px-2.5 py-2 rounded-[var(--radius-sm)] text-xs text-fg cursor-pointer outline-0 data-highlighted:bg-surface-2";
   return (
     <Menu.Root>
-      <Menu.Trigger render={<Btn variant="ghost" size="sm" title="Room info" />}>
-        {trigger}
-      </Menu.Trigger>
+      {compact ? (
+        <Menu.Trigger
+          render={<ControlBtn aria-label="Room info" title="room info" className="lg:hidden" />}
+        >
+          <Icon.Hash size={16} />
+        </Menu.Trigger>
+      ) : (
+        <Menu.Trigger render={<Btn variant="ghost" size="sm" title="Room info" />}>
+          {trigger}
+        </Menu.Trigger>
+      )}
       <Menu.Portal>
         <Menu.Positioner side="top" align="start" sideOffset={10} className="z-[160] outline-0">
           <Menu.Popup className="min-w-[200px] p-1.5 bg-surface border border-border-strong rounded-[var(--radius)] shadow-deep outline-0">
@@ -305,7 +330,7 @@ function RoomName({ name, canRename }: { name: string; canRename: boolean }) {
         onKeyDown={(e) => {
           if (e.key === "Escape") setDraft(null);
         }}
-        className="h-6 min-w-0 w-56 px-2 rounded-md bg-surface border border-border text-[11.5px] text-fg outline-0 focus:border-primary"
+        className="h-6 pointer-coarse:h-8 min-w-0 w-56 px-2 rounded-md bg-surface border border-border text-[11.5px] text-fg outline-0 focus:border-primary"
       />
       <button type="submit" className="text-[11px] text-primary cursor-pointer">
         save
@@ -412,6 +437,12 @@ function RoomPage({
   const navigate = useNavigate();
   const { settings } = useSettings();
   const { openSettings } = useAppActions();
+  const canFullscreen = useFullscreenSupported();
+  // The whole page, not a tile, is fullscreen.
+  const fullscreenElement = useFullscreenElement();
+  const roomFullscreen =
+    fullscreenElement !== null &&
+    fullscreenElement === fullscreenElement.ownerDocument.documentElement;
   // Starts from the loader's view; the realtime socket's snapshot and events take over.
   const [participants, setParticipants] = useState<Participant[]>(detail.participants);
   const live = useRoomLive(detail.id, meId, initialMedia);
@@ -434,6 +465,7 @@ function RoomPage({
   const [pinnedId, setPinnedId] = useState<string | null>(null);
   const [mutedIds, setMutedIds] = useState<Set<string>>(() => new Set());
   const [sideOpen, setSideOpen] = useState(false);
+  const chatButton = useRef<HTMLButtonElement>(null);
 
   const liveFor = useMinutesSince(detail.createdAt);
 
@@ -621,6 +653,7 @@ function RoomPage({
   }, [people, pinnedId]);
 
   const announcement = activity.find((a) => ANNOUNCED.has(a.kind));
+  const hostName = participants.find((p) => p.role === "host")?.name ?? detail.host;
   const zones = useMemo(() => stageZones(stage, showNonSharers), [stage, showNonSharers]);
   const density = DENSITY[settings.density];
   // What every tile on the stage gets, whichever zone shows it.
@@ -875,7 +908,7 @@ function RoomPage({
           <div className="absolute left-[18px] flex gap-2 max-lg:hidden">
             <RoomInfoMenu
               roomId={detail.id}
-              host={participants.find((p) => p.role === "host")?.name ?? detail.host}
+              host={hostName}
               canInvite={isPrivate && joined && isModerator(myRole, admin)}
               canRegenerate={isPrivate && joined && myRole === "host"}
               onInviteResult={setInviteResult}
@@ -966,12 +999,22 @@ function RoomPage({
                 </Menu.Positioner>
               </Menu.Portal>
             </Menu.Root>
+            <RoomInfoMenu
+              compact
+              roomId={detail.id}
+              host={hostName}
+              canInvite={isPrivate && joined && isModerator(myRole, admin)}
+              canRegenerate={isPrivate && joined && myRole === "host"}
+              onInviteResult={setInviteResult}
+            />
             {settings.showChat && (
               <ControlBtn
+                ref={chatButton}
                 state={sideOpen ? "active" : undefined}
                 onClick={() => setSideOpen((o) => !o)}
                 aria-label="Chat & people"
                 title="chat & people"
+                aria-haspopup="dialog"
                 aria-expanded={sideOpen}
                 className="lg:hidden"
               >
@@ -998,28 +1041,24 @@ function RoomPage({
             >
               <Icon.Gear size={14} />
             </Btn>
-            <Btn
-              variant="ghost"
-              size="sm"
-              className="!w-7 !px-0"
-              aria-label="Fullscreen"
-              onClick={() => document.documentElement.requestFullscreen?.()}
-            >
-              <Icon.Maximize size={14} />
-            </Btn>
+            {canFullscreen && (
+              <Btn
+                variant="ghost"
+                size="sm"
+                className="!w-7 !px-0"
+                aria-label={roomFullscreen ? "Exit fullscreen" : "Fullscreen"}
+                aria-pressed={roomFullscreen}
+                title={roomFullscreen ? "Exit fullscreen" : "Fullscreen"}
+                onClick={() => toggleFullscreen(document.documentElement)}
+              >
+                {roomFullscreen ? <Icon.Minimize size={14} /> : <Icon.Maximize size={14} />}
+              </Btn>
+            )}
           </div>
         </div>
       </div>
 
       {isPrivate && <KnockToasts roomId={detail.id} />}
-      {settings.showChat && sideOpen && (
-        <button
-          type="button"
-          aria-label="Close panel"
-          className="lg:hidden fixed inset-0 z-[110] bg-black/45 animate-bc-fade cursor-default"
-          onClick={() => setSideOpen(false)}
-        />
-      )}
       {settings.showChat && (
         <RoomSide
           participants={people}
@@ -1034,6 +1073,7 @@ function RoomPage({
           moderation={{ myRole, admin, onModerate }}
           open={sideOpen}
           onClose={() => setSideOpen(false)}
+          returnFocus={chatButton}
         />
       )}
     </div>

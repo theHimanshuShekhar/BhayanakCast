@@ -1,11 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { STUN_SERVERS } from "~/lib/ice";
-import { type Caller, SignInRequiredError } from "./caller.ts";
+import type { Db } from "../db/client.ts";
+import { roomMembers, rooms, user } from "../db/schema/index.ts";
+import { createTestDb } from "../db/test-db.ts";
+import { type Caller, type SignedInCaller, SignInRequiredError } from "./caller.ts";
 import { FakeClock } from "./clock.ts";
 import {
   cloudflareTurn,
   ICE_REPORT_RATE_LIMIT,
   IceService,
+  mayEnterRoom,
   TURN_CREDENTIAL_TTL_S,
   TURN_REFRESH_MARGIN_S,
   type TurnProvider,
@@ -30,11 +34,17 @@ function fakeTurn() {
   return turn;
 }
 
-function setup(turn: TurnProvider | null = fakeTurn()) {
+/** Rooms "r1" and "r2" are open to everyone; nobody may enter anything else ("r3" is ended). */
+function setup(
+  turn: TurnProvider | null = fakeTurn(),
+  mayEnter: (caller: SignedInCaller, roomId: string) => Promise<boolean> = async (_, roomId) =>
+    roomId === "r1" || roomId === "r2",
+) {
   const clock = new FakeClock();
   const lines: { line: string; error?: unknown }[] = [];
   const service = new IceService({
     turn,
+    mayEnter,
     clock,
     log: (line, error) => lines.push({ line, error }),
   });
@@ -46,27 +56,27 @@ const username = (servers: RTCIceServer[]) => servers.find((s) => s.username)?.u
 describe("ICE servers", () => {
   it("are for signed-in callers only", async () => {
     const { service } = setup();
-    await expect(service.serversFor(visitor)).rejects.toThrow(SignInRequiredError);
+    await expect(service.serversFor(visitor, "r1")).rejects.toThrow(SignInRequiredError);
   });
 
   it("mint TURN credentials once per user and reuse them until near expiry", async () => {
     const turn = fakeTurn();
     const { clock, service } = setup(turn);
-    const first = await service.serversFor(asUser("ana"));
+    const first = await service.serversFor(asUser("ana"), "r1");
     expect(turn.minted).toEqual([TURN_CREDENTIAL_TTL_S]);
     expect(username(first.iceServers)).toBe("u1");
     // Asked again just when a page should: with the refresh margin left.
     expect(first.refreshInSeconds).toBe(TURN_CREDENTIAL_TTL_S - TURN_REFRESH_MARGIN_S);
 
     clock.advance(60 * 60_000);
-    const again = await service.serversFor(asUser("ana"));
+    const again = await service.serversFor(asUser("ana"), "r1");
     expect(username(again.iceServers)).toBe("u1");
     expect(again.refreshInSeconds).toBe(TURN_CREDENTIAL_TTL_S - TURN_REFRESH_MARGIN_S - 3_600);
     // Someone else gets their own.
-    expect(username((await service.serversFor(asUser("bo"))).iceServers)).toBe("u2");
+    expect(username((await service.serversFor(asUser("bo"), "r1")).iceServers)).toBe("u2");
 
     clock.advance((first.refreshInSeconds - 3_600) * 1_000);
-    expect(username((await service.serversFor(asUser("ana"))).iceServers)).toBe("u3");
+    expect(username((await service.serversFor(asUser("ana"), "r1")).iceServers)).toBe("u3");
     expect(turn.minted).toHaveLength(3);
   });
 
@@ -74,8 +84,8 @@ describe("ICE servers", () => {
     const turn = fakeTurn();
     const { service } = setup(turn);
     const both = await Promise.all([
-      service.serversFor(asUser("ana")),
-      service.serversFor(asUser("ana")),
+      service.serversFor(asUser("ana"), "r1"),
+      service.serversFor(asUser("ana"), "r1"),
     ]);
     expect(turn.minted).toHaveLength(1);
     expect(both.map((g) => username(g.iceServers))).toEqual(["u1", "u1"]);
@@ -85,7 +95,7 @@ describe("ICE servers", () => {
     const turn = fakeTurn();
     turn.failing = true;
     const { lines, service } = setup(turn);
-    expect(await service.serversFor(asUser("ana"))).toEqual({
+    expect(await service.serversFor(asUser("ana"), "r1")).toEqual({
       iceServers: STUN_SERVERS,
       refreshInSeconds: 60,
     });
@@ -96,12 +106,126 @@ describe("ICE servers", () => {
       },
     ]);
     turn.failing = false;
-    expect(username((await service.serversFor(asUser("ana"))).iceServers)).toBe("u2");
+    expect(username((await service.serversFor(asUser("ana"), "r1")).iceServers)).toBe("u2");
   });
 
   it("are STUN only without a TURN key", async () => {
     const { service } = setup(null);
-    expect((await service.serversFor(asUser("ana"))).iceServers).toEqual(STUN_SERVERS);
+    expect((await service.serversFor(asUser("ana"), "r1")).iceServers).toEqual(STUN_SERVERS);
+  });
+
+  it("carry no TURN credentials for someone who can't enter the room, and mint nothing", async () => {
+    const turn = fakeTurn();
+    const { service } = setup(turn);
+    // A room that isn't live (or isn't open to them) and one that never existed.
+    for (const roomId of ["r3", "nope"]) {
+      expect(await service.serversFor(asUser("ana"), roomId)).toEqual({
+        iceServers: STUN_SERVERS,
+        refreshInSeconds: 60,
+      });
+    }
+    expect(turn.minted).toEqual([]);
+  });
+
+  it("ask the room's rule for the caller who asks, and hand TURN only to those it lets in", async () => {
+    const turn = fakeTurn();
+    const asked: string[] = [];
+    const { service } = setup(turn, async (caller, roomId) => {
+      asked.push(`${caller.user.id}:${roomId}`);
+      return caller.user.id === "ana";
+    });
+    expect(username((await service.serversFor(asUser("ana"), "r1")).iceServers)).toBe("u1");
+    expect((await service.serversFor(asUser("bo"), "r1")).iceServers).toEqual(STUN_SERVERS);
+    expect(asked).toEqual(["ana:r1", "bo:r1"]);
+    expect(turn.minted).toHaveLength(1);
+  });
+
+  it("keep one cached credential per user across rooms, and withhold it where they can't enter", async () => {
+    const turn = fakeTurn();
+    const { service } = setup(turn);
+    expect(username((await service.serversFor(asUser("ana"), "r1")).iceServers)).toBe("u1");
+    // Another room reuses the cached credentials: nothing is minted again.
+    expect(username((await service.serversFor(asUser("ana"), "r2")).iceServers)).toBe("u1");
+    // A cached credential isn't handed out for a room they can't enter.
+    expect((await service.serversFor(asUser("ana"), "r3")).iceServers).toEqual(STUN_SERVERS);
+    expect(turn.minted).toHaveLength(1);
+  });
+
+  it("are for signed-in callers before the room is even looked at", async () => {
+    const asked: string[] = [];
+    const { service } = setup(fakeTurn(), async (_, roomId) => {
+      asked.push(roomId);
+      return true;
+    });
+    await expect(service.serversFor(visitor, "r1")).rejects.toThrow(SignInRequiredError);
+    expect(asked).toEqual([]);
+  });
+});
+
+describe("mayEnterRoom", () => {
+  let db: Db;
+  let close: () => Promise<void>;
+  const T0 = new Date("2026-09-01T12:00:00Z");
+  const admin: Caller = { user: { id: "admin", username: "admin", image: null }, role: "admin" };
+  const signedIn = (id: string) => asUser(id) as SignedInCaller;
+
+  beforeEach(async () => {
+    ({ db, close } = await createTestDb());
+    await db.insert(user).values(
+      ["host", "ana", "member", "kicked", "admin"].map((id) => ({
+        id,
+        name: id,
+        email: `${id}@discord.invalid`,
+        discordUsername: `${id}.discord`,
+        role: id === "admin" ? "admin" : "user",
+      })),
+    );
+    await db.insert(rooms).values([
+      { id: "pub", name: "public", hostUserId: "host", createdBy: "host", createdAt: T0 },
+      {
+        id: "priv",
+        name: "private",
+        hostUserId: "host",
+        createdBy: "host",
+        createdAt: T0,
+        isPrivate: true,
+      },
+      {
+        id: "old",
+        name: "ended",
+        hostUserId: "host",
+        createdBy: "host",
+        createdAt: T0,
+        endedAt: T0,
+      },
+    ]);
+    await db.insert(roomMembers).values([
+      { roomId: "priv", userId: "member", approved: true },
+      { roomId: "pub", userId: "kicked", kicked: true },
+      { roomId: "priv", userId: "kicked", approved: true, kicked: true },
+    ]);
+  });
+
+  afterEach(async () => {
+    await close();
+  });
+
+  it("lets a signed-in user into a live public room, and the host and approved members into a private one", async () => {
+    expect(await mayEnterRoom(db, signedIn("ana"), "pub")).toBe(true);
+    expect(await mayEnterRoom(db, signedIn("host"), "priv")).toBe(true);
+    expect(await mayEnterRoom(db, signedIn("member"), "priv")).toBe(true);
+    expect(await mayEnterRoom(db, admin as SignedInCaller, "priv")).toBe(true);
+  });
+
+  it("refuses a private room they weren't approved into, an ended room and an unknown one", async () => {
+    expect(await mayEnterRoom(db, signedIn("ana"), "priv")).toBe(false);
+    expect(await mayEnterRoom(db, signedIn("host"), "old")).toBe(false);
+    expect(await mayEnterRoom(db, signedIn("host"), "nope")).toBe(false);
+  });
+
+  it("refuses someone kicked from the room", async () => {
+    expect(await mayEnterRoom(db, signedIn("kicked"), "pub")).toBe(false);
+    expect(await mayEnterRoom(db, signedIn("kicked"), "priv")).toBe(false);
   });
 });
 

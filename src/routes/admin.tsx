@@ -60,7 +60,7 @@ export const Route = createFileRoute("/admin")({
       queryClient.ensureQueryData(adminOverviewQuery()),
       queryClient.ensureQueryData(adminDailySeriesQuery()),
       queryClient.ensureQueryData(adminLiveRoomsQuery()),
-      queryClient.ensureQueryData(adminRecentRoomsQuery()),
+      queryClient.ensureQueryData(adminRecentRoomsQuery(FIRST_ROOMS_PAGE)),
       queryClient.ensureQueryData(adminLeaderboardsQuery()),
       queryClient.ensureQueryData(adminUsersQuery(FIRST_USERS_PAGE)),
     ]);
@@ -70,6 +70,9 @@ export const Route = createFileRoute("/admin")({
 
 /** The users table as the page opens: no search, everyone, page 1. */
 const FIRST_USERS_PAGE = { q: "", banned: false, page: 1 };
+
+/** The recent-rooms table as the page opens: no search, page 1. */
+const FIRST_ROOMS_PAGE = { q: "", page: 1 };
 
 const card = "bg-surface border border-border rounded-[var(--radius)] shadow-card";
 const th =
@@ -289,28 +292,64 @@ const SortHeader = ({
   );
 };
 
-const RecentRoomsTable = ({ rooms: rows }: { rooms: AdminRoomRow[] }) => {
+/** Previous and next buttons under a table paged server-side. */
+const Pager = ({
+  label,
+  page,
+  pages,
+  setPage,
+}: {
+  label: string;
+  page: number;
+  pages: number;
+  setPage: (update: (page: number) => number) => void;
+}) => (
+  <nav
+    aria-label={label}
+    className="flex items-center justify-end gap-2 px-3.5 py-2.5 border-t border-border-subtle bg-canvas"
+  >
+    <MonoCaps>
+      page {Math.min(page, pages)} of {pages}
+    </MonoCaps>
+    <Btn size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+      previous
+    </Btn>
+    <Btn size="sm" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>
+      next
+    </Btn>
+  </nav>
+);
+
+/** Recent rooms, searched and paged server-side; the sort headers order the page shown. */
+const RecentRoomsTable = () => {
   const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
   const [sort, setSort] = useState<Sort>({ key: "endedAt", dir: "desc" });
-  const rooms: RecentRoom[] = rows.map((r) => ({ ...r, hostName: r.host?.username ?? "" }));
-  const term = q.trim().toLowerCase();
-  const sorted = rooms
-    .filter((r) => r.name.toLowerCase().includes(term) || r.hostName.toLowerCase().includes(term))
-    .sort((a, b) => {
-      const av = a[sort.key];
-      const bv = b[sort.key];
-      // Empty values last. Two empty ones tie: answering 1 for both orders (a comparator that
-      // contradicts itself) sorts differently in Node and Firefox, so the server and the browser
-      // rendered the live rooms in different orders and hydration failed.
-      if (av == null && bv == null) return 0;
-      if (av == null) return 1;
-      if (bv == null) return -1;
-      if (typeof av === "number" && typeof bv === "number")
-        return sort.dir === "desc" ? bv - av : av - bv;
-      return sort.dir === "desc"
-        ? String(bv).localeCompare(String(av))
-        : String(av).localeCompare(String(bv));
-    });
+  const term = useDebounced(q.trim(), 250);
+  const { data } = useQuery({
+    ...adminRecentRoomsQuery({ q: term, page }),
+    placeholderData: keepPreviousData,
+  });
+  const rooms: RecentRoom[] = (data?.rooms ?? []).map((r) => ({
+    ...r,
+    hostName: r.host?.username ?? "",
+  }));
+  const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
+  const sorted = [...rooms].sort((a, b) => {
+    const av = a[sort.key];
+    const bv = b[sort.key];
+    // Empty values last. Two empty ones tie: answering 1 for both orders (a comparator that
+    // contradicts itself) sorts differently in Node and Firefox, so the server and the browser
+    // rendered the live rooms in different orders and hydration failed.
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === "number" && typeof bv === "number")
+      return sort.dir === "desc" ? bv - av : av - bv;
+    return sort.dir === "desc"
+      ? String(bv).localeCompare(String(av))
+      : String(av).localeCompare(String(bv));
+  });
 
   return (
     <div>
@@ -322,12 +361,13 @@ const RecentRoomsTable = ({ rooms: rows }: { rooms: AdminRoomRow[] }) => {
             className="flex-1 min-w-0 bg-transparent border-0 outline-0 text-fg text-xs"
             placeholder="search rooms or hosts…"
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            onChange={(e) => {
+              setQ(e.target.value);
+              setPage(1);
+            }}
           />
         </div>
-        <MonoCaps>
-          {sorted.length} of {rooms.length} rooms
-        </MonoCaps>
+        <MonoCaps>{data?.total ?? 0} rooms</MonoCaps>
       </div>
       <div className="overflow-x-auto">
         <table aria-label="recent rooms" className="w-full min-w-[640px] border-collapse text-xs">
@@ -390,6 +430,7 @@ const RecentRoomsTable = ({ rooms: rows }: { rooms: AdminRoomRow[] }) => {
           </tbody>
         </table>
       </div>
+      <Pager label="recent rooms pages" page={page} pages={pages} setPage={setPage} />
     </div>
   );
 };
@@ -594,20 +635,7 @@ const UsersTable = () => {
           </tbody>
         </table>
       </div>
-      <nav
-        aria-label="users pages"
-        className="flex items-center justify-end gap-2 px-3.5 py-2.5 border-t border-border-subtle bg-canvas"
-      >
-        <MonoCaps>
-          page {Math.min(page, pages)} of {pages}
-        </MonoCaps>
-        <Btn size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-          previous
-        </Btn>
-        <Btn size="sm" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>
-          next
-        </Btn>
-      </nav>
+      <Pager label="users pages" page={page} pages={pages} setPage={setPage} />
       <BanUserDialog
         target={banTarget}
         onOpenChange={(open) => !open && setBanTarget(null)}
@@ -756,7 +784,6 @@ function AdminPage() {
   const { data: overview } = useSuspenseQuery(adminOverviewQuery());
   const { data: daily } = useSuspenseQuery(adminDailySeriesQuery());
   const { data: liveRooms } = useSuspenseQuery(adminLiveRoomsQuery());
-  const { data: recentRooms } = useSuspenseQuery(adminRecentRoomsQuery());
   const { data: leaderboards } = useSuspenseQuery(adminLeaderboardsQuery());
   const { totals, window: last30 } = overview;
   const chartDays = daily.map((d) => ({
@@ -868,13 +895,13 @@ function AdminPage() {
 
         <SectionHead
           title="recent rooms"
-          sub="last 30 days · sortable"
+          sub="last 30 days · search · sort a page"
           dot="muted"
           size="sm"
           className="mt-6"
         />
         <div className={`${card} overflow-hidden`}>
-          <RecentRoomsTable rooms={recentRooms} />
+          <RecentRoomsTable />
         </div>
 
         <SectionHead title="users" sub="search · ban and unban" size="sm" className="mt-6" />

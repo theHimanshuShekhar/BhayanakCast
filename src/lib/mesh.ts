@@ -29,11 +29,19 @@
  * page offers afresh, and one whose first offer was lost (the server drops signalling to someone
  * in their reconnect grace) sends it again.
  *
+ * `send` says whether the step went out: while the page's own socket is reconnecting it doesn't.
+ * A description lost that way (an offer, or an answer) is kept, and `resend` (the socket is back
+ * in the room) sends it again, in order, unless negotiation has moved on: an offer only while it
+ * is still the pending one. Each goes as it stands then, with the candidates gathered since.
+ * Candidates and `visibility` steps are not kept (a description sent again carries the
+ * candidates, and the pair's state is told again whenever it connects).
+ *
  * A connection that fails, or doesn't connect within `CONNECT_TIMEOUT_MS`, gets one ICE restart
  * (with the latest ICE servers: STUN plus TURN, ADR 3), or one start-over if it never even
- * negotiated; if that fails too it is `failed` until `retry` starts it over. Once connected, its
- * selected candidate pair says whether it is `relayed` through TURN. `relayed`, and `failed`
- * after ICE was tried, come with the connection's anonymised ICE path.
+ * negotiated; if that fails too it is `failed` until `retry` starts it over (or until TURN
+ * credentials arrive for a page that started on STUN alone: then one more ICE restart). Once
+ * connected, its selected candidate pair says whether it is `relayed` through TURN. `relayed`,
+ * and `failed` after ICE was tried, come with the connection's anonymised ICE path.
  *
  * A camera this page isn't showing (a hidden or scrolled-away tile) is paused towards it, to save
  * the sender's upload (ADR 2 addendum): `setVisible` tells that peer with a `visibility` step
@@ -47,7 +55,11 @@
  *
  * Video is adaptive and per pair (ADR 2). `adjust` (run every `QUALITY_INTERVAL_MS`) reads each
  * screen and camera sender's stats and moves it along its quality ladder (./quality.ts), applied
- * with `setParameters` to that peer's sender alone. Each side also tells the other which video
+ * with `setParameters` to that peer's sender alone. The pairs share this page's uplink, though:
+ * an `UplinkBudget` bounds the sum of all the senders' target bitrates, a new sender starts at
+ * the highest rung the others leave room for, a probe up has to fit it, and when most pairs show
+ * strain at once the budget drops towards what was being sent and the heaviest senders step down
+ * until the targets fit (ADR 2 addendum). Each side also tells the other which video
  * codecs it can decode (in `hello` and every description), and orders its own senders' codecs
  * best first, AV1 > VP9 > H.264 > VP8, among those (./codecs.ts). A codec preference takes effect
  * in the next offer, which browsers version as they do any other.
@@ -55,19 +67,24 @@
  * Local tracks belong to the caller (./local-media.ts): the Mesh never stops them.
  */
 import { localVideoCodecs, orderCodecs, type VideoCodecs } from "./codecs";
-import { type IcePath, icePathOf, isRelayed, STUN_SERVERS } from "./ice";
+import { hasTurn, type IcePath, icePathOf, isRelayed, STUN_SERVERS } from "./ice";
 import {
   CAMERA_DEFAULT_RUNG,
   CAMERA_LADDER,
   captureCap,
+  fitRung,
   freshLadderState,
+  INITIAL_UPLINK,
   type LadderState,
+  probeDue,
   type Rung,
   readSample,
   SCREEN_DEFAULT_RUNG,
   SCREEN_LADDER,
   type StatsSample,
   step,
+  strained,
+  UplinkBudget,
 } from "./quality";
 import type { MediaSlot, SignalPayload } from "./realtime";
 
@@ -125,20 +142,36 @@ export interface PeerQuality {
   cam?: SlotQuality;
 }
 
+/** What one pair's pass over its senders showed, for the uplink budget. */
+interface PairReading {
+  /** Whether a sender past its warm-up showed strain on the network; absent if none was past it. */
+  strained?: boolean;
+}
+
+/** A video sender being sent, with the pair and ladder state it belongs to. */
+interface VideoSender {
+  link: Link;
+  slot: VideoSlot;
+  state: Adaptation;
+  sender: RTCRtpSender;
+}
+
 /** How long a connection may take to connect (or reconnect) before it gets an ICE restart. */
 export const CONNECT_TIMEOUT_MS = 20_000;
 
 export interface MeshOptions {
   /** This user's id: decides who is polite in each pair. */
   selfId: string;
-  /** Deliver `payload` to peer `to` (the `signal` message). */
-  send: (to: string, payload: SignalPayload) => void;
+  /** Deliver `payload` to peer `to` (the `signal` message); false if it was dropped (see `resend`). */
+  send: (to: string, payload: SignalPayload) => boolean;
   /** The ICE servers (see `setIceServers`). Defaults to `STUN_SERVERS`. */
   iceServers?: RTCIceServer[];
   /** Where negotiation failures are reported. Defaults to `console.warn`. */
   log?: (message: string, error?: unknown) => void;
   /** This browser's video codecs. Defaults to what it reports. For tests. */
   codecs?: VideoCodecs;
+  /** The uplink budget to start from, bits per second. Defaults to `INITIAL_UPLINK`. For tests. */
+  uplink?: number;
   /** For tests. */
   RTCPeerConnection?: typeof RTCPeerConnection;
 }
@@ -229,6 +262,7 @@ type Step =
   | Omit<Extract<SignalPayload, { kind: "description" }>, "session" | "peerSession">
   | Omit<Extract<SignalPayload, { kind: "candidate" }>, "session" | "peerSession">
   | Omit<Extract<SignalPayload, { kind: "visibility" }>, "session" | "peerSession">;
+type DescriptionStep = Extract<Step, { kind: "description" }>;
 
 /** One video sender's place on its quality ladder (`rung` is the one wanted, see `#tune`). */
 interface Adaptation extends LadderState {
@@ -258,6 +292,12 @@ interface Link {
   remoteSlots: Map<string, MediaSlot>;
   /** The peer's description this side applied last, as sent (before `withStereoOpus`). */
   remoteSdp?: string;
+  /** The pending offer was dropped by `send` (`resend` sends what is pending then). */
+  offerUnsent: boolean;
+  /** The answer `send` dropped; it goes before any offer after it. */
+  answerUnsent?: DescriptionStep;
+  /** A quality pass over this peer's senders is running (see `adjust`). */
+  adjusting: boolean;
   /** Slots the peer isn't showing: sent to it as no track. */
   paused: Set<MediaSlot>;
   tracks: Partial<Record<MediaSlot, MediaStreamTrack>>;
@@ -284,6 +324,10 @@ export class Mesh {
   readonly #log: (message: string, error?: unknown) => void;
   readonly #RTCPeerConnection: typeof RTCPeerConnection;
   readonly #codecs: VideoCodecs | undefined;
+  /** What all the video senders' targets may add up to (their sum is `#committed`). */
+  readonly #budget: UplinkBudget;
+  /** What `setParameters` last gave each screen sender, for browsers that don't report it. */
+  readonly #degradation = new WeakMap<RTCRtpSender, RTCDegradationPreference>();
   readonly #links = new Map<string, Link>();
   readonly #listeners = new Set<(event: MeshEvent) => void>();
   readonly #local: Partial<Record<MediaSlot, MediaStreamTrack | null>> = {};
@@ -291,7 +335,6 @@ export class Mesh {
   readonly #shown = new Map<string, Map<MediaSlot, boolean>>();
   #closed = false;
   #adjustTimer: ReturnType<typeof setInterval> | undefined;
-  #adjusting = false;
 
   constructor(options: MeshOptions) {
     this.#selfId = options.selfId;
@@ -300,6 +343,7 @@ export class Mesh {
     this.#log = options.log ?? ((message, error) => console.warn(`[mesh] ${message}`, error));
     this.#RTCPeerConnection = options.RTCPeerConnection ?? RTCPeerConnection;
     this.#codecs = options.codecs ?? localVideoCodecs();
+    this.#budget = new UplinkBudget(options.uplink ?? INITIAL_UPLINK);
   }
 
   /**
@@ -396,12 +440,27 @@ export class Mesh {
   }
 
   /**
+   * Send again the descriptions `send` dropped (an offer or answer meant for a peer while this
+   * page's socket was reconnecting). Call it once the socket is back in the room, which is when
+   * the server relays this page's signalling again. A no-op for peers with nothing waiting.
+   */
+  resend(): void {
+    if (this.#closed) return;
+    for (const link of this.#links.values()) this.#flush(link);
+  }
+
+  /**
    * Use these ICE servers from now on (fresh TURN credentials): for new connections, and for
-   * ICE restarts of the current ones.
+   * ICE restarts of the current ones. When TURN arrives after a start on STUN alone (fetching
+   * the credentials failed at first), pairs that failed meanwhile restart ICE: they may relay.
    */
   setIceServers(iceServers: RTCIceServer[]): void {
+    const gotTurn = !hasTurn(this.#iceServers) && hasTurn(iceServers);
     this.#iceServers = iceServers;
-    for (const link of this.#links.values()) this.#configure(link);
+    for (const link of this.#links.values()) {
+      this.#configure(link);
+      if (gotTurn && link.state === "failed" && link.pc.remoteDescription) this.#restartIce(link);
+    }
   }
 
   /** Start over with `userId` (after `failed`): a new connection, and they start over too. */
@@ -459,16 +518,32 @@ export class Mesh {
   /**
    * Read every video sender's stats and move it along its ladder (run every
    * `QUALITY_INTERVAL_MS` while something is sent; public for tests). Each peer's senders adapt
-   * on their own connection's stats, so a viewer on a bad link doesn't degrade the others.
+   * on their own connection's stats, so a viewer on a bad link doesn't degrade the others. Each
+   * peer's pass is guarded on its own too: one whose stats read hangs is skipped until it
+   * returns, and the other peers carry on.
    */
   async adjust(): Promise<void> {
-    if (this.#adjusting) return;
-    this.#adjusting = true;
-    try {
-      await Promise.all([...this.#links.values()].map((link) => this.#adjustLink(link)));
-    } finally {
-      this.#adjusting = false;
+    const links = [...this.#links.values()];
+    const readings = await Promise.all(links.map((link) => this.#adjustLink(link)));
+    // A pair skipped this pass (its last read hasn't returned) has no say; what it sends counts.
+    const judged = readings.filter((reading) => reading?.strained !== undefined);
+    if (judged.length > 0) {
+      let sent = 0;
+      for (const { link, state } of this.#videoSenders()) {
+        if (this.#live(link)) sent += state.last?.sendBitrate ?? 0;
+      }
+      this.#budget.observe({
+        pairs: judged.length,
+        strainedPairs: judged.filter((reading) => reading?.strained).length,
+        sent,
+      });
     }
+    this.#fitBudget();
+  }
+
+  /** The uplink budget and what all the video senders' targets add up to. For tests. */
+  uplink(): { budget: number; targeted: number } {
+    return { budget: this.#budget.limit, targeted: this.#committed() };
   }
 
   /** Each peer's current rung and codec, per video sender that is sending (for the dev overlay). */
@@ -520,6 +595,8 @@ export class Mesh {
       started: false,
       makingOffer: false,
       ignoreOffer: false,
+      offerUnsent: false,
+      adjusting: false,
       own: new Map(),
       remoteSlots: new Map(),
       paused: new Set(),
@@ -590,10 +667,17 @@ export class Mesh {
     transceiver.sender
       .replaceTrack(this.#outgoing(link, slot))
       .then(() => {
-        // A resumed or replaced track: the readings so far were of something else.
+        // A resumed or replaced track: the readings so far were of something else. It comes
+        // back at the rung it had, if the budget has room for it now, like a new pair.
         const state = isVideoSlot(slot) ? link.quality[slot] : undefined;
-        if (state)
-          Object.assign(state, freshLadderState(state.rung), { readings: 0, last: undefined });
+        if (state && isVideoSlot(slot)) {
+          const own = transceiver.sender.track ? rungOf(slot, state.rung).maxBitrate : 0;
+          const room = this.#budget.room(this.#committed() - own);
+          const rung = transceiver.sender.track
+            ? fitRung(LADDERS[slot].rungs, room, state.rung)
+            : state.rung;
+          Object.assign(state, freshLadderState(rung), { readings: 0, last: undefined });
+        }
         this.#tune(link, slot, transceiver.sender);
       })
       .catch((error: unknown) => this.#log(`sending ${slot} to ${link.userId} failed`, error));
@@ -626,10 +710,13 @@ export class Mesh {
       maxFramerate: rung.frameRate,
       ...(height && { scaleResolutionDownBy: Math.max(1, height / rung.height) }),
     };
-    const degradationPreference =
-      slot === "screen" ? degradationFor(track.contentHint) : parameters.degradationPreference;
+    // A camera keeps whatever it has. A browser that doesn't report its degradation preference
+    // (Firefox, probably Safari) is taken to have what was last set, or it would never match.
+    const degradationPreference = slot === "screen" ? degradationFor(track.contentHint) : undefined;
     const unchanged =
-      parameters.degradationPreference === degradationPreference &&
+      (degradationPreference === undefined ||
+        (parameters.degradationPreference ?? this.#degradation.get(sender)) ===
+          degradationPreference) &&
       Object.entries(wanted).every(([key, value]) => first[key as keyof typeof first] === value);
     if (unchanged) return;
     await sender.setParameters({
@@ -637,13 +724,16 @@ export class Mesh {
       encodings: [{ ...first, ...wanted }, ...others],
       ...(degradationPreference && { degradationPreference }),
     });
+    if (degradationPreference) this.#degradation.set(sender, degradationPreference);
   }
 
   /** `slot`'s ladder state for `link`: its default rung, or the highest its capture feeds. */
   #adaptation(link: Link, slot: VideoSlot, track: MediaStreamTrack): Adaptation {
     let state = link.quality[slot];
     if (!state) {
-      const rung = Math.min(LADDERS[slot].start, this.#cap(slot, track));
+      // The highest rung it may start at that the other senders leave room for.
+      const top = Math.min(LADDERS[slot].start, this.#cap(slot, track));
+      const rung = fitRung(LADDERS[slot].rungs, this.#budget.room(this.#committed()), top);
       state = { ...freshLadderState(rung), readings: 0 };
       link.quality[slot] = state;
     }
@@ -661,12 +751,94 @@ export class Mesh {
     return link.own.get(other)?.sender.track ? (link.quality[other]?.last?.sendBitrate ?? 0) : 0;
   }
 
+  /** Every video sender being sent (one with a track and a place on its ladder). */
+  *#videoSenders(): Generator<VideoSender> {
+    for (const link of this.#links.values()) {
+      for (const slot of VIDEO_SLOTS) {
+        const state = link.quality[slot];
+        const sender = link.own.get(slot)?.sender;
+        if (state && sender?.track) yield { link, slot, state, sender };
+      }
+    }
+  }
+
+  /** What every video sender being sent targets together (each one's rung `maxBitrate`). */
+  #committed(): number {
+    let total = 0;
+    for (const { slot, state } of this.#videoSenders())
+      total += rungOf(slot, state.rung).maxBitrate;
+    return total;
+  }
+
+  /** The pair's connection is up, so its senders are read (and can probe). */
+  #live(link: Link): boolean {
+    return link.state === "connected" || link.state === "relayed";
+  }
+
+  /**
+   * Whether `state` may grow the budget now: no other sender of `slot` that can probe (a live
+   * pair, clean for a window, below its capture's cap) sits on a lower rung. A viewer on a
+   * mediocre link, or a pair that isn't connected, never probes and so never holds the turn.
+   */
+  #hasTurn(slot: VideoSlot, state: Adaptation): boolean {
+    for (const other of this.#videoSenders()) {
+      if (other.slot !== slot || other.state === state || !this.#live(other.link)) continue;
+      const canProbe = other.state.rung < this.#cap(slot, other.sender.track as MediaStreamTrack);
+      if (
+        canProbe &&
+        probeDue(other.state.window, other.state.backoff) &&
+        other.state.rung < state.rung
+      ) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Whether `state` may step up to `rung` (it proposes a probe): within the room the budget has
+   * left, or else on its turn after a clean spell, which grows the budget by just that probe.
+   */
+  #admit(slot: VideoSlot, state: Adaptation, rung: number): boolean {
+    const extra = rungOf(slot, rung).maxBitrate - rungOf(slot, state.rung).maxBitrate;
+    return this.#budget.admit(this.#committed(), extra, this.#hasTurn(slot, state));
+  }
+
+  /**
+   * Step the heaviest senders down, a rung at a time, until their targets fit the budget. A
+   * pair whose pass is still running (a stats read that hasn't returned) is left alone.
+   */
+  #fitBudget(): void {
+    while (this.#committed() > this.#budget.limit) {
+      let heaviest: VideoSender | undefined;
+      for (const candidate of this.#videoSenders()) {
+        if (candidate.state.rung === 0 || candidate.link.adjusting) continue;
+        const bitrate = (c: VideoSender) => rungOf(c.slot, c.state.rung).maxBitrate;
+        if (!heaviest || bitrate(candidate) > bitrate(heaviest)) heaviest = candidate;
+      }
+      if (!heaviest) return;
+      const { link, slot, state, sender } = heaviest;
+      Object.assign(state, freshLadderState(state.rung - 1), { backoff: state.backoff });
+      this.#tune(link, slot, sender);
+    }
+  }
+
   #watchQuality(): void {
     this.#adjustTimer ??= setInterval(() => void this.adjust(), QUALITY_INTERVAL_MS);
   }
 
-  async #adjustLink(link: Link): Promise<void> {
-    if (link.state !== "connected" && link.state !== "relayed") return;
+  async #adjustLink(link: Link): Promise<PairReading | undefined> {
+    if (link.adjusting || !this.#live(link)) return undefined;
+    link.adjusting = true;
+    try {
+      return await this.#adjustSenders(link);
+    } finally {
+      link.adjusting = false;
+    }
+  }
+
+  async #adjustSenders(link: Link): Promise<PairReading> {
+    const reading: PairReading = {};
     for (const slot of VIDEO_SLOTS) {
       const sender = link.own.get(slot)?.sender;
       const track = sender?.track;
@@ -683,16 +855,18 @@ export class Mesh {
       if (sample.codec) state.codec = sample.codec;
       state.last = sample;
       if (state.readings++ >= WARMUP_READINGS) {
-        Object.assign(
-          state,
-          step(LADDERS[slot].rungs, state, sample, {
-            max: this.#cap(slot, track),
-            reserved: this.#reservedFor(link, slot),
-          }),
-        );
+        reading.strained = (reading.strained ?? false) || strained(sample);
+        const options = { max: this.#cap(slot, track), reserved: this.#reservedFor(link, slot) };
+        let next = step(LADDERS[slot].rungs, state, sample, options);
+        // A probe the budget refuses is no probe: the window carries on as it was.
+        if (next.rung > state.rung && !this.#admit(slot, state, next.rung)) {
+          next = step(LADDERS[slot].rungs, state, sample, { ...options, max: state.rung });
+        }
+        Object.assign(state, next);
       }
       this.#tune(link, slot, sender);
     }
+    return reading;
   }
 
   #shut(link: Link): void {
@@ -767,17 +941,49 @@ export class Mesh {
     }
   }
 
+  /** Send `link`'s local description; if `send` drops it, it waits for `resend`. */
   #sendDescription(link: Link): void {
+    const step = this.#describe(link);
+    if (!step) return;
+    if (step.description.type === "answer") link.answerUnsent = step;
+    else link.offerUnsent = true;
+    this.#flush(link);
+  }
+
+  /** `link`'s local description as a step, with what its transceivers carry. */
+  #describe(link: Link): DescriptionStep | undefined {
     const description = link.pc.localDescription;
-    if (!description) return;
+    if (!description) return undefined;
     const slots: Record<string, MediaSlot> = {};
     for (const [slot, transceiver] of link.own) if (transceiver.mid) slots[transceiver.mid] = slot;
-    this.#signal(link, {
+    return {
       kind: "description",
       description: { type: description.type, sdp: description.sdp },
       slots,
       ...this.#decodable(),
-    });
+    };
+  }
+
+  /**
+   * Send what `send` dropped, an answer before the offer that came after it, and stop at the
+   * first drop. A waiting answer or offer goes as it stands now, with the candidates gathered
+   * since (those were dropped too).
+   */
+  #flush(link: Link): void {
+    if (link.answerUnsent) {
+      // The answer is the connection's current local description, even once an offer follows it.
+      const local = link.pc.currentLocalDescription ?? link.pc.localDescription;
+      const kept = link.answerUnsent;
+      const answer: DescriptionStep =
+        local?.type === "answer" && isSameOffer(local.sdp, kept.description.sdp)
+          ? { ...kept, description: { type: local.type, sdp: local.sdp } }
+          : kept;
+      if (!this.#signal(link, answer)) return;
+      link.answerUnsent = undefined;
+    }
+    if (!link.offerUnsent) return;
+    const offer = link.pc.signalingState === "have-local-offer" ? this.#describe(link) : undefined;
+    if (!offer || this.#signal(link, offer)) link.offerUnsent = false;
   }
 
   /** The video codecs this side tells peers it can decode. */
@@ -785,9 +991,10 @@ export class Mesh {
     return this.#codecs ? { codecs: this.#codecs.receive } : {};
   }
 
-  #signal(link: Link, step: Step): void {
-    if (!this.#current(link)) return;
-    this.#send(link.userId, {
+  /** Whether `step` went out (not if `send` dropped it, or the connection is gone). */
+  #signal(link: Link, step: Step): boolean {
+    if (!this.#current(link)) return false;
+    return this.#send(link.userId, {
       ...step,
       session: link.session,
       ...(link.remoteSession ? { peerSession: link.remoteSession } : {}),
@@ -860,11 +1067,7 @@ export class Mesh {
       return;
     }
     if (negotiated && !link.restarted) {
-      link.restarted = true;
-      this.#configure(link);
-      link.pc.restartIce();
-      this.#waitToConnect(link);
-      this.#setState(link, "connecting");
+      this.#restartIce(link);
       return;
     }
     if (link.state === "failed") return;
@@ -878,6 +1081,15 @@ export class Mesh {
         this.#emit({ type: "state", userId: link.userId, state: "failed", ...(ice && { ice }) });
       }
     });
+  }
+
+  /** Restart ICE on `link` with the latest ICE servers (its one automatic restart). */
+  #restartIce(link: Link): void {
+    link.restarted = true;
+    this.#configure(link);
+    link.pc.restartIce();
+    this.#waitToConnect(link);
+    this.#setState(link, "connecting");
   }
 
   /** The connection's anonymised ICE path, from its stats (undefined if they can't be read). */

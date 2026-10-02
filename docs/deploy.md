@@ -12,9 +12,9 @@ The stack has three services:
 
 | Service | What it does |
 |---|---|
-| `app` | Built from the `Dockerfile` (Node 26, pnpm via corepack). On start it applies pending Drizzle migrations (`node src/db/migrate.ts`), then serves pages, `/api/*` and the realtime socket `/ws` from one port (`node server.prod.ts`). Published only on `${HOST_BIND}:${HOST_PORT}` (default `10.1.1.160:3000`). Healthcheck: `GET /api/auth/ok`. |
-| `db` | `postgres:17-alpine` with a named local Docker volume (`pgdata`). Never put it on the NAS CIFS share (ADR 9 addendum). Not published on any host port. Healthcheck: `pg_isready`. |
-| `backup` | Built from `backup/` (`postgres:17-alpine` plus `rsync` and `supercronic`). Once at start, and then on `BACKUP_SCHEDULE` (nightly by default), it writes a compressed `pg_dump` to its `backups` volume, rsyncs it to the NAS share and prunes old dumps (section 5, Backups to the NAS). Healthcheck: the last run succeeded. |
+| `app` | Built from the `Dockerfile` (Node 26, pnpm via corepack; the base image, corepack and pnpm are pinned, see Pinned images). On start it applies pending Drizzle migrations (`node src/db/migrate.ts`), then serves pages, `/api/*` and the realtime socket `/ws` from one port (`node server.prod.ts`). Published only on `${HOST_BIND}:${HOST_PORT}` (default `10.1.1.160:3000`). Healthcheck: `GET /api/auth/ok`. |
+| `db` | `postgres:17-alpine`, pinned by digest, with a named local Docker volume (`pgdata`). Never put it on the NAS CIFS share (ADR 9 addendum). Not published on any host port. Healthcheck: `pg_isready`. |
+| `backup` | Built from `backup/` (`postgres:17-alpine`, pinned by digest, plus pinned `rsync` and `supercronic`). Once at start, and then on `BACKUP_SCHEDULE` (nightly by default), it writes a compressed `pg_dump` to its `backups` volume, rsyncs it to the NAS share and prunes old dumps (section 5, Backups to the NAS). Healthcheck: the last run succeeded, recently. |
 
 All services use `restart: unless-stopped` and json-file log rotation (3 files of 10 MB each).
 
@@ -73,7 +73,7 @@ as an empty string, and the app treats that as unset. See `.env.example` for a t
 
 | Variable | Required | Where to get it |
 |---|---|---|
-| `POSTGRES_PASSWORD` | yes | Generate one: `openssl rand -hex 24`. Keep it URL-safe, because it's embedded in the app's `DATABASE_URL`. It's applied only when the volume is first initialised; changing it later means running `ALTER USER` inside Postgres too. |
+| `POSTGRES_PASSWORD` | yes | Generate one: `openssl rand -hex 24`. It must be URL-safe (the hex output is), because compose pastes it unencoded into the app's `DATABASE_URL`; a `/`, `#`, `?` or `%` in it makes the app refuse to start, and `POSTGRES_USER` and `POSTGRES_DB` follow the same rule. It's applied only when the volume is first initialised; changing it later means running `ALTER USER` inside Postgres too. |
 | `POSTGRES_USER`, `POSTGRES_DB` | no | Default `bhayanakcast`. |
 | `BETTER_AUTH_SECRET` | yes | Generate one: `openssl rand -base64 32` (at least 32 chars). It signs sessions: rotating it signs everyone out. |
 | `BETTER_AUTH_URL` | no | Defaults to `https://cast.bhayanak.net` in compose. It must be the public origin, because it builds the Discord redirect URL. |
@@ -85,12 +85,14 @@ as an empty string, and the app treats that as unset. See `.env.example` for a t
 | `HOST_BIND` | no | Host address the app is published on. Default `10.1.1.160` (the dockhand LXC's LAN IP). |
 | `HOST_PORT` | no | Host port. Default `3000`. The tunnel's service URL must match it. |
 | `REALTIME_ANONYMOUS_SOCKETS_PER_IP` | no | Open signed-out (lobby) sockets per client IP. Default `20` (ADR 20). |
+| `REALTIME_SOCKETS_PER_USER` | no | Open realtime sockets (tabs and devices) per signed-in user; more are refused with 429. Default `10` (ADR 4 addendum). |
 | `REALTIME_EMPTY_ROOM_TIMEOUT_MS` | no | How long an empty room waits before it ends. Default `300000` (5 minutes, ADR 14). Leave it unset in production. |
 | `BACKUP_NAS_SHARE` | no | The NAS CIFS directory where dumps go, as `//host/share/path`. Default `//10.1.1.195/weyland/Services/backups/bhayanakcast`. It must exist and hold the `.bhayanakcast-backups` marker file. See section 5 (Backups to the NAS). |
 | `BACKUP_NAS_USERNAME`, `BACKUP_NAS_PASSWORD` | yes, for backups | The NAS account that can write to `BACKUP_NAS_SHARE`. The password can't contain `,` or `$` (it goes into the mount options and through compose interpolation). Without them `backup` can't start; the app is unaffected. |
 | `BACKUP_SCHEDULE` | no | Cron expression (5 fields) for the backup. Default `0 3 * * *`, nightly at 03:00. |
 | `BACKUP_TZ` | no | Time zone for `BACKUP_SCHEDULE` and the dump's date, for example `Asia/Kolkata`. Default `UTC`. |
-| `BACKUP_RETENTION_DAYS` | no | How many days of dumps to keep, today included, both locally and on the NAS. Older ones are deleted. Default `14`. |
+| `BACKUP_RETENTION_DAYS` | no | How many days of dumps to keep, today included, both locally and on the NAS. Older ones are deleted. Default `14`. A whole number of days, 1 to 9999; leading zeros are fine (`014` is 14). |
+| `BACKUP_MAX_AGE_HOURS` | no | How old the last successful backup may be before `backup` turns unhealthy. Default `26`, for the nightly schedule. If `BACKUP_SCHEDULE` runs less often than daily, set it above the longest gap between runs. |
 
 Compose sets `NODE_ENV=production`, `PORT=3000`, `HOST=0.0.0.0` and `DATABASE_URL` itself. Don't
 set `E2E_AUTH`: compose doesn't pass it through, and the app refuses to start if it's set.
@@ -123,8 +125,8 @@ NAS directory are left alone.
 Docker mounts the share itself, as the stack's `nas` volume (a `cifs` volume of the `local`
 driver), whenever `backup` starts. Nothing is mounted on the host, so it survives reboots. If the
 NAS is unreachable or the credentials are wrong, `backup` fails to start (its error names the
-mount) instead of writing to local disk; the app doesn't depend on it and keeps running. The volume
-is mounted root-only (`uid=0,gid=0,file_mode=0600,dir_mode=0700`), because the dumps hold user data
+mount) instead of writing to local disk. The app doesn't depend on it (see "When the NAS is
+unreachable" below). The volume is mounted root-only (`uid=0,gid=0,file_mode=0600,dir_mode=0700`), because the dumps hold user data
 and session tokens.
 
 1. On the NAS, create the backup directory, for example `Services/backups/bhayanakcast` on the
@@ -142,8 +144,39 @@ and leaves the files on the NAS alone), then redeploy.
 The backup runs once when the container starts, so a broken setup shows up at deploy time. After
 that it runs on `BACKUP_SCHEDULE`. Every run is logged to the container log, ending in
 `backup: done` or `backup: FAILED (exit N)`. The container is **healthy** only while its last run
-succeeded. A failed run makes it **unhealthy** until the next run succeeds. To run a backup now:
-`docker exec <backup container> backup.sh`.
+succeeded and finished less than `BACKUP_MAX_AGE_HOURS` ago. A failed run makes it **unhealthy**
+until the next run succeeds, and so does a last success that is too old (a schedule that stopped
+firing). The status is the file `/tmp/backup-status` (`ok <epoch> <time>` or
+`failed <time> exit N`); `docker exec <backup container> healthcheck.sh` shows why a check fails.
+To run a backup now: `docker exec <backup container> backup.sh`.
+
+A hung run can't block the ones after it: `pg_dump` and `rsync` each get 30 minutes
+(`BACKUP_DUMP_TIMEOUT` and `BACKUP_RSYNC_TIMEOUT`, in seconds, set in the container's environment;
+not stack variables), `pg_dump` gives up connecting after 30 seconds, and `rsync` stops after 5
+minutes without data. A timeout fails the run (exit 143, or 137 if it had to be killed) and
+releases the lock. Failed or interrupted runs leave no `*.partial` dump in `/backups` and no
+`.bhayanakcast-*.sql.gz.XXXXXX` rsync temp file on the NAS; the next run clears any that remain.
+
+### When the NAS is unreachable
+
+Checked with the compose file here and a share that doesn't answer (`BACKUP_NAS_SHARE` pointing at
+an address with no server):
+
+- `docker compose up -d` (a normal stack deploy): `db` and `app` start and run. Only `backup`
+  fails: Docker can't mount `nas`, so `backup` stays in the `created` state and the command exits
+  with an error (`error while mounting volume ... operation now in progress`, after about 15
+  seconds). A deploy tool that treats that exit code as a failed deploy shows red even though the
+  app is up.
+- `docker compose up -d app db` brings up just those two: no `nas` volume is created or mounted,
+  and the command succeeds. This is the way to deploy the app alone while the NAS is down. Dockhand
+  deploys the whole stack, and this was not tried against it: if it reports the deploy as failed
+  because of `backup`, check that `app` is running.
+- Once the NAS is back, redeploy (or `docker compose up -d backup`). The container isn't retried
+  by itself, because it never started; its healthcheck can't report anything either, so watch for
+  `backup` being `created` rather than `unhealthy`.
+- If the share is up but the mount is stale or the directory was replaced, the marker check in
+  `backup.sh` fails the run instead (`/nas/.bhayanakcast-backups is missing`) and the local dump
+  stays in `/backups`.
 
 ### Restore
 
@@ -172,7 +205,7 @@ do this). Then start `app` again.
 
 ## Production guards
 
-- `NODE_ENV=production` is set by both the image and compose.
+- `NODE_ENV=production` is set by both the image and compose. If it's ever missing the app still validates as production (only an explicit `development` or `test` relaxes the checks), so it fails to start rather than booting with development defaults.
 - The app validates its environment at startup. If anything is missing or invalid, it exits and lists every problem (for example `BETTER_AUTH_SECRET: … at least 32 characters`). In the logs, a restart loop with that message means a variable needs fixing.
 - `E2E_AUTH` (the test-only sign-in) is refused in production and isn't passed through by compose.
 - `TRUSTED_PROXY_IPS` is required in production, so a spoofed `cf-connecting-ip` from the LAN is ignored.
@@ -197,7 +230,11 @@ do this). Then start `app` again.
 ## Operating
 
 - **Updating:** merge to `main`, then redeploy (or let the webhook do it). Pending migrations run on
-  start. Migrations only go forward, so rolling back to an older commit doesn't undo a schema change.
+  start, one instance at a time (a Postgres advisory lock). Migrations only go forward, so rolling
+  back to an older commit doesn't undo a schema change. If the app won't start and its log says
+  `Refusing to migrate`, a migration was added with a timestamp older than one already applied,
+  which Drizzle would skip for good: regenerate it with a newer one (ADR 8).
+- **Pinned images:** see below.
 - **Logs:** Dockhand's container logs, or `docker logs <container>`. They're rotated at 3 × 10 MB.
 - **Restarts** drop live room state. Clients reconnect on their own (ADR 9).
 - **TURN and NAT (ADR 3):** each signed-in user gets TURN credentials that last 4 hours. They're
@@ -209,3 +246,28 @@ do this). Then start `app` again.
   double NAT bites.
 - **Data** lives in the `pgdata` volume. Don't delete the stack's volumes when removing or re-creating it.
   Nightly dumps are on the NAS share (section 5, Backups to the NAS).
+
+## Pinned images
+
+Two builds of the same commit produce the same images. `Dockerfile` pins `node:26-alpine` by digest
+(the tag stays in the line for readers) and corepack by exact version (`npm install -g corepack@x.y.z`);
+pnpm is the exact version in `package.json` `packageManager`. `backup/Dockerfile` and the `db` service
+in `docker-compose.yml` pin `postgres:17-alpine` by digest, and the backup image pins `rsync` and
+`supercronic` to the versions that digest's Alpine ships.
+
+To bump:
+
+- **Digests:** `.github/dependabot.yml` opens weekly PRs for the Dockerfiles and the compose file. By hand,
+  `docker buildx imagetools inspect node:26-alpine` (or `postgres:17-alpine`) prints the index digest;
+  put it after the tag as `@sha256:...`. The `node` digest appears twice in `Dockerfile` (`base` and
+  `runtime`); the `postgres` digest appears in `backup/Dockerfile` and `docker-compose.yml`. Keep each pair identical.
+- **Major versions:** Dependabot ignores them. The `postgres` major must stay 17 on both `db` and
+  `backup` so `pg_dump` matches the server; a major upgrade needs a dump and restore, not a tag change.
+  The `node` major follows `.nvmrc` and `package.json` `engines`.
+- **apk pins:** after a new `postgres` digest, run `docker run --rm <postgres image with the new digest> sh -c 'apk update && apk policy rsync supercronic'`
+  and update the versions in `backup/Dockerfile`. Alpine's repository keeps only the current
+  revision, so a stale pin fails the build with "no such package" rather than building silently.
+- **corepack:** `npm view corepack version`, then edit `Dockerfile` (Dependabot can't see it).
+- **pnpm:** bump `packageManager` in `package.json` (the Dockerfile follows it).
+
+Then build both images and run `pnpm test:backup`.

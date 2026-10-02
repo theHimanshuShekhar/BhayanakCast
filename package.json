@@ -15,6 +15,8 @@
     "check": "biome check .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:backup": "vitest run -c vitest.backup.config.ts",
+    "test:migrate": "vitest run -c vitest.migrate.config.ts",
     "test:e2e": "playwright test",
     "db:generate": "drizzle-kit generate && biome format --write drizzle",
     "db:migrate": "node src/db/migrate.ts",

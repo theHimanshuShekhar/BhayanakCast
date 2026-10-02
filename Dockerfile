@@ -1,8 +1,11 @@
 # syntax=docker/dockerfile:1
 
-FROM node:26-alpine AS base
+# Reproducible build: the base is pinned by digest (the tag stays for readers; Docker resolves the
+# digest) and corepack by exact version. pnpm comes from package.json `packageManager`, which is
+# exact too. To bump, see docs/deploy.md ("Pinned images"); Dependabot opens PRs for the digest.
+FROM node:26-alpine@sha256:0b36e8c136b94cd4fcf02188228e76c31ad5872eef3fec8cbd2eee500cfd9e80 AS base
 # Node 25+ no longer bundles corepack, so install it before enabling pnpm.
-RUN npm install -g corepack@latest && corepack enable
+RUN npm install -g corepack@0.36.0 && corepack enable
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN corepack install
@@ -19,7 +22,8 @@ FROM deps AS build
 COPY . .
 RUN pnpm build
 
-FROM node:26-alpine AS runtime
+# Same digest as `base` above; bump both together.
+FROM node:26-alpine@sha256:0b36e8c136b94cd4fcf02188228e76c31ad5872eef3fec8cbd2eee500cfd9e80 AS runtime
 ENV NODE_ENV=production PORT=3000 HOST=0.0.0.0
 WORKDIR /app
 COPY --from=prod-deps /app/node_modules ./node_modules

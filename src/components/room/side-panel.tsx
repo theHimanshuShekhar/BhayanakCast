@@ -1,10 +1,21 @@
 // Room sidebar — chat / people / feed tabs (Base UI Tabs). Ported from docs/design/prototype/room.jsx.
+import { Dialog } from "@base-ui/react/dialog";
 import { Tabs } from "@base-ui/react/tabs";
 import { Link } from "@tanstack/react-router";
-import { type FormEvent, Fragment, type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  type FormEvent,
+  Fragment,
+  type ReactNode,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { tokenizeChat } from "~/lib/chat-text";
 import { CHAT_MAX_LENGTH, type KnockEntry } from "~/lib/realtime";
 import type { ActivityItem, ChatMessage, Participant, RoomRole } from "~/lib/types";
+import { useMediaQuery } from "~/lib/use-media-query";
 import { Icon } from "../icons";
 import { Avatar, Btn, Chip, IconBtn } from "../ui";
 import { EmojiPicker } from "./emoji-picker";
@@ -230,6 +241,9 @@ const panelCls = "flex-1 min-h-0 overflow-auto px-3 py-2.5 outline-0";
 
 const NOTICE_MS = 4_000;
 
+/** Tailwind's `lg`: from here the panel is a column beside the stage, below it a drawer. */
+const COLUMN_QUERY = "(min-width: 64rem)";
+
 export const RoomSide = ({
   participants,
   chat,
@@ -243,6 +257,7 @@ export const RoomSide = ({
   moderation,
   open,
   onClose,
+  returnFocus,
 }: {
   participants: Participant[];
   chat: ChatMessage[];
@@ -259,13 +274,16 @@ export const RoomSide = ({
   onDecideKnock: (userId: string, admit: boolean) => void;
   /** The viewer's role and the moderation handler, for the people tab's menus. */
   moderation: Moderation;
+  /** The drawer (below the desktop breakpoint) is open. */
   open: boolean;
   onClose: () => void;
+  /** Where focus goes when the drawer closes: the button that opens it. */
+  returnFocus: RefObject<HTMLElement | null>;
 }) => {
   const [tab, setTab] = useState<string>("chat");
   const [draft, setDraft] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
-  const chatRef = useRef<HTMLDivElement>(null);
+  const chatRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   /** The last message sent, restored to the composer if the server refuses it. */
   const lastSent = useRef<string | null>(null);
@@ -275,10 +293,15 @@ export const RoomSide = ({
   // Chat lines carry no picture; the sender's comes from the room's people.
   const images = new Map(participants.map((p) => [p.userId, p.image]));
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll on new messages / tab switch
+  // The drawer's content mounts when it opens and the chat when its tab does: start at the end.
+  const attachChat = useCallback((el: HTMLDivElement | null) => {
+    chatRef.current = el;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll on new messages
   useEffect(() => {
     if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
-  }, [chat.length, tab]);
+  }, [chat.length]);
 
   useEffect(() => {
     if (!chatError) return;
@@ -337,11 +360,12 @@ export const RoomSide = ({
     ["viewers", participants.filter((p) => !p.streaming && p.role === "member")],
   ];
 
-  return (
-    <aside
-      aria-label="Room chat and people"
-      className={`flex flex-col min-w-0 min-h-0 bg-canvas border-l border-border-subtle max-lg:fixed max-lg:inset-y-0 max-lg:right-0 max-lg:z-[120] max-lg:w-[min(380px,100%)] max-lg:shadow-deep ${open ? "" : "max-lg:hidden"}`}
-    >
+  // Server-rendered as the column; a phone swaps to the drawer on hydration. The state above
+  // lives here, so the chat draft survives the drawer closing.
+  const column = useMediaQuery(COLUMN_QUERY, true);
+
+  const panel = (
+    <>
       <Tabs.Root value={tab} onValueChange={setTab} className="flex flex-col min-h-0 flex-1">
         <div className="flex items-center gap-0.5 p-2.5 pb-0">
           <Tabs.List className="flex flex-1 gap-0.5">
@@ -355,17 +379,17 @@ export const RoomSide = ({
               <Icon.Activity size={13} /> feed
             </Tabs.Tab>
           </Tabs.List>
-          <IconBtn
-            onClick={onClose}
-            aria-label="Close panel"
-            className="lg:hidden !w-8 !h-8 flex-shrink-0"
-          >
-            <Icon.Close size={14} />
-          </IconBtn>
+          {!column && (
+            <Dialog.Close
+              render={<IconBtn aria-label="Close panel" className="!w-8 !h-8 flex-shrink-0" />}
+            >
+              <Icon.Close size={14} />
+            </Dialog.Close>
+          )}
         </div>
 
         <Tabs.Panel value="chat" className="flex flex-col flex-1 min-h-0 outline-0">
-          <div className={panelCls} ref={chatRef} aria-live="polite">
+          <div className={panelCls} ref={attachChat} aria-live="polite">
             {chat.length === 0 && <EmptyNote>no messages yet. say hi!</EmptyNote>}
             {chat.map((m) => (
               <ChatLine
@@ -466,6 +490,36 @@ export const RoomSide = ({
           ))}
         </Tabs.Panel>
       </Tabs.Root>
-    </aside>
+    </>
+  );
+
+  if (column) {
+    return (
+      <aside
+        aria-label="Room chat and people"
+        // max-lg:hidden: server-rendered as the column, so a phone must not show it inline
+        // before hydration swaps in the drawer (or ever, if the script fails).
+        className="flex flex-col min-w-0 min-h-0 bg-canvas border-l border-border-subtle max-lg:hidden"
+      >
+        {panel}
+      </aside>
+    );
+  }
+  // A modal drawer: focus moves in and stays there, Escape or a tap outside closes it and
+  // focus goes back to the button that opened it, and the page behind is inert.
+  return (
+    <Dialog.Root open={open} onOpenChange={(next) => !next && onClose()}>
+      <Dialog.Portal>
+        <Dialog.Backdrop className="fixed inset-0 z-[110] bg-black/45 animate-bc-fade" />
+        <Dialog.Popup
+          aria-label="Room chat and people"
+          aria-modal="true"
+          finalFocus={returnFocus}
+          className="fixed inset-y-0 right-0 z-[120] w-[min(380px,100%)] flex flex-col min-w-0 min-h-0 bg-canvas border-l border-border-subtle shadow-deep outline-0"
+        >
+          {panel}
+        </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 };
