@@ -7,7 +7,8 @@
  * `POST /api/auth/test/ban` bans or unbans a fake user by Discord id (test-only too).
  * `POST /api/auth/test/seed-room` inserts a room with its presence/stream intervals and
  * end time as given, so browser tests can build past streams without the realtime server.
- * `POST /api/auth/test/stats` sets a fake user's lifetime stats and co-time (test-only too).
+ * `POST /api/auth/test/stats` sets a fake user's lifetime stats and co-time (test-only too), as
+ * if all from public rooms.
  */
 import type { BetterAuthPlugin, User } from "better-auth";
 import { APIError, createAuthEndpoint } from "better-auth/api";
@@ -206,7 +207,16 @@ export function testSignIn(db: Db) {
           }),
         },
         async (ctx) => {
-          const { discordId, stats, cotime } = ctx.body;
+          const { discordId, stats: seeded, cotime } = ctx.body;
+          // As if all from public rooms: the public aggregates (ADR 16 addendum) match.
+          const stats = {
+            ...seeded,
+            publicSecondsStreamed: seeded.secondsStreamed,
+            publicSecondsWatched: seeded.secondsWatched,
+            publicRoomsHosted: seeded.roomsHosted,
+            publicRoomsJoined: seeded.roomsJoined,
+            publicPeakViewers: seeded.peakViewers,
+          };
           const rows = await db
             .select({ id: userTable.id, discordId: userTable.discordId })
             .from(userTable)
@@ -225,10 +235,10 @@ export function testSignIn(db: Db) {
             const [userA, userB] = userId < other ? [userId, other] : [other, userId];
             await db
               .insert(userCotime)
-              .values({ userA, userB, secondsTogether })
+              .values({ userA, userB, secondsTogether, publicSecondsTogether: secondsTogether })
               .onConflictDoUpdate({
                 target: [userCotime.userA, userCotime.userB],
-                set: { secondsTogether },
+                set: { secondsTogether, publicSecondsTogether: secondsTogether },
               });
           }
           return ctx.json({ userId });

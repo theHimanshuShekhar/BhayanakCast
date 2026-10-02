@@ -4,5 +4,5 @@
 # Same major as the db service, so pg_dump always matches the server.
 FROM postgres:17-alpine
 RUN apk add --no-cache rsync supercronic
-COPY --chmod=755 backup.sh entrypoint.sh /usr/local/bin/
+COPY --chmod=755 backup.sh entrypoint.sh healthcheck.sh /usr/local/bin/
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

@@ -24,3 +24,6 @@ The app is published on the LAN IP, so a LAN client can reach it directly and se
 
 ## Addendum: the backup sidecar mounts the NAS itself (2026-09-30)
 The sidecar's NAS directory is a Docker `cifs` volume of the `local` driver in the compose file, not a bind mount of a share the host mounts. Docker mounts it whenever the sidecar starts, so it needs no host fstab entry and survives reboots, and an unreachable share stops the sidecar instead of letting it write to an empty local mount point. The NAS account's credentials are stack variables. Postgres data stays on its local volume.
+
+## Addendum: backup health must mean a recent backup (2026-10-02)
+The sidecar's healthcheck no longer trusts an old "ok". The status file carries the finish time, and the check fails once it is older than `BACKUP_MAX_AGE_HOURS` (default 26), so a stopped schedule shows as unhealthy and not as healthy forever. `pg_dump` and `rsync` run under timeouts so a hung run fails and frees the run lock, and each run clears the temp files an interrupted one left. These are additions to the 2026-09-27 and 2026-09-30 decisions, which stand: local-volume Postgres, dumps rsynced to the NAS, and the Docker-mounted `cifs` volume. An unreachable NAS still stops only the sidecar; the app and `db` start (docs/deploy.md section 5).

@@ -1,6 +1,10 @@
 /**
  * Persistent aggregates (ADR 11). These tables deliberately have NO foreign key
  * to `rooms`, so the 30-day room purge can never cascade into them.
+ *
+ * Each aggregate is kept twice (ADR 16 addendum): over every room, and `public_*` over public
+ * rooms only. The roll-up writes both, so what profiles and search show to anyone but an admin
+ * never includes a private room.
  */
 import { sql } from "drizzle-orm";
 import {
@@ -25,6 +29,11 @@ export const userStats = pgTable("user_stats", {
   roomsJoined: integer("rooms_joined").default(0).notNull(),
   /** Most other people simultaneously present while this user was streaming. */
   peakViewers: integer("peak_viewers").default(0).notNull(),
+  publicSecondsStreamed: bigint("public_seconds_streamed", { mode: "number" }).default(0).notNull(),
+  publicSecondsWatched: bigint("public_seconds_watched", { mode: "number" }).default(0).notNull(),
+  publicRoomsHosted: integer("public_rooms_hosted").default(0).notNull(),
+  publicRoomsJoined: integer("public_rooms_joined").default(0).notNull(),
+  publicPeakViewers: integer("public_peak_viewers").default(0).notNull(),
 });
 
 /** Pairwise co-time. Each pair is stored once with userA < userB. */
@@ -38,6 +47,9 @@ export const userCotime = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     secondsTogether: bigint("seconds_together", { mode: "number" }).default(0).notNull(),
+    publicSecondsTogether: bigint("public_seconds_together", { mode: "number" })
+      .default(0)
+      .notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.userA, table.userB] }),
