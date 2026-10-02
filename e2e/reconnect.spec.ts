@@ -62,8 +62,12 @@ test("reloading the room page is not a leave and a join for everyone else", asyn
 
     // Reload: the guest's old socket closes and a new one rejoins within the grace.
     const rejoined = nextSnapshot(guest);
-    // This tab was in the room, so the reload skips the lobby and rejoins at once.
+    // This tab was in the room, so the reload skips the lobby and rejoins at once. The browser
+    // asks first (it can't tell a reload from closing the tab); the fixture accepts.
+    const prompts: string[] = [];
+    guest.on("dialog", (dialog) => prompts.push(dialog.type()));
     await guest.reload();
+    expect(prompts).toEqual(["beforeunload"]);
     await rejoined;
     await expect(await peopleTab(guest)).toContainText("rc.guest (you)");
 
