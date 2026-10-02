@@ -8,11 +8,11 @@ The app server process hosts a WebSocket endpoint. It carries:
 - room presence (join/leave, mic/cam/share state, speaking)
 - chat and reactions fan-out
 
-Live room state is held in memory in that process. Durable events (room created/ended, user joined/left, stream started/stopped) are written to Postgres.
+Live room state is held in memory in that process (a restart rebuilds the durable part from Postgres, see the 2026-10-02 addendum). Durable events (room created/ended, user joined/left, stream started/stopped) are written to Postgres.
 
 ## Consequences
 - No extra realtime service to run. A single server instance is the scaling unit; horizontal scaling would need a pub/sub layer (e.g. Postgres LISTEN/NOTIFY or Redis). Not needed at friend-group scale.
-- A server restart drops live room state; clients must reconnect and re-announce themselves (rooms self-heal from clients).
+- A server restart loses only what is memory-only (chat, the feed, pending knocks, and mic and camera state until each client re-announces it); rooms and their people are restored from Postgres, and clients reconnect and re-announce themselves (see the 2026-10-02 addendum below, which corrects this bullet).
 - Chat passes through the server, so late joiners can be sent recent in-memory history even though chat is never persisted.
 
 ## Addendum: chat history for late joiners
@@ -46,3 +46,11 @@ Every message runs on the hub's single serial queue (heartbeats, grace timers an
 - **A budget across all message types** (`CONNECTION_MESSAGE_BUDGET`, 600 per 10 seconds), counted before a frame is parsed, so garbage and the messages with no limit of their own (moderation) are cheap to refuse too. Signalling is already capped at 400 per 10 seconds by `SIGNAL_RATE_LIMIT`; the budget leaves room above it. Frames over it are dropped, and the socket is told `rate_limited` once per window rather than once per frame, so a client that doesn't read can't make the server buffer a reply for each. A socket that keeps going until the dropped frames alone fill another budget in the same window is closed with `FLOOD_CLOSE_CODE`.
 - **A cap on queued work per connection** (`MAX_PENDING_MESSAGES`, 500). The rate limits keep a socket's rate down, but a slow database can still let its messages pile up. Past the cap the socket is told `rate_limited`, closed with `FLOOD_CLOSE_CODE` (4002, reason "too many pending messages"), and what of its work is still queued is skipped. The cap sits above the heaviest honest burst, signalling to a full room (about 20 steps to each of 9 peers).
 - **A cap on open sockets per signed-in user** (`REALTIME_SOCKETS_PER_USER`, default 10), enforced at the upgrade next to the anonymous per-IP cap (ADR 20): more are refused with 429, and the slot frees when the socket closes. A takeover (ADR 21) is a new tab or device of the same user, so it needs a free slot like any other connection; 10 leaves room for a user's tabs, devices and a few not-yet-closed sockets from a reconnect.
+
+## Addendum: what a restart keeps and loses (2026-10-02)
+The Consequences bullet above ("a restart drops live room state") was wrong from the 2026-09-27 addendum on, and ADR 9 and the deploy guide repeated it. `RoomHub.#restore` reloads every live room from Postgres on boot (`src/server/room-hub.ts`, tested in `realtime-resilience.test.ts`, "restart recovery").
+- **Kept (in Postgres):** the live rooms themselves, their host and mod roles, who was in them (open presence intervals, with their join times), who was sharing (open stream intervals), approved members of private rooms, and when a room became empty.
+- **Reconnect grace:** everyone whose interval was last seen within 90 s (`RESTORE_STALE_AFTER_MS`: one checkpoint plus one reconnect grace) is put back in the room as just disconnected. Those who reconnect within `RECONNECT_GRACE_MS` (30 s) continue the same interval; the rest leave at their last-seen checkpoint (ADR 12), which is up to 60 s (`CHECKPOINT_INTERVAL_MS`) before the crash. The host gets the 30 s host grace (ADR 14). An older interval closes at its last-seen time at once. A room nobody comes back to ends at its last-seen time (ADR 14).
+- **Lost (memory only):** chat history, the feed, pending knocks (knockers must knock again), and each person's mic and camera state until their client re-announces it. A restored sharer stays marked as sharing until they re-announce or the grace runs out.
+- **Unaffected:** peer-to-peer media, which doesn't go through the server, keeps flowing. The `lobby.snapshot` a client gets on reconnecting refreshes its lists.
+So a short restart is a blip. A long outage still ends the rooms, because the people can't reconnect within the grace.
