@@ -45,6 +45,9 @@ export const Route = createFileRoute("/")({
   component: HomePage,
 });
 
+/** Filling Up shows once there are more live rooms than this. */
+const FILLING_UP_AFTER = 4;
+
 const panelCls = "bg-canvas border border-border rounded-[var(--radius)] shadow-card p-3.5";
 
 const PanelHead = ({ icon: I, children }: { icon: IconComponent; children: ReactNode }) => (
@@ -70,7 +73,10 @@ const StatMini = ({
 }) => (
   <div className="min-w-0 bg-surface rounded-[var(--radius-sm)] px-2.5 py-2.5" title={pending}>
     <div className="flex items-center gap-[5px] text-[10px] tracking-[0.04em] text-muted uppercase truncate">
-      <I size={10} /> {label}
+      <span className="inline-flex shrink-0">
+        <I size={10} />
+      </span>
+      <span className="truncate">{label}</span>
     </div>
     {pending ? (
       <div className="mt-1 text-lg font-bold tracking-[-0.01em] text-subtle">
@@ -283,7 +289,9 @@ function HomePage() {
   );
 
   return (
-    <div className="grid lg:grid-cols-[minmax(0,1fr)_300px] content-start lg:content-stretch gap-6 px-6 py-5 max-sm:px-3.5 max-sm:py-4 h-full overflow-auto lg:overflow-hidden">
+    // One minmax(0, 1fr) column below lg: an implicit auto column grows to the widest unbreakable
+    // line, so one long room name in Filling Up made the whole phone page wider than the screen.
+    <div className="grid grid-cols-[minmax(0,1fr)] lg:grid-cols-[minmax(0,1fr)_300px] content-start lg:content-stretch gap-6 px-6 py-5 max-sm:px-3.5 max-sm:py-4 h-full overflow-auto lg:overflow-hidden">
       <div className="lg:min-h-0 lg:overflow-auto min-w-0">
         <SignInErrorNotice
           search={search}
@@ -318,19 +326,21 @@ function HomePage() {
               Who's hanging out right now, and every hangout from the last 30 days.
             </p>
           </div>
-          {/* A visitor's primary action is signing in (the intro below); this asks for it too. */}
-          <Btn variant={user ? "primary" : "default"} onClick={openCreateRoom} className="shrink-0">
-            <Icon.Plus size={14} /> start a room
-          </Btn>
+          {/* Visitors start rooms by signing in first: the intro below is their one way in. */}
+          {user && (
+            <Btn variant="primary" onClick={openCreateRoom} className="shrink-0 max-sm:h-11">
+              <Icon.Plus size={14} /> start a room
+            </Btn>
+          )}
         </div>
 
         {!user && <VisitorIntro />}
 
-        <div className="flex items-center gap-2.5 h-10 px-3.5 mb-3.5 bg-canvas border border-border rounded-[10px] text-muted focus-within:border-primary">
+        <label className="flex items-center gap-2.5 h-11 px-3.5 mb-3.5 bg-canvas border border-border rounded-[var(--radius-sm)] text-muted cursor-text focus-within:border-primary focus-within:shadow-[0_0_0_3px_var(--color-primary-soft)] transition-shadow">
           <Icon.Search size={14} />
           <input
             aria-label="Search rooms and users"
-            className="flex-1 bg-transparent border-0 outline-0 text-fg text-[12.5px]"
+            className="flex-1 self-stretch min-w-0 bg-transparent border-0 outline-0 text-fg text-[12.5px] placeholder:text-muted"
             placeholder="Search rooms, users, #tags or categories…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
@@ -346,9 +356,15 @@ function HomePage() {
               <Icon.Close size={12} />
             </button>
           )}
-        </div>
+        </label>
 
-        <div role="status" className="mb-2.5 text-[11px] text-muted tracking-[0.04em] tabular-nums">
+        {/* Shown while searching; the section heads carry the counts otherwise. */}
+        <div
+          role="status"
+          className={
+            term ? "mb-2.5 text-[11px] text-muted tracking-[0.04em] tabular-nums" : "sr-only"
+          }
+        >
           {filtered.length} live · {past.length} past
           {term && !term.startsWith("#") ? ` · ${users.length} people` : ""}
         </div>
@@ -413,7 +429,7 @@ function HomePage() {
               dot="muted"
               className="mt-[18px]"
             />
-            <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(230px,100%),1fr))]">
+            <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(260px,100%),1fr))]">
               {past.map((r) => (
                 <PastCard key={r.id} room={r} onOpen={openPast} />
               ))}
@@ -422,7 +438,7 @@ function HomePage() {
         )}
       </div>
 
-      <aside className="flex flex-col gap-3.5 lg:min-h-0 lg:overflow-auto [&>*]:shrink-0 max-lg:grid max-lg:sm:grid-cols-2 max-lg:items-start">
+      <aside className="min-w-0 flex flex-col gap-3.5 lg:min-h-0 lg:overflow-auto [&>*]:shrink-0 [&>*]:min-w-0 max-lg:grid max-lg:grid-cols-[minmax(0,1fr)] max-lg:sm:grid-cols-[repeat(2,minmax(0,1fr))] max-lg:items-start">
         <section aria-label="Right Now" className={panelCls}>
           <PanelHead icon={Icon.Sparkle}>Right Now</PanelHead>
           <div className="grid grid-cols-3 gap-2">
@@ -433,7 +449,8 @@ function HomePage() {
         </section>
 
         {/* Hidden with no live rooms: the main column already says so. */}
-        {trending.length > 0 && (
+        {/* Only once the grid is longer than a glance: with a few rooms it repeats the cards. */}
+        {rooms.length > FILLING_UP_AFTER && (
           <section aria-label="Filling Up" className={panelCls}>
             <PanelHead icon={Icon.Bolt}>Filling Up</PanelHead>
             {trending.map((r) => (

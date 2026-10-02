@@ -3,6 +3,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound, redirect, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { Icon } from "~/components/icons";
+import { Sheet } from "~/components/overlays";
 import { ControlBtn } from "~/components/room/control-btn";
 import { KnockToasts } from "~/components/room/knock-toasts";
 import { failureText, Lobby } from "~/components/room/lobby";
@@ -43,12 +44,12 @@ import {
   wasInRoom,
 } from "~/lib/room-live";
 import { useRoomMesh, useSpeakers } from "~/lib/room-media";
-import { roomDetailFor, withRoster } from "~/lib/room-view";
+import { roomDetailFor, stageZones, withRoster } from "~/lib/room-view";
 import { type LiveRoomCard, ROOM_NAME_MAX, type RoomKind } from "~/lib/rooms";
 import { roomQuery } from "~/lib/rooms.queries";
 import { useSettings } from "~/lib/settings";
 import { startThumbnailUploads } from "~/lib/thumbnail-capture";
-import type { ChatMessage, Participant, RoomDetail, RoomRole } from "~/lib/types";
+import type { ActivityItem, ChatMessage, Participant, RoomDetail, RoomRole } from "~/lib/types";
 
 export const Route = createFileRoute("/room/$roomId")({
   // Visitors go home with the "sign in to join" prompt open. A UX guard only: the room
@@ -180,11 +181,14 @@ function RoomVisit({ room, admin }: { room: LiveRoomCard; admin: boolean }) {
  */
 function RoomInfoMenu({
   roomId,
+  host,
   canInvite,
   canRegenerate,
   onInviteResult,
 }: {
   roomId: string;
+  /** The host's username, if the room has one. */
+  host: string | null;
   canInvite: boolean;
   canRegenerate: boolean;
   onInviteResult: (notice: { message: string }) => void;
@@ -194,13 +198,15 @@ function RoomInfoMenu({
       <Icon.Hash size={12} /> room info
     </>
   );
-  if (!canInvite) {
-    return (
-      <Btn variant="ghost" size="sm" title="Room info">
-        {trigger}
-      </Btn>
-    );
-  }
+  // A public room's link works for anyone signed in; a private one needs its invite link.
+  const copyRoomLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      onInviteResult({ message: "room link copied" });
+    } catch {
+      onInviteResult({ message: "couldn't copy the room link" });
+    }
+  };
   const copyInvite = async () => {
     try {
       const token = await getInviteTokenFn({ data: { roomId } });
@@ -231,9 +237,20 @@ function RoomInfoMenu({
       <Menu.Portal>
         <Menu.Positioner side="top" align="start" sideOffset={10} className="z-[160] outline-0">
           <Menu.Popup className="min-w-[200px] p-1.5 bg-surface border border-border-strong rounded-[var(--radius)] shadow-deep outline-0">
-            <Menu.Item onClick={() => void copyInvite()} className={itemCls}>
-              <Icon.Users size={13} /> copy invite link
-            </Menu.Item>
+            {host && (
+              <div className="px-2.5 pt-1.5 pb-2 text-[11px] text-muted">
+                hosted by <span className="text-fg font-semibold">{host}</span>
+              </div>
+            )}
+            {canInvite ? (
+              <Menu.Item onClick={() => void copyInvite()} className={itemCls}>
+                <Icon.Users size={13} /> copy invite link
+              </Menu.Item>
+            ) : (
+              <Menu.Item onClick={() => void copyRoomLink()} className={itemCls}>
+                <Icon.Users size={13} /> copy room link
+              </Menu.Item>
+            )}
             {canRegenerate && (
               <Menu.Item onClick={() => void regenerateInvite()} className={itemCls}>
                 <Icon.Lock size={13} /> regenerate invite link
@@ -256,7 +273,7 @@ function RoomName({ name, canRename }: { name: string; canRename: boolean }) {
         {canRename && (
           <button
             type="button"
-            className="text-[11px] text-muted hover:text-fg cursor-pointer"
+            className="inline-flex items-center h-7 px-2 -my-1 rounded-[var(--radius-sm)] text-[11px] text-muted hover:text-fg hover:bg-surface-2 cursor-pointer"
             onClick={() => setDraft(name)}
           >
             rename
@@ -304,11 +321,37 @@ function RoomName({ name, canRename }: { name: string; canRename: boolean }) {
   );
 }
 
-const DENSITY_CLS = {
-  compact: "gap-2 p-2.5 auto-rows-[minmax(120px,auto)]",
-  comfortable: "gap-3 p-4 auto-rows-[minmax(140px,auto)]",
-  spacious: "gap-[18px] p-[22px] auto-rows-[minmax(180px,auto)]",
+/** Feed events read out to screen readers as they happen. */
+const ANNOUNCED = new Set<ActivityItem["kind"]>([
+  "joined",
+  "left",
+  "shareStarted",
+  "shareStopped",
+  "kicked",
+]);
+
+// Stage spacing and the camera row's height, per the viewer's density setting.
+const DENSITY = {
+  compact: { stage: "gap-2 p-2.5", gap: "gap-2", camera: "md:h-[104px]" },
+  comfortable: { stage: "gap-3 p-4", gap: "gap-3", camera: "md:h-[128px]" },
+  spacious: { stage: "gap-[18px] p-[22px]", gap: "gap-[18px]", camera: "md:h-[164px]" },
 } as const;
+
+/**
+ * The screen zone's grid for `n` entries (DESIGN.md "Stage"): like the room cards' mosaic, one
+ * fills it, two split it and three are a hero plus a stack. "grid" makes them equal, and
+ * "spotlight" keeps a wide hero with the rest in a narrow column. Phones stack them.
+ */
+const screenGrid = (n: number, layout: "mosaic" | "grid" | "spotlight") => {
+  if (n <= 1) return "md:grid-cols-1 md:grid-rows-1";
+  if (layout === "spotlight") {
+    return `md:grid-cols-[3fr_1fr] ${n === 2 ? "md:grid-rows-1" : n === 3 ? "md:grid-rows-2" : "md:grid-rows-3"} md:[&>*:first-child]:row-span-full`;
+  }
+  if (n === 2) return "md:grid-cols-2 md:grid-rows-1";
+  if (n === 3 && layout === "grid") return "md:grid-cols-3 md:grid-rows-1";
+  if (n === 3) return "md:grid-cols-[2fr_1fr] md:grid-rows-2 md:[&>*:first-child]:row-span-2";
+  return "md:grid-cols-2 md:grid-rows-2";
+};
 
 /** Minutes since `iso`, ticking every 30s. */
 const useMinutesSince = (iso: string) => {
@@ -387,6 +430,7 @@ function RoomPage({
   // Knocks on a private room: the people tab's "waiting" group (and the toasts).
   const knocks = usePendingKnocks(detail.id);
   const [showNonSharers, setShowNonSharers] = useState(true);
+  const [kickTarget, setKickTarget] = useState<Participant | null>(null);
   const [pinnedId, setPinnedId] = useState<string | null>(null);
   const [mutedIds, setMutedIds] = useState<Set<string>>(() => new Set());
   const [sideOpen, setSideOpen] = useState(false);
@@ -547,7 +591,8 @@ function RoomPage({
     const target = participants.find((p) => p.id === id);
     if (!target) return;
     const userId = target.userId;
-    if (action === "kick") moderate({ type: "mod.kick", userId });
+    // A kick is permanent for the room (ADR 15), so it asks first.
+    if (action === "kick") setKickTarget(target);
     else if (action === "stopShare") moderate({ type: "mod.stopShare", userId });
     else moderate({ type: "mod.setRole", userId, role: action === "promote" ? "mod" : "member" });
   };
@@ -563,7 +608,7 @@ function RoomPage({
   // Hiding everyone not sharing leaves the streamers: the others' cameras are paused towards
   // this page (ADR 13 addendum).
   const stage = useMemo(() => {
-    const base = showNonSharers ? people : people.filter((p) => p.streaming);
+    const base = people;
     if (!pinnedId) return base;
     return [
       ...base
@@ -573,7 +618,31 @@ function RoomPage({
         .filter((p) => p.id !== pinnedId)
         .map((p) => (p.size === "l" ? { ...p, size: "m" as const } : p)),
     ];
-  }, [people, showNonSharers, pinnedId]);
+  }, [people, pinnedId]);
+
+  const announcement = activity.find((a) => ANNOUNCED.has(a.kind));
+  const zones = useMemo(() => stageZones(stage, showNonSharers), [stage, showNonSharers]);
+  const density = DENSITY[settings.density];
+  // What every tile on the stage gets, whichever zone shows it.
+  const tileProps = (p: Participant) => ({
+    p,
+    myRole,
+    admin,
+    locallyMuted: mutedIds.has(p.id),
+    volume: volumes[p.id] ?? 1,
+    onVolume: (id: string, volume: number) => setVolumes((v) => ({ ...v, [id]: volume })),
+    cameraTrack: p.you ? local.cam.track : mesh.remote[p.userId]?.cam,
+    onCameraShown,
+    screenTrack: p.you ? local.share.track : mesh.remote[p.userId]?.screen,
+    shareVolume: shareVolumes[p.id] ?? 1,
+    onShareVolume: mesh.shareAudio.has(p.userId) ? onShareVolume : undefined,
+    reactions: reactions.filter((r) => r.targetUserId === p.userId),
+    onPin: (id: string) => setPinnedId((cur) => (cur === id ? null : id)),
+    onToggleMute: toggleMute,
+    onModerate,
+    cantConnect: mesh.states[p.userId] === "failed",
+    onRetry: () => mesh.retry(p.userId),
+  });
 
   // The room ended or was hidden from us since the page loaded.
   if (live.error?.code === "not_found") return <RoomNotFound />;
@@ -667,33 +736,105 @@ function RoomPage({
           </div>
         </div>
 
-        <div
-          className={`flex-1 min-h-0 overflow-auto grid grid-cols-12 max-md:grid-cols-2 max-md:auto-rows-[minmax(88px,auto)] content-start ${DENSITY_CLS[settings.density]}`}
+        {/* Past every tile's controls, straight to mic, camera and leave. */}
+        <a
+          href="#room-controls"
+          className="sr-only focus:not-sr-only focus:absolute focus:top-14 focus:left-3 focus:z-[20] focus:px-3 focus:py-2 focus:rounded-[var(--radius-sm)] focus:bg-surface-3 focus:text-fg focus:border focus:border-border-strong focus:shadow-pop"
         >
-          {stage.map((p) => (
-            <Tile
-              key={p.id}
-              p={p}
-              layout={settings.layout}
-              myRole={myRole}
-              admin={admin}
-              locallyMuted={mutedIds.has(p.id)}
-              volume={volumes[p.id] ?? 1}
-              onVolume={(id, volume) => setVolumes((v) => ({ ...v, [id]: volume }))}
-              cameraTrack={p.you ? local.cam.track : mesh.remote[p.userId]?.cam}
-              onCameraShown={onCameraShown}
-              screenTrack={p.you ? local.share.track : mesh.remote[p.userId]?.screen}
-              shareVolume={shareVolumes[p.id] ?? 1}
-              onShareVolume={mesh.shareAudio.has(p.userId) ? onShareVolume : undefined}
-              reactions={reactions.filter((r) => r.targetUserId === p.userId)}
-              onPin={(id) => setPinnedId((cur) => (cur === id ? null : id))}
-              onToggleMute={toggleMute}
-              onModerate={onModerate}
-              cantConnect={mesh.states[p.userId] === "failed"}
-              onRetry={() => mesh.retry(p.userId)}
-            />
-          ))}
+          skip to controls
+        </a>
+        <div className={`flex-1 min-h-0 overflow-auto flex flex-col ${density.stage}`}>
+          {zones.screens.length > 0 ? (
+            <div
+              className={`grid grid-cols-1 auto-rows-[minmax(0,auto)] md:flex-1 md:min-h-[240px] motion-safe:transition-[grid-template-columns,grid-template-rows] motion-safe:duration-300 motion-safe:ease-[cubic-bezier(0.16,1,0.3,1)] ${density.gap} ${screenGrid(zones.screens.length, settings.layout)}`}
+            >
+              {zones.screens.map(({ p, variant }) => (
+                <Tile
+                  key={p.id}
+                  {...tileProps(p)}
+                  variant={variant}
+                  className="max-md:aspect-video"
+                />
+              ))}
+            </div>
+          ) : zones.cameras.length === 0 ? (
+            <div className="md:flex-1 grid place-items-center min-h-[160px] rounded-[var(--radius)] border border-dashed border-border text-center px-6">
+              <div>
+                <p className="m-0 text-[13px] font-semibold text-fg-muted">nobody's sharing yet</p>
+                <p className="m-0 mt-1 text-[12px] text-muted">
+                  {canShare
+                    ? "share your screen and it lands here."
+                    : "screens land here once someone shares."}
+                </p>
+              </div>
+            </div>
+          ) : null}
+          {zones.cameras.length > 0 && (
+            <div
+              className={
+                zones.screens.length > 0
+                  ? `flex ${density.gap} overflow-x-auto shrink-0 max-md:grid max-md:grid-cols-2`
+                  : `grid ${density.gap} md:flex-1 content-center grid-cols-[repeat(auto-fit,minmax(min(260px,100%),1fr))]`
+              }
+            >
+              {zones.cameras.map((p) => (
+                <Tile
+                  key={p.id}
+                  {...tileProps(p)}
+                  variant="camera"
+                  className={
+                    zones.screens.length > 0
+                      ? `aspect-video shrink-0 ${density.camera}`
+                      : "aspect-video"
+                  }
+                />
+              ))}
+            </div>
+          )}
+          {zones.chips.length > 0 && (
+            <ul
+              aria-label="others in the room"
+              className="m-0 p-0 list-none flex flex-wrap gap-2 shrink-0"
+            >
+              {zones.chips.map((p) => (
+                <li key={p.id} className="min-w-0">
+                  <Tile {...tileProps(p)} variant="chip" />
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
+        {/* Joins, leaves and shares, for screen readers even with the chat drawer closed. */}
+        <p role="status" className="sr-only">
+          {announcement ? `${announcement.who} ${announcement.what}` : ""}
+        </p>
+        {kickTarget && (
+          <Sheet
+            open
+            onOpenChange={(open) => !open && setKickTarget(null)}
+            title={`kick ${kickTarget.name}?`}
+            width="w-[min(400px,94vw)]"
+            footer={
+              <>
+                <Btn onClick={() => setKickTarget(null)}>keep them</Btn>
+                <Btn
+                  variant="danger"
+                  onClick={() => {
+                    moderate({ type: "mod.kick", userId: kickTarget.userId });
+                    setKickTarget(null);
+                  }}
+                >
+                  kick {kickTarget.name}
+                </Btn>
+              </>
+            }
+          >
+            <p className="m-0 text-[12.5px] text-muted leading-relaxed">
+              <span className="text-fg font-semibold">{kickTarget.name}</span> leaves {roomName} now
+              and can't rejoin it until it ends. Their share and camera stop for everyone.
+            </p>
+          </Sheet>
+        )}
         {import.meta.env.DEV && (
           <QualityDebug
             read={mesh.quality}
@@ -734,6 +875,7 @@ function RoomPage({
           <div className="absolute left-[18px] flex gap-2 max-lg:hidden">
             <RoomInfoMenu
               roomId={detail.id}
+              host={participants.find((p) => p.role === "host")?.name ?? detail.host}
               canInvite={isPrivate && joined && isModerator(myRole, admin)}
               canRegenerate={isPrivate && joined && myRole === "host"}
               onInviteResult={setInviteResult}
@@ -752,21 +894,27 @@ function RoomPage({
           >
             {notice}
           </p>
-          <div className="flex gap-2 max-sm:gap-1.5 p-1.5 bg-surface border border-border rounded-full shadow-card">
+          <div
+            id="room-controls"
+            tabIndex={-1}
+            className="flex gap-2 max-sm:gap-1.5 p-1.5 bg-surface border border-border rounded-full shadow-card outline-0"
+          >
             <ControlBtn
-              state={media.cam ? "active" : "muted"}
+              state={media.cam ? "active" : undefined}
               onClick={toggleCam}
               disabled={!joined || local.cam.status === "starting"}
               aria-label={media.cam ? "Turn camera off" : "Turn camera on"}
+              title={media.cam ? "camera on" : "camera off"}
               aria-pressed={media.cam}
             >
               {media.cam ? <Icon.Cam size={16} /> : <Icon.CamOff size={16} />}
             </ControlBtn>
             <ControlBtn
-              state={media.mic ? "active" : "muted"}
+              state={media.mic ? "active" : undefined}
               onClick={toggleMic}
               disabled={!joined || local.mic.status === "starting"}
               aria-label={media.mic ? "Mute mic" : "Unmute mic"}
+              title={media.mic ? "mic on" : "mic off"}
               aria-pressed={media.mic}
             >
               {media.mic ? <Icon.Mic size={16} /> : <Icon.MicOff size={16} />}
@@ -774,22 +922,28 @@ function RoomPage({
             {/* Hidden where the browser can't share its screen (mobile, ADR 17). */}
             {canShare && (
               <ControlBtn
-                state={media.share ? "active" : undefined}
+                state={media.share ? "live" : undefined}
                 onClick={() => void toggleShare()}
                 disabled={!joined || !canStartShare || local.share.status === "starting"}
                 aria-label={media.share ? "Stop sharing" : "Share screen"}
                 aria-pressed={media.share}
                 title={
-                  canStartShare ? "Screen share" : `${MAX_STREAMERS} people are already sharing`
+                  media.share
+                    ? "you're live: stop sharing"
+                    : canStartShare
+                      ? "share your screen"
+                      : `${MAX_STREAMERS} people are already sharing`
                 }
-                className="max-sm:hidden"
+                className={`max-sm:hidden ${media.share ? "px-3.5" : ""}`}
               >
                 <Icon.Screen size={16} />
+                {media.share && <span className="text-xs font-semibold">live · stop</span>}
               </ControlBtn>
             )}
             <Menu.Root>
               <Menu.Trigger
                 aria-label="Reactions"
+                title="react"
                 className="w-10 h-10 rounded-full grid place-items-center border cursor-pointer bg-surface-2 text-fg border-border hover:bg-surface-3 max-[380px]:hidden"
               >
                 <Icon.Smile size={16} />
@@ -817,6 +971,7 @@ function RoomPage({
                 state={sideOpen ? "active" : undefined}
                 onClick={() => setSideOpen((o) => !o)}
                 aria-label="Chat & people"
+                title="chat & people"
                 aria-expanded={sideOpen}
                 className="lg:hidden"
               >
@@ -826,7 +981,8 @@ function RoomPage({
             <button
               type="button"
               onClick={leave}
-              className="inline-flex items-center gap-2 h-10 px-4 max-sm:px-3 rounded-full bg-live text-white font-semibold text-xs cursor-pointer hover:brightness-110"
+              title="leave the room"
+              className="inline-flex items-center gap-2 h-10 px-4 max-sm:px-3 rounded-full border bg-[color-mix(in_oklch,var(--color-live)_18%,var(--color-surface))] border-[color-mix(in_oklch,var(--color-live)_45%,transparent)] text-live-ink font-semibold text-xs cursor-pointer hover:bg-[color-mix(in_oklch,var(--color-live)_28%,var(--color-surface))] transition-colors"
             >
               <Icon.Leave size={14} /> <span className="max-sm:sr-only">leave</span>
             </button>
@@ -875,6 +1031,7 @@ function RoomPage({
           onOpenProfile={openProfile}
           knocks={isPrivate && joined && isModerator(myRole, admin) ? knocks : NO_KNOCKS}
           onDecideKnock={decideKnock}
+          moderation={{ myRole, admin, onModerate }}
           open={sideOpen}
           onClose={() => setSideOpen(false)}
         />

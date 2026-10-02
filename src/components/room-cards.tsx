@@ -176,6 +176,18 @@ export const liveCardLabel = (room: LiveRoomCard): string =>
     .filter(Boolean)
     .join(", ");
 
+/** A past card's accessible name: what it shows, like a live card's. */
+export const pastCardLabel = (room: PastRoomCard): string =>
+  [
+    `View recap of ${room.name}`,
+    room.host ? `hosted by ${room.host.username}` : null,
+    `${room.people.length} joined`,
+    `lasted ${fmtMins(room.durationMinutes)}`,
+    room.isPrivate ? "private" : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
 export const LiveCard = ({
   room,
   onOpen,
@@ -230,7 +242,7 @@ export const LiveCard = ({
         </span>
         {full && <Chip>full · wait for a spot</Chip>}
         {room.streamCount > 0 && (
-          <span className="inline-flex items-center gap-1.5 text-success">
+          <span className="inline-flex items-center gap-1.5 text-success-ink">
             <span className="w-1.5 h-1.5 rounded-full bg-success shadow-[0_0_6px_var(--color-success)]" />{" "}
             Streaming
           </span>
@@ -252,7 +264,7 @@ export const PastCard = ({
   return (
     <button
       type="button"
-      aria-label={`View recap of ${room.name}`}
+      aria-label={pastCardLabel(room)}
       onClick={() => onOpen(room)}
       className={`${cardBase} shadow-card transition-[transform,border-color] duration-[120ms] motion-safe:hover:-translate-y-px hover:border-border-strong`}
     >

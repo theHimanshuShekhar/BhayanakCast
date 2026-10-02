@@ -112,10 +112,13 @@ const OnlineCount = () => {
 };
 
 export const SideNav = ({
+  inRoom = false,
   isAdmin,
   onCreate,
   profileMenu,
 }: {
+  /** On a room page: hidden on phones, where the room's control bar takes the bottom. */
+  inRoom?: boolean;
   isAdmin: boolean;
   onCreate: () => void;
   profileMenu: ReactNode;
@@ -130,10 +133,14 @@ export const SideNav = ({
   const dark = settings.theme === "dark";
 
   return (
-    <nav className="flex flex-col items-center gap-1 py-3 bg-canvas border-r border-border-subtle min-h-0 overflow-hidden max-sm:order-last max-sm:flex-row max-sm:justify-around max-sm:overflow-visible max-sm:py-1.5 max-sm:px-2 max-sm:pb-[max(6px,env(safe-area-inset-bottom))] max-sm:border-r-0 max-sm:border-t">
+    <nav
+      className={`${inRoom ? "max-sm:hidden " : ""}flex flex-col items-center gap-1 py-3 bg-canvas border-r border-border-subtle min-h-0 overflow-hidden max-sm:order-last max-sm:flex-row max-sm:justify-around max-sm:overflow-visible max-sm:py-1.5 max-sm:px-2 max-sm:pb-[max(6px,env(safe-area-inset-bottom))] max-sm:border-r-0 max-sm:border-t`}
+    >
       <Link
         to="/"
         aria-label="BhayanakCast home"
+        // "Active Rooms" below is the same link, so keyboard users get it once.
+        tabIndex={-1}
         className="max-sm:hidden w-10 h-10 rounded-[10px] grid place-items-center bg-surface-2 border border-border font-extrabold text-[11px] tracking-[0.08em] text-primary shadow-card mb-2 hover:shadow-[var(--shadow-card),0_0_18px_var(--color-primary-glow)] transition-shadow no-underline hover:no-underline"
       >
         BC

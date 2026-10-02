@@ -8,6 +8,7 @@ import type { ActivityItem, ChatMessage, Participant, RoomRole } from "~/lib/typ
 import { Icon } from "../icons";
 import { Avatar, Btn, Chip, IconBtn } from "../ui";
 import { EmojiPicker } from "./emoji-picker";
+import { type ModAction, ModerateMenu } from "./tile";
 
 const ROLE_BADGE: Partial<Record<RoomRole, string>> = {
   mod: "bg-primary-soft text-primary-strong border border-[color-mix(in_oklch,var(--color-primary)_35%,transparent)]",
@@ -99,7 +100,7 @@ const ChatLine = ({
             {m.user}
           </button>
           {role !== "member" && <RoleBadge role={role} />}
-          <time dateTime={m.at} className="text-[10px] text-subtle">
+          <time dateTime={m.at} className="text-[10px] text-muted tabular-nums">
             {hhmm(m.at)}
           </time>
         </div>
@@ -109,6 +110,16 @@ const ChatLine = ({
       </div>
     </div>
   );
+};
+
+// Feed dots follow the event: live red for a share starting (The Tally Rule), green for an
+// arrival, the accent for roles, muted for leaving and stopping.
+const FEED_DOT: Partial<Record<ActivityItem["kind"], string>> = {
+  shareStarted: "bg-live shadow-[0_0_8px_var(--color-live)]",
+  joined: "bg-success",
+  roleChanged: "bg-primary",
+  hostChanged: "bg-primary",
+  reaction: "bg-primary",
 };
 
 const EmptyNote = ({ children }: { children: ReactNode }) => (
@@ -125,9 +136,11 @@ const GroupHead = ({ children, count }: { children: ReactNode; count: number }) 
 const ParticipantRow = ({
   p,
   onOpenProfile,
+  moderation,
 }: {
   p: Participant;
   onOpenProfile: (u: string) => void;
+  moderation: Moderation;
 }) => (
   <div className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-surface">
     <button
@@ -159,8 +172,20 @@ const ParticipantRow = ({
       {p.muted ? <Icon.MicOff size={13} /> : <Icon.Mic size={13} />}
       {p.camera ? <Icon.Cam size={13} /> : <Icon.CamOff size={13} />}
     </div>
+    <ModerateMenu
+      p={p}
+      {...moderation}
+      triggerClassName="w-7 h-7 -mr-1 inline-flex items-center justify-center rounded-[var(--radius-sm)] text-muted cursor-pointer hover:bg-surface-2 hover:text-fg data-popup-open:bg-surface-2"
+    />
   </div>
 );
+
+/** Who's looking, so the people tab offers the same moderation as tiles. */
+type Moderation = {
+  myRole: RoomRole;
+  admin: boolean;
+  onModerate: (id: string, action: ModAction) => void;
+};
 
 /** Someone knocking (ADR 16), for the host, mods and admins: who, and admit or deny. */
 const KnockRow = ({
@@ -215,6 +240,7 @@ export const RoomSide = ({
   onOpenProfile,
   knocks,
   onDecideKnock,
+  moderation,
   open,
   onClose,
 }: {
@@ -231,6 +257,8 @@ export const RoomSide = ({
   /** Knocks pending on a private room, shown to those who can decide them; else empty. */
   knocks: KnockEntry[];
   onDecideKnock: (userId: string, admit: boolean) => void;
+  /** The viewer's role and the moderation handler, for the people tab's menus. */
+  moderation: Moderation;
   open: boolean;
   onClose: () => void;
 }) => {
@@ -403,7 +431,12 @@ export const RoomSide = ({
                 <Fragment key={label}>
                   <GroupHead count={list.length}>{label}</GroupHead>
                   {list.map((p) => (
-                    <ParticipantRow key={p.id} p={p} onOpenProfile={onOpenProfile} />
+                    <ParticipantRow
+                      key={p.id}
+                      p={p}
+                      onOpenProfile={onOpenProfile}
+                      moderation={moderation}
+                    />
                   ))}
                 </Fragment>
               ),
@@ -417,10 +450,15 @@ export const RoomSide = ({
               key={a.id}
               className="flex gap-2.5 py-2 border-t border-dashed border-border-subtle first:border-t-0"
             >
-              <span className="w-[7px] h-[7px] mt-1.5 rounded-full bg-primary shadow-[0_0_8px_var(--color-primary-glow)] flex-shrink-0" />
+              <span
+                className={`w-[7px] h-[7px] mt-1.5 rounded-full flex-shrink-0 ${FEED_DOT[a.kind] ?? "bg-muted"}`}
+              />
               <div className="text-[11.5px] text-fg-muted leading-normal">
                 <span className="text-fg font-semibold">{a.who}</span> {a.what}
-                <time dateTime={a.at} className="block mt-0.5 text-[10.5px] text-subtle">
+                <time
+                  dateTime={a.at}
+                  className="block mt-0.5 text-[10.5px] text-muted tabular-nums"
+                >
                   {hhmm(a.at)}
                 </time>
               </div>

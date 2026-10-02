@@ -6,6 +6,7 @@ import {
   Scripts,
   useNavigate,
   useRouter,
+  useRouterState,
   useSearch,
 } from "@tanstack/react-router";
 import { type ReactNode, Suspense, useEffect, useMemo, useState } from "react";
@@ -74,6 +75,8 @@ function AppShell() {
   // A visitor sent home from a room URL arrives with ?join=<roomId>, which opens the prompt.
   // Home's loader prefetches that room, so its name is there on first paint.
   const { join } = useSearch({ strict: false });
+  // In a room on a phone, the room's own control bar is the bottom bar.
+  const inRoom = useRouterState({ select: (s) => s.location.pathname.startsWith("/room/") });
   const joinRoom = useQuery({ ...roomQuery(join ?? ""), enabled: !user && !!join }).data;
   const joinPrompt: SignInPrompt | null =
     !user && join ? { kind: "join", roomName: joinRoom?.name } : null;
@@ -123,6 +126,7 @@ function AppShell() {
         </a>
         <div className="grid grid-cols-[64px_minmax(0,1fr)] max-sm:grid-cols-1 max-sm:grid-rows-[minmax(0,1fr)_auto] min-h-0 overflow-hidden">
           <SideNav
+            inRoom={inRoom}
             isAdmin={role === "admin"}
             onCreate={actions.openCreateRoom}
             profileMenu={

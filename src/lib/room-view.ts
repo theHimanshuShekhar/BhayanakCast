@@ -105,3 +105,37 @@ export function withRoster(
     return { ...next, size: "s", viewerOnly: false };
   });
 }
+
+/** One entry in the screen zone: someone's share, or a pinned camera. */
+export type StageScreen = { p: Participant; variant: "screen" | "camera" };
+
+/**
+ * How the stage shows `stage` (DESIGN.md "Stage"): screens first, in the room-card mosaic order,
+ * then cameras in a row, then everyone else as compact chips (you included).
+ * - The screen zone holds every share. The hero is the pinned person when they share, else the
+ *   one keeping the big tile (`size: "l"`, which `withRoster` holds steady so a new share never
+ *   moves an existing one), else the first. A pinned camera leads the zone instead.
+ * - `showOthers` false hides cameras and chips (the header's "viewers" toggle, ADR 13 addendum).
+ */
+export function stageZones(
+  stage: Participant[],
+  showOthers: boolean,
+): { screens: StageScreen[]; cameras: Participant[]; chips: Participant[] } {
+  const pinned = stage.find((p) => p.pinned);
+  const sharing = stage.filter((p) => p.streaming);
+  const hero =
+    (pinned?.streaming ? pinned : undefined) ?? sharing.find((p) => p.size === "l") ?? sharing[0];
+  const screens: StageScreen[] = [
+    ...(hero ? [hero] : []),
+    ...sharing.filter((p) => p !== hero),
+  ].map((p) => ({ p, variant: "screen" }));
+  const pinnedCamera = pinned && !pinned.streaming && pinned.camera ? pinned : undefined;
+  if (pinnedCamera) screens.unshift({ p: pinnedCamera, variant: "camera" });
+  if (!showOthers) return { screens, cameras: [], chips: [] };
+  const others = stage.filter((p) => !p.streaming && p !== pinnedCamera);
+  return {
+    screens,
+    cameras: others.filter((p) => p.camera),
+    chips: others.filter((p) => !p.camera),
+  };
+}

@@ -118,6 +118,7 @@ test("three people unmute and each hears the other two; leaving releases everyth
       await expect(twoTile.locator(".animate-bc-wave")).not.toHaveCount(0, { timeout: 15_000 });
     }
     // Their volume and mute here are this viewer's own.
+    await twoTile.hover();
     await twoTile.getByRole("slider", { name: "Volume for voice.two" }).fill("0.5");
     await twoTile.getByRole("button", { name: "Mute for me" }).click();
     const twoAudio = page.locator(`audio[data-peer="${twoId}"]`);
@@ -161,8 +162,13 @@ test("being kicked or taken over releases the mic and every connection", async (
         .toEqual({ liveTracks: 1, openConnections: 2, audio: 2 });
     }
 
+    await page.getByRole("group", { name: "voice.kicked", exact: true }).hover();
     await page.getByRole("button", { name: "Moderate voice.kicked" }).click();
     await page.getByRole("menuitem", { name: "kick from room" }).click();
+    await page
+      .getByRole("dialog", { name: "kick voice.kicked?" })
+      .getByRole("button", { name: "kick voice.kicked" })
+      .click();
     await expect(
       kicked.page.getByRole("heading", { name: "you were removed from this room" }),
     ).toBeVisible();

@@ -60,6 +60,28 @@ export async function seedPastRoom(
 }
 
 /**
+ * `count` public live rooms, each with a fresh host present: enough that home shows its
+ * "Filling Up" panel (it waits for more live rooms than the grid shows at a glance).
+ */
+export async function seedLiveRooms(browser: Browser, count = 5): Promise<void> {
+  const context = await browser.newContext();
+  try {
+    for (let i = 0; i < count; i++) {
+      const hostUserId = await signIn(context, { username: `filler.${i}` });
+      const span = { userId: hostUserId, startedAt: minutesAgo(5) };
+      await seedRoom(context, {
+        name: uniqueRoomName("filler"),
+        hostUserId,
+        createdAt: span.startedAt,
+        presence: [span],
+      });
+    }
+  } finally {
+    await context.close();
+  }
+}
+
+/**
  * A room name no other test (or browser project) uses: every test shares one server and
  * one database, so lists hold everyone's rooms. Search for the returned name, not `base`.
  */
@@ -70,8 +92,10 @@ export function uniqueRoomName(base: string): string {
 export interface NewRoom {
   name: string;
   isPrivate?: boolean;
-  /** The create dialog's kind button, e.g. "Coding" (default: Gaming). */
+  /** The create dialog's kind button, e.g. "coding" (default: just chatting). */
   kind?: string;
+  /** Tags to pick, without the "#" (default: none). */
+  tags?: string[];
 }
 
 /**
@@ -95,11 +119,17 @@ export async function createRoomOnPage(page: Page, room: NewRoom): Promise<strin
   await hydrating(page).goto("/");
   // The rail's button (home has its own "start a room" button too).
   await page.getByRole("button", { name: "Start a Room" }).first().click();
-  const dialog = page.getByRole("dialog", { name: "start a hang" });
+  const dialog = page.getByRole("dialog", { name: "start a room" });
   await dialog.getByLabel("room name").fill(room.name);
   if (room.kind) await dialog.getByRole("button", { name: room.kind, exact: true }).click();
+  if (room.tags?.length) {
+    await dialog.getByText("tags and a description").click();
+    for (const tag of room.tags) {
+      await dialog.getByRole("button", { name: `#${tag}`, exact: true }).click();
+    }
+  }
   if (room.isPrivate) await dialog.getByRole("switch").click();
-  await dialog.getByRole("button", { name: /start hang/ }).click();
+  await dialog.getByRole("button", { name: /start room/ }).click();
   await expect(page.getByRole("heading", { name: room.name })).toBeVisible();
   const id = /\/room\/([^/?#]+)$/.exec(new URL(page.url()).pathname)?.[1];
   if (!id) throw new Error(`Not on a room page: ${page.url()}`);

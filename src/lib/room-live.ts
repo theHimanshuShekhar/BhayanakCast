@@ -54,6 +54,7 @@ const by = (who: { username: string } | undefined) => (who ? ` by ${who.username
 export function feedLine(entry: FeedEntry): ActivityItem {
   const item = (what: string): ActivityItem => ({
     id: entry.id,
+    kind: entry.kind,
     who: entry.username,
     what,
     at: entry.at,

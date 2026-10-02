@@ -24,7 +24,7 @@ const render = (p: Participant, extra: Partial<Parameters<typeof Tile>[0]> = {})
   renderToStaticMarkup(
     <Tile
       p={p}
-      layout="grid"
+      variant="screen"
       myRole="member"
       locallyMuted={false}
       reactions={[]}
@@ -51,5 +51,19 @@ describe("Tile", () => {
   it("has a share volume only while their share has sound", () => {
     expect(render(bo)).not.toContain("Share volume for bo");
     expect(render(bo, { onShareVolume: () => {} })).toContain("Share volume for bo");
+  });
+
+  it("names the person on each control, so a screen reader can tell tiles apart", () => {
+    const html = render({ ...bo, streaming: false, camera: true }, { variant: "camera" });
+    expect(html).toContain('aria-label="Pin bo"');
+    expect(html).toContain('aria-label="Mute for me: bo"');
+    expect(html).toContain('aria-label="Fullscreen bo"');
+  });
+
+  it("shows someone with neither a share nor a camera as a compact chip", () => {
+    const html = render({ ...bo, streaming: false }, { variant: "chip" });
+    expect(html).toContain('aria-label="bo"');
+    expect(html).not.toContain("data-screen");
+    expect(html).not.toContain("Fullscreen");
   });
 });

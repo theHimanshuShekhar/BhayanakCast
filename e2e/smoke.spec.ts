@@ -18,14 +18,13 @@ test("home lists live rooms and past streams", async ({ page, browser }) => {
 test("search filters rooms by name, host, #tag and kind", async ({ page, browser }) => {
   const name = uniqueRoomName("rust pair programming");
   const token = name.split(" ").at(-1) ?? name;
-  await createRoomAs(browser, "ferris.searcher", { name });
+  await createRoomAs(browser, "ferris.searcher", { name, kind: "coding", tags: ["chill"] });
   await page.goto("/");
   const search = page.getByLabel("Search rooms and users");
   await search.fill(token);
   await expect(page.getByRole("button", { name: `Join ${name}` })).toBeVisible();
   await expect(page.getByRole("button", { name: /^Join / })).toHaveCount(1);
-  // The create dialog's defaults: kind "gaming", tag "chill".
-  for (const term of ["ferris.searcher", "#chill", "gaming"]) {
+  for (const term of ["ferris.searcher", "#chill", "coding"]) {
     await search.fill(term);
     await expect(page.getByRole("button", { name: `Join ${name}` })).toBeVisible();
   }

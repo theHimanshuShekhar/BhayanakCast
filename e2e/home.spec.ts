@@ -16,7 +16,7 @@ async function rightNow(page: Page, label: string): Promise<number> {
   const tile = page
     .getByRole("region", { name: "Right Now" })
     .getByText(label, { exact: true })
-    .locator("xpath=following-sibling::div");
+    .locator("xpath=../following-sibling::div");
   return Number(await tile.textContent());
 }
 

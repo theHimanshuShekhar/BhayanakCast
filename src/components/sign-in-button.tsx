@@ -61,7 +61,7 @@ export const SignInButton = ({
   }
 
   return (
-    <Btn variant="primary" className="w-full" onClick={start} disabled={pending}>
+    <Btn variant="primary" className="w-full max-sm:h-11" onClick={start} disabled={pending}>
       <DiscordMark size={14} /> sign in with discord
     </Btn>
   );

@@ -183,7 +183,7 @@ The palette is a dark tonal ladder carrying three signal colors, and each signal
 - **On-Air Glow** (`on-air-glow`, default hue 265, violet): the accent is a role, and the user retunes its hue at runtime through `--accent-h`. It marks the active rail item, primary buttons, speaking waves, focus rings, @mentions and the viewer's own identity. It has three companions: **soft** (18% alpha) for active fills and focus halos, **halo** (55% alpha) for glows, and **ink** (a dark ink tinted with the same hue) for text on the accent. The ink is dark because near-white on an L 0.68 fill stays under 3:1 at every hue, while dark ink gives about 6:1 at every hue.
 
 ### Secondary
-- **Tally Light Red** (`tally-light-red`): means live and nothing else. It's used for LIVE chips, the pulsing live dot, and live-room tile outlines. Mixed down with surface, it also serves as the danger button, where "leave" and "stop" read as cutting the feed. The solid LIVE chip mixes 85% red with 15% black behind white text.
+- **Tally Light Red** (`tally-light-red`): means live and nothing else. It's used for LIVE chips, the pulsing live dot, and live-room tile outlines. Mixed down with surface, it also serves as the danger button, where "leave" and "stop" read as cutting the feed. The solid LIVE chip mixes 72% red with 28% black behind white text, which keeps 10.5px white text above 4.5:1. Your own active share uses the same solid red: it's the one control that means you're on air.
 
 ### Tertiary
 - **Signal Green** (`signal-green`): means healthy and present. It appears on "Streaming" status, the online dot, capacity chips and ok chips.
@@ -235,8 +235,9 @@ The app shell is a 64px icon rail on the left, a scrolling main column, and an o
 - **Room grid:** 12 columns on desktop and 2 columns below `md`. Density is a user setting: compact (8px gap, 10px padding, 120px rows), comfortable (12px, 16px, 140px rows) or spacious (18px, 22px, 180px rows). Layout presets are mosaic, grid and spotlight.
 - **Stream mosaic** (room cards): always 16:9. One stream fills it, two split side by side, and three use one hero tile plus a stack of two. Tiles have 2px gaps.
 - **Spacing rhythm:** a 4px base with lots of half steps (6, 10 and 14px). Gaps of 8–12px and card padding of 14px dominate.
-- **Home header:** the page title sits on the left and a "start a room" button on the right; on phones the button goes full width below the title. It's primary for signed-in users. For visitors it's secondary, because the visitor intro's sign-in is their primary action. The visitor intro sits above search at every width.
-- **Responsive:** below `sm` the rail becomes a bottom bar that respects the safe-area inset. Its targets are 44px, and it has no accent swatch, because accent lives in settings. The room sidebar becomes a drawer, and rail tooltips are hidden. Screen sharing controls are hidden on mobile (see PRODUCT.md).
+- **Home header:** the page title sits on the left and, for signed-in users, a primary "start a room" button on the right (full width below the title on phones). Visitors have no start button: the visitor intro, above search at every width, is their one way in. Filling Up appears only once there are more than four live rooms; with fewer, it would repeat cards that are already in view.
+- **Room stage:** screens first. The screen zone holds every share in the room-card mosaic: one fills it, two split it, three are a hero plus a stack. The "grid" layout makes them equal, and "spotlight" keeps a wide hero with a narrow column. The hero is the pinned share, else whoever had the big slot first, so a new share never moves an existing one. Cameras sit in a row below the screens, or take the stage when nobody shares. Everyone else, you included, is a compact chip. The density setting sets the gaps and the camera row's height. On phones the zones stack and each screen keeps 16:9. The header's "viewers" toggle hides cameras and chips.
+- **Responsive:** below `sm` the rail becomes a bottom bar that respects the safe-area inset. Its targets are 44px, and it has no accent swatch, because accent lives in settings. The room sidebar becomes a drawer, and rail tooltips are hidden. On a room page the bottom bar is hidden, because the room's control bar takes the bottom. Screen sharing controls are hidden on mobile (see PRODUCT.md).
 
 ## Elevation & Depth
 
@@ -289,7 +290,15 @@ Buttons are tactile and quiet, and they press down on click (`active:translate-y
 - **Mobile:** the rail becomes a bottom bar, and the active bar and tooltips are hidden.
 
 ### Stream Tile (signature)
-Stream tiles are the product's main surface. Each is a dark screen well containing the live `<video>`, or a hue-tinted striped placeholder before thumbnails exist. Overlays sit on top: a solid LIVE chip and role chip at top left, a dashed screen-kind label (for example "GAME CAPTURE") at 9.5px with 0.16em tracking, a viewer count at top right, and a name pill at bottom left (black at 55% with 6px blur) with a speaking wave. The streamer's camera sits bottom right as a picture-in-picture. Hosts' tiles get an accent outline, and other live tiles get a red-tinted outline.
+Stream tiles are the product's main surface. Each is a dark screen well containing the live `<video>` (letterboxed, never cropped), or a hue-tinted striped placeholder until the picture arrives. Overlays sit on top: a solid LIVE chip and role chip at top left, the per-person controls at top right, and a name pill at bottom left (black at 55% with 8px blur) with a speaking wave. The streamer's camera sits bottom right as a picture-in-picture. A speaking person gets a 2px accent ring with a glow, and a sharing tile a red-tinted outline.
+- **Per-person controls:** pin, mute for me, their voice volume (mic icon), their screen's volume (screen icon), fullscreen and the moderation menu. Each control's name includes the person ("Pin bo", "Mute for me: bo"). Both sliders are white: the icon tells them apart, not a colour.
+- **Chip:** someone with neither a share nor a camera is a 40px pill with their avatar, name, role and mic state. The border lights in the accent while they speak.
+
+### Control Bar
+Round 40px controls in a pill. Lit in the accent when on (camera, mic, the open chat drawer), plain when off, where the slashed icon carries the state. Your own share is solid live red and reads "live · stop". Leave uses the danger mix, never solid red. Every control has a tooltip, and a "skip to controls" link jumps past the tiles.
+
+### Moderation
+Stop a share, change a role or kick, from the ⋯ menu on a tile or on a row in the people tab. A kick is permanent for the room, so it always asks first. The dialog names the person and says they can't rejoin. Its buttons are "keep them" and a danger "kick {name}".
 
 ### Screen Switch-On (signature motion)
 "On air": when a share starts, its screen switches on like a monitor. It opens from a bright horizontal line to the full frame (clip-path from `inset(49.5% 0)` to `inset(0)`, with brightness 2.4 → 1 and saturation 0 → 1) over 520ms on `cubic-bezier(0.16, 1, 0.3, 1)`, and the LIVE chip lights 260ms later (`animate-bc-power-on`). On home, only a room that goes live while the page is open switches on. The first render never does. This is the product's one authored moment, so don't reuse it for anything else.
@@ -297,6 +306,7 @@ Stream tiles are the product's main surface. Each is a dark screen well containi
 ### Motion
 - **Settle-in** (`animate-bc-enter`, 220ms): new tiles, chat lines and lit chips arrive with opacity plus a 4px rise.
 - **Dialogs:** fade and scale from 0.98 over 200ms (they slide up on phones) and exit in 120ms.
+- **Stage:** when shares come and go, the screen zone eases its grid tracks over 300ms, so existing screens slide to make room instead of jumping.
 - **Feedback:** hover and press run 120–160ms. The speaking ring eases over 200ms.
 - **Reduced motion:** no pulse or wave loops, and the switch-on and settle-in become a 200ms fade. Reactions fade in place, and hover lifts and dialog movement are `motion-safe:` only.
 
