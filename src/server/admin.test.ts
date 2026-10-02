@@ -9,7 +9,7 @@ import {
   userStats,
 } from "../db/schema/index.ts";
 import { createTestDb } from "../db/test-db.ts";
-import { percentChange } from "../lib/admin.ts";
+import { ADMIN_ROOMS_PAGE_SIZE, percentChange } from "../lib/admin.ts";
 import {
   getAdminDailySeries,
   getAdminLeaderboards,
@@ -61,7 +61,7 @@ describe("admin functions refuse non-admins", () => {
     ["getAdminOverview", (caller) => getAdminOverview(db, caller, now)],
     ["getAdminDailySeries", (caller) => getAdminDailySeries(db, caller, now)],
     ["listAdminLiveRooms", (caller) => listAdminLiveRooms(db, caller)],
-    ["listAdminRecentRooms", (caller) => listAdminRecentRooms(db, caller, now)],
+    ["listAdminRecentRooms", (caller) => listAdminRecentRooms(db, caller, {}, now)],
     ["getAdminLeaderboards", (caller) => getAdminLeaderboards(db, caller)],
   ];
   for (const [name, call] of calls) {
@@ -257,8 +257,9 @@ describe("listAdminRecentRooms", () => {
       span("live", "c", 60, 40),
     ]);
 
-    const rows = await listAdminRecentRooms(db, admin, now);
+    const { rooms: rows, ...paging } = await listAdminRecentRooms(db, admin, {}, now);
 
+    expect(paging).toEqual({ total: 3, page: 1, pageSize: ADMIN_ROOMS_PAGE_SIZE });
     expect(rows.map((r) => r.id)).toEqual(["live", "recent", "older"]);
     expect(rows[0]).toEqual({
       id: "live",
@@ -280,6 +281,80 @@ describe("listAdminRecentRooms", () => {
       endedAt: minutesAgo(60).toISOString(),
     });
     expect(rows[2]).toMatchObject({ status: "ended", peak: 0, joined: 0 });
+  });
+
+  describe("paging and search", () => {
+    // One live room, then ended rooms from most to least recently ended: ended00, ended01, ...
+    const seed = async (ended: number) => {
+      await db.insert(rooms).values([
+        room({ id: "live", createdAt: minutesAgo(10) }),
+        ...Array.from({ length: ended }, (_, i) =>
+          room({
+            id: `ended${String(i).padStart(2, "0")}`,
+            hostUserId: i % 2 ? "b" : "a",
+            createdAt: minutesAgo(600 + i),
+            endedAt: minutesAgo(30 + i),
+          }),
+        ),
+      ]);
+    };
+
+    it("pages through the rooms, live first then most recently ended", async () => {
+      await seed(ADMIN_ROOMS_PAGE_SIZE + 4);
+      const first = await listAdminRecentRooms(db, admin, { page: 1 }, now);
+      const second = await listAdminRecentRooms(db, admin, { page: 2 }, now);
+      expect(first).toMatchObject({ total: ADMIN_ROOMS_PAGE_SIZE + 5, page: 1 });
+      expect(first.rooms).toHaveLength(ADMIN_ROOMS_PAGE_SIZE);
+      expect(first.rooms.slice(0, 2).map((r) => r.id)).toEqual(["live", "ended00"]);
+      expect(second.rooms.map((r) => r.id)).toEqual([
+        `ended${ADMIN_ROOMS_PAGE_SIZE - 1}`,
+        `ended${ADMIN_ROOMS_PAGE_SIZE}`,
+        `ended${ADMIN_ROOMS_PAGE_SIZE + 1}`,
+        `ended${ADMIN_ROOMS_PAGE_SIZE + 2}`,
+        `ended${ADMIN_ROOMS_PAGE_SIZE + 3}`,
+      ]);
+      expect((await listAdminRecentRooms(db, admin, { page: 3 }, now)).rooms).toEqual([]);
+    });
+
+    it("computes peak and joined for the page's rooms, whichever page they are on", async () => {
+      await seed(ADMIN_ROOMS_PAGE_SIZE);
+      // The live room and the first 24 ended ones fill page 1; the last one is alone on page 2.
+      const last = `ended${ADMIN_ROOMS_PAGE_SIZE - 1}`;
+      const span = (roomId: string, userId: string, from: number, to: number) => ({
+        roomId,
+        userId,
+        startedAt: minutesAgo(from),
+        endedAt: minutesAgo(to),
+        lastSeenAt: minutesAgo(to),
+      });
+      await db
+        .insert(presenceIntervals)
+        .values([
+          span("ended00", "a", 120, 60),
+          span(last, "a", 600, 590),
+          span(last, "b", 595, 585),
+          span(last, "c", 700, 690),
+        ]);
+      const first = await listAdminRecentRooms(db, admin, { page: 1 }, now);
+      const second = await listAdminRecentRooms(db, admin, { page: 2 }, now);
+      expect(first.rooms.find((r) => r.id === "ended00")).toMatchObject({ peak: 1, joined: 1 });
+      expect(second.rooms.map((r) => [r.id, r.peak, r.joined])).toEqual([[last, 2, 3]]);
+    });
+
+    it("searches room names and host usernames case-insensitively, literally", async () => {
+      await seed(4);
+      await db.insert(rooms).values(room({ id: "50%_off", name: "50%_off", hostUserId: "c" }));
+      const ids = async (q: string) =>
+        (await listAdminRecentRooms(db, admin, { q }, now)).rooms.map((r) => r.id);
+      expect(await ids("ENDED0")).toEqual(["ended00", "ended01", "ended02", "ended03"]);
+      // Hosts: b (ended01, ended03), a_user (live and the other ended rooms).
+      expect(await ids("B_USER")).toEqual(["ended01", "ended03"]);
+      expect(await ids("c_user")).toEqual(["50%_off"]);
+      expect(await ids("%")).toEqual(["50%_off"]);
+      expect(await ids("_o")).toEqual(["50%_off"]);
+      const found = await listAdminRecentRooms(db, admin, { q: "b_user", page: 1 }, now);
+      expect(found.total).toBe(2);
+    });
   });
 });
 

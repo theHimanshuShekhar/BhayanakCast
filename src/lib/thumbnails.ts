@@ -6,6 +6,13 @@
 /** Every thumbnail is this size: the frame is scaled down to fit and letterboxed. */
 export const THUMBNAIL_WIDTH = 480;
 export const THUMBNAIL_HEIGHT = 270;
+/**
+ * The most the server lets an upload declare (ADR 10): twice the capture size, so a changed
+ * capture or encoder doesn't break uploads, while a small file claiming a huge size can't make
+ * every viewer of a room card decode it.
+ */
+export const THUMBNAIL_MAX_WIDTH = THUMBNAIL_WIDTH * 2;
+export const THUMBNAIL_MAX_HEIGHT = THUMBNAIL_HEIGHT * 2;
 /** Upload limit, enforced on the server (a 480x270 WebP is about 30 KB). */
 export const THUMBNAIL_MAX_BYTES = 100 * 1024;
 export const THUMBNAIL_MIME_TYPES = ["image/webp", "image/jpeg"] as const;

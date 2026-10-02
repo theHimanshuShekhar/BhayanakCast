@@ -4,7 +4,8 @@
  * cookie (ADR 7), then hands frames and closes to the room hub (./room-hub.ts), which owns all
  * live state and the protocol (src/lib/realtime.ts). An upgrade without a valid session opens
  * an anonymous, lobby-only socket (ADR 20), at most `anonymousSocketsPerIp` per client IP
- * (`cf-connecting-ip` only from a trusted proxy, ./client-ip.ts).
+ * (`cf-connecting-ip` only from a trusted proxy, ./client-ip.ts). A signed-in user may hold at
+ * most `socketsPerUser` sockets (tabs and devices); more are refused with 429, like visitors'.
  *
  * `ws` runs in no-server mode on the server's `upgrade` event and only takes upgrades on
  * `REALTIME_PATH`, leaving any others (Vite's HMR socket in dev) to their own listeners.
@@ -37,6 +38,11 @@ export interface RealtimeOptions {
    * Defaults to `REALTIME_ANONYMOUS_SOCKETS_PER_IP`.
    */
   anonymousSocketsPerIp?: number;
+  /**
+   * Open sockets (and upgrades in progress) allowed per signed-in user; more are refused with
+   * 429. Defaults to `REALTIME_SOCKETS_PER_USER`.
+   */
+  socketsPerUser?: number;
   /**
    * Peers whose `cf-connecting-ip` names the client (./client-ip.ts); for anyone else the socket
    * address is the client IP. Defaults to `TRUSTED_PROXY_IPS`.
@@ -71,11 +77,14 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
     });
   const authenticate = options.authenticate ?? authenticateFromSession;
   const anonymousLimit = options.anonymousSocketsPerIp ?? env.REALTIME_ANONYMOUS_SOCKETS_PER_IP;
+  const userLimit = options.socketsPerUser ?? env.REALTIME_SOCKETS_PER_USER;
   const clientIp = createClientIpResolver(options.trustedProxies ?? env.TRUSTED_PROXY_IPS, {
     warn: (message) => console.warn(`[realtime] ${message}`),
   });
   /** Open anonymous sockets (and upgrades in progress) by client IP. */
   const anonymousByIp = new Map<string, number>();
+  /** Open signed-in sockets (and upgrades in progress) by user id. */
+  const socketsByUser = new Map<string, number>();
   const stopAnnouncements = onRoomAnnouncement((announcement) => {
     void hub.announce(announcement);
   });
@@ -119,17 +128,16 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
     // The client left while we were authenticating: `close` has already fired, so a count
     // taken now would never be released.
     if (socket.destroyed) return;
-    if (!caller.user) {
+    // Held until the TCP socket closes, whether the handshake completes or not.
+    if (caller.user) {
+      if (!takeSlot(socketsByUser, caller.user.id, userLimit, socket)) {
+        return refuse(socket, 429, "Too Many Requests");
+      }
+    } else {
       const ip = clientIp(request.socket.remoteAddress, request.headers[CLIENT_IP_HEADER]);
-      const open = anonymousByIp.get(ip) ?? 0;
-      if (open >= anonymousLimit) return refuse(socket, 429, "Too Many Requests");
-      // Held until the TCP socket closes, whether the handshake completes or not.
-      anonymousByIp.set(ip, open + 1);
-      socket.once("close", () => {
-        const left = (anonymousByIp.get(ip) ?? 1) - 1;
-        if (left > 0) anonymousByIp.set(ip, left);
-        else anonymousByIp.delete(ip);
-      });
+      if (!takeSlot(anonymousByIp, ip, anonymousLimit, socket)) {
+        return refuse(socket, 429, "Too Many Requests");
+      }
     }
     wss.handleUpgrade(request, socket, head, (ws) => {
       // The 101 is already written, so a throw here can't be answered with an HTTP status
@@ -190,6 +198,22 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
       await hub.idle();
     },
   };
+}
+
+/**
+ * Count one more open socket for `key` in `open`, released when `socket` closes. False, with
+ * nothing counted, if `key` already has `limit`.
+ */
+function takeSlot(open: Map<string, number>, key: string, limit: number, socket: Duplex): boolean {
+  const held = open.get(key) ?? 0;
+  if (held >= limit) return false;
+  open.set(key, held + 1);
+  socket.once("close", () => {
+    const left = (open.get(key) ?? 1) - 1;
+    if (left > 0) open.set(key, left);
+    else open.delete(key);
+  });
+  return true;
 }
 
 /**

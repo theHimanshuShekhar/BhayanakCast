@@ -14,6 +14,8 @@ services:
       NODE_ENV: production
       PORT: "3000"
       HOST: 0.0.0.0
+      # Pasted in unencoded, so the password (and user and db name) must be URL-safe; the app refuses
+      # to start otherwise (docs/deploy.md section 3).
       DATABASE_URL: postgres://${POSTGRES_USER:-bhayanakcast}:${POSTGRES_PASSWORD:-}@db:5432/${POSTGRES_DB:-bhayanakcast}
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-https://cast.bhayanak.net}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
@@ -26,6 +28,7 @@ services:
       CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:-}
       CLOUDFLARE_ANALYTICS_API_TOKEN: ${CLOUDFLARE_ANALYTICS_API_TOKEN:-}
       REALTIME_ANONYMOUS_SOCKETS_PER_IP: ${REALTIME_ANONYMOUS_SOCKETS_PER_IP:-}
+      REALTIME_SOCKETS_PER_USER: ${REALTIME_SOCKETS_PER_USER:-}
       REALTIME_EMPTY_ROOM_TIMEOUT_MS: ${REALTIME_EMPTY_ROOM_TIMEOUT_MS:-}
     # Apply pending migrations, then start the server (the image's default command too).
     command: ["sh", "-c", "node src/db/migrate.ts && exec node server.prod.ts"]

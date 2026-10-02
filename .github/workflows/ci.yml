@@ -50,3 +50,7 @@ jobs:
       # Runs the sidecar's scripts in their image against a throwaway Postgres container.
       - name: Backup sidecar tests
         run: pnpm test:backup
+
+      # The migration runner's advisory lock and out-of-order check, against a throwaway Postgres.
+      - name: Migration runner tests
+        run: pnpm test:migrate

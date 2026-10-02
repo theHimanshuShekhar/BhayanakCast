@@ -1,7 +1,15 @@
 import { Menu } from "@base-ui/react/menu";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound, redirect, useNavigate } from "@tanstack/react-router";
-import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Icon } from "~/components/icons";
 import { ControlBtn } from "~/components/room/control-btn";
 import { KnockToasts } from "~/components/room/knock-toasts";
@@ -176,24 +184,29 @@ function RoomVisit({ room, admin }: { room: LiveRoomCard; admin: boolean }) {
 /**
  * The room-info menu. In a private room the host, mods and admins can copy its invite link,
  * and the host can regenerate it so old links stop working (ADR 16); `onInviteResult` gets what
- * to tell them, done or not.
+ * to tell them, done or not. `compact` is the round icon for the control bar below the desktop
+ * breakpoint, where there is no room for the labelled button; it has nothing to show without
+ * invite rights.
  */
 function RoomInfoMenu({
   roomId,
   canInvite,
   canRegenerate,
   onInviteResult,
+  compact = false,
 }: {
   roomId: string;
   canInvite: boolean;
   canRegenerate: boolean;
   onInviteResult: (notice: { message: string }) => void;
+  compact?: boolean;
 }) {
   const trigger = (
     <>
       <Icon.Hash size={12} /> room info
     </>
   );
+  if (compact && !canInvite) return null;
   if (!canInvite) {
     return (
       <Btn variant="ghost" size="sm" title="Room info">
@@ -225,9 +238,17 @@ function RoomInfoMenu({
     "flex items-center gap-2 px-2.5 py-2 rounded-[var(--radius-sm)] text-xs text-fg cursor-pointer outline-0 data-highlighted:bg-surface-2";
   return (
     <Menu.Root>
-      <Menu.Trigger render={<Btn variant="ghost" size="sm" title="Room info" />}>
-        {trigger}
-      </Menu.Trigger>
+      {compact ? (
+        <Menu.Trigger
+          render={<ControlBtn aria-label="Room info" title="Room info" className="lg:hidden" />}
+        >
+          <Icon.Hash size={16} />
+        </Menu.Trigger>
+      ) : (
+        <Menu.Trigger render={<Btn variant="ghost" size="sm" title="Room info" />}>
+          {trigger}
+        </Menu.Trigger>
+      )}
       <Menu.Portal>
         <Menu.Positioner side="top" align="start" sideOffset={10} className="z-[160] outline-0">
           <Menu.Popup className="min-w-[200px] p-1.5 bg-surface border border-border-strong rounded-[var(--radius)] shadow-deep outline-0">
@@ -288,7 +309,7 @@ function RoomName({ name, canRename }: { name: string; canRename: boolean }) {
         onKeyDown={(e) => {
           if (e.key === "Escape") setDraft(null);
         }}
-        className="h-6 min-w-0 w-56 px-2 rounded-md bg-surface border border-border text-[11.5px] text-fg outline-0 focus:border-primary"
+        className="h-6 pointer-coarse:h-8 min-w-0 w-56 px-2 rounded-md bg-surface border border-border text-[11.5px] text-fg outline-0 focus:border-primary"
       />
       <button type="submit" className="text-[11px] text-primary cursor-pointer">
         save
@@ -390,6 +411,7 @@ function RoomPage({
   const [pinnedId, setPinnedId] = useState<string | null>(null);
   const [mutedIds, setMutedIds] = useState<Set<string>>(() => new Set());
   const [sideOpen, setSideOpen] = useState(false);
+  const chatButton = useRef<HTMLButtonElement>(null);
 
   const liveFor = useMinutesSince(detail.createdAt);
 
@@ -812,11 +834,20 @@ function RoomPage({
                 </Menu.Positioner>
               </Menu.Portal>
             </Menu.Root>
+            <RoomInfoMenu
+              compact
+              roomId={detail.id}
+              canInvite={isPrivate && joined && isModerator(myRole, admin)}
+              canRegenerate={isPrivate && joined && myRole === "host"}
+              onInviteResult={setInviteResult}
+            />
             {settings.showChat && (
               <ControlBtn
+                ref={chatButton}
                 state={sideOpen ? "active" : undefined}
                 onClick={() => setSideOpen((o) => !o)}
                 aria-label="Chat & people"
+                aria-haspopup="dialog"
                 aria-expanded={sideOpen}
                 className="lg:hidden"
               >
@@ -856,14 +887,6 @@ function RoomPage({
       </div>
 
       {isPrivate && <KnockToasts roomId={detail.id} />}
-      {settings.showChat && sideOpen && (
-        <button
-          type="button"
-          aria-label="Close panel"
-          className="lg:hidden fixed inset-0 z-[110] bg-black/45 animate-bc-fade cursor-default"
-          onClick={() => setSideOpen(false)}
-        />
-      )}
       {settings.showChat && (
         <RoomSide
           participants={people}
@@ -877,6 +900,7 @@ function RoomPage({
           onDecideKnock={decideKnock}
           open={sideOpen}
           onClose={() => setSideOpen(false)}
+          returnFocus={chatButton}
         />
       )}
     </div>

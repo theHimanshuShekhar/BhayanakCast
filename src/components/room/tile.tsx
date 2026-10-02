@@ -1,6 +1,6 @@
 // Stage tile — screen share / camera / viewer-only. Ported from docs/design/prototype/room.jsx.
 import { Menu } from "@base-ui/react/menu";
-import { type CSSProperties, useRef } from "react";
+import { type CSSProperties, useRef, useState } from "react";
 import { avatarFor } from "~/lib/format";
 import type { Participant, RoomRole, Settings } from "~/lib/types";
 import { Icon } from "../icons";
@@ -38,9 +38,12 @@ const tileBase =
   "@container group relative bg-surface border border-border rounded-[var(--radius)] overflow-hidden flex flex-col min-w-0 min-h-0";
 const glassPill = "bg-black/55 backdrop-blur-[8px] text-white";
 const overlayBtn =
-  "w-[26px] h-[26px] inline-flex items-center justify-center rounded-[var(--radius-sm)] text-white cursor-pointer hover:bg-white/20 transition-colors data-popup-open:bg-white/20";
+  "w-[26px] h-[26px] pointer-coarse:w-8 pointer-coarse:h-8 inline-flex items-center justify-center rounded-[var(--radius-sm)] text-white cursor-pointer hover:bg-white/20 transition-colors data-popup-open:bg-white/20";
 const menuItem =
   "flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[11.5px] text-fg-muted outline-0 cursor-pointer data-highlighted:bg-surface-2 data-highlighted:text-fg";
+
+/** What a tap on a tile leaves to itself, rather than showing or hiding the controls. */
+const INTERACTIVE = "button, a, input, select, textarea, [role=menuitem], [role=slider]";
 
 export type ModAction = "kick" | "stopShare" | "promote" | "demote";
 
@@ -115,6 +118,9 @@ export const Tile = ({
   onRetry?: () => void;
 }) => {
   const ref = useRef<HTMLDivElement>(null);
+  // Touch has no hover: a tap on the tile shows its controls, another hides them (the styles
+  // below only act on `pointer: coarse`).
+  const [tapped, setTapped] = useState(false);
   const span = tileSpan(p, layout);
   const cantConnectState = cantConnect && <CantConnect name={p.name} onRetry={onRetry} />;
 
@@ -159,11 +165,20 @@ export const Tile = ({
 
   return (
     // biome-ignore lint/a11y/useSemanticElements: a tile groups one person's view, not a form
+    // biome-ignore lint/a11y/useKeyWithClickEvents: the tap only reveals controls that keyboard users reach by focus
     <div
       ref={ref}
       role="group"
       aria-label={displayName(p)}
       className={`${tileBase} ${span} ${ring}`}
+      onClick={(e) => {
+        // A tap on a button, link or field is for that; so is one in a menu, which React
+        // bubbles here from its portal outside the tile.
+        const target = e.target as Element;
+        if (e.currentTarget.contains(target) && !target.closest(INTERACTIVE)) {
+          setTapped((t) => !t);
+        }
+      }}
     >
       {p.streaming ? (
         screenTrack ? (
@@ -205,7 +220,8 @@ export const Tile = ({
       </div>
 
       <div
-        className={`absolute top-2.5 right-2.5 z-[4] flex gap-1 p-[3px] rounded-[10px] border border-white/14 opacity-0 -translate-y-1 transition-[opacity,transform] duration-[160ms] group-hover:opacity-100 group-hover:translate-y-0 focus-within:opacity-100 focus-within:translate-y-0 has-data-popup-open:opacity-100 has-data-popup-open:translate-y-0 ${glassPill}`}
+        data-tapped={tapped || undefined}
+        className={`absolute top-2.5 right-2.5 z-[4] flex pointer-coarse:flex-wrap pointer-coarse:justify-end gap-1 p-[3px] rounded-[10px] border border-white/14 opacity-0 -translate-y-1 transition-[opacity,transform] duration-[160ms] group-hover:opacity-100 group-hover:translate-y-0 focus-within:opacity-100 focus-within:translate-y-0 has-data-popup-open:opacity-100 has-data-popup-open:translate-y-0 pointer-coarse:data-tapped:opacity-100 pointer-coarse:data-tapped:translate-y-0 pointer-coarse:not-data-tapped:not-focus-within:not-has-data-popup-open:pointer-events-none ${glassPill}`}
       >
         <button
           type="button"

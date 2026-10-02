@@ -271,6 +271,22 @@ export type ShareAnswer = "accepted" | "refused" | "timeout";
  */
 export const SHARE_ACK_TIMEOUT_MS = 3_000;
 
+/**
+ * The media state to show once the server refused a `media.state` with `code`. Over the share
+ * limit only the share is off (the rest applied). Rate-limited, none of it applied, so it falls
+ * back to the last state the server confirmed (`confirmed`), as the UI mustn't show a state the
+ * server never accepted.
+ */
+export function mediaAfterRefusal(
+  code: ServerMessageOf<"error">["code"],
+  current: MediaState,
+  confirmed: MediaState,
+): MediaState {
+  if (code === "share_limit") return { ...current, share: false };
+  if (code === "rate_limited") return confirmed;
+  return current;
+}
+
 /** An answer that `settle` gives once, or that is `timeout` after `timeoutMs`. */
 export function pendingShareAnswer(timeoutMs = SHARE_ACK_TIMEOUT_MS) {
   let settle: (answer: ShareAnswer) => void = () => {};
@@ -408,6 +424,9 @@ export function useRoomLive(
   // The media this page wants, re-announced after every (re)join: a reconnect keeps its share
   // (and stream interval) going, while a reloaded page goes through the lobby again.
   const media = useRef<MediaState>({ ...initialMedia, share: false });
+  // The last state the server confirmed for this page's user (snapshot or `stateChanged`): what
+  // the UI falls back to if a `media.state` is refused as rate limited.
+  const confirmedMedia = useRef<MediaState>(MEDIA_OFF);
   // Answers the pending `requestShare`, if any.
   const shareAnswer = useRef<((answer: ShareAnswer) => void) | null>(null);
   const answerShare = useCallback((answer: ShareAnswer) => {
@@ -439,19 +458,27 @@ export function useRoomLive(
           setResult((r) => ({ ...r, moderationError: message }));
         }
         if (message.re === "media.state") {
-          if (message.code === "share_limit") {
-            media.current = { ...media.current, share: false };
-            answerShare("refused");
-          }
+          media.current = mediaAfterRefusal(message.code, media.current, confirmedMedia.current);
+          if (!media.current.share) answerShare("refused");
           setResult((r) => ({ ...r, media: media.current, mediaError: message }));
         }
         return;
       }
       if (message.type === "room.snapshot" && message.roomId === roomId) {
+        confirmedMedia.current =
+          message.participants.find((p) => p.userId === meId)?.media ?? MEDIA_OFF;
         client.send({ type: "media.state", ...media.current });
         // Accepted before a reconnect, and the answer lost with the old socket.
         if (message.participants.some((p) => p.userId === meId && p.media.share))
           answerShare("accepted");
+      }
+      if (
+        message.type === "room.event" &&
+        message.roomId === roomId &&
+        message.event.kind === "stateChanged" &&
+        message.event.userId === meId
+      ) {
+        confirmedMedia.current = message.event.media;
       }
       if (
         message.type === "room.event" &&

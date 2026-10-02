@@ -1,27 +1,10 @@
 import type { BrowserContext, Page } from "@playwright/test";
 import { signIn } from "./auth";
 import { expect, newPage, test } from "./fixtures";
-import { createRoomOnPage, enterRoom, uniqueRoomName } from "./rooms";
+import { createRoomOnPage, enterRoom, fakeClipboard, uniqueRoomName } from "./rooms";
 
 // Private rooms (#41, #42, #43, ADR 16): copy the invite link, knock, and the host admits or
 // denies; the host regenerates the link, and a visitor signs in from it.
-
-/**
- * Record what the page copies instead of touching the real clipboard, which needs permissions
- * Playwright can't grant in every browser. Read it back with `copied(page)`.
- */
-async function fakeClipboard(context: BrowserContext) {
-  await context.addInitScript(() => {
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: {
-        writeText: async (text: string) => {
-          (window as unknown as { copied?: string }).copied = text;
-        },
-      },
-    });
-  });
-}
 
 /** Copy the room's invite link from the room-info menu (with `fakeClipboard`) and return it. */
 async function copyInviteLink(page: Page): Promise<string> {

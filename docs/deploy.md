@@ -73,7 +73,7 @@ as an empty string, and the app treats that as unset. See `.env.example` for a t
 
 | Variable | Required | Where to get it |
 |---|---|---|
-| `POSTGRES_PASSWORD` | yes | Generate one: `openssl rand -hex 24`. Keep it URL-safe, because it's embedded in the app's `DATABASE_URL`. It's applied only when the volume is first initialised; changing it later means running `ALTER USER` inside Postgres too. |
+| `POSTGRES_PASSWORD` | yes | Generate one: `openssl rand -hex 24`. It must be URL-safe (the hex output is), because compose pastes it unencoded into the app's `DATABASE_URL`; a `/`, `#`, `?` or `%` in it makes the app refuse to start, and `POSTGRES_USER` and `POSTGRES_DB` follow the same rule. It's applied only when the volume is first initialised; changing it later means running `ALTER USER` inside Postgres too. |
 | `POSTGRES_USER`, `POSTGRES_DB` | no | Default `bhayanakcast`. |
 | `BETTER_AUTH_SECRET` | yes | Generate one: `openssl rand -base64 32` (at least 32 chars). It signs sessions: rotating it signs everyone out. |
 | `BETTER_AUTH_URL` | no | Defaults to `https://cast.bhayanak.net` in compose. It must be the public origin, because it builds the Discord redirect URL. |
@@ -85,6 +85,7 @@ as an empty string, and the app treats that as unset. See `.env.example` for a t
 | `HOST_BIND` | no | Host address the app is published on. Default `10.1.1.160` (the dockhand LXC's LAN IP). |
 | `HOST_PORT` | no | Host port. Default `3000`. The tunnel's service URL must match it. |
 | `REALTIME_ANONYMOUS_SOCKETS_PER_IP` | no | Open signed-out (lobby) sockets per client IP. Default `20` (ADR 20). |
+| `REALTIME_SOCKETS_PER_USER` | no | Open realtime sockets (tabs and devices) per signed-in user; more are refused with 429. Default `10` (ADR 4 addendum). |
 | `REALTIME_EMPTY_ROOM_TIMEOUT_MS` | no | How long an empty room waits before it ends. Default `300000` (5 minutes, ADR 14). Leave it unset in production. |
 | `BACKUP_NAS_SHARE` | no | The NAS CIFS directory where dumps go, as `//host/share/path`. Default `//10.1.1.195/weyland/Services/backups/bhayanakcast`. It must exist and hold the `.bhayanakcast-backups` marker file. See section 5 (Backups to the NAS). |
 | `BACKUP_NAS_USERNAME`, `BACKUP_NAS_PASSWORD` | yes, for backups | The NAS account that can write to `BACKUP_NAS_SHARE`. The password can't contain `,` or `$` (it goes into the mount options and through compose interpolation). Without them `backup` can't start; the app is unaffected. |
@@ -229,7 +230,10 @@ do this). Then start `app` again.
 ## Operating
 
 - **Updating:** merge to `main`, then redeploy (or let the webhook do it). Pending migrations run on
-  start. Migrations only go forward, so rolling back to an older commit doesn't undo a schema change.
+  start, one instance at a time (a Postgres advisory lock). Migrations only go forward, so rolling
+  back to an older commit doesn't undo a schema change. If the app won't start and its log says
+  `Refusing to migrate`, a migration was added with a timestamp older than one already applied,
+  which Drizzle would skip for good: regenerate it with a newer one (ADR 8).
 - **Pinned images:** see below.
 - **Logs:** Dockhand's container logs, or `docker logs <container>`. They're rotated at 3 × 10 MB.
 - **Restarts** drop live room state. Clients reconnect on their own (ADR 9).

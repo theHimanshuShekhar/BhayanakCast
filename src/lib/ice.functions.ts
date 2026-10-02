@@ -6,11 +6,15 @@ import { createServerFn } from "@tanstack/react-start";
 import { getIceService } from "~/server/ice";
 import { getCaller } from "~/server/request-caller";
 import { iceReport } from "./ice";
+import { roomIdInput } from "./rooms";
 
-/** STUN plus short-lived TURN credentials for the caller, and when to ask again. */
-export const getIceServersFn = createServerFn({ method: "POST" }).handler(async () =>
-  getIceService().serversFor(await getCaller()),
-);
+/**
+ * STUN for the caller, plus short-lived TURN credentials if they may enter the live room
+ * `roomId`, and when to ask again.
+ */
+export const getIceServersFn = createServerFn({ method: "POST" })
+  .validator(roomIdInput)
+  .handler(async ({ data }) => getIceService().serversFor(await getCaller(), data.roomId));
 
 /** Log that one of the caller's pairs relays or failed (anonymised candidate types). */
 export const reportIceFn = createServerFn({ method: "POST" })

@@ -72,12 +72,12 @@ export function useRoomMesh(
 
   useEffect(() => {
     if (!meId || !active) return;
-    const stop = keepIceServersFresh(() => getIceServersFn(), setIceServers);
+    const stop = keepIceServersFresh(() => getIceServersFn({ data: { roomId } }), setIceServers);
     return () => {
       stop();
       setIceServers(null);
     };
-  }, [meId, active]);
+  }, [roomId, meId, active]);
 
   useEffect(() => {
     if (!meId || !active || !iceReady) return;

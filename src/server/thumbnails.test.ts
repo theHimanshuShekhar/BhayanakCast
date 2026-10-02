@@ -3,11 +3,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "../db/client.ts";
 import { roomMembers, rooms, streamIntervals, user } from "../db/schema/index.ts";
 import { createTestDb } from "../db/test-db.ts";
-import { THUMBNAIL_MAX_BYTES } from "../lib/thumbnails.ts";
+import { THUMBNAIL_HEIGHT, THUMBNAIL_MAX_BYTES, THUMBNAIL_WIDTH } from "../lib/thumbnails.ts";
 import type { Caller } from "./caller.ts";
 import { SignInRequiredError } from "./caller.ts";
+import { ascii } from "./image-size.ts";
 import { getRecap } from "./recaps.ts";
 import { listLiveRooms, listPastRooms } from "./rooms.ts";
+import { jpegHeader, webpHeader } from "./test-images.ts";
 import {
   getThumbnail,
   InvalidThumbnailError,
@@ -29,20 +31,10 @@ let close: () => Promise<void>;
 const visitor: Caller = { user: null, role: "visitor" };
 const asUser = (id: string): Caller => ({ user: { id, username: id, image: null }, role: "user" });
 
-/** A file that starts like a WebP, `size` bytes long. */
-const webp = (size = 64, fill = 1) => {
-  const bytes = new Uint8Array(size).fill(fill);
-  bytes.set(
-    [..."RIFF"].map((c) => c.charCodeAt(0)),
-    0,
-  );
-  bytes.set(
-    [..."WEBP"].map((c) => c.charCodeAt(0)),
-    8,
-  );
-  return bytes;
-};
-const jpeg = () => Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
+/** A WebP header declaring a real capture's size (480x270), `size` bytes long, the rest `fill`. */
+const webp = (size = 64, fill = 1) =>
+  webpHeader("VP8X", THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT, size).fill(fill, 30);
+const jpeg = () => jpegHeader(THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT);
 
 beforeEach(async () => {
   ({ db, close } = await createTestDb());
@@ -128,6 +120,45 @@ describe("uploadThumbnail", () => {
     await expect(
       upload(asUser("a"), { contentType: "image/jpeg", bytes: webp() }),
     ).rejects.toBeInstanceOf(InvalidThumbnailError);
+  });
+
+  it("takes a real capture's size in either format, and some margin over it", async () => {
+    for (const kind of ["VP8 ", "VP8L", "VP8X"] as const) {
+      await upload(asUser("a"), { bytes: webpHeader(kind, THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT) });
+    }
+    await upload(asUser("a"), { contentType: "image/jpeg", bytes: jpeg() });
+    await upload(asUser("a"), { bytes: webpHeader("VP8 ", 640, 360) });
+    expect((await getThumbnail(db, visitor, "r1", "a"))?.mime).toBe("image/webp");
+  });
+
+  it("refuses a file that declares more than the capture size plus its margin", async () => {
+    const huge = [
+      webpHeader("VP8 ", 16383, 16383),
+      webpHeader("VP8L", 16384, 16384),
+      webpHeader("VP8X", 16_000_000, 16_000_000),
+      webpHeader("VP8X", 2_000, THUMBNAIL_HEIGHT),
+      webpHeader("VP8X", THUMBNAIL_WIDTH, 2_000),
+    ];
+    for (const bytes of huge) {
+      await expect(upload(asUser("a"), { bytes })).rejects.toMatchObject({ reason: "size" });
+    }
+    for (const sof of [0xc0, 0xc2]) {
+      await expect(
+        upload(asUser("a"), { contentType: "image/jpeg", bytes: jpegHeader(65535, 65535, sof) }),
+      ).rejects.toMatchObject({ reason: "size" });
+    }
+    expect(await getThumbnail(db, visitor, "r1", "a")).toBeNull();
+  });
+
+  it("refuses a file whose header declares no size", async () => {
+    const bareRiff = Uint8Array.from(ascii("RIFF\0\0\0\0WEBP"));
+    await expect(upload(asUser("a"), { bytes: bareRiff })).rejects.toMatchObject({
+      reason: "type",
+    });
+    const bareJpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 1]);
+    await expect(
+      upload(asUser("a"), { contentType: "image/jpeg", bytes: bareJpeg }),
+    ).rejects.toMatchObject({ reason: "type" });
   });
 
   it("refuses an empty or oversized upload, and takes exactly the limit", async () => {

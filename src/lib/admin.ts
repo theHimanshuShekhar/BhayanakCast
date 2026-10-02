@@ -65,6 +65,33 @@ export interface AdminRoomRow {
   endedAt: string | null;
 }
 
+export const ADMIN_QUERY_MAX = 64;
+
+/** The search and page every paged admin table takes. */
+const pagedSearch = {
+  q: z.string().trim().max(ADMIN_QUERY_MAX).default(""),
+  page: z.number().int().min(1).max(100_000).default(1),
+};
+
+/** What every page of an admin table says about itself, besides its rows. */
+export interface PageInfo {
+  /** Rows matching the search, across all pages. */
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+/** Rows per page of the recent-rooms table. */
+export const ADMIN_ROOMS_PAGE_SIZE = 25;
+
+/** A page of the recent-rooms table: `q` matches room names and host usernames. */
+export const listAdminRecentRoomsInput = z.object(pagedSearch);
+export type ListAdminRecentRoomsInput = z.input<typeof listAdminRecentRoomsInput>;
+
+export interface AdminRecentRoomsPage extends PageInfo {
+  rooms: AdminRoomRow[];
+}
+
 export interface LeaderboardEntry extends RoomPerson {
   hours: number;
 }
@@ -89,14 +116,12 @@ export function percentChange({ current, previous }: WindowCount): number | null
 
 /** Rows per page of the users table. */
 export const ADMIN_USERS_PAGE_SIZE = 25;
-export const ADMIN_USERS_QUERY_MAX = 64;
 export const BAN_REASON_MAX = 200;
 
 /** A page of the users table: `q` matches usernames; `banned` keeps only users banned now. */
 export const listAdminUsersInput = z.object({
-  q: z.string().trim().max(ADMIN_USERS_QUERY_MAX).default(""),
+  ...pagedSearch,
   banned: z.boolean().default(false),
-  page: z.number().int().min(1).max(100_000).default(1),
 });
 export type ListAdminUsersInput = z.input<typeof listAdminUsersInput>;
 
@@ -131,12 +156,8 @@ export interface AdminUserRow extends RoomPerson {
   hours: number;
 }
 
-export interface AdminUsersPage {
+export interface AdminUsersPage extends PageInfo {
   users: AdminUserRow[];
-  /** Users matching the search, across all pages. */
-  total: number;
-  page: number;
-  pageSize: number;
 }
 
 /** How long a ban lasts, in seconds; null for good. */
