@@ -1,0 +1,1 @@
+CREATE INDEX "rooms_unrolled_idx" ON "rooms" USING btree ("id") WHERE "rooms"."ended_at" is not null and "rooms"."stats_rolled_up_at" is null;
