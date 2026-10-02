@@ -18,6 +18,13 @@
  *   up to `MAX_BACKOFF` doublings); a probe that stays clean for a window resets the wait.
  * - It never leaves `[min, max]`; a rung outside them moves inside at once.
  *
+ * Every pair adapts on its own connection's stats, but they share one uplink: `UplinkBudget` is
+ * the streamer's budget for the sum of all the pairs' target bitrates. A new pair starts at the
+ * highest rung that fits what the others leave, a probe up needs room in it (or a clean spell
+ * across the whole room, which grows it by that one probe), and pressure on most pairs at once
+ * lowers it towards what was measured being sent. `nextRung` and `step` stay pure: they propose
+ * a probe, and the Mesh asks the budget before taking it.
+ *
  * The thresholds are provisional (ADR 2 addendum).
  */
 
@@ -94,17 +101,33 @@ export interface RungOptions {
   backoff?: number;
 }
 
-const pressured = (sample: StatsSample): boolean =>
+/** The network shows strain: loss, a long round trip, or a bandwidth limit the estimate backs. */
+export const strained = (sample: StatsSample): boolean =>
   sample.loss >= LOSS_DOWN ||
   (sample.rttMs ?? 0) >= RTT_DOWN_MS ||
-  sample.limit === "cpu" ||
   (sample.limit === "bandwidth" &&
     sample.availableBitrate !== undefined &&
     sample.sendBitrate !== undefined &&
     sample.availableBitrate < sample.sendBitrate * ESTIMATE_SHORT);
 
+/** Strain, or a CPU limit (which no uplink budget can help: it shows on every pair at once). */
+const pressured = (sample: StatsSample): boolean => strained(sample) || sample.limit === "cpu";
+
 const clean = (sample: StatsSample): boolean =>
   !pressured(sample) && sample.loss < LOSS_UP && (sample.rttMs ?? 0) < RTT_UP_MS;
+
+/** Whether `window` holds the clean spell a probe up needs after `backoff` failed ones. */
+export function probeDue(window: readonly StatsSample[], backoff = 0): boolean {
+  const needed = UP_SAMPLES * 2 ** Math.min(backoff, MAX_BACKOFF);
+  return window.length >= needed && window.slice(-needed).every(clean);
+}
+
+/** The highest rung of `ladder` up to `top` whose bitrate fits in `room`, or else the lowest. */
+export function fitRung(ladder: readonly Rung[], room: number, top = ladder.length - 1): number {
+  let rung = Math.min(top, ladder.length - 1);
+  while (rung > 0 && (ladder[rung] as Rung).maxBitrate > room) rung--;
+  return rung;
+}
 
 /** The rung to send at next, given the newest `window` samples (oldest first) at `current`. */
 export function nextRung(
@@ -128,11 +151,7 @@ export function nextRung(
     return target;
   }
 
-  const needed = UP_SAMPLES * 2 ** Math.min(backoff, MAX_BACKOFF);
-  if (current < top && window.length >= needed && window.slice(-needed).every(clean)) {
-    return current + 1;
-  }
-  return current;
+  return current < top && probeDue(window, backoff) ? current + 1 : current;
 }
 
 /** One video sender's place on its ladder, and what the controller remembers of its probes. */
@@ -177,6 +196,101 @@ export function step(
     return { ...state, window, backoff: 0, probing: false };
   }
   return { ...state, window };
+}
+
+/** ADR 2's floor for a streamer's uplink, bits per second. */
+export const UPLINK_FLOOR = 25_000_000;
+/** Kept back for audio: share audio and mics to nine viewers come to about 1.7 Mbps. */
+export const AUDIO_ALLOWANCE = 2_000_000;
+/** What the video budget starts from, until it measures better. */
+export const INITIAL_UPLINK = UPLINK_FLOOR - AUDIO_ALLOWANCE;
+/** Share of what was being sent under pressure that the budget keeps: some room is left. */
+export const UPLINK_SHARE = 0.9;
+/** One drop keeps at least this share of the budget: a quiet scene sends little at any rung. */
+export const UPLINK_DROP_LIMIT = 0.7;
+
+/** What one pass over every pair showed (the Mesh reads each pair every few seconds). */
+export interface UplinkReading {
+  /** Pairs with a reading to judge, and how many of them show strain on the network. */
+  pairs: number;
+  strainedPairs: number;
+  /** Bits per second the streamer was sending in all, as measured. */
+  sent: number;
+}
+
+/**
+ * The streamer's uplink as one budget for the sum of all its video senders' target bitrates
+ * (`maxBitrate` of each one's rung), owned by the Mesh and consulted by every pair's controller.
+ * Starts at `INITIAL_UPLINK` and follows measurements:
+ *
+ * - One viewer's bad link is that pair's own business. The uplink is what is short when at least
+ *   two pairs, and at least half of them, show strain (`strained`: not a CPU limit, which no
+ *   uplink cures) in `DOWN_SAMPLES` passes in a row: the budget drops to `UPLINK_SHARE` of what
+ *   was being sent then, but by no more than `UPLINK_DROP_LIMIT` at once (a still screen sends
+ *   next to nothing, whatever the uplink), and the Mesh steps senders down until their targets
+ *   fit.
+ * - A probe up that fits the room left in the budget goes ahead. One that doesn't is admitted
+ *   only on its sender's turn (the Mesh says whose) after a clean spell (`UP_SAMPLES` passes
+ *   without shared strain), and then the budget grows by just that probe, so beyond the budget
+ *   one pair at a time tries. If the strain comes back the next spell is twice as long
+ *   (`MAX_BACKOFF` doublings); a growth that has held for a window resets it.
+ */
+export class UplinkBudget {
+  /** Bits per second the targets may add up to. */
+  limit: number;
+  #pressure = 0;
+  #clean = 0;
+  #backoff = 0;
+  /** It grew, and hasn't yet shown the new size holds. */
+  #growing = false;
+
+  constructor(limit = INITIAL_UPLINK) {
+    this.limit = limit;
+  }
+
+  /** What is left of the budget when `committed` bits per second are targeted already. */
+  room(committed: number): number {
+    return Math.max(0, this.limit - committed);
+  }
+
+  /** Take in one pass over the pairs. */
+  observe({ pairs, strainedPairs, sent }: UplinkReading): void {
+    if (strainedPairs < 2 || strainedPairs * 2 < pairs) {
+      this.#pressure = 0;
+      this.#clean++;
+      if (this.#growing && this.#clean >= UP_SAMPLES) {
+        this.#growing = false;
+        this.#backoff = 0;
+      }
+      return;
+    }
+    this.#clean = 0;
+    if (++this.#pressure < DOWN_SAMPLES) return;
+    this.#pressure = 0;
+    if (sent > 0) {
+      this.limit = Math.min(
+        this.limit,
+        Math.max(sent * UPLINK_SHARE, this.limit * UPLINK_DROP_LIMIT),
+      );
+    }
+    if (this.#growing) {
+      this.#growing = false;
+      this.#backoff = Math.min(this.#backoff + 1, MAX_BACKOFF);
+    }
+  }
+
+  /**
+   * Whether a sender may take `extra` bits per second more, with `committed` targeted now. Past
+   * the budget that grows it, if it is the sender's `turn` and a clean spell allows.
+   */
+  admit(committed: number, extra: number, turn = true): boolean {
+    if (committed + extra <= this.limit) return true;
+    if (!turn || this.#clean < UP_SAMPLES * 2 ** this.#backoff) return false;
+    this.limit = committed + extra;
+    this.#clean = 0;
+    this.#growing = true;
+    return true;
+  }
 }
 
 /**

@@ -3,6 +3,11 @@ import { Menu } from "@base-ui/react/menu";
 import { type CSSProperties, useRef, useState } from "react";
 import { avatarFor } from "~/lib/format";
 import type { Participant, RoomRole, Settings } from "~/lib/types";
+import {
+  toggleFullscreen,
+  useFullscreenElement,
+  useFullscreenSupported,
+} from "~/lib/use-fullscreen";
 import { Icon } from "../icons";
 import { Avatar, Btn, Chip, ScreenPlaceholder, Wave } from "../ui";
 import { CameraVideo } from "./camera-video";
@@ -118,6 +123,9 @@ export const Tile = ({
   onRetry?: () => void;
 }) => {
   const ref = useRef<HTMLDivElement>(null);
+  const fullscreenElement = useFullscreenElement();
+  const fullscreen = fullscreenElement !== null && fullscreenElement === ref.current;
+  const canFullscreen = useFullscreenSupported();
   // Touch has no hover: a tap on the tile shows its controls, another hides them (the styles
   // below only act on `pointer: coarse`).
   const [tapped, setTapped] = useState(false);
@@ -270,21 +278,25 @@ export const Tile = ({
             className="w-16 h-[26px] cursor-pointer accent-[var(--color-live)]"
           />
         )}
-        <button
-          type="button"
-          className={overlayBtn}
-          aria-label="Fullscreen"
-          title="Fullscreen"
-          onClick={() => ref.current?.requestFullscreen?.()}
-        >
-          <Icon.Maximize size={14} />
-        </button>
+        {canFullscreen && (
+          <button
+            type="button"
+            className={overlayBtn}
+            aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+            aria-pressed={fullscreen}
+            title={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+            onClick={() => ref.current && toggleFullscreen(ref.current)}
+          >
+            {fullscreen ? <Icon.Minimize size={14} /> : <Icon.Maximize size={14} />}
+          </button>
+        )}
         {canModerate && (
           <Menu.Root>
             <Menu.Trigger className={overlayBtn} aria-label={`Moderate ${p.name}`}>
               <Icon.More size={14} />
             </Menu.Trigger>
-            <Menu.Portal>
+            {/* Only the fullscreen element is shown, so the menu goes inside it then. */}
+            <Menu.Portal container={fullscreen ? ref : undefined}>
               <Menu.Positioner
                 side="bottom"
                 align="end"

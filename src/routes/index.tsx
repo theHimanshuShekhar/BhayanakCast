@@ -12,7 +12,11 @@ import { type SignInErrorSearch, validateSignInErrorSearch } from "~/lib/ban";
 import { useCurrentSession } from "~/lib/current-user";
 import { homeSummaryQuery } from "~/lib/home.queries";
 import { useOnlineCount } from "~/lib/lobby-live";
-import { USER_SEARCH_QUERY_MAX, type UserSearchResult } from "~/lib/profiles";
+import {
+  READ_RATE_LIMITED_MESSAGE,
+  USER_SEARCH_QUERY_MAX,
+  type UserSearchResult,
+} from "~/lib/profiles";
 import { searchUsersQuery } from "~/lib/profiles.queries";
 import type { LiveRoomCard, PastRoomCard } from "~/lib/rooms";
 import { liveRoomsQuery, pastRoomsQuery, roomQuery } from "~/lib/rooms.queries";
@@ -270,12 +274,16 @@ function HomePage() {
     term.startsWith("#") ? "" : term.slice(0, USER_SEARCH_QUERY_MAX),
     200,
   );
-  const { data: foundUsers } = useQuery({
+  const { data: foundUsers, error: searchError } = useQuery({
     ...searchUsersQuery(userTerm),
     enabled: userTerm !== "",
     placeholderData: keepPreviousData,
+    // A refusal for too many searches lasts a minute, so retrying only adds to it.
+    retry: (failures, error) => error.message !== READ_RATE_LIMITED_MESSAGE && failures < 3,
   });
-  const users = term && !term.startsWith("#") && userTerm ? (foundUsers ?? []) : [];
+  const searching = term && !term.startsWith("#") && userTerm;
+  const users = searching ? (foundUsers ?? []) : [];
+  const searchRefused = searching && searchError?.message === READ_RATE_LIMITED_MESSAGE;
   const liveRoomOf = (userId: string) =>
     rooms.find((r) => r.participants.some((p) => p.id === userId));
 
@@ -354,6 +362,12 @@ function HomePage() {
           Showing {filtered.length + past.length} rooms
           {term && !term.startsWith("#") ? ` · ${users.length} users` : ""}
         </div>
+
+        {searchRefused && (
+          <p role="status" className="mb-2.5 text-[12px] text-muted">
+            Too many searches. Try again in a minute.
+          </p>
+        )}
 
         {users.length > 0 && (
           <>

@@ -57,6 +57,11 @@ import { roomQuery } from "~/lib/rooms.queries";
 import { useSettings } from "~/lib/settings";
 import { startThumbnailUploads } from "~/lib/thumbnail-capture";
 import type { ChatMessage, Participant, RoomDetail, RoomRole } from "~/lib/types";
+import {
+  toggleFullscreen,
+  useFullscreenElement,
+  useFullscreenSupported,
+} from "~/lib/use-fullscreen";
 
 export const Route = createFileRoute("/room/$roomId")({
   // Visitors go home with the "sign in to join" prompt open. A UX guard only: the room
@@ -390,6 +395,12 @@ function RoomPage({
   const navigate = useNavigate();
   const { settings } = useSettings();
   const { openSettings } = useAppActions();
+  const canFullscreen = useFullscreenSupported();
+  // The whole page, not a tile, is fullscreen.
+  const fullscreenElement = useFullscreenElement();
+  const roomFullscreen =
+    fullscreenElement !== null &&
+    fullscreenElement === fullscreenElement.ownerDocument.documentElement;
   // Starts from the loader's view; the realtime socket's snapshot and events take over.
   const [participants, setParticipants] = useState<Participant[]>(detail.participants);
   const live = useRoomLive(detail.id, meId, initialMedia);
@@ -873,15 +884,19 @@ function RoomPage({
             >
               <Icon.Gear size={14} />
             </Btn>
-            <Btn
-              variant="ghost"
-              size="sm"
-              className="!w-7 !px-0"
-              aria-label="Fullscreen"
-              onClick={() => document.documentElement.requestFullscreen?.()}
-            >
-              <Icon.Maximize size={14} />
-            </Btn>
+            {canFullscreen && (
+              <Btn
+                variant="ghost"
+                size="sm"
+                className="!w-7 !px-0"
+                aria-label={roomFullscreen ? "Exit fullscreen" : "Fullscreen"}
+                aria-pressed={roomFullscreen}
+                title={roomFullscreen ? "Exit fullscreen" : "Fullscreen"}
+                onClick={() => toggleFullscreen(document.documentElement)}
+              >
+                {roomFullscreen ? <Icon.Minimize size={14} /> : <Icon.Maximize size={14} />}
+              </Btn>
+            )}
           </div>
         </div>
       </div>

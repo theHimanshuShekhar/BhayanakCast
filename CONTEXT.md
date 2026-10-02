@@ -19,7 +19,8 @@ Small-group live screen-sharing hangouts. Anyone signs in with Discord, starts o
 - **Online user**: a signed-in user with an open connection, whether or not they are in a room. The side rail's count adds the online visitors to these (see **Online count**).
 - **Visitor**: someone not signed in. They can browse home, profiles and recaps, but must sign in to enter a room. An online visitor counts once per browser (several tabs are one, a private window is another), by a random id the browser keeps.
 - **Online count**: the distinct online users plus the online visitors, as one number. The side rail and the home "Online" tile show it.
-- **Lobby**: the pre-join check before entering a room, where the user picks and previews devices. Mic and camera start off.
+- **Lobby**: the realtime home channel (ADR 20). Every page keeps a socket open to it, signed in or not, and it carries only public, list-level events: the online count and public room list changes (`lobby.changed`, `lobby-live.ts`). It has nothing to do with joining a room.
+- **Pre-join**: the device check before entering a room, where the user picks and previews devices. Mic and camera start off. The `Lobby` component (`components/room/lobby.tsx`) and many code comments still call this step "the pre-join lobby"; the e2e spec is `prejoin.spec.ts`. Read "lobby" as this step only in those places. Everywhere else it means the channel above.
 - **Takeover**: joining from a new tab or device ends the user's previous room connection. A user is in at most one room at a time.
 - **Admin**: a site-wide role with access to `/admin`, bans, and moderation in any room. Admins promote and demote each other from `/admin`.
 - **Env admin**: an admin listed in `ADMIN_DISCORD_IDS`. They're granted the role at every sign-in and can't be demoted.
