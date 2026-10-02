@@ -4,9 +4,10 @@ import { isTrustedProxyEntry } from "./client-ip.ts";
 /**
  * Server environment, validated once at startup.
  *
- * In production a missing or malformed variable throws immediately (fail fast).
- * In development and tests, missing values fall back to harmless placeholders
- * so the app and unit tests can boot without a full `.env`.
+ * In production a missing or malformed variable throws immediately (fail fast), and so does
+ * an unset or unknown NODE_ENV: only an explicit `development` or `test` relaxes the checks.
+ * There, missing values fall back to harmless placeholders so the app and unit tests can boot
+ * without a full `.env`.
  */
 const commaList = z
   .string()
@@ -52,6 +53,12 @@ const baseSchema = z.object({
 });
 
 const prodSchema = baseSchema.extend({
+  // Unset, empty and unknown values all land here, so only `production` itself passes.
+  NODE_ENV: z
+    .literal("production", {
+      error: 'must be "production", or "development" or "test" for local runs',
+    })
+    .default("production"),
   // Fail fast: the test-only sign-in must never be reachable in production.
   E2E_AUTH: z.never({ error: "must not be set in production" }).optional(),
   // Without it every tunnelled visitor shares the cloudflared host's IP for rate limits.
@@ -61,7 +68,8 @@ const prodSchema = baseSchema.extend({
 });
 
 const devSchema = baseSchema.extend({
-  NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
+  // Always present: `parseEnv` picks this schema only for an explicit development or test.
+  NODE_ENV: z.enum(["development", "test"]),
   DATABASE_URL: z.url().default("postgres://postgres:postgres@localhost:5432/bhayanakcast"),
   BETTER_AUTH_SECRET: z.string().default("dev-only-insecure-secret-change-me-0123456789"),
   BETTER_AUTH_URL: z.url().default("http://localhost:3000"),
@@ -72,13 +80,16 @@ const devSchema = baseSchema.extend({
 export type Env = z.infer<typeof baseSchema>;
 
 export function parseEnv(source: Record<string, string | undefined> = process.env): Env {
-  const isProduction = source.NODE_ENV === "production";
+  // Fail closed: only an explicit development or test gets the placeholders and the test-only
+  // sign-in. Unset, empty or unknown is validated as production, so a deploy that loses
+  // NODE_ENV fails startup instead of quietly dropping every production guard.
+  const isLocal = source.NODE_ENV === "development" || source.NODE_ENV === "test";
   // An empty value counts as unset: docker-compose.yml passes every variable through as
   // `${NAME:-}`, so an unset one arrives as "".
   const present = Object.fromEntries(
     Object.entries(source).filter(([, value]) => value !== undefined && value.trim() !== ""),
   );
-  const result = (isProduction ? prodSchema : devSchema).safeParse(present);
+  const result = (isLocal ? devSchema : prodSchema).safeParse(present);
   if (!result.success) {
     const issues = result.error.issues
       .map((issue) => `  - ${issue.path.join(".")}: ${issue.message}`)
@@ -95,8 +106,8 @@ export const env: Env = parseEnv();
  * for browser tests, and never in production.
  */
 export function isTestSignInEnabled(source: Pick<Env, "NODE_ENV" | "E2E_AUTH">): boolean {
-  if (source.NODE_ENV === "production") return false;
-  return source.NODE_ENV === "test" || source.E2E_AUTH === "1";
+  if (source.NODE_ENV === "test") return true;
+  return source.NODE_ENV === "development" && source.E2E_AUTH === "1";
 }
 
 /** Discord user IDs that are granted the admin role at sign-in (ADR 6 addendum). */

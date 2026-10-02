@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  hasTurn,
   ICE_SERVERS_RETRY_MS,
   type IceServersGrant,
   icePathOf,
@@ -10,6 +11,17 @@ import {
 
 const report = (...stats: Record<string, unknown>[]) =>
   new Map(stats.map((s) => [s.id as string, s])) as unknown as RTCStatsReport;
+
+describe("hasTurn", () => {
+  it("tells TURN servers (turn: and turns:, one URL or several) from STUN alone", () => {
+    expect(hasTurn(STUN_SERVERS)).toBe(false);
+    expect(hasTurn([])).toBe(false);
+    expect(hasTurn([{ urls: "turn:turn.example:3478" }])).toBe(true);
+    expect(hasTurn([{ urls: ["stun:s.example", "turns:turn.example:443?transport=tcp"] }])).toBe(
+      true,
+    );
+  });
+});
 
 describe("icePathOf", () => {
   it("takes Firefox's selected pair (no transport stats) and keeps no addresses", () => {

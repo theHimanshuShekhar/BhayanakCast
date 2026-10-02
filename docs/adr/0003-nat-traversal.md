@@ -32,3 +32,6 @@ Some peer pairs behind CGNAT or strict/mobile NATs cannot connect directly (ADR 
 - The answer is cached in memory for 15 minutes, keyed by month so the 1st never shows last month's total. A failed call isn't cached; the panel says "usage unavailable" and the rest of the dashboard is unaffected.
 - The panel warns at 80% of the free tier (800 GB).
 - 1 GB is taken as 10^9 bytes. Cloudflare doesn't say whether it means GB or GiB; decimal shows a slightly higher percentage, so it errs on the side of warning early.
+
+## Addendum: TURN arriving late restarts failed pairs (2026-10-02)
+A page whose ICE-server fetch failed starts on STUN alone (and asks again every minute). Pairs that failed in that time stayed `failed` even after TURN credentials arrived. When TURN servers appear where there were none, the Mesh now gives every `failed` pair that had negotiated one more ICE restart with the new servers. Credential refreshes after that restart nothing, and a pair that never negotiated is still a signalling stall, not an ICE failure.
