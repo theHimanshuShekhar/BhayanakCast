@@ -58,7 +58,8 @@ httpServer.prependListener("request", (request: IncomingMessage) => {
   );
 });
 
-attachRealtime(httpServer);
+// Nothing else takes upgrades here, so refuse any that aren't for the realtime socket.
+attachRealtime(httpServer, { closeUnknownUpgrades: true });
 
 // Daily retention purge + stats roll-up (ADR 11).
 startMaintenance(getDb());

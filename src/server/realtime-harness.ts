@@ -24,7 +24,7 @@
  * so `expect(client.pending()).toEqual([])` after `settled()` asserts nothing else arrived
  * (lobby traffic and feed entries aside: see `pendingLobby()` and `pendingFeed()`).
  */
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import WebSocket from "ws";
 import type { Db } from "../db/client.ts";
@@ -154,6 +154,8 @@ export interface RealtimeHarnessOptions {
   anonymousSocketsPerIp?: number;
   /** Passed to `attachRealtime`; the default trusts nobody's `cf-connecting-ip`. */
   trustedProxies?: readonly string[];
+  /** Awaited before each upgrade is authenticated, to hold one in flight. */
+  beforeAuthenticate?: (request: IncomingMessage) => Promise<void>;
 }
 
 export async function startRealtimeHarness(
@@ -174,10 +176,14 @@ export async function startRealtimeHarness(
     const hub = new RoomHub({ clock: mortal.clock, store: mortal.store });
     const realtime: RealtimeServer = attachRealtime(server, {
       hub,
-      authenticate: async (request) =>
-        callerFromSession(await resolveSession(auth, toHeaders(request))),
+      authenticate: async (request) => {
+        await options.beforeAuthenticate?.(request);
+        return callerFromSession(await resolveSession(auth, toHeaders(request)));
+      },
       anonymousSocketsPerIp: options.anonymousSocketsPerIp ?? 100,
       trustedProxies: options.trustedProxies ?? [],
+      // Like production: this server has no other upgrade listeners.
+      closeUnknownUpgrades: true,
     });
     return { hub, realtime, kill: mortal.kill };
   }
