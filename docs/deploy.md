@@ -172,7 +172,7 @@ do this). Then start `app` again.
 
 ## Production guards
 
-- `NODE_ENV=production` is set by both the image and compose.
+- `NODE_ENV=production` is set by both the image and compose. If it's ever missing the app still validates as production (only an explicit `development` or `test` relaxes the checks), so it fails to start rather than booting with development defaults.
 - The app validates its environment at startup. If anything is missing or invalid, it exits and lists every problem (for example `BETTER_AUTH_SECRET: … at least 32 characters`). In the logs, a restart loop with that message means a variable needs fixing.
 - `E2E_AUTH` (the test-only sign-in) is refused in production and isn't passed through by compose.
 - `TRUSTED_PROXY_IPS` is required in production, so a spoofed `cf-connecting-ip` from the LAN is ignored.

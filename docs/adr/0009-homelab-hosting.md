@@ -24,3 +24,6 @@ The app is published on the LAN IP, so a LAN client can reach it directly and se
 
 ## Addendum: the backup sidecar mounts the NAS itself (2026-09-30)
 The sidecar's NAS directory is a Docker `cifs` volume of the `local` driver in the compose file, not a bind mount of a share the host mounts. Docker mounts it whenever the sidecar starts, so it needs no host fstab entry and survives reboots, and an unreachable share stops the sidecar instead of letting it write to an empty local mount point. The NAS account's credentials are stack variables. Postgres data stays on its local volume.
+
+## Addendum: environment validation fails closed (2026-10-02)
+Only an explicit `NODE_ENV=development` or `test` gets the placeholder secrets and the test-only sign-in (`E2E_AUTH=1`). Anything else (unset, empty, unknown) is validated as production: a deploy that loses `NODE_ENV` fails at startup, listing the missing secrets, instead of booting with the development defaults; an unknown value such as `staging` is refused. The e2e server, which used to run with `NODE_ENV` unset, now sets `NODE_ENV=development` explicitly (`playwright.config.ts`).
