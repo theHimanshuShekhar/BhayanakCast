@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { and, eq, isNull, sql } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Db } from "../db/client.ts";
 import {
   dailyPlatformStats,
@@ -804,6 +804,43 @@ describe("purgeExpiredRooms", () => {
     // Running again is a no-op.
     expect(await purgeExpiredRooms(db, now)).toEqual({ rolledUp: 0, purged: 0 });
     expect(await statsFor("a")).toMatchObject({ secondsStreamed: 60 * 60 });
+  });
+
+  it("logs and skips a room whose roll-up fails, and still deletes expired rooms", async () => {
+    const now = new Date(T0.getTime() + 40 * DAY);
+    // "bad" fails to roll up: a trigger rejects its host's stats row.
+    await db.execute(sql`
+      create function reject_user_d() returns trigger language plpgsql as $$
+      begin
+        if new.user_id = 'd' then raise exception 'boom'; end if;
+        return new;
+      end $$`);
+    await db.execute(sql`
+      create trigger reject_user_d before insert on user_stats
+      for each row execute function reject_user_d()`);
+    await seedRoom("bad", { createdBy: "d", presence: [["d", 0, 60]] });
+    await seedRoom("good", { createdBy: "a", presence: [["a", 0, 60]] });
+    // Already rolled up and expired: the purge must still delete it.
+    await seedRoom("expired", { createdBy: "b", presence: [["b", 0, 60]] });
+    expect(await rollupEndedRoom(db, "expired", at(61))).toBe(true);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      expect(await purgeExpiredRooms(db, now)).toEqual({ rolledUp: 1, purged: 2 });
+      expect(logged).toHaveBeenCalledOnce();
+      expect(String(logged.mock.calls[0]?.[0])).toContain("bad");
+    } finally {
+      logged.mockRestore();
+    }
+
+    // The failed room rolled back whole: not rolled up, not deleted, ready for a retry.
+    const left = await db
+      .select({ id: rooms.id, rolledUp: rooms.statsRolledUpAt })
+      .from(rooms)
+      .orderBy(rooms.id);
+    expect(left).toEqual([{ id: "bad", rolledUp: null }]);
+    expect(await statsFor("d")).toBeUndefined();
+    expect(await statsFor("a")).toMatchObject({ secondsWatched: 60 * 60 });
   });
 
   it("keeps rooms ended less than 30 days ago", async () => {

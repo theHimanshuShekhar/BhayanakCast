@@ -69,6 +69,8 @@ class FakePC {
   signalingState: RTCSignalingState = "stable";
   connectionState: RTCPeerConnectionState = "new";
   localDescription: RTCSessionDescriptionInit | null = null;
+  /** The last negotiated local description (the pending offer is only `localDescription`). */
+  currentLocalDescription: RTCSessionDescriptionInit | null = null;
   remoteDescription: RTCSessionDescriptionInit | null = null;
   onnegotiationneeded: (() => void) | null = null;
   onicecandidate: unknown = null;
@@ -101,7 +103,8 @@ class FakePC {
   async setLocalDescription() {
     await Promise.resolve();
     if (this.signalingState === "have-remote-offer") {
-      this.localDescription = { type: "answer", sdp: "" };
+      this.localDescription = { type: "answer", sdp: `o=- ${this.id} 1\r\n` };
+      this.currentLocalDescription = this.localDescription;
       this.signalingState = "stable";
       this.#maybeNegotiate();
       return;
@@ -123,6 +126,7 @@ class FakePC {
     if (description.type === "answer") {
       if (this.signalingState !== "have-local-offer") throw new Error("answer while not offering");
       this.remoteDescription = description;
+      this.currentLocalDescription = this.localDescription;
       this.signalingState = "stable";
       this.#maybeNegotiate();
       return;
@@ -146,6 +150,14 @@ class FakePC {
       this.ontrack?.({ transceiver: t, track: t.receiver.track });
     }
     this.signalingState = "have-remote-offer";
+  }
+
+  /** ICE gathering finds a candidate: an answer already set gains it (offers aren't touched). */
+  gather(candidate: string) {
+    const grown = (d: RTCSessionDescriptionInit | null) =>
+      d?.type === "answer" ? { ...d, sdp: `${d.sdp}a=candidate:${candidate}\r\n` } : d;
+    this.localDescription = grown(this.localDescription);
+    this.currentLocalDescription = grown(this.currentLocalDescription);
   }
 
   getReceivers() {
@@ -197,10 +209,17 @@ function page(
 ) {
   const events: MeshEvent[] = [];
   const pcs: FakePC[] = [];
+  const sent: SignalPayload[] = [];
+  const socket = { up: true };
   const mesh = new Mesh({
     selfId: userId,
-    send: (to: string, payload: SignalPayload) =>
-      setTimeout(() => network.get(to)?.receive(userId, payload)),
+    send: (to: string, payload: SignalPayload) => {
+      // A page whose socket is reconnecting has its steps dropped, as `RealtimeClient` does.
+      if (!socket.up) return false;
+      sent.push(payload);
+      setTimeout(() => network.get(to)?.receive(userId, payload));
+      return true;
+    },
     iceServers,
     codecs,
     RTCPeerConnection: class extends FakePC {
@@ -217,7 +236,7 @@ function page(
   mesh.subscribe((event) => events.push(event));
   const tracks = (from: string) =>
     events.flatMap((e) => (e.type === "track" && e.userId === from ? [e.slot] : []));
-  return { mesh, events, pcs, tracks };
+  return { mesh, events, pcs, tracks, sent, socket };
 }
 
 const track = (name: string, contentHint = "") =>
@@ -500,6 +519,132 @@ describe("Mesh", () => {
   });
 });
 
+describe("Mesh across socket reconnects (ADR 1)", () => {
+  /** Ana and bo, negotiated. Ana is the polite side, bo the impolite one. */
+  async function negotiated() {
+    const network = new Map<string, Mesh>();
+    const ana = page("ana", network);
+    const bo = page("bo", network);
+    ana.mesh.join(everyone);
+    bo.mesh.join(everyone);
+    await settle();
+    return { ana, bo };
+  }
+
+  /** The descriptions `p` has sent (after its first `from` steps). */
+  const descriptions = (p: ReturnType<typeof page>, from = 0) =>
+    p.sent.slice(from).flatMap((s) => (s.kind === "description" ? [s.description] : []));
+  const kinds = (sent: { type: string }[]) => sent.map((d) => d.type);
+
+  it("sends a share's offer again once the socket is back, from either side", async () => {
+    for (const sharing of ["ana", "bo"] as const) {
+      const { ana, bo } = await negotiated();
+      const [sharer, viewer] = sharing === "ana" ? [ana, bo] : [bo, ana];
+      sharer.socket.up = false;
+      sharer.mesh.setLocalTracks({ screen: track(`${sharing} screen`) });
+      await settle();
+      // The offer was dropped: the viewer has nothing, and the sharer still waits for an answer.
+      expect(viewer.tracks(sharing)).toEqual(["mic"]);
+      expect(sharer.pcs[0]?.signalingState).toBe("have-local-offer");
+
+      sharer.socket.up = true;
+      sharer.mesh.resend();
+      await settle();
+      expect(viewer.tracks(sharing)).toEqual(["mic", "screen"]);
+      expect([ana, bo].map((p) => p.pcs[0]?.signalingState)).toEqual(["stable", "stable"]);
+    }
+  });
+
+  it("sends a dropped answer again with its candidates, then the offer that followed it", async () => {
+    const { ana, bo } = await negotiated();
+    ana.socket.up = false;
+    // Bo's offer reaches ana, whose answer is dropped; her own offer after it is dropped too.
+    bo.mesh.setLocalTracks({ cam: track("bo cam") });
+    await settle();
+    ana.mesh.setLocalTracks({ screen: track("ana screen") });
+    await settle();
+    expect(bo.pcs[0]?.signalingState).toBe("have-local-offer");
+    // Candidates gathered meanwhile: the answer is the connection's current description, while
+    // her offer is the pending one.
+    ana.pcs[0]?.gather("1 udp 10.0.0.1 9");
+    const before = ana.sent.length;
+
+    ana.socket.up = true;
+    ana.mesh.resend();
+    await settle();
+    const resent = descriptions(ana, before);
+    expect(kinds(resent)).toEqual(["answer", "offer"]);
+    expect(resent[0]?.sdp).toContain("a=candidate:1 udp 10.0.0.1 9");
+    expect(bo.tracks("ana")).toEqual(["mic", "screen"]);
+    expect(ana.tracks("bo")).toEqual(["mic", "cam"]);
+    expect([ana, bo].map((p) => p.pcs[0]?.signalingState)).toEqual(["stable", "stable"]);
+  });
+
+  it("doesn't send an offer again once the peer's offer has replaced it (glare)", async () => {
+    const { ana, bo } = await negotiated();
+    ana.socket.up = false;
+    ana.mesh.setLocalTracks({ screen: track("ana screen") });
+    await settle();
+    const stale = ana.pcs[0]?.localDescription?.sdp;
+    expect(ana.pcs[0]?.signalingState).toBe("have-local-offer");
+    // Bo's offer arrives meanwhile: ana (polite) rolls her offer back and answers it, and her
+    // screen is offered again afterwards. Both of those are dropped, as the socket is down.
+    bo.mesh.setLocalTracks({ cam: track("bo cam") });
+    await settle();
+    const before = ana.sent.length;
+
+    ana.socket.up = true;
+    ana.mesh.resend();
+    await settle();
+    const resent = descriptions(ana, before);
+    expect(kinds(resent)).toEqual(["answer", "offer"]);
+    expect(resent.map((d) => d.sdp)).not.toContain(stale);
+    expect(bo.tracks("ana")).toEqual(["mic", "screen"]);
+    expect(ana.tracks("bo")).toEqual(["mic", "cam"]);
+    expect([ana, bo].map((p) => p.pcs[0]?.signalingState)).toEqual(["stable", "stable"]);
+  });
+
+  it("doesn't send a dropped offer the peer's offer rolled back, even if it is due", async () => {
+    const { ana, bo } = await negotiated();
+    ana.socket.up = false;
+    ana.mesh.setLocalTracks({ screen: track("ana screen") });
+    await settle();
+    const stale = ana.pcs[0]?.localDescription?.sdp;
+    // The socket is back (no `resend` yet) when bo's offer replaces ana's: her answer to it
+    // goes, and her screen is offered afresh. The dropped offer is not sent after them.
+    ana.socket.up = true;
+    const before = ana.sent.length;
+    bo.mesh.setLocalTracks({ cam: track("bo cam") });
+    await settle();
+    ana.mesh.resend();
+    await settle();
+    const resent = descriptions(ana, before);
+    expect(kinds(resent)).toEqual(["answer", "offer"]);
+    expect(resent.map((d) => d.sdp)).not.toContain(stale);
+    expect(bo.tracks("ana")).toEqual(["mic", "screen"]);
+    expect(ana.tracks("bo")).toEqual(["mic", "cam"]);
+  });
+
+  it("sends nothing again when nothing was dropped, or once it has been sent", async () => {
+    const { ana } = await negotiated();
+    ana.mesh.setLocalTracks({ screen: track("ana screen") });
+    await settle();
+    const sent = ana.sent.length;
+    ana.mesh.resend();
+    await settle();
+    expect(ana.sent).toHaveLength(sent);
+
+    ana.socket.up = false;
+    ana.mesh.setLocalTracks({ cam: track("ana cam") });
+    await settle();
+    ana.socket.up = true;
+    ana.mesh.resend();
+    ana.mesh.resend();
+    await settle();
+    expect(ana.sent).toHaveLength(sent + 1);
+  });
+});
+
 const trackWith = (name: string, settings: Partial<MediaTrackSettings> = {}, contentHint = "") =>
   ({ id: name, contentHint, getSettings: () => settings }) as unknown as MediaStreamTrack;
 
@@ -661,6 +806,18 @@ describe("Mesh quality ladder (ADR 2)", () => {
     for (let i = 0; i < 4; i++) await ana.mesh.adjust();
     // 2 warm-up readings, then 2 lossy ones: one step down, not the two it would be without.
     expect(rungs(ana.mesh)[0]).toBe("900p30");
+    ana.mesh.close();
+  });
+
+  it("adapts each viewer on its own, so one hung stats read doesn't stall the others", async () => {
+    const { ana, toBo, toCy } = await sharing();
+    // Bo's stats never come back; cy's link is lossy.
+    toBo.sender.getStats = () => new Promise(() => {});
+    toCy.sender.stats = senderStats(0.1);
+    void ana.mesh.adjust();
+    // Every pass skips bo and still finishes cy's: warm-up, then a step down.
+    for (let i = 0; i < 4; i++) await ana.mesh.adjust();
+    expect(rungs(ana.mesh)).toEqual(["1080p30", "900p30"]);
     ana.mesh.close();
   });
 
@@ -892,6 +1049,49 @@ describe("Mesh ICE (ADR 3)", () => {
     expect(states(ana)).toEqual(["connecting", "failed", "connected", "connecting"]);
   });
 
+  it("restarts ICE for failed pairs when TURN arrives after a STUN-only start", async () => {
+    vi.useFakeTimers();
+    const network = new Map<string, Mesh>();
+    const stun = [{ urls: "stun:stun.example:3478" }];
+    const ana = page("ana", network, stun);
+    const bo = page("bo", network, stun);
+    ana.mesh.join(everyone);
+    bo.mesh.join(everyone);
+    await tick();
+    const [anaPc, boPc] = [ana.pcs[0] as FakePC, bo.pcs[0] as FakePC];
+    anaPc.setConnectionState("connected");
+    boPc.setConnectionState("connected");
+    await tick();
+
+    // It fails, restarts once on STUN, and fails for good.
+    anaPc.setConnectionState("failed");
+    await tick();
+    anaPc.setConnectionState("failed");
+    await tick();
+    expect(anaPc.iceRestarts).toBe(1);
+    expect(states(ana).at(-1)).toBe("failed");
+
+    // More STUN changes nothing; TURN arriving restarts the pair with it.
+    ana.mesh.setIceServers([{ urls: "stun:other.example:3478" }]);
+    await tick();
+    expect(anaPc.iceRestarts).toBe(1);
+    ana.mesh.setIceServers(turn);
+    await tick();
+    expect(anaPc.iceRestarts).toBe(2);
+    expect(anaPc.configuration.iceServers).toEqual(turn);
+    expect(states(ana).at(-1)).toBe("connecting");
+    expect([anaPc.signalingState, boPc.signalingState]).toEqual(["stable", "stable"]);
+
+    // It connects; fresh TURN credentials later restart nothing, and neither do pairs that
+    // never failed.
+    anaPc.setConnectionState("connected");
+    await tick();
+    ana.mesh.setIceServers([{ ...turn[0], credential: "c2" } as RTCIceServer]);
+    bo.mesh.setIceServers(turn);
+    await tick();
+    expect([anaPc.iceRestarts, boPc.iceRestarts]).toEqual([2, 0]);
+  });
+
   it("starts a pair that never negotiated over once, then fails it with no ICE path", async () => {
     vi.useFakeTimers();
     const network = new Map<string, Mesh>();
@@ -917,6 +1117,26 @@ describe("Mesh ICE (ADR 3)", () => {
     expect(bo.pcs[1]?.iceRestarts).toBe(0);
     // A signalling stall, not an ICE failure: no ICE path, so nothing is reported.
     expect(bo.events.at(-1)).toEqual({ type: "state", userId: "ana", state: "failed" });
+  });
+
+  it("leaves a failed pair that never negotiated alone when TURN arrives", async () => {
+    vi.useFakeTimers();
+    const network = new Map<string, Mesh>();
+    // Bo starts on STUN alone, and its offers go nowhere: ana's page isn't there.
+    const bo = page("bo", network);
+    bo.mesh.join(everyone);
+    await tick();
+    await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS * 2);
+    await tick();
+    expect(states(bo).at(-1)).toBe("failed");
+    const events = bo.events.length;
+
+    // A signalling stall isn't something TURN fixes: there is no ICE to restart.
+    bo.mesh.setIceServers(turn);
+    await tick();
+    expect(bo.pcs.map((pc) => pc.iceRestarts)).toEqual([0, 0]);
+    expect(bo.events).toHaveLength(events);
+    expect(bo.pcs[1]?.configuration.iceServers).toEqual(turn);
   });
 
   it("connects a stalled pair when its start-over gets through", async () => {

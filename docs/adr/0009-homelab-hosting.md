@@ -27,3 +27,6 @@ The sidecar's NAS directory is a Docker `cifs` volume of the `local` driver in t
 
 ## Addendum: backup health must mean a recent backup (2026-10-02)
 The sidecar's healthcheck no longer trusts an old "ok". The status file carries the finish time, and the check fails once it is older than `BACKUP_MAX_AGE_HOURS` (default 26), so a stopped schedule shows as unhealthy and not as healthy forever. `pg_dump` and `rsync` run under timeouts so a hung run fails and frees the run lock, and each run clears the temp files an interrupted one left. These are additions to the 2026-09-27 and 2026-09-30 decisions, which stand: local-volume Postgres, dumps rsynced to the NAS, and the Docker-mounted `cifs` volume. An unreachable NAS still stops only the sidecar; the app and `db` start (docs/deploy.md section 5).
+
+## Addendum: environment validation fails closed (2026-10-02)
+Only an explicit `NODE_ENV=development` or `test` gets the placeholder secrets and the test-only sign-in (`E2E_AUTH=1`). Anything else (unset, empty, unknown) is validated as production: a deploy that loses `NODE_ENV` fails at startup, listing the missing secrets, instead of booting with the development defaults; an unknown value such as `staging` is refused. The e2e server, which used to run with `NODE_ENV` unset, now sets `NODE_ENV=development` explicitly (`playwright.config.ts`).

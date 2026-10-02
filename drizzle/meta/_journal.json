@@ -43,6 +43,13 @@
       "when": 1790908474131,
       "tag": "0005_modern_shiva",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790931741798,
+      "tag": "0006_last_penance",
+      "breakpoints": true
     }
   ]
 }

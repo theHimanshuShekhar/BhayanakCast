@@ -51,7 +51,9 @@ export default defineConfig({
   // The prod build against an in-memory PGlite, with the test-only sign-in enabled (e2e/serve.ts)
   // and one fake Discord id bootstrapped as admin.
   webServer: {
-    command: "pnpm build && node e2e/serve.ts",
+    // NODE_ENV=development on the server only: it takes the non-production env schema the
+    // test-only sign-in needs. Set in `env` below, it would reach `pnpm build` too.
+    command: "pnpm build && NODE_ENV=development node e2e/serve.ts",
     url: baseURL,
     env: {
       PORT: String(PORT),
