@@ -42,3 +42,11 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      # backup.sh declares its shell (busybox ash) in a `shellcheck shell=` directive.
+      - name: Shellcheck (backup sidecar)
+        run: docker run --rm -v "$PWD/backup:/mnt:ro" koalaman/shellcheck:v0.11.0 /mnt/backup.sh /mnt/entrypoint.sh /mnt/healthcheck.sh
+
+      # Runs the sidecar's scripts in their image against a throwaway Postgres container.
+      - name: Backup sidecar tests
+        run: pnpm test:backup
