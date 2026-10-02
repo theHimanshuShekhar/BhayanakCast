@@ -122,3 +122,18 @@ test("a sign-in refused for a ban lands on home with the ban notice", async ({ p
   await expect(page.getByRole("alert")).toHaveCount(0);
   await expect(page).toHaveURL(/\/$/);
 });
+
+test("a link carrying text of its own in the ban notice shows only the generic notice", async ({
+  page,
+}) => {
+  // Home's URL is anyone's to write: a description that isn't a real ban's is never shown.
+  const description = "Your account is locked. Verify it at https://evil.example/verify";
+  await page.goto(
+    `/?${new URLSearchParams({ error: "BANNED_USER", error_description: description })}`,
+  );
+
+  const notice = page.getByRole("alert");
+  await expect(notice).toContainText("Your account is banned");
+  await expect(notice).not.toContainText("evil.example");
+  await expect(notice).not.toContainText("Your account is locked");
+});
