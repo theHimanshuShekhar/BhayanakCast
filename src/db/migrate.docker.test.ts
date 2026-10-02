@@ -3,7 +3,7 @@
  * it can't hold a lock against a second runner. Needs Docker; `pnpm test:migrate`. Each test gets
  * its own empty database in the one container.
  */
-import { execFile, execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import postgres from "postgres";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { type PostgresContainer, startPostgresContainer } from "./docker-postgres.ts";
 import {
   applyMigrations,
   MIGRATION_LOCK_ID,
@@ -18,14 +19,9 @@ import {
   readJournal,
 } from "./migrations.ts";
 
-const pg = `bhayanakcast-migrate-test-pg-${process.pid}`;
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const realMigrations = path.join(repoRoot, "drizzle");
 const journalLength = readJournal(realMigrations).length;
-
-function docker(args: string[]): string {
-  return execFileSync("docker", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-}
 
 /** A Drizzle migrations folder holding `migrations` in journal order. */
 function writeMigrations(migrations: { tag: string; when: number; sql: string }[]): string {
@@ -60,49 +56,21 @@ async function runMigrateScript(databaseUrl: string) {
   }
 }
 
-let port: string;
-let admin: postgres.Sql;
-let dbCount = 0;
+let container: PostgresContainer;
 let dbUrl: string;
 let client: postgres.Sql;
 const folders: string[] = [];
 
-const urlFor = (database: string) => `postgres://postgres:test@127.0.0.1:${port}/${database}`;
-
 beforeAll(async () => {
-  docker(
-    ["run", "-d", "--rm", "--name", pg, "-p", "127.0.0.1::5432"].concat([
-      "-e",
-      "POSTGRES_PASSWORD=test",
-      "postgres:17-alpine",
-    ]),
-  );
-  port = docker(["port", pg, "5432/tcp"]).trim().split("\n")[0]?.split(":").at(-1) ?? "";
-  admin = postgres(urlFor("postgres"), { max: 1, onnotice: () => {} });
-  for (let i = 0; ; i++) {
-    try {
-      await admin`select 1`;
-      break;
-    } catch (err) {
-      if (i >= 60) throw err;
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
-  }
+  container = await startPostgresContainer("migrate");
 }, 120_000);
 
 afterAll(async () => {
-  await admin?.end();
-  try {
-    docker(["rm", "-f", pg]);
-  } catch {
-    // Already gone.
-  }
+  await container?.stop();
 });
 
 beforeEach(async () => {
-  const name = `migrate_test_${++dbCount}`;
-  await admin.unsafe(`create database ${name}`);
-  dbUrl = urlFor(name);
+  dbUrl = await container.createDatabase();
   client = postgres(dbUrl, { max: 3, onnotice: () => {} });
 });
 

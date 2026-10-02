@@ -3,7 +3,7 @@
  * changes, through real sockets (./realtime-harness.ts).
  */
 import { connect as connectTcp } from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import {
   IDLE_TIMEOUT_MS,
@@ -25,6 +25,8 @@ import { RECONNECT_GRACE_MS } from "./room-hub.ts";
 let h: RealtimeHarness;
 const SECOND = 1_000;
 
+// Each describe boots its harness in a `beforeEach` with its own options: booting and migrating
+// PGlite then counts against the hook timeout, not the test's.
 async function start(options?: RealtimeHarnessOptions) {
   h = await startRealtimeHarness(options);
 }
@@ -52,8 +54,9 @@ async function visitor(headers?: Record<string, string>, visitorId?: string) {
 const nextChange = (client: TestClient) => client.waitFor("lobby.changed");
 
 describe("anonymous sockets", () => {
+  beforeEach(() => start());
+
   it("are accepted, get the lobby snapshot, and have everything but heartbeat refused", async () => {
-    await start();
     expect(await h.upgradeStatus(null)).toBe(101);
     const ana = await h.createUser("ana");
     const roomId = await h.createRoom(ana);
@@ -83,7 +86,6 @@ describe("anonymous sockets", () => {
   });
 
   it("hear lobby events only, never room traffic", async () => {
-    await start();
     const ana = await h.createUser("ana");
     const bo = await h.createUser("bo");
     const { client: anon } = await visitor();
@@ -106,8 +108,9 @@ describe("anonymous sockets", () => {
 });
 
 describe("online users", () => {
+  beforeEach(() => start());
+
   it("counts distinct signed-in users with an open socket as they come and go", async () => {
-    await start();
     const [ana, bo, cy] = [
       await h.createUser("ana"),
       await h.createUser("bo"),
@@ -151,14 +154,13 @@ describe("online visitors", () => {
   const lastOnline = () => observer.received.findLast((m) => m.type === "lobby.changed")?.online;
 
   /** A signed-in observer: it is online itself, so the count starts at 1. */
-  async function observe() {
+  beforeEach(async () => {
     await start();
     observer = await h.connectAs(await h.createUser("ana"));
     expect((await observer.waitFor("lobby.snapshot")).online).toBe(1);
-  }
+  });
 
   it("counts a visitor in their own snapshot, and every tab of one browser once", async () => {
-    await observe();
     const tab1 = await visitor(undefined, BROWSER_A);
     expect(tab1.snapshot.online).toBe(2);
     expect(await nextChange(observer)).toEqual({ type: "lobby.changed", online: 2 });
@@ -177,7 +179,6 @@ describe("online visitors", () => {
   });
 
   it("counts a different browser separately", async () => {
-    await observe();
     const a = await visitor(undefined, BROWSER_A);
     expect(await nextChange(observer)).toEqual({ type: "lobby.changed", online: 2 });
     const b = await visitor(undefined, BROWSER_B);
@@ -193,7 +194,6 @@ describe("online visitors", () => {
   });
 
   it("counts a socket with a missing or malformed id on its own, and still welcomes it", async () => {
-    await observe();
     const bare = await visitor();
     expect(bare.snapshot.online).toBe(2);
     await visitor();
@@ -214,7 +214,6 @@ describe("online visitors", () => {
   });
 
   it("ignores the visitor id of a signed-in socket", async () => {
-    await observe();
     const bo = await h.createUser("bo");
     const signedIn = await h.connect(bo);
     signedIn.send({ type: "hello", v: PROTOCOL_VERSION, visitorId: BROWSER_A });
@@ -231,7 +230,6 @@ describe("online visitors", () => {
   });
 
   it("counts a socket once however often it says hello", async () => {
-    await observe();
     const { client } = await visitor(undefined, BROWSER_A);
     client.send({ type: "hello", v: PROTOCOL_VERSION, visitorId: BROWSER_B });
     await client.waitFor("welcome");
@@ -242,7 +240,6 @@ describe("online visitors", () => {
   });
 
   it("doesn't count a socket that never said hello", async () => {
-    await observe();
     const silent = await h.connect(null);
     await h.settled();
     expect(observer.pendingLobby()).toEqual([]);
@@ -253,6 +250,8 @@ describe("online visitors", () => {
 });
 
 describe("public room changes", () => {
+  beforeEach(() => start());
+
   let ana: TestUser;
   let bo: TestUser;
 
@@ -266,7 +265,6 @@ describe("public room changes", () => {
   }
 
   it("announces created rooms and every participant count change", async () => {
-    await start();
     ana = await h.createUser("ana");
     bo = await h.createUser("bo");
     const { client: anon } = await visitor();
@@ -306,7 +304,6 @@ describe("public room changes", () => {
   });
 
   it("never mentions a private room", async () => {
-    await start();
     ana = await h.createUser("ana");
     bo = await h.createUser("bo");
     const { client: anon } = await visitor();
@@ -333,8 +330,9 @@ describe("public room changes", () => {
 });
 
 describe("thumbnail uploads", () => {
+  beforeEach(() => start());
+
   it("tell the lobby about a public room, never about a private one", async () => {
-    await start();
     const ana = await h.createUser("ana");
     const { client: anon } = await visitor();
     const publicRoom = await h.createRoom(ana);
@@ -356,8 +354,9 @@ describe("thumbnail uploads", () => {
 });
 
 describe("with the reconnect grace", () => {
+  beforeEach(() => start());
+
   it("drops a user from online with their last socket, but the room count after the grace", async () => {
-    await start();
     const [ana, bo] = [await h.createUser("ana"), await h.createUser("bo")];
     const { client: anon } = await visitor();
     const roomId = await h.createRoom(ana);
@@ -390,7 +389,6 @@ describe("with the reconnect grace", () => {
   });
 
   it("keeps a heartbeating anonymous socket open past the idle timeout, pings not refused", async () => {
-    await start();
     const { client: anon } = await visitor();
     await h.advance(2 * IDLE_TIMEOUT_MS);
     expect(anon.isClosed).toBe(false);
@@ -399,72 +397,84 @@ describe("with the reconnect grace", () => {
 });
 
 describe("per-IP limit on anonymous sockets", () => {
-  it("frees the slot of a client that leaves while its upgrade is being authenticated", async () => {
-    // The client's connection drops (and `close` fires) while the upgrade is being authenticated.
-    await start({
-      anonymousSocketsPerIp: 1,
-      beforeAuthenticate: (request) =>
-        request.headers["x-drop"]
-          ? new Promise<void>((resolve) => {
-              request.socket.once("close", () => resolve());
-              request.socket.destroy();
-            })
-          : Promise.resolve(),
+  describe("with a client that leaves while its upgrade is being authenticated", () => {
+    beforeEach(() =>
+      start({
+        anonymousSocketsPerIp: 1,
+        beforeAuthenticate: (request) =>
+          request.headers["x-drop"]
+            ? new Promise<void>((resolve) => {
+                request.socket.once("close", () => resolve());
+                request.socket.destroy();
+              })
+            : Promise.resolve(),
+      }),
+    );
+
+    it("frees its slot", async () => {
+      // The client's connection drops (and `close` fires) while the upgrade is being authenticated.
+      await new Promise<void>((resolve, reject) => {
+        const socket = connectTcp(Number(new URL(h.url).port), "127.0.0.1");
+        socket.on("error", reject);
+        socket.on("close", () => resolve());
+        socket.write(
+          "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+            "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nx-drop: 1\r\n\r\n",
+        );
+      });
+      expect(await h.upgradeStatus(null)).toBe(101);
     });
-    await new Promise<void>((resolve, reject) => {
-      const socket = connectTcp(Number(new URL(h.url).port), "127.0.0.1");
-      socket.on("error", reject);
-      socket.on("close", () => resolve());
-      socket.write(
-        "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
-          "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nx-drop: 1\r\n\r\n",
-      );
-    });
-    expect(await h.upgradeStatus(null)).toBe(101);
   });
 
-  it("refuses anonymous upgrades past the limit, by socket address", async () => {
-    await start({ anonymousSocketsPerIp: 2 });
-    const ana = await h.createUser("ana");
-    const first = await h.connect(null);
-    await h.connect(null);
-    expect(await h.upgradeStatus(null)).toBe(429);
+  describe("by socket address", () => {
+    beforeEach(() => start({ anonymousSocketsPerIp: 2 }));
 
-    // Signed-in sockets aren't limited this way.
-    expect(await h.upgradeStatus(ana)).toBe(101);
+    it("refuses anonymous upgrades past the limit", async () => {
+      const ana = await h.createUser("ana");
+      const first = await h.connect(null);
+      await h.connect(null);
+      expect(await h.upgradeStatus(null)).toBe(429);
 
-    // A peer that isn't a trusted proxy can't dodge the limit with its own cf-connecting-ip.
-    expect(await h.upgradeStatus(null, { "cf-connecting-ip": "203.0.113.7" })).toBe(429);
+      // Signed-in sockets aren't limited this way.
+      expect(await h.upgradeStatus(ana)).toBe(101);
 
-    // A closed socket frees its slot.
-    await first.close();
-    await h.settled();
-    await expect.poll(() => h.upgradeStatus(null)).toBe(101);
+      // A peer that isn't a trusted proxy can't dodge the limit with its own cf-connecting-ip.
+      expect(await h.upgradeStatus(null, { "cf-connecting-ip": "203.0.113.7" })).toBe(429);
+
+      // A closed socket frees its slot.
+      await first.close();
+      await h.settled();
+      await expect.poll(() => h.upgradeStatus(null)).toBe(101);
+    });
   });
 
-  it("counts by cf-connecting-ip when the peer is a trusted proxy (the tunnel)", async () => {
-    await start({ anonymousSocketsPerIp: 2, trustedProxies: ["127.0.0.1", "::1"] });
-    const first = await h.connect(null);
-    await h.connect(null);
-    expect(await h.upgradeStatus(null)).toBe(429);
+  describe("behind a trusted proxy (the tunnel)", () => {
+    beforeEach(() => start({ anonymousSocketsPerIp: 2, trustedProxies: ["127.0.0.1", "::1"] }));
 
-    // Behind Cloudflare the client IP comes from cf-connecting-ip.
-    const cf = { "cf-connecting-ip": "203.0.113.7" };
-    await h.connect(null, cf);
-    await h.connect(null, cf);
-    expect(await h.upgradeStatus(null, cf)).toBe(429);
-    expect(await h.upgradeStatus(null, { "cf-connecting-ip": "203.0.113.8" })).toBe(101);
+    it("counts by cf-connecting-ip", async () => {
+      const first = await h.connect(null);
+      await h.connect(null);
+      expect(await h.upgradeStatus(null)).toBe(429);
 
-    // A closed socket frees its slot.
-    await first.close();
-    await h.settled();
-    await expect.poll(() => h.upgradeStatus(null)).toBe(101);
+      // Behind Cloudflare the client IP comes from cf-connecting-ip.
+      const cf = { "cf-connecting-ip": "203.0.113.7" };
+      await h.connect(null, cf);
+      await h.connect(null, cf);
+      expect(await h.upgradeStatus(null, cf)).toBe(429);
+      expect(await h.upgradeStatus(null, { "cf-connecting-ip": "203.0.113.8" })).toBe(101);
+
+      // A closed socket frees its slot.
+      await first.close();
+      await h.settled();
+      await expect.poll(() => h.upgradeStatus(null)).toBe(101);
+    });
   });
 });
 
 describe("signing in", () => {
+  beforeEach(() => start());
+
   it("upgrades the page's socket to authenticated when the client restarts it", async () => {
-    await start();
     const ana = await h.createUser("ana");
     // Another browser, online throughout: it hears the count settle at two, itself and the page
     // below (a visitor, then ana).

@@ -10,15 +10,22 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  // In CI: annotations on the run, plus an HTML report the nightly workflow uploads on failure.
-  reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "list",
+  // In CI: annotations on the run, an HTML report, and a JSON one the nightly workflow reads to
+  // list the tests that only passed on a retry. It uploads both, and the traces, on a failure or
+  // a flake. Retries stay a safety net, not a silent one; to make a flake fail the run, set
+  // `failOnFlakyTests` (Playwright 1.63).
+  reporter: process.env.CI
+    ? [["github"], ["html", { open: "never" }], ["json", { outputFile: "playwright-results.json" }]]
+    : "list",
   // Parallel browsers on a loaded machine render slowly (Firefox especially), so a page can
   // take longer than the 5s expect default and a multi-page test longer than 30s.
   timeout: 60_000,
   expect: { timeout: 10_000 },
   use: {
     baseURL,
-    trace: "on-first-retry",
+    // Every run is traced, and the trace kept for a run that failed (even if its retry passed:
+    // that is the evidence of a flake) and for a retry.
+    trace: "retain-on-failure-and-retries",
   },
   projects: [
     {

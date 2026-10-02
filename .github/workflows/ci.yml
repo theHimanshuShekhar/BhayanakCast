@@ -51,6 +51,7 @@ jobs:
       - name: Backup sidecar tests
         run: pnpm test:backup
 
-      # The migration runner's advisory lock and out-of-order check, against a throwaway Postgres.
-      - name: Migration runner tests
+      # Against a throwaway Postgres: the migration runner's advisory lock and out-of-order check,
+      # and the app's queries through postgres-js on a database migrated from an older state.
+      - name: Real Postgres tests (migrations, postgres-js)
         run: pnpm test:migrate

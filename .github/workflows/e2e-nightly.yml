@@ -72,17 +72,41 @@ jobs:
       - name: E2E tests
         run: pnpm test:e2e
 
+      # A test that failed and then passed on a retry leaves the run green, so say so: a warning
+      # annotation and a job summary naming each one. The artifacts below are kept for it too.
+      # (Playwright's `failOnFlakyTests` would turn these into a red run instead.)
+      - name: Report flaky tests
+        id: flaky
+        if: ${{ !cancelled() }}
+        run: |
+          [ -f playwright-results.json ] || exit 0
+          flaky=$(jq -r '[.. | objects | select(has("tests") and has("file")) | . as $spec
+            | $spec.tests[] | select(.status == "flaky")
+            | "\($spec.file): \($spec.title) [\(.projectName)], passed on attempt \(.results | length)"] | .[]' \
+            playwright-results.json)
+          [ -n "$flaky" ] || exit 0
+          echo "flaky=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Flaky e2e tests (passed on retry)"
+            echo
+            echo "$flaky" | sed 's/^/- /'
+            echo
+            echo "Traces are in the \`test-results\` artifact."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::warning title=Flaky e2e tests::$(echo "$flaky" | wc -l) test(s) passed only on a retry; see the job summary"
+
       - name: Upload Playwright report
-        if: failure()
+        if: ${{ failure() || steps.flaky.outputs.flaky == 'true' }}
         uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: playwright-report/
           retention-days: 14
 
-      # Traces (trace: on-first-retry), screenshots and error context.
+      # Traces (trace: retain-on-failure-and-retries, so a flaky test's failed attempt too),
+      # screenshots and error context.
       - name: Upload test results
-        if: failure()
+        if: ${{ failure() || steps.flaky.outputs.flaky == 'true' }}
         uses: actions/upload-artifact@v7
         with:
           name: test-results
