@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { homeKeys } from "./home.queries.ts";
-import { coalesce, lobbyInvalidations, ONLINE_SETTLE_MS, settleOnline } from "./lobby-live.ts";
+import {
+  coalesce,
+  invalidateLobbyKeys,
+  lobbyInvalidations,
+  ONLINE_SETTLE_MS,
+  settleOnline,
+} from "./lobby-live.ts";
 import type { LOBBY_ROOM_CHANGES, ServerMessage } from "./realtime.ts";
 import { roomKeys } from "./rooms.queries.ts";
 
@@ -104,5 +110,54 @@ describe("coalesce", () => {
     expect(run).toHaveBeenCalledTimes(2);
     call();
     expect(run).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("invalidateLobbyKeys", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("invalidates every key but the home summary at once, and the summary through the coalesced refetch", () => {
+    const client = { invalidateQueries: vi.fn() };
+    const refetchSummary = vi.fn();
+    invalidateLobbyKeys(client, [roomKeys.live(), homeKeys.summary()], refetchSummary);
+    expect(client.invalidateQueries).toHaveBeenCalledTimes(2);
+    expect(refetchSummary).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends a key that covers the summary (every room read) through it as well", () => {
+    const client = { invalidateQueries: vi.fn() };
+    const refetchSummary = vi.fn();
+    invalidateLobbyKeys(client, [roomKeys.all], refetchSummary);
+    expect(refetchSummary).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not touch the summary for a change that doesn't affect it", () => {
+    const client = { invalidateQueries: vi.fn() };
+    const refetchSummary = vi.fn();
+    invalidateLobbyKeys(client, [roomKeys.live()], refetchSummary);
+    expect(refetchSummary).not.toHaveBeenCalled();
+  });
+
+  it("keeps the summary out of the immediate invalidation, which would refetch it uncoalesced", () => {
+    const client = { invalidateQueries: vi.fn() };
+    invalidateLobbyKeys(client, [roomKeys.all], vi.fn());
+    const predicate = client.invalidateQueries.mock.calls[0]?.[0]?.predicate;
+    expect(predicate({ queryKey: homeKeys.summary() })).toBe(false);
+    expect(predicate({ queryKey: roomKeys.live() })).toBe(true);
+    expect(predicate({ queryKey: roomKeys.past() })).toBe(true);
+  });
+
+  it("refetches the summary at most once per window across a burst of lobby changes", () => {
+    vi.useFakeTimers();
+    const refetchSummary = vi.fn();
+    const coalesced = coalesce(refetchSummary, 5_000);
+    const client = { invalidateQueries: vi.fn() };
+    // 30 changes in a minute from one popular stream.
+    for (let i = 0; i < 30; i++) {
+      invalidateLobbyKeys(client, lobbyInvalidations(changed("count"), false), coalesced);
+      vi.advanceTimersByTime(2_000);
+    }
+    expect(refetchSummary.mock.calls.length).toBeLessThanOrEqual(13);
+    expect(refetchSummary.mock.calls.length).toBeLessThan(30);
   });
 });

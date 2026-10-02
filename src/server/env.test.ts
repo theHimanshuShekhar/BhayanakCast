@@ -20,12 +20,14 @@ describe("empty values", () => {
       CLOUDFLARE_TURN_KEY_ID: "",
       REALTIME_ANONYMOUS_SOCKETS_PER_IP: "",
       REALTIME_SOCKETS_PER_USER: "",
+      PUBLIC_READ_LIMIT_SCALE: "",
       REALTIME_EMPTY_ROOM_TIMEOUT_MS: " ",
     });
     expect(parsed).toMatchObject({
       ADMIN_DISCORD_IDS: [],
       REALTIME_ANONYMOUS_SOCKETS_PER_IP: 20,
       REALTIME_SOCKETS_PER_USER: 10,
+      PUBLIC_READ_LIMIT_SCALE: 1,
     });
     expect(parsed.E2E_AUTH).toBeUndefined();
     expect(parsed.CLOUDFLARE_TURN_KEY_ID).toBeUndefined();
