@@ -180,7 +180,7 @@ describe("test-only sign-in", () => {
       }),
     ]);
     expect(await db.select().from(userCotime)).toEqual([
-      { userA: a, userB: b, secondsTogether: 600 },
+      { userA: a, userB: b, secondsTogether: 600, publicSecondsTogether: 600 },
     ]);
     expect((await setStats({ discordId: "9999" })).status).toBe(404);
   });

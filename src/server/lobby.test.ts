@@ -2,6 +2,7 @@
  * The lobby channel (ADR 20, #24): anonymous sockets, the online count and public room
  * changes, through real sockets (./realtime-harness.ts).
  */
+import { connect as connectTcp } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import {
@@ -398,6 +399,30 @@ describe("with the reconnect grace", () => {
 });
 
 describe("per-IP limit on anonymous sockets", () => {
+  it("frees the slot of a client that leaves while its upgrade is being authenticated", async () => {
+    // The client's connection drops (and `close` fires) while the upgrade is being authenticated.
+    await start({
+      anonymousSocketsPerIp: 1,
+      beforeAuthenticate: (request) =>
+        request.headers["x-drop"]
+          ? new Promise<void>((resolve) => {
+              request.socket.once("close", () => resolve());
+              request.socket.destroy();
+            })
+          : Promise.resolve(),
+    });
+    await new Promise<void>((resolve, reject) => {
+      const socket = connectTcp(Number(new URL(h.url).port), "127.0.0.1");
+      socket.on("error", reject);
+      socket.on("close", () => resolve());
+      socket.write(
+        "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+          "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nx-drop: 1\r\n\r\n",
+      );
+    });
+    expect(await h.upgradeStatus(null)).toBe(101);
+  });
+
   it("refuses anonymous upgrades past the limit, by socket address", async () => {
     await start({ anonymousSocketsPerIp: 2 });
     const ana = await h.createUser("ana");
