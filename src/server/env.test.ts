@@ -19,9 +19,14 @@ describe("empty values", () => {
       ADMIN_DISCORD_IDS: "",
       CLOUDFLARE_TURN_KEY_ID: "",
       REALTIME_ANONYMOUS_SOCKETS_PER_IP: "",
+      PUBLIC_READ_LIMIT_SCALE: "",
       REALTIME_EMPTY_ROOM_TIMEOUT_MS: " ",
     });
-    expect(parsed).toMatchObject({ ADMIN_DISCORD_IDS: [], REALTIME_ANONYMOUS_SOCKETS_PER_IP: 20 });
+    expect(parsed).toMatchObject({
+      ADMIN_DISCORD_IDS: [],
+      REALTIME_ANONYMOUS_SOCKETS_PER_IP: 20,
+      PUBLIC_READ_LIMIT_SCALE: 1,
+    });
     expect(parsed.E2E_AUTH).toBeUndefined();
     expect(parsed.CLOUDFLARE_TURN_KEY_ID).toBeUndefined();
     expect(parsed.REALTIME_EMPTY_ROOM_TIMEOUT_MS).toBeUndefined();

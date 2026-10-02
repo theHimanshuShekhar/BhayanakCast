@@ -44,6 +44,11 @@ const baseSchema = z.object({
   /** Open anonymous (lobby-only) realtime sockets allowed per client IP (ADR 20). */
   REALTIME_ANONYMOUS_SOCKETS_PER_IP: z.coerce.number().int().positive().default(20),
   /**
+   * Multiplies the per-IP budgets of the public reads (profile, search, home; ADR 20 addendum).
+   * Only e2e runs raise it: every test's browser connects from one IP.
+   */
+  PUBLIC_READ_LIMIT_SCALE: z.coerce.number().int().positive().default(1),
+  /**
    * How long an empty room waits before it ends, in ms (ADR 14: 5 minutes, the default). Only
    * e2e runs shorten it, so a test can watch a room end.
    */

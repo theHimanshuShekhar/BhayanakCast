@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "../db/client.ts";
 import {
@@ -11,7 +12,7 @@ import {
 } from "../db/schema/index.ts";
 import { createTestDb } from "../db/test-db.ts";
 import type { Caller } from "./caller.ts";
-import { getProfile, searchUsers } from "./profiles.ts";
+import { escapeLike, getProfile, searchUsers, username } from "./profiles.ts";
 import { rollupEndedRoom } from "./stats.ts";
 
 let db: Db;
@@ -337,5 +338,47 @@ describe("searchUsers", () => {
   it("rejects an empty or overlong query", async () => {
     await expect(searchUsers(db, visitor, { query: "   " })).rejects.toThrow();
     await expect(searchUsers(db, visitor, { query: "x".repeat(65) })).rejects.toThrow();
+  });
+
+  describe("index", () => {
+    /** Rows of a raw query (PGlite's result shape; `Db` types it as unknown). */
+    const rowsOf = async <T>(query: ReturnType<typeof sql>) =>
+      ((await db.execute(query)) as unknown as { rows: T[] }).rows;
+
+    /** The plan for the search's own `where`, as text. */
+    const plan = async (query: string) =>
+      (
+        await rowsOf<{ "QUERY PLAN": string }>(
+          sql`explain select ${user.id} from ${user} where ${username} ilike ${`%${escapeLike(query)}%`}`,
+        )
+      )
+        .map((row) => row["QUERY PLAN"])
+        .join("\n");
+
+    it("is used on the searched expression, once there are rows to prefer it", async () => {
+      await db.insert(user).values(
+        Array.from({ length: 5000 }, (_, i) => ({
+          id: `bulk${i}`,
+          name: `bulk${i}`,
+          email: `bulk${i}@discord.invalid`,
+          discordUsername: `player_${i.toString(36)}_${(i * 7919).toString(36)}`,
+        })),
+      );
+      await db.execute(sql`analyze "user"`);
+      // A table this small is cheaper to scan, so forbid the scan: the plan then shows whether
+      // the index can serve the query's expression at all.
+      await db.execute(sql`set enable_seqscan = off`);
+      expect(await plan("reverb")).toMatch(/Bitmap Index Scan on user_username_trgm_idx/);
+    });
+
+    it("replaces the old btree on discord_username, which no query used", async () => {
+      const names = (
+        await rowsOf<{ indexname: string }>(
+          sql`select indexname from pg_indexes where tablename = 'user'`,
+        )
+      ).map((row) => row.indexname);
+      expect(names).toContain("user_username_trgm_idx");
+      expect(names).not.toContain("user_discord_username_idx");
+    });
   });
 });
