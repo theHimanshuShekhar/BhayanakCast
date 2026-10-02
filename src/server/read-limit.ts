@@ -4,6 +4,7 @@
  * them. Server functions apply them through `limitPublicRead` (./request-caller.ts); this file
  * is the limiter itself, which tests drive with explicit IPs and times.
  */
+import { READ_RATE_LIMITED_MESSAGE } from "../lib/profiles.ts";
 import { withinRateLimit } from "./rate-limit.ts";
 
 /** What a public read is limited as: each kind has its own budget per IP. */
@@ -22,10 +23,14 @@ export const PUBLIC_READ_LIMITS: Record<PublicRead, number> = {
   home: 120,
 };
 
-/** Thrown when an IP is over its limit for a kind of read. The UI shows its message. */
+/**
+ * Thrown when an IP is over its limit for a kind of read. Home's user search shows a notice for
+ * it; the profile and home loaders have no handling of their own yet, so the router's default
+ * error page shows the message.
+ */
 export class ReadRateLimitedError extends Error {
   constructor() {
-    super("Too many requests. Wait a moment and try again.");
+    super(READ_RATE_LIMITED_MESSAGE);
     this.name = "ReadRateLimitedError";
   }
 }

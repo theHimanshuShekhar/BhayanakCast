@@ -12,6 +12,13 @@ export const PROFILE_CO_USERS = 5;
 export const USER_SEARCH_LIMIT = 8;
 export const USER_SEARCH_QUERY_MAX = 64;
 
+/**
+ * The message of the error a public read throws when its client IP is over the limit (HTTP 429;
+ * `ReadRateLimitedError`, src/server/read-limit.ts). The client gets a plain `Error` with this
+ * message, so it recognises a refusal by comparing messages.
+ */
+export const READ_RATE_LIMITED_MESSAGE = "Too many requests. Wait a moment and try again.";
+
 export const userIdInput = z.object({ userId: z.string().min(1).max(64) });
 
 export const searchUsersInput = z.object({

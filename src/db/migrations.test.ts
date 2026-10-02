@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
+import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import { describe, expect, it } from "vitest";
@@ -45,7 +46,8 @@ describe("readJournal", () => {
     timeout: 30_000,
   }, async () => {
     const migrationsFolder = fileURLToPath(new URL("../../drizzle", import.meta.url));
-    const client = new PGlite();
+    // Migration 0007 creates pg_trgm, which PGlite only has when it is loaded (see test-db.ts).
+    const client = new PGlite({ extensions: { pg_trgm } });
     try {
       await migrate(drizzle({ client }), { migrationsFolder });
       const { rows } = await client.query<{ hash: string; created_at: string }>(
