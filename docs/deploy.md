@@ -73,7 +73,7 @@ as an empty string, and the app treats that as unset. See `.env.example` for a t
 
 | Variable | Required | Where to get it |
 |---|---|---|
-| `POSTGRES_PASSWORD` | yes | Generate one: `openssl rand -hex 24`. Keep it URL-safe, because it's embedded in the app's `DATABASE_URL`. It's applied only when the volume is first initialised; changing it later means running `ALTER USER` inside Postgres too. |
+| `POSTGRES_PASSWORD` | yes | Generate one: `openssl rand -hex 24`. It must be URL-safe (the hex output is), because compose pastes it unencoded into the app's `DATABASE_URL`; a `/`, `#`, `?` or `%` in it makes the app refuse to start, and `POSTGRES_USER` and `POSTGRES_DB` follow the same rule. It's applied only when the volume is first initialised; changing it later means running `ALTER USER` inside Postgres too. |
 | `POSTGRES_USER`, `POSTGRES_DB` | no | Default `bhayanakcast`. |
 | `BETTER_AUTH_SECRET` | yes | Generate one: `openssl rand -base64 32` (at least 32 chars). It signs sessions: rotating it signs everyone out. |
 | `BETTER_AUTH_URL` | no | Defaults to `https://cast.bhayanak.net` in compose. It must be the public origin, because it builds the Discord redirect URL. |
@@ -229,7 +229,10 @@ do this). Then start `app` again.
 ## Operating
 
 - **Updating:** merge to `main`, then redeploy (or let the webhook do it). Pending migrations run on
-  start. Migrations only go forward, so rolling back to an older commit doesn't undo a schema change.
+  start, one instance at a time (a Postgres advisory lock). Migrations only go forward, so rolling
+  back to an older commit doesn't undo a schema change. If the app won't start and its log says
+  `Refusing to migrate`, a migration was added with a timestamp older than one already applied,
+  which Drizzle would skip for good: regenerate it with a newer one (ADR 8).
 - **Logs:** Dockhand's container logs, or `docker logs <container>`. They're rotated at 3 × 10 MB.
 - **Restarts** drop live room state. Clients reconnect on their own (ADR 9).
 - **TURN and NAT (ADR 3):** each signed-in user gets TURN credentials that last 4 hours. They're
