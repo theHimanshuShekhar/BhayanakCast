@@ -20,3 +20,6 @@ Date: 2026-09-27 · Status: accepted
 - A room's last thumbnails are served after it ends, for the same 30 days as its recap (ADR 11), and only to whoever may see the room (ADR 16). Past cards and the recap show them desaturated, as "cached · X ago".
 - Each upload tells the lobby (`lobby.changed`, change `thumbnail`) so live cards refetch without a reload; the page collapses these refetches to at most one per 5 seconds. Only public live rooms are announced: a private room's cards refresh on the next reload or list refetch.
 - The 3-minute interval is a build-time setting (`VITE_THUMBNAIL_REFRESH_MS`, never below 5 s); the e2e server sets 8 s.
+
+## Addendum: declared size is checked too (2026-10-02)
+- The magic bytes aren't enough: a small file can declare a huge size, and every viewer of the room card would decode it. The upload route reads the size from the header itself (JPEG frame headers, WebP `VP8 `, `VP8L` and `VP8X`) and refuses anything declaring more than twice the capture size (960x540), a margin for a changed capture. A header that can't be read is refused too.

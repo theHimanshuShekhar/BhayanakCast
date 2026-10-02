@@ -9,10 +9,13 @@ import type { Db } from "../db/client.ts";
 import { rooms, streamIntervals, thumbnails } from "../db/schema/index.ts";
 import {
   THUMBNAIL_MAX_BYTES,
+  THUMBNAIL_MAX_HEIGHT,
+  THUMBNAIL_MAX_WIDTH,
   THUMBNAIL_MIME_TYPES,
   type ThumbnailMime,
 } from "../lib/thumbnails.ts";
 import { type Caller, requireSignedIn } from "./caller.ts";
+import { declaredImageSize } from "./image-size.ts";
 import { withinRateLimit } from "./rate-limit.ts";
 import { endedWithinRetention } from "./rooms.ts";
 import { roomVisibleTo } from "./visibility.ts";
@@ -25,7 +28,7 @@ export class NotStreamingError extends Error {
   }
 }
 
-/** Thrown for an upload that isn't a WebP or JPEG within the size limit. */
+/** Thrown for an upload that isn't a WebP or JPEG within the byte and pixel limits. */
 export class InvalidThumbnailError extends Error {
   constructor(
     message: string,
@@ -42,14 +45,6 @@ export function thumbnailMime(contentType: string | null): ThumbnailMime | null 
   return THUMBNAIL_MIME_TYPES.find((allowed) => allowed === mime) ?? null;
 }
 
-/** Whether `bytes` start like an image of `mime` (the header isn't taken on trust). */
-function looksLike(mime: ThumbnailMime, bytes: Uint8Array): boolean {
-  const at = (offset: number, text: string) =>
-    [...text].every((char, i) => bytes[offset + i] === char.charCodeAt(0));
-  if (mime === "image/webp") return at(0, "RIFF") && at(8, "WEBP");
-  return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
-}
-
 export interface UploadThumbnailInput {
   roomId: string;
   /** The request's Content-Type. */
@@ -60,7 +55,8 @@ export interface UploadThumbnailInput {
 /**
  * Store `bytes` as the caller's latest thumbnail in `roomId`, replacing the previous one, and
  * stamp the room's `lastThumbnailAt`. Refused unless the caller is signed in and has an open
- * stream interval in the room, and the upload is a WebP or JPEG of at most 100 KB.
+ * stream interval in the room, and the upload is a WebP or JPEG of at most 100 KB whose header
+ * declares no more than twice the capture's size (the header is read, not taken on trust).
  */
 export async function uploadThumbnail(
   db: Db,
@@ -89,8 +85,13 @@ export async function uploadThumbnail(
       "size",
     );
   }
-  if (!looksLike(mime, input.bytes)) {
-    throw new InvalidThumbnailError("The image doesn't match its type", "type");
+  const size = declaredImageSize(mime, input.bytes);
+  if (!size) throw new InvalidThumbnailError("The image doesn't match its type", "type");
+  if (size.width > THUMBNAIL_MAX_WIDTH || size.height > THUMBNAIL_MAX_HEIGHT) {
+    throw new InvalidThumbnailError(
+      `Thumbnails are at most ${THUMBNAIL_MAX_WIDTH}x${THUMBNAIL_MAX_HEIGHT} pixels`,
+      "size",
+    );
   }
   await db.transaction(async (tx) => {
     await tx
