@@ -57,10 +57,9 @@ class FakeTransceiver {
     getParameters: () => Partial<RTCRtpSendParameters>;
     setParameters: (parameters: Partial<RTCRtpSendParameters>) => Promise<void>;
   };
-  constructor(
-    track: unknown,
-    readonly init: RTCRtpTransceiverInit = {},
-  ) {
+  readonly init: RTCRtpTransceiverInit;
+  constructor(track: unknown, init: RTCRtpTransceiverInit = {}) {
+    this.init = init;
     let parameters: Partial<RTCRtpSendParameters> = { encodings: init.sendEncodings ?? [{}] };
     const sender = {
       track,
