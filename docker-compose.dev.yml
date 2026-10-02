@@ -1,0 +1,27 @@
+# Local development: Postgres only, published on localhost. The app runs on the host with
+# `pnpm dev`, reading DATABASE_URL from .env (see .env.example). Production is docker-compose.yml.
+#   pnpm db:up                                  # this file, detached; `pnpm db:down` stops it
+#   set -a; . ./.env; set +a                    # the app scripts read process.env, not .env
+#   pnpm db:migrate && pnpm dev
+
+name: bhayanakcast-dev
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-bhayanakcast}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-bhayanakcast}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:

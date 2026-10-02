@@ -1,5 +1,6 @@
 // UI view models. Shapes mirror what server functions / the realtime socket will return.
 import type { UserSettings } from "~/db/settings";
+import type { FeedEntry } from "./realtime";
 import type { RoomKind } from "./rooms";
 
 export type { RoomKind };
@@ -64,6 +65,8 @@ export type RoomDetail = {
 /** A line in the room's feed tab: `who` did `what` (src/lib/room-live.ts `feedLine`). */
 export type ActivityItem = {
   id: string;
+  /** What kind of event it is (the feed colours its dot by it). */
+  kind: FeedEntry["kind"];
   who: string;
   what: string;
   /** ISO timestamp, server clock. */

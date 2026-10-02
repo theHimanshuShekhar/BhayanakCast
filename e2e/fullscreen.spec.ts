@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { signIn } from "./auth";
 import { expect, newPage, test } from "./fixtures";
-import { createRoomOnPage, enterRoom, uniqueRoomName } from "./rooms";
+import { createRoomOnPage, enterWithCamera, uniqueRoomName } from "./rooms";
 
 // The fullscreen buttons on a tile and in the room's control bar toggle (#85), and follow the
 // browser's real fullscreen state. Playwright's headless Firefox has no Fullscreen API
@@ -24,12 +24,12 @@ test("the tile's fullscreen button enters and exits, and follows Escape", async 
   const guestContext = await browser.newContext();
   try {
     await signIn(guestContext, { username: "fs.tileguest" });
-    await enterRoom(await newPage(guestContext), roomId);
+    await enterWithCamera(await newPage(guestContext), roomId);
 
-    // Your own tile has no controls until you show something; the guest's does.
+    // The guest's camera gives them a tile, with its controls.
     const tile = page.getByRole("group", { name: "fs.tileguest", exact: true });
     await tile.hover();
-    const enter = tile.getByRole("button", { name: "Fullscreen", exact: true });
+    const enter = tile.getByRole("button", { name: "Fullscreen fs.tileguest", exact: true });
     const exit = tile.getByRole("button", { name: "Exit fullscreen" });
     await expect(enter).toHaveAttribute("aria-pressed", "false");
 
@@ -69,7 +69,7 @@ test("the room's fullscreen button enters and exits, and a tile takes over from 
   const guestContext = await browser.newContext();
   try {
     await signIn(guestContext, { username: "fs.roomguest" });
-    await enterRoom(await newPage(guestContext), roomId);
+    await enterWithCamera(await newPage(guestContext), roomId);
     const tile = page.getByRole("group", { name: "fs.roomguest", exact: true });
     await expect(tile).toBeVisible();
 
@@ -89,7 +89,7 @@ test("the room's fullscreen button enters and exits, and a tile takes over from 
     await enter.click();
     await expect(exit).toBeVisible();
     await tile.hover();
-    await tile.getByRole("button", { name: "Fullscreen", exact: true }).click();
+    await tile.getByRole("button", { name: "Fullscreen fs.roomguest", exact: true }).click();
     await expect(tile.getByRole("button", { name: "Exit fullscreen" })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -116,7 +116,7 @@ test("without the Fullscreen API there is no fullscreen button", async ({
   const guestContext = await browser.newContext();
   try {
     await signIn(guestContext, { username: "fs.noneguest" });
-    await enterRoom(await newPage(guestContext), roomId);
+    await enterWithCamera(await newPage(guestContext), roomId);
     const tile = page.getByRole("group", { name: "fs.noneguest", exact: true });
     await expect(tile.getByRole("button", { name: "Pin" })).toBeAttached();
     await expect(page.getByRole("button", { name: "Settings" })).toBeVisible();

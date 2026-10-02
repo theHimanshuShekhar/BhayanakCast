@@ -20,7 +20,9 @@
     "test:e2e": "playwright test",
     "db:generate": "drizzle-kit generate && biome format --write drizzle",
     "db:migrate": "node src/db/migrate.ts",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "db:up": "docker compose -f docker-compose.dev.yml up -d --wait",
+    "db:down": "docker compose -f docker-compose.dev.yml down"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

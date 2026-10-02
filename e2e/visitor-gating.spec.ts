@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 import { signIn } from "./auth";
 import { expect, test } from "./fixtures";
 import { createUser } from "./profiles";
-import { createRoomAs, seedPastRoom, uniqueRoomName } from "./rooms";
+import { createRoomAs, seedLiveRooms, seedPastRoom, uniqueRoomName } from "./rooms";
 
 const activeRooms = { level: 1, name: "Active Rooms" } as const;
 const joinPrompt = (page: Page) => page.getByRole("dialog", { name: "sign in to join" });
@@ -43,6 +43,7 @@ test.describe("a visitor", () => {
 
   test('clicking a "Filling Up" entry opens the sign-in prompt', async ({ page, browser }) => {
     await createRoomAs(browser, "gate.host", { name: uniqueRoomName("filling") });
+    await seedLiveRooms(browser);
     await page.goto("/");
     await fillingUp(page).click();
     await expect(joinPrompt(page)).toBeVisible();
@@ -71,7 +72,7 @@ test.describe("a visitor", () => {
 
   test('"Start a Room" asks to sign in instead of opening the create dialog', async ({ page }) => {
     await page.goto("/profile/no-such-user");
-    await page.getByRole("button", { name: "Start a Room" }).click();
+    await page.getByRole("navigation").getByRole("button", { name: "Start a Room" }).click();
     const dialog = createPrompt(page);
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole("button", { name: /sign in with discord/i })).toBeVisible();
@@ -126,6 +127,7 @@ test.describe("a signed-in user", () => {
 
   test('clicking a "Filling Up" entry enters the room', async ({ page, browser }) => {
     await createRoomAs(browser, "gate.host", { name: uniqueRoomName("filling") });
+    await seedLiveRooms(browser);
     await page.goto("/");
     await fillingUp(page).click();
     await expect(page).toHaveURL(/\/room\/[^/]+$/);
@@ -143,8 +145,8 @@ test.describe("a signed-in user", () => {
 
   test('"Start a Room" opens the create dialog', async ({ page }) => {
     await page.goto("/profile/no-such-user");
-    await page.getByRole("button", { name: "Start a Room" }).click();
-    const dialog = page.getByRole("dialog", { name: "start a hang" });
+    await page.getByRole("navigation").getByRole("button", { name: "Start a Room" }).click();
+    const dialog = page.getByRole("dialog", { name: "start a room" });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByLabel("room name")).toBeVisible();
     await expect(createPrompt(page)).toHaveCount(0);

@@ -111,7 +111,7 @@ export function Lobby({
           disabled={starting}
           onClick={() => onEnter({ mic: micOn, cam: camOn })}
         >
-          <Icon.Broadcast size={13} /> Enter room
+          <Icon.Broadcast size={13} /> enter room
         </Btn>
       </div>
     </DeviceCheck>
@@ -169,9 +169,15 @@ export function DeviceCheck({
             {camOn && local.cam.track ? (
               <Preview track={local.cam.track} />
             ) : (
-              <div className="absolute inset-0 grid place-items-center">
-                <div className="flex flex-col items-center gap-2.5">
-                  <Avatar name={me} image={meImage} size="xl" />
+              // Centred above the mic and camera buttons, which sit along the bottom.
+              <div className="absolute inset-0 grid place-items-center pb-14">
+                <div className="flex flex-col items-center gap-2.5 max-sm:gap-1.5">
+                  <Avatar
+                    name={me}
+                    image={meImage}
+                    size="xl"
+                    className="max-sm:!w-14 max-sm:!h-14 max-sm:!text-[18px]"
+                  />
                   <span className="text-[11.5px] text-muted">
                     {local.cam.status === "starting" ? "starting camera…" : "camera is off"}
                   </span>
@@ -184,7 +190,7 @@ export function DeviceCheck({
                 aria-checked={micOn}
                 aria-label="Microphone"
                 title={micOn ? "Turn mic off" : "Turn mic on"}
-                state={micOn ? "active" : "muted"}
+                state={micOn ? "active" : undefined}
                 disabled={local.mic.status === "starting"}
                 onClick={() => toggle("mic")}
               >
@@ -195,7 +201,7 @@ export function DeviceCheck({
                 aria-checked={camOn}
                 aria-label="Camera"
                 title={camOn ? "Turn camera off" : "Turn camera on"}
-                state={camOn ? "active" : "muted"}
+                state={camOn ? "active" : undefined}
                 disabled={local.cam.status === "starting"}
                 onClick={() => toggle("cam")}
               >

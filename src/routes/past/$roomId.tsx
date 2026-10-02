@@ -171,7 +171,7 @@ function PastStreamPage({ recap }: { recap: Recap }) {
         <div className="grid grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] gap-4 max-[820px]:grid-cols-1">
           {/* The streamers' last thumbnails, or placeholders for those who have none. */}
           <StreamMosaic
-            streams={placeholderStreams(streamers, recap.id)}
+            streams={placeholderStreams(streamers, recap.id, recap.kind)}
             cached
             freshness={endedLabel(newest, recap.endedAt)}
           />

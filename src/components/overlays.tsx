@@ -2,10 +2,10 @@
 // Ported from docs/design/prototype/overlays.jsx onto Base UI Dialog/Menu (focus trap, Esc, a11y).
 import { Dialog } from "@base-ui/react/dialog";
 import { Menu } from "@base-ui/react/menu";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, type RefObject, useRef, useState } from "react";
 import { useCurrentSession } from "~/lib/current-user";
 import { ACCENTS } from "~/lib/format";
-import { type CreateRoomInput, ROOM_NAME_MAX } from "~/lib/rooms";
+import { type CreateRoomInput, ROOM_KIND_LABELS, ROOM_KINDS, ROOM_NAME_MAX } from "~/lib/rooms";
 import { useSettings } from "~/lib/settings";
 import type { RoomKind } from "~/lib/types";
 import { Icon } from "./icons";
@@ -21,6 +21,7 @@ const tagBtn = (active: boolean) =>
 
 /** A modal dialog on Base UI Dialog: title bar with close, scrolling body, footer actions. */
 export const Sheet = ({
+  initialFocus,
   open,
   onOpenChange,
   title,
@@ -34,12 +35,15 @@ export const Sheet = ({
   width: string;
   children: ReactNode;
   footer: ReactNode;
+  /** What gets focus when it opens (Base UI's default is the first tabbable: Close). */
+  initialFocus?: RefObject<HTMLElement | null>;
 }) => (
   <Dialog.Root open={open} onOpenChange={onOpenChange}>
     <Dialog.Portal>
       <Dialog.Backdrop className="fixed inset-0 z-[200] bg-black/55 backdrop-blur-[3px] animate-bc-fade" />
       <Dialog.Popup
-        className={`fixed z-[201] left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 ${width} max-h-[calc(100dvh-2rem)] flex flex-col bg-surface border border-border rounded-[var(--radius)] shadow-deep overflow-hidden outline-0 max-sm:top-auto max-sm:bottom-0 max-sm:translate-y-0 max-sm:w-full max-sm:max-h-[92dvh] max-sm:rounded-b-none max-sm:border-b-0`}
+        initialFocus={initialFocus}
+        className={`fixed z-[201] left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 ${width} transition-[opacity,scale,translate] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] data-ending-style:duration-[120ms] data-starting-style:opacity-0 data-ending-style:opacity-0 motion-safe:sm:data-starting-style:scale-[0.98] motion-safe:max-sm:data-starting-style:translate-y-full motion-safe:max-sm:data-ending-style:translate-y-full max-h-[calc(100dvh-2rem)] flex flex-col bg-surface border border-border rounded-[var(--radius)] shadow-deep overflow-hidden outline-0 max-sm:top-auto max-sm:bottom-0 max-sm:translate-y-0 max-sm:w-full max-sm:max-h-[92dvh] max-sm:rounded-b-none max-sm:border-b-0`}
       >
         <div className="flex items-center gap-3 px-5 py-3.5 border-b border-border-subtle">
           <Dialog.Title className="m-0 text-[15px] tracking-[-0.005em] font-bold flex-1">
@@ -58,25 +62,8 @@ export const Sheet = ({
   </Dialog.Root>
 );
 
-const KINDS: { id: RoomKind; label: string }[] = [
-  { id: "gaming", label: "Gaming" },
-  { id: "code", label: "Coding" },
-  { id: "music", label: "Music" },
-  { id: "art", label: "Art" },
-  { id: "watch", label: "Watch party" },
-  { id: "chat", label: "Just chatting" },
-];
-const ALL_TAGS = [
-  "chill",
-  "gaming",
-  "coding",
-  "music",
-  "art",
-  "cozy",
-  "speedrun",
-  "watch-party",
-  "learning",
-];
+// Tags that say more than the kind does (a kind already covers gaming, coding and the rest).
+const ALL_TAGS = ["chill", "cozy", "speedrun", "learning"];
 
 export const CreateRoomDialog = ({
   open,
@@ -90,8 +77,10 @@ export const CreateRoomDialog = ({
 }) => {
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
-  const [tags, setTags] = useState<Set<string>>(() => new Set(["chill"]));
-  const [kind, setKind] = useState<RoomKind>("gaming");
+  // No guessed defaults: a room is "just chatting" with no tags until the host says otherwise.
+  const [tags, setTags] = useState<Set<string>>(() => new Set());
+  const [kind, setKind] = useState<RoomKind>("chat");
+  const nameRef = useRef<HTMLInputElement>(null);
   const [isPrivate, setIsPrivate] = useState(false);
   const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -118,6 +107,8 @@ export const CreateRoomDialog = ({
       });
       setName("");
       setDesc("");
+      setTags(new Set());
+      setKind("chat");
     } catch {
       setFailed(true);
     } finally {
@@ -129,18 +120,26 @@ export const CreateRoomDialog = ({
     <Sheet
       open={open}
       onOpenChange={onOpenChange}
-      title="start a hang"
+      title="start a room"
       width="w-[min(520px,94vw)]"
+      initialFocus={nameRef}
       footer={
         <>
           <Btn onClick={() => onOpenChange(false)}>cancel</Btn>
-          <Btn variant="primary" onClick={submit} disabled={!name.trim() || pending}>
-            <Icon.Broadcast size={13} /> start hang
+          {/* In the footer, outside the form, so it names the form to submit (Enter works too). */}
+          <Btn
+            type="submit"
+            form="create-room"
+            variant="primary"
+            disabled={!name.trim() || pending}
+          >
+            <Icon.Broadcast size={13} /> {pending ? "starting…" : "start room"}
           </Btn>
         </>
       }
     >
       <form
+        id="create-room"
         className="contents"
         onSubmit={(e) => {
           e.preventDefault();
@@ -153,6 +152,7 @@ export const CreateRoomDialog = ({
           </label>
           <input
             id="room-name"
+            ref={nameRef}
             type="text"
             placeholder="e.g. sunday synth jams"
             value={name}
@@ -165,50 +165,19 @@ export const CreateRoomDialog = ({
         <fieldset className="flex flex-col gap-1.5 m-0 p-0 border-0">
           <legend className={`${fieldLabel} mb-1.5`}>what kind of room</legend>
           <div className="flex flex-wrap gap-1.5">
-            {KINDS.map((k) => (
+            {ROOM_KINDS.map((k) => (
               <button
-                key={k.id}
+                key={k}
                 type="button"
-                aria-pressed={kind === k.id}
-                className={tagBtn(kind === k.id)}
-                onClick={() => setKind(k.id)}
+                aria-pressed={kind === k}
+                className={tagBtn(kind === k)}
+                onClick={() => setKind(k)}
               >
-                {k.label}
+                {ROOM_KIND_LABELS[k]}
               </button>
             ))}
           </div>
         </fieldset>
-
-        <fieldset className="flex flex-col gap-1.5 m-0 p-0 border-0">
-          <legend className={`${fieldLabel} mb-1.5`}>tags · pick a few</legend>
-          <div className="flex flex-wrap gap-1.5">
-            {ALL_TAGS.map((t) => (
-              <button
-                key={t}
-                type="button"
-                aria-pressed={tags.has(t)}
-                className={tagBtn(tags.has(t))}
-                onClick={() => toggleTag(t)}
-              >
-                #{t}
-              </button>
-            ))}
-          </div>
-        </fieldset>
-
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="room-desc" className={fieldLabel}>
-            description (optional)
-          </label>
-          <textarea
-            id="room-desc"
-            rows={2}
-            placeholder="what's going down in this room…"
-            value={desc}
-            onChange={(e) => setDesc(e.target.value)}
-            className={`${fieldInput} resize-none font-[inherit]`}
-          />
-        </div>
 
         <Toggle
           k="private room"
@@ -216,6 +185,43 @@ export const CreateRoomDialog = ({
           on={isPrivate}
           onChange={setIsPrivate}
         />
+
+        {/* Optional extras, out of the way of a host who just wants the room up. */}
+        <details className="group flex flex-col gap-4 [&[open]>summary]:mb-4">
+          <summary className="w-fit text-[11.5px] text-muted cursor-pointer hover:text-fg list-none inline-flex items-center gap-1.5">
+            <Icon.Plus size={11} /> tags and a description
+          </summary>
+          <fieldset className="flex flex-col gap-1.5 m-0 p-0 border-0 mb-4">
+            <legend className={`${fieldLabel} mb-1.5`}>tags · pick a few</legend>
+            <div className="flex flex-wrap gap-1.5">
+              {ALL_TAGS.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  aria-pressed={tags.has(t)}
+                  className={tagBtn(tags.has(t))}
+                  onClick={() => toggleTag(t)}
+                >
+                  #{t}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="room-desc" className={fieldLabel}>
+              description (optional)
+            </label>
+            <textarea
+              id="room-desc"
+              rows={2}
+              placeholder="what's going down in this room…"
+              value={desc}
+              onChange={(e) => setDesc(e.target.value)}
+              className={`${fieldInput} resize-none font-[inherit]`}
+            />
+          </div>
+        </details>
         {failed && (
           <p role="alert" className="m-0 text-[11.5px] text-live-ink">
             couldn't start the room. check the details and try again.
@@ -365,6 +371,9 @@ export const SignInPromptDialog = ({
           )}
         </p>
       </div>
+      <p className="m-0 text-[11.5px] text-muted">
+        Your mic and camera stay off until you turn them on.
+      </p>
       <SignInButton />
     </Sheet>
   );
@@ -388,7 +397,7 @@ export const ProfileMenu = ({
 }) => (
   <Menu.Root>
     <Menu.Trigger
-      className="w-9 h-9 p-0 rounded-[10px] bg-transparent grid place-items-center cursor-pointer"
+      className="w-9 h-9 max-sm:w-11 max-sm:h-11 p-0 rounded-[10px] bg-transparent grid place-items-center cursor-pointer"
       aria-label="Account menu"
     >
       <Avatar name={username} image={image} size="md" ring />

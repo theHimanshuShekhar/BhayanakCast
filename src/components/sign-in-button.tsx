@@ -17,13 +17,14 @@ const DiscordMark = ({ size = 16 }: { size?: number }) => (
 
 /**
  * Starts Better Auth's Discord social sign-in with the callback set to `callbackURL` (home
- * unless given). `rail` fills the side rail's avatar slot; `block` is a full-width primary button.
+ * unless given). `rail` fills the side rail's avatar slot; `block` is a full-width primary button;
+ * `retry` is a small button for trying again after a failed sign-in.
  */
 export const SignInButton = ({
   variant = "block",
   callbackURL = "/",
 }: {
-  variant?: "rail" | "block";
+  variant?: "rail" | "block" | "retry";
   callbackURL?: string;
 }) => {
   const [pending, setPending] = useState(false);
@@ -51,8 +52,16 @@ export const SignInButton = ({
     );
   }
 
+  if (variant === "retry") {
+    return (
+      <Btn size="sm" onClick={start} disabled={pending}>
+        <DiscordMark size={12} /> try again
+      </Btn>
+    );
+  }
+
   return (
-    <Btn variant="primary" className="w-full" onClick={start} disabled={pending}>
+    <Btn variant="primary" className="w-full max-sm:h-11" onClick={start} disabled={pending}>
       <DiscordMark size={14} /> sign in with discord
     </Btn>
   );

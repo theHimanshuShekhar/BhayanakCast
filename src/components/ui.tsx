@@ -104,7 +104,7 @@ const CHIP_VARIANTS = {
   live: "bg-[color-mix(in_oklch,var(--color-live)_22%,transparent)] border-[color-mix(in_oklch,var(--color-live)_55%,transparent)] text-live-ink",
   accent: "bg-primary border-transparent text-primary-ink font-semibold",
   liveSolid:
-    "bg-[color-mix(in_oklch,var(--color-live)_85%,black)] border-transparent text-white font-semibold",
+    "bg-[color-mix(in_oklch,var(--color-live)_72%,black)] border-transparent text-white font-semibold",
   ok: "bg-[color-mix(in_oklch,var(--color-success)_22%,transparent)] border-[color-mix(in_oklch,var(--color-success)_40%,transparent)] text-success-ink",
 } as const;
 
@@ -159,7 +159,7 @@ export const Btn = ({
 }) => (
   <button
     type={type}
-    className={`inline-flex items-center justify-center gap-2 border rounded-[var(--radius-sm)] font-medium whitespace-nowrap cursor-pointer transition-[background-color,border-color,filter,transform] duration-[120ms] active:translate-y-px disabled:opacity-50 disabled:cursor-not-allowed ${BTN_SIZES[size]} ${BTN_VARIANTS[variant]} ${className}`}
+    className={`inline-flex items-center justify-center gap-2 border rounded-[var(--radius-sm)] font-medium whitespace-nowrap cursor-pointer transition-[background-color,border-color,filter,transform] duration-[120ms] motion-safe:active:translate-y-px disabled:opacity-50 disabled:cursor-not-allowed ${BTN_SIZES[size]} ${BTN_VARIANTS[variant]} ${className}`}
     {...rest}
   >
     {children}
