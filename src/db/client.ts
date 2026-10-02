@@ -12,8 +12,21 @@ export { schema };
  */
 export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
 
+/**
+ * Longest one statement may run before Postgres cancels it (ADR 8 addendum). The realtime hub
+ * runs every operation on one serial queue, so a hung query would freeze heartbeats and every
+ * room until clients timed out; the app's statements are indexed lookups and small writes that
+ * finish in milliseconds, so 10 seconds only ever cuts off one that is stuck.
+ */
+export const STATEMENT_TIMEOUT_MS = 10_000;
+
 export function createDb(url: string, options: postgres.Options<Record<string, never>> = {}) {
-  const client = postgres(url, { max: 10, ...options });
+  const client = postgres(url, {
+    max: 10,
+    ...options,
+    // Sent in the startup message, so it covers every pooled connection.
+    connection: { statement_timeout: STATEMENT_TIMEOUT_MS, ...options.connection },
+  });
   const db = drizzle({ client, schema });
   return { db, close: () => client.end() };
 }

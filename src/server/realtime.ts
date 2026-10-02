@@ -6,6 +6,7 @@
  * an anonymous, lobby-only socket (ADR 20), at most `anonymousSocketsPerIp` per client IP
  * (`cf-connecting-ip` only from a trusted proxy, ./client-ip.ts). A signed-in user may hold at
  * most `socketsPerUser` sockets (tabs and devices); more are refused with 429, like visitors'.
+ * A socket that stops reading is dropped once `MAX_BUFFERED_BYTES` are waiting to be sent to it.
  *
  * `ws` runs in no-server mode on the server's `upgrade` event and only takes upgrades on
  * `REALTIME_PATH`, leaving any others (Vite's HMR socket in dev) to their own listeners.
@@ -14,7 +15,7 @@ import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
 import { type WebSocket, WebSocketServer } from "ws";
 import { getDb } from "../db/client.ts";
-import { MAX_CLIENT_MESSAGE_BYTES, REALTIME_PATH } from "../lib/realtime.ts";
+import { MAX_BUFFERED_BYTES, MAX_CLIENT_MESSAGE_BYTES, REALTIME_PATH } from "../lib/realtime.ts";
 import type { Caller } from "./caller.ts";
 import { CLIENT_IP_HEADER, createClientIpResolver } from "./client-ip.ts";
 import { systemClock } from "./clock.ts";
@@ -49,6 +50,11 @@ export interface RealtimeOptions {
    */
   trustedProxies?: readonly string[];
   /**
+   * Bytes allowed unsent to one socket before it is dropped (it has stopped reading).
+   * Defaults to `MAX_BUFFERED_BYTES`.
+   */
+  maxBufferedBytes?: number;
+  /**
    * Refuse upgrades on any path but `REALTIME_PATH` (404) instead of leaving them to other
    * `upgrade` listeners. Set it where nothing else takes upgrades (production), or they hang
    * open forever; leave it off in dev, where Vite's HMR socket upgrades on the same server.
@@ -78,6 +84,7 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
   const authenticate = options.authenticate ?? authenticateFromSession;
   const anonymousLimit = options.anonymousSocketsPerIp ?? env.REALTIME_ANONYMOUS_SOCKETS_PER_IP;
   const userLimit = options.socketsPerUser ?? env.REALTIME_SOCKETS_PER_USER;
+  const maxBufferedBytes = options.maxBufferedBytes ?? MAX_BUFFERED_BYTES;
   const clientIp = createClientIpResolver(options.trustedProxies ?? env.TRUSTED_PROXY_IPS, {
     warn: (message) => console.warn(`[realtime] ${message}`),
   });
@@ -103,7 +110,9 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
     const registered = hub.connect(
       {
         send: (message) => {
-          if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message));
+          if (ws.readyState !== ws.OPEN) return;
+          if (ws.bufferedAmount > maxBufferedBytes) return dropSlowClient(ws, caller);
+          ws.send(JSON.stringify(message));
         },
         close: (code, reason) => ws.close(code, reason),
       },
@@ -113,6 +122,19 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
     ws.on("message", (data, isBinary) => {
       void hub.handle(registered, isBinary ? null : data.toString());
     });
+  }
+
+  /**
+   * `ws` isn't being read: terminate it rather than close it, since a close frame would queue
+   * behind the backlog and never arrive (and the handshake would hold the socket, and its
+   * buffer, for `ws`'s close timeout). `close` fires as for any drop and tells the hub.
+   */
+  function dropSlowClient(ws: WebSocket, caller: Caller): void {
+    console.warn(
+      `[realtime] dropping ${caller.user ? `user ${caller.user.id}` : "an anonymous socket"}: ` +
+        `${ws.bufferedAmount} bytes unsent (limit ${maxBufferedBytes})`,
+    );
+    ws.terminate();
   }
 
   async function upgrade(request: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
