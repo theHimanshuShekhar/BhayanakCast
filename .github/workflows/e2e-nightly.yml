@@ -21,9 +21,9 @@ jobs:
     timeout-minutes: 45
     # Actions sets CI=true, so playwright.config.ts starts its own server (no reuse), forbids
     # .only, retries, and writes the HTML report. The config also supplies E2E_AUTH=1 and the
-    # fake media flags. NODE_ENV stays unset, so the server uses the non-production env schema
-    # the test-only sign-in needs (a production NODE_ENV fails fast: e2e/serve.ts's in-memory
-    # database is refused in production).
+    # fake media flags. The config starts the server with NODE_ENV=development, the non-production
+    # env schema the test-only sign-in needs (a production NODE_ENV fails fast: e2e/serve.ts's
+    # in-memory database is refused in production).
     steps:
       - uses: actions/checkout@v7
 
