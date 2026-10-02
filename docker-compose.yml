@@ -53,7 +53,8 @@ services:
         max-file: "3"
 
   db:
-    image: postgres:17-alpine
+    # Pinned by digest, the same as backup/Dockerfile's base so pg_dump matches the server.
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-bhayanakcast}
       # No `:?` guard (Dockhand can't stop/redeploy stacks that use it); the postgres image

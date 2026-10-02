@@ -51,7 +51,9 @@ describe("trusted proxies", () => {
     expect(() => parseEnv({ ...productionEnv, TRUSTED_PROXY_IPS: "10.1.1.5,cloudflared" })).toThrow(
       /TRUSTED_PROXY_IPS/,
     );
-    expect(() => parseEnv({ TRUSTED_PROXY_IPS: "10.1.1.0/40" })).toThrow(/TRUSTED_PROXY_IPS/);
+    expect(() => parseEnv({ NODE_ENV: "development", TRUSTED_PROXY_IPS: "10.1.1.0/40" })).toThrow(
+      /TRUSTED_PROXY_IPS/,
+    );
   });
 
   it("is required in production and optional elsewhere", () => {
@@ -60,7 +62,7 @@ describe("trusted proxies", () => {
     expect(() => parseEnv({ ...productionEnv, TRUSTED_PROXY_IPS: " , " })).toThrow(
       /TRUSTED_PROXY_IPS/,
     );
-    expect(parseEnv({}).TRUSTED_PROXY_IPS).toEqual([]);
+    expect(parseEnv({ NODE_ENV: "development" }).TRUSTED_PROXY_IPS).toEqual([]);
   });
 });
 
@@ -75,5 +77,53 @@ describe("test-only sign-in flag", () => {
     expect(isTestSignInEnabled({ NODE_ENV: "development", E2E_AUTH: "1" })).toBe(true);
     expect(isTestSignInEnabled({ NODE_ENV: "development" })).toBe(false);
     expect(isTestSignInEnabled({ NODE_ENV: "production", E2E_AUTH: "1" })).toBe(false);
+  });
+});
+
+describe("NODE_ENV", () => {
+  // `source` shapes that must all be validated as production: unset, empty, blank, unknown.
+  const notLocal = [
+    { label: "unset", value: undefined },
+    { label: "empty", value: "" },
+    { label: "blank", value: " " },
+    { label: "unknown", value: "staging" },
+    { label: "miscased", value: "Development" },
+  ];
+
+  it.each(notLocal)("is validated as production when $label: no default secrets", ({ value }) => {
+    expect(() => parseEnv({ NODE_ENV: value })).toThrow(
+      /DATABASE_URL[\s\S]*BETTER_AUTH_SECRET[\s\S]*BETTER_AUTH_URL[\s\S]*TRUSTED_PROXY_IPS/,
+    );
+  });
+
+  it.each(notLocal)(
+    "does not enable test sign-in when $label, even with E2E_AUTH=1",
+    ({ value }) => {
+      expect(() => parseEnv({ ...productionEnv, NODE_ENV: value, E2E_AUTH: "1" })).toThrow(
+        /E2E_AUTH: must not be set in production/,
+      );
+    },
+  );
+
+  it("passes a complete production configuration whether NODE_ENV is set or not", () => {
+    const { NODE_ENV: _, ...withoutNodeEnv } = productionEnv;
+    expect(parseEnv(withoutNodeEnv).NODE_ENV).toBe("production");
+    expect(parseEnv({ ...productionEnv, NODE_ENV: "" }).NODE_ENV).toBe("production");
+  });
+
+  it("refuses an unknown value instead of treating it as development", () => {
+    expect(() => parseEnv({ ...productionEnv, NODE_ENV: "staging" })).toThrow(/NODE_ENV/);
+  });
+
+  it.each(["development", "test"] as const)("keeps the placeholders under explicit %s", (mode) => {
+    const parsed = parseEnv({ NODE_ENV: mode });
+    expect(parsed.NODE_ENV).toBe(mode);
+    expect(parsed.BETTER_AUTH_SECRET).toMatch(/^dev-only-/);
+    expect(parsed.TRUSTED_PROXY_IPS).toEqual([]);
+  });
+
+  it("still allows E2E_AUTH under an explicit development", () => {
+    const parsed = parseEnv({ NODE_ENV: "development", E2E_AUTH: "1" });
+    expect(isTestSignInEnabled(parsed)).toBe(true);
   });
 });

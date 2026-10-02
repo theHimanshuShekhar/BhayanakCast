@@ -12,9 +12,9 @@ The stack has three services:
 
 | Service | What it does |
 |---|---|
-| `app` | Built from the `Dockerfile` (Node 26, pnpm via corepack). On start it applies pending Drizzle migrations (`node src/db/migrate.ts`), then serves pages, `/api/*` and the realtime socket `/ws` from one port (`node server.prod.ts`). Published only on `${HOST_BIND}:${HOST_PORT}` (default `10.1.1.160:3000`). Healthcheck: `GET /api/auth/ok`. |
-| `db` | `postgres:17-alpine` with a named local Docker volume (`pgdata`). Never put it on the NAS CIFS share (ADR 9 addendum). Not published on any host port. Healthcheck: `pg_isready`. |
-| `backup` | Built from `backup/` (`postgres:17-alpine` plus `rsync` and `supercronic`). Once at start, and then on `BACKUP_SCHEDULE` (nightly by default), it writes a compressed `pg_dump` to its `backups` volume, rsyncs it to the NAS share and prunes old dumps (section 5, Backups to the NAS). Healthcheck: the last run succeeded, recently. |
+| `app` | Built from the `Dockerfile` (Node 26, pnpm via corepack; the base image, corepack and pnpm are pinned, see Pinned images). On start it applies pending Drizzle migrations (`node src/db/migrate.ts`), then serves pages, `/api/*` and the realtime socket `/ws` from one port (`node server.prod.ts`). Published only on `${HOST_BIND}:${HOST_PORT}` (default `10.1.1.160:3000`). Healthcheck: `GET /api/auth/ok`. |
+| `db` | `postgres:17-alpine`, pinned by digest, with a named local Docker volume (`pgdata`). Never put it on the NAS CIFS share (ADR 9 addendum). Not published on any host port. Healthcheck: `pg_isready`. |
+| `backup` | Built from `backup/` (`postgres:17-alpine`, pinned by digest, plus pinned `rsync` and `supercronic`). Once at start, and then on `BACKUP_SCHEDULE` (nightly by default), it writes a compressed `pg_dump` to its `backups` volume, rsyncs it to the NAS share and prunes old dumps (section 5, Backups to the NAS). Healthcheck: the last run succeeded, recently. |
 
 All services use `restart: unless-stopped` and json-file log rotation (3 files of 10 MB each).
 
@@ -205,7 +205,7 @@ do this). Then start `app` again.
 
 ## Production guards
 
-- `NODE_ENV=production` is set by both the image and compose.
+- `NODE_ENV=production` is set by both the image and compose. If it's ever missing the app still validates as production (only an explicit `development` or `test` relaxes the checks), so it fails to start rather than booting with development defaults.
 - The app validates its environment at startup. If anything is missing or invalid, it exits and lists every problem (for example `BETTER_AUTH_SECRET: … at least 32 characters`). In the logs, a restart loop with that message means a variable needs fixing.
 - `E2E_AUTH` (the test-only sign-in) is refused in production and isn't passed through by compose.
 - `TRUSTED_PROXY_IPS` is required in production, so a spoofed `cf-connecting-ip` from the LAN is ignored.
@@ -231,6 +231,7 @@ do this). Then start `app` again.
 
 - **Updating:** merge to `main`, then redeploy (or let the webhook do it). Pending migrations run on
   start. Migrations only go forward, so rolling back to an older commit doesn't undo a schema change.
+- **Pinned images:** see below.
 - **Logs:** Dockhand's container logs, or `docker logs <container>`. They're rotated at 3 × 10 MB.
 - **Restarts** drop live room state. Clients reconnect on their own (ADR 9).
 - **TURN and NAT (ADR 3):** each signed-in user gets TURN credentials that last 4 hours. They're
@@ -242,3 +243,28 @@ do this). Then start `app` again.
   double NAT bites.
 - **Data** lives in the `pgdata` volume. Don't delete the stack's volumes when removing or re-creating it.
   Nightly dumps are on the NAS share (section 5, Backups to the NAS).
+
+## Pinned images
+
+Two builds of the same commit produce the same images. `Dockerfile` pins `node:26-alpine` by digest
+(the tag stays in the line for readers) and corepack by exact version (`npm install -g corepack@x.y.z`);
+pnpm is the exact version in `package.json` `packageManager`. `backup/Dockerfile` and the `db` service
+in `docker-compose.yml` pin `postgres:17-alpine` by digest, and the backup image pins `rsync` and
+`supercronic` to the versions that digest's Alpine ships.
+
+To bump:
+
+- **Digests:** `.github/dependabot.yml` opens weekly PRs for the Dockerfiles and the compose file. By hand,
+  `docker buildx imagetools inspect node:26-alpine` (or `postgres:17-alpine`) prints the index digest;
+  put it after the tag as `@sha256:...`. The `node` digest appears twice in `Dockerfile` (`base` and
+  `runtime`); the `postgres` digest appears in `backup/Dockerfile` and `docker-compose.yml`. Keep each pair identical.
+- **Major versions:** Dependabot ignores them. The `postgres` major must stay 17 on both `db` and
+  `backup` so `pg_dump` matches the server; a major upgrade needs a dump and restore, not a tag change.
+  The `node` major follows `.nvmrc` and `package.json` `engines`.
+- **apk pins:** after a new `postgres` digest, run `docker run --rm <postgres image with the new digest> sh -c 'apk update && apk policy rsync supercronic'`
+  and update the versions in `backup/Dockerfile`. Alpine's repository keeps only the current
+  revision, so a stale pin fails the build with "no such package" rather than building silently.
+- **corepack:** `npm view corepack version`, then edit `Dockerfile` (Dependabot can't see it).
+- **pnpm:** bump `packageManager` in `package.json` (the Dockerfile follows it).
+
+Then build both images and run `pnpm test:backup`.

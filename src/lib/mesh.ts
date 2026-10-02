@@ -29,11 +29,19 @@
  * page offers afresh, and one whose first offer was lost (the server drops signalling to someone
  * in their reconnect grace) sends it again.
  *
+ * `send` says whether the step went out: while the page's own socket is reconnecting it doesn't.
+ * A description lost that way (an offer, or an answer) is kept, and `resend` (the socket is back
+ * in the room) sends it again, in order, unless negotiation has moved on: an offer only while it
+ * is still the pending one. Each goes as it stands then, with the candidates gathered since.
+ * Candidates and `visibility` steps are not kept (a description sent again carries the
+ * candidates, and the pair's state is told again whenever it connects).
+ *
  * A connection that fails, or doesn't connect within `CONNECT_TIMEOUT_MS`, gets one ICE restart
  * (with the latest ICE servers: STUN plus TURN, ADR 3), or one start-over if it never even
- * negotiated; if that fails too it is `failed` until `retry` starts it over. Once connected, its
- * selected candidate pair says whether it is `relayed` through TURN. `relayed`, and `failed`
- * after ICE was tried, come with the connection's anonymised ICE path.
+ * negotiated; if that fails too it is `failed` until `retry` starts it over (or until TURN
+ * credentials arrive for a page that started on STUN alone: then one more ICE restart). Once
+ * connected, its selected candidate pair says whether it is `relayed` through TURN. `relayed`,
+ * and `failed` after ICE was tried, come with the connection's anonymised ICE path.
  *
  * A camera this page isn't showing (a hidden or scrolled-away tile) is paused towards it, to save
  * the sender's upload (ADR 2 addendum): `setVisible` tells that peer with a `visibility` step
@@ -55,7 +63,7 @@
  * Local tracks belong to the caller (./local-media.ts): the Mesh never stops them.
  */
 import { localVideoCodecs, orderCodecs, type VideoCodecs } from "./codecs";
-import { type IcePath, icePathOf, isRelayed, STUN_SERVERS } from "./ice";
+import { hasTurn, type IcePath, icePathOf, isRelayed, STUN_SERVERS } from "./ice";
 import {
   CAMERA_DEFAULT_RUNG,
   CAMERA_LADDER,
@@ -131,8 +139,8 @@ export const CONNECT_TIMEOUT_MS = 20_000;
 export interface MeshOptions {
   /** This user's id: decides who is polite in each pair. */
   selfId: string;
-  /** Deliver `payload` to peer `to` (the `signal` message). */
-  send: (to: string, payload: SignalPayload) => void;
+  /** Deliver `payload` to peer `to` (the `signal` message); false if it was dropped (see `resend`). */
+  send: (to: string, payload: SignalPayload) => boolean;
   /** The ICE servers (see `setIceServers`). Defaults to `STUN_SERVERS`. */
   iceServers?: RTCIceServer[];
   /** Where negotiation failures are reported. Defaults to `console.warn`. */
@@ -229,6 +237,7 @@ type Step =
   | Omit<Extract<SignalPayload, { kind: "description" }>, "session" | "peerSession">
   | Omit<Extract<SignalPayload, { kind: "candidate" }>, "session" | "peerSession">
   | Omit<Extract<SignalPayload, { kind: "visibility" }>, "session" | "peerSession">;
+type DescriptionStep = Extract<Step, { kind: "description" }>;
 
 /** One video sender's place on its quality ladder (`rung` is the one wanted, see `#tune`). */
 interface Adaptation extends LadderState {
@@ -258,6 +267,12 @@ interface Link {
   remoteSlots: Map<string, MediaSlot>;
   /** The peer's description this side applied last, as sent (before `withStereoOpus`). */
   remoteSdp?: string;
+  /** The pending offer was dropped by `send` (`resend` sends what is pending then). */
+  offerUnsent: boolean;
+  /** The answer `send` dropped; it goes before any offer after it. */
+  answerUnsent?: DescriptionStep;
+  /** A quality pass over this peer's senders is running (see `adjust`). */
+  adjusting: boolean;
   /** Slots the peer isn't showing: sent to it as no track. */
   paused: Set<MediaSlot>;
   tracks: Partial<Record<MediaSlot, MediaStreamTrack>>;
@@ -291,7 +306,6 @@ export class Mesh {
   readonly #shown = new Map<string, Map<MediaSlot, boolean>>();
   #closed = false;
   #adjustTimer: ReturnType<typeof setInterval> | undefined;
-  #adjusting = false;
 
   constructor(options: MeshOptions) {
     this.#selfId = options.selfId;
@@ -396,12 +410,27 @@ export class Mesh {
   }
 
   /**
+   * Send again the descriptions `send` dropped (an offer or answer meant for a peer while this
+   * page's socket was reconnecting). Call it once the socket is back in the room, which is when
+   * the server relays this page's signalling again. A no-op for peers with nothing waiting.
+   */
+  resend(): void {
+    if (this.#closed) return;
+    for (const link of this.#links.values()) this.#flush(link);
+  }
+
+  /**
    * Use these ICE servers from now on (fresh TURN credentials): for new connections, and for
-   * ICE restarts of the current ones.
+   * ICE restarts of the current ones. When TURN arrives after a start on STUN alone (fetching
+   * the credentials failed at first), pairs that failed meanwhile restart ICE: they may relay.
    */
   setIceServers(iceServers: RTCIceServer[]): void {
+    const gotTurn = !hasTurn(this.#iceServers) && hasTurn(iceServers);
     this.#iceServers = iceServers;
-    for (const link of this.#links.values()) this.#configure(link);
+    for (const link of this.#links.values()) {
+      this.#configure(link);
+      if (gotTurn && link.state === "failed" && link.pc.remoteDescription) this.#restartIce(link);
+    }
   }
 
   /** Start over with `userId` (after `failed`): a new connection, and they start over too. */
@@ -459,16 +488,12 @@ export class Mesh {
   /**
    * Read every video sender's stats and move it along its ladder (run every
    * `QUALITY_INTERVAL_MS` while something is sent; public for tests). Each peer's senders adapt
-   * on their own connection's stats, so a viewer on a bad link doesn't degrade the others.
+   * on their own connection's stats, so a viewer on a bad link doesn't degrade the others. Each
+   * peer's pass is guarded on its own too: one whose stats read hangs is skipped until it
+   * returns, and the other peers carry on.
    */
   async adjust(): Promise<void> {
-    if (this.#adjusting) return;
-    this.#adjusting = true;
-    try {
-      await Promise.all([...this.#links.values()].map((link) => this.#adjustLink(link)));
-    } finally {
-      this.#adjusting = false;
-    }
+    await Promise.all([...this.#links.values()].map((link) => this.#adjustLink(link)));
   }
 
   /** Each peer's current rung and codec, per video sender that is sending (for the dev overlay). */
@@ -520,6 +545,8 @@ export class Mesh {
       started: false,
       makingOffer: false,
       ignoreOffer: false,
+      offerUnsent: false,
+      adjusting: false,
       own: new Map(),
       remoteSlots: new Map(),
       paused: new Set(),
@@ -666,7 +693,16 @@ export class Mesh {
   }
 
   async #adjustLink(link: Link): Promise<void> {
-    if (link.state !== "connected" && link.state !== "relayed") return;
+    if (link.adjusting || (link.state !== "connected" && link.state !== "relayed")) return;
+    link.adjusting = true;
+    try {
+      await this.#adjustSenders(link);
+    } finally {
+      link.adjusting = false;
+    }
+  }
+
+  async #adjustSenders(link: Link): Promise<void> {
     for (const slot of VIDEO_SLOTS) {
       const sender = link.own.get(slot)?.sender;
       const track = sender?.track;
@@ -767,17 +803,49 @@ export class Mesh {
     }
   }
 
+  /** Send `link`'s local description; if `send` drops it, it waits for `resend`. */
   #sendDescription(link: Link): void {
+    const step = this.#describe(link);
+    if (!step) return;
+    if (step.description.type === "answer") link.answerUnsent = step;
+    else link.offerUnsent = true;
+    this.#flush(link);
+  }
+
+  /** `link`'s local description as a step, with what its transceivers carry. */
+  #describe(link: Link): DescriptionStep | undefined {
     const description = link.pc.localDescription;
-    if (!description) return;
+    if (!description) return undefined;
     const slots: Record<string, MediaSlot> = {};
     for (const [slot, transceiver] of link.own) if (transceiver.mid) slots[transceiver.mid] = slot;
-    this.#signal(link, {
+    return {
       kind: "description",
       description: { type: description.type, sdp: description.sdp },
       slots,
       ...this.#decodable(),
-    });
+    };
+  }
+
+  /**
+   * Send what `send` dropped, an answer before the offer that came after it, and stop at the
+   * first drop. A waiting answer or offer goes as it stands now, with the candidates gathered
+   * since (those were dropped too).
+   */
+  #flush(link: Link): void {
+    if (link.answerUnsent) {
+      // The answer is the connection's current local description, even once an offer follows it.
+      const local = link.pc.currentLocalDescription ?? link.pc.localDescription;
+      const kept = link.answerUnsent;
+      const answer: DescriptionStep =
+        local?.type === "answer" && isSameOffer(local.sdp, kept.description.sdp)
+          ? { ...kept, description: { type: local.type, sdp: local.sdp } }
+          : kept;
+      if (!this.#signal(link, answer)) return;
+      link.answerUnsent = undefined;
+    }
+    if (!link.offerUnsent) return;
+    const offer = link.pc.signalingState === "have-local-offer" ? this.#describe(link) : undefined;
+    if (!offer || this.#signal(link, offer)) link.offerUnsent = false;
   }
 
   /** The video codecs this side tells peers it can decode. */
@@ -785,9 +853,10 @@ export class Mesh {
     return this.#codecs ? { codecs: this.#codecs.receive } : {};
   }
 
-  #signal(link: Link, step: Step): void {
-    if (!this.#current(link)) return;
-    this.#send(link.userId, {
+  /** Whether `step` went out (not if `send` dropped it, or the connection is gone). */
+  #signal(link: Link, step: Step): boolean {
+    if (!this.#current(link)) return false;
+    return this.#send(link.userId, {
       ...step,
       session: link.session,
       ...(link.remoteSession ? { peerSession: link.remoteSession } : {}),
@@ -860,11 +929,7 @@ export class Mesh {
       return;
     }
     if (negotiated && !link.restarted) {
-      link.restarted = true;
-      this.#configure(link);
-      link.pc.restartIce();
-      this.#waitToConnect(link);
-      this.#setState(link, "connecting");
+      this.#restartIce(link);
       return;
     }
     if (link.state === "failed") return;
@@ -878,6 +943,15 @@ export class Mesh {
         this.#emit({ type: "state", userId: link.userId, state: "failed", ...(ice && { ice }) });
       }
     });
+  }
+
+  /** Restart ICE on `link` with the latest ICE servers (its one automatic restart). */
+  #restartIce(link: Link): void {
+    link.restarted = true;
+    this.#configure(link);
+    link.pc.restartIce();
+    this.#waitToConnect(link);
+    this.#setState(link, "connecting");
   }
 
   /** The connection's anonymised ICE path, from its stats (undefined if they can't be read). */

@@ -301,6 +301,7 @@ export async function rollupEndedRoom(db: Db, roomId: string, now = new Date()):
       select user_id, streamed, watched, hosted, joined, peak
              ${isPublic ? sql`, streamed, watched, hosted, joined, peak` : none}
       from contribution
+      order by user_id
       on conflict (user_id) do update set
         seconds_streamed = user_stats.seconds_streamed + excluded.seconds_streamed,
         seconds_watched = user_stats.seconds_watched + excluded.seconds_watched,
@@ -326,6 +327,7 @@ export async function rollupEndedRoom(db: Db, roomId: string, now = new Date()):
         (user_a, user_b, seconds_together ${isPublic ? sql`, public_seconds_together` : none})
       select user_a, user_b, secs ${isPublic ? sql`, secs` : none}
       from pair_contribution
+      order by user_a, user_b
       on conflict (user_a, user_b) do update set
         seconds_together = user_cotime.seconds_together + excluded.seconds_together
         ${
@@ -350,7 +352,9 @@ export interface PurgeResult {
 /**
  * Daily retention job: roll up any ended room that was missed, then delete
  * rooms that ended more than RETENTION_DAYS ago. Stats tables have no FK to
- * rooms, so they survive the delete.
+ * rooms, so they survive the delete. A room whose roll-up fails is logged and
+ * skipped, so one bad room can't stop retention; it stays un-rolled-up (and is
+ * never deleted) and is retried on the next run.
  */
 export async function purgeExpiredRooms(db: Db, now: Date = new Date()): Promise<PurgeResult> {
   const pending = await db
@@ -360,7 +364,11 @@ export async function purgeExpiredRooms(db: Db, now: Date = new Date()): Promise
 
   let rolledUp = 0;
   for (const { id } of pending) {
-    if (await rollupEndedRoom(db, id, now)) rolledUp++;
+    try {
+      if (await rollupEndedRoom(db, id, now)) rolledUp++;
+    } catch (error) {
+      console.error(`[maintenance] roll-up of room ${id} failed, skipping`, error);
+    }
   }
 
   const cutoff = new Date(now.getTime() - RETENTION_DAYS * DAY_MS);
