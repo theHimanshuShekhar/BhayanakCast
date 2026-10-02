@@ -14,7 +14,7 @@ The stack has three services:
 |---|---|
 | `app` | Built from the `Dockerfile` (Node 26, pnpm via corepack). On start it applies pending Drizzle migrations (`node src/db/migrate.ts`), then serves pages, `/api/*` and the realtime socket `/ws` from one port (`node server.prod.ts`). Published only on `${HOST_BIND}:${HOST_PORT}` (default `10.1.1.160:3000`). Healthcheck: `GET /api/auth/ok`. |
 | `db` | `postgres:17-alpine` with a named local Docker volume (`pgdata`). Never put it on the NAS CIFS share (ADR 9 addendum). Not published on any host port. Healthcheck: `pg_isready`. |
-| `backup` | Built from `backup/` (`postgres:17-alpine` plus `rsync` and `supercronic`). Once at start, and then on `BACKUP_SCHEDULE` (nightly by default), it writes a compressed `pg_dump` to its `backups` volume, rsyncs it to the NAS share and prunes old dumps (section 5, Backups to the NAS). Healthcheck: the last run succeeded. |
+| `backup` | Built from `backup/` (`postgres:17-alpine` plus `rsync` and `supercronic`). Once at start, and then on `BACKUP_SCHEDULE` (nightly by default), it writes a compressed `pg_dump` to its `backups` volume, rsyncs it to the NAS share and prunes old dumps (section 5, Backups to the NAS). Healthcheck: the last run succeeded, recently. |
 
 All services use `restart: unless-stopped` and json-file log rotation (3 files of 10 MB each).
 
@@ -90,7 +90,8 @@ as an empty string, and the app treats that as unset. See `.env.example` for a t
 | `BACKUP_NAS_USERNAME`, `BACKUP_NAS_PASSWORD` | yes, for backups | The NAS account that can write to `BACKUP_NAS_SHARE`. The password can't contain `,` or `$` (it goes into the mount options and through compose interpolation). Without them `backup` can't start; the app is unaffected. |
 | `BACKUP_SCHEDULE` | no | Cron expression (5 fields) for the backup. Default `0 3 * * *`, nightly at 03:00. |
 | `BACKUP_TZ` | no | Time zone for `BACKUP_SCHEDULE` and the dump's date, for example `Asia/Kolkata`. Default `UTC`. |
-| `BACKUP_RETENTION_DAYS` | no | How many days of dumps to keep, today included, both locally and on the NAS. Older ones are deleted. Default `14`. |
+| `BACKUP_RETENTION_DAYS` | no | How many days of dumps to keep, today included, both locally and on the NAS. Older ones are deleted. Default `14`. A whole number of days, 1 to 9999; leading zeros are fine (`014` is 14). |
+| `BACKUP_MAX_AGE_HOURS` | no | How old the last successful backup may be before `backup` turns unhealthy. Default `26`, for the nightly schedule. If `BACKUP_SCHEDULE` runs less often than daily, set it above the longest gap between runs. |
 
 Compose sets `NODE_ENV=production`, `PORT=3000`, `HOST=0.0.0.0` and `DATABASE_URL` itself. Don't
 set `E2E_AUTH`: compose doesn't pass it through, and the app refuses to start if it's set.
@@ -123,8 +124,8 @@ NAS directory are left alone.
 Docker mounts the share itself, as the stack's `nas` volume (a `cifs` volume of the `local`
 driver), whenever `backup` starts. Nothing is mounted on the host, so it survives reboots. If the
 NAS is unreachable or the credentials are wrong, `backup` fails to start (its error names the
-mount) instead of writing to local disk; the app doesn't depend on it and keeps running. The volume
-is mounted root-only (`uid=0,gid=0,file_mode=0600,dir_mode=0700`), because the dumps hold user data
+mount) instead of writing to local disk. The app doesn't depend on it (see "When the NAS is
+unreachable" below). The volume is mounted root-only (`uid=0,gid=0,file_mode=0600,dir_mode=0700`), because the dumps hold user data
 and session tokens.
 
 1. On the NAS, create the backup directory, for example `Services/backups/bhayanakcast` on the
@@ -142,8 +143,39 @@ and leaves the files on the NAS alone), then redeploy.
 The backup runs once when the container starts, so a broken setup shows up at deploy time. After
 that it runs on `BACKUP_SCHEDULE`. Every run is logged to the container log, ending in
 `backup: done` or `backup: FAILED (exit N)`. The container is **healthy** only while its last run
-succeeded. A failed run makes it **unhealthy** until the next run succeeds. To run a backup now:
-`docker exec <backup container> backup.sh`.
+succeeded and finished less than `BACKUP_MAX_AGE_HOURS` ago. A failed run makes it **unhealthy**
+until the next run succeeds, and so does a last success that is too old (a schedule that stopped
+firing). The status is the file `/tmp/backup-status` (`ok <epoch> <time>` or
+`failed <time> exit N`); `docker exec <backup container> healthcheck.sh` shows why a check fails.
+To run a backup now: `docker exec <backup container> backup.sh`.
+
+A hung run can't block the ones after it: `pg_dump` and `rsync` each get 30 minutes
+(`BACKUP_DUMP_TIMEOUT` and `BACKUP_RSYNC_TIMEOUT`, in seconds, set in the container's environment;
+not stack variables), `pg_dump` gives up connecting after 30 seconds, and `rsync` stops after 5
+minutes without data. A timeout fails the run (exit 143, or 137 if it had to be killed) and
+releases the lock. Failed or interrupted runs leave no `*.partial` dump in `/backups` and no
+`.bhayanakcast-*.sql.gz.XXXXXX` rsync temp file on the NAS; the next run clears any that remain.
+
+### When the NAS is unreachable
+
+Checked with the compose file here and a share that doesn't answer (`BACKUP_NAS_SHARE` pointing at
+an address with no server):
+
+- `docker compose up -d` (a normal stack deploy): `db` and `app` start and run. Only `backup`
+  fails: Docker can't mount `nas`, so `backup` stays in the `created` state and the command exits
+  with an error (`error while mounting volume ... operation now in progress`, after about 15
+  seconds). A deploy tool that treats that exit code as a failed deploy shows red even though the
+  app is up.
+- `docker compose up -d app db` brings up just those two: no `nas` volume is created or mounted,
+  and the command succeeds. This is the way to deploy the app alone while the NAS is down. Dockhand
+  deploys the whole stack, and this was not tried against it: if it reports the deploy as failed
+  because of `backup`, check that `app` is running.
+- Once the NAS is back, redeploy (or `docker compose up -d backup`). The container isn't retried
+  by itself, because it never started; its healthcheck can't report anything either, so watch for
+  `backup` being `created` rather than `unhealthy`.
+- If the share is up but the mount is stale or the directory was replaced, the marker check in
+  `backup.sh` fails the run instead (`/nas/.bhayanakcast-backups is missing`) and the local dump
+  stays in `/backups`.
 
 ### Restore
 
