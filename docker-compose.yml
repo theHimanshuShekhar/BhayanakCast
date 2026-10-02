@@ -76,7 +76,8 @@ services:
         max-file: "3"
 
   # Nightly compressed pg_dump, rsynced to the NAS share, the last 14 days kept (ADR 9 addendum).
-  # Runs once at start, then on BACKUP_SCHEDULE. Health reflects the last run. See docs/deploy.md.
+  # Runs once at start, then on BACKUP_SCHEDULE. Health: the last run succeeded, within
+  # BACKUP_MAX_AGE_HOURS. See docs/deploy.md.
   backup:
     build: ./backup
     environment:
@@ -86,6 +87,7 @@ services:
       PGDATABASE: ${POSTGRES_DB:-bhayanakcast}
       BACKUP_SCHEDULE: ${BACKUP_SCHEDULE:-0 3 * * *}
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_MAX_AGE_HOURS: ${BACKUP_MAX_AGE_HOURS:-26}
       # BACKUP_TZ, not TZ: stack variables named like Dockhand's own env can pick up its values.
       TZ: ${BACKUP_TZ:-UTC}
     volumes:
@@ -97,7 +99,8 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "grep -q '^ok' /tmp/backup-status"]
+      # Healthy only while the last run succeeded and is under BACKUP_MAX_AGE_HOURS old.
+      test: ["CMD", "/usr/local/bin/healthcheck.sh"]
       interval: 60s
       timeout: 5s
       retries: 1
