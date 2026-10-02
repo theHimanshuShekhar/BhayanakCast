@@ -42,6 +42,8 @@ const baseSchema = z.object({
   }),
   /** Open anonymous (lobby-only) realtime sockets allowed per client IP (ADR 20). */
   REALTIME_ANONYMOUS_SOCKETS_PER_IP: z.coerce.number().int().positive().default(20),
+  /** Open realtime sockets allowed per signed-in user: their tabs and devices (ADR 4 addendum). */
+  REALTIME_SOCKETS_PER_USER: z.coerce.number().int().positive().default(10),
   /**
    * How long an empty room waits before it ends, in ms (ADR 14: 5 minutes, the default). Only
    * e2e runs shorten it, so a test can watch a room end.
