@@ -64,6 +64,7 @@ test("/admin hydrates without errors with several live rooms", async ({
 }) => {
   await signIn(context, { discordId: E2E_ADMIN_DISCORD_ID, username: "admin_jpg" });
   const host = await createUser(browser, uniqueUsername("admin.hydrate"));
+  // Four rooms with the host's name, which the recent-rooms search finds whatever else is live.
   for (let i = 0; i < 4; i++) {
     await seedRoom(context, {
       name: uniqueRoomName("admin hydrate"),
@@ -76,7 +77,12 @@ test("/admin hydrates without errors with several live rooms", async ({
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("/admin");
   await expect(page.getByRole("heading", { name: "TURN usage" })).toBeVisible();
-  await expect(page.getByRole("table", { name: "recent rooms" })).toContainText("admin hydrate");
+  // The table is paged: search for the rooms by their host rather than hoping for page 1.
+  await page.getByRole("textbox", { name: "Search rooms or hosts" }).fill(host.username);
+  const recent = page.getByRole("table", { name: "recent rooms" });
+  // The header row and the four rooms.
+  await expect(recent.getByRole("row")).toHaveCount(5);
+  await expect(recent).toContainText("admin hydrate");
   expect(errors).toEqual([]);
 });
 

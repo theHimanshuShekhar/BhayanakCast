@@ -511,4 +511,33 @@ describe("listAdminUsers", () => {
     expect(second.users.map((u) => u.id)).toEqual(["old20", "old21", "old22", "old23", "old24"]);
     expect((await listAdminUsers(db, admin, { page: 3 }, ENV_ADMINS, now)).users).toEqual([]);
   });
+
+  it("gives last seen to the users on each page, from their latest interval", async () => {
+    await db.insert(user).values(
+      Array.from({ length: ADMIN_USERS_PAGE_SIZE }, (_, i) => ({
+        id: `old${String(i).padStart(2, "0")}`,
+        name: `old${i}`,
+        email: `old${i}@discord.invalid`,
+        createdAt: minutesAgo(5000 + i),
+      })),
+    );
+    await db.insert(presenceIntervals).values([
+      // Two intervals: the latest wins, an open one counting at its last-seen checkpoint.
+      {
+        roomId: "r",
+        userId: "old24",
+        startedAt: minutesAgo(200),
+        endedAt: minutesAgo(190),
+        lastSeenAt: minutesAgo(190),
+      },
+      { roomId: "r", userId: "old24", startedAt: minutesAgo(40), lastSeenAt: minutesAgo(3) },
+    ]);
+    const second = await listAdminUsers(db, admin, { page: 2 }, ENV_ADMINS, now);
+    expect(second.users.find((u) => u.id === "old24")?.lastSeenAt).toBe(
+      minutesAgo(3).toISOString(),
+    );
+    expect(second.users.find((u) => u.id === "old20")?.lastSeenAt).toBeNull();
+    const first = await listAdminUsers(db, admin, { page: 1 }, ENV_ADMINS, now);
+    expect(first.users.find((u) => u.id === "bo")?.lastSeenAt).toBe(minutesAgo(1).toISOString());
+  });
 });

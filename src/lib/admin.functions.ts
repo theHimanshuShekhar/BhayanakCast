@@ -25,6 +25,7 @@ import { getTurnUsageService } from "~/server/turn-usage";
 import {
   banUserInput,
   endRoomInput,
+  listAdminRecentRoomsInput,
   listAdminUsersInput,
   setUserRoleInput,
   unbanUserInput,
@@ -42,9 +43,9 @@ export const listAdminLiveRoomsFn = createServerFn({ method: "GET" }).handler(as
   listAdminLiveRooms(getDb(), await getCaller()),
 );
 
-export const listAdminRecentRoomsFn = createServerFn({ method: "GET" }).handler(async () =>
-  listAdminRecentRooms(getDb(), await getCaller()),
-);
+export const listAdminRecentRoomsFn = createServerFn({ method: "GET" })
+  .validator(listAdminRecentRoomsInput)
+  .handler(async ({ data }) => listAdminRecentRooms(getDb(), await getCaller(), data));
 
 export const getAdminLeaderboardsFn = createServerFn({ method: "GET" }).handler(async () =>
   getAdminLeaderboards(getDb(), await getCaller()),
