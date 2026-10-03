@@ -19,15 +19,16 @@ import { roomKeys } from "./rooms.queries";
  * The query keys to invalidate for a lobby `message`, by what changed in a public room:
  * - `created`, `count`, `streamers`, `renamed`, `host`: the live list and the home summary;
  * - `thumbnail`: the live list only (the summary has no images);
- * - `ended`: every room read (past lists too) and the home summary;
+ * - `ended`: every room read (past lists, the live list and the home summary included);
  * - a fresh snapshot after a reconnect (`reconnected`): every room read, since anything may have
  *   changed while the socket was down.
- * `invalidateLobbyKeys` then refetches the live list and the summary coalesced, not on every one.
+ * `invalidateLobbyKeys` coalesces the refetches of the live list and the summary that the first
+ * two kinds of change ask for by their own keys, and refetches `roomKeys.all` at once.
  */
 export function lobbyInvalidations(message: ServerMessage, reconnected: boolean): QueryKey[] {
   if (message.type === "lobby.snapshot") return reconnected ? [roomKeys.all] : [];
   if (message.type !== "lobby.changed" || !message.room) return [];
-  if (message.room.change === "ended") return [roomKeys.all, homeKeys.summary()];
+  if (message.room.change === "ended") return [roomKeys.all];
   if (message.room.change === "thumbnail") return [roomKeys.live()];
   return [roomKeys.live(), homeKeys.summary()];
 }
@@ -73,15 +74,16 @@ export function coalesce(run: () => void, ms: number): () => void {
   };
 }
 
-/** Whether `key` starts with `prefix`, as a query key matches the keys under it. */
-const startsWith = (key: QueryKey, prefix: QueryKey) =>
-  prefix.length <= key.length && prefix.every((part, i) => part === key[i]);
+const sameKey = (a: QueryKey, b: QueryKey) =>
+  a.length === b.length && a.every((part, i) => part === b[i]);
 
 /**
- * Invalidate `keys` (from `lobbyInvalidations`), but leave the home summary to `refetchSummary`
- * and the live room list to `refetchLive`, `coalesce`d refetches of them, wherever a key covers
- * them (`roomKeys.all` does). Every other read (past lists, a room's detail) is invalidated at
- * once.
+ * Invalidate `keys` (from `lobbyInvalidations`). The home summary's own key goes to
+ * `refetchSummary` and the live room list's to `refetchLive`, `coalesce`d refetches: they are
+ * what the changes that come in bursts (joins, leaves, renames, thumbnails) ask for. Any other
+ * key (`roomKeys.all`: a room ended, a reconnect) invalidates what it covers at once, the live
+ * list and the summary too. That is once per room or reconnect, and an ended room must leave
+ * the lists now, not when a window ends.
  */
 export function invalidateLobbyKeys(
   queryClient: Pick<QueryClient, "invalidateQueries">,
@@ -89,17 +91,10 @@ export function invalidateLobbyKeys(
   refetchSummary: () => void,
   refetchLive: () => void,
 ): void {
-  const summary = homeKeys.summary();
-  const live = roomKeys.live();
   for (const queryKey of keys) {
-    if (startsWith(summary, queryKey)) refetchSummary();
-    if (startsWith(live, queryKey)) refetchLive();
-    // A coalesced read's own key has nothing else to invalidate.
-    if (startsWith(queryKey, summary) || startsWith(queryKey, live)) continue;
-    void queryClient.invalidateQueries({
-      queryKey,
-      predicate: ({ queryKey: read }) => !startsWith(read, summary) && !startsWith(read, live),
-    });
+    if (sameKey(queryKey, homeKeys.summary())) refetchSummary();
+    else if (sameKey(queryKey, roomKeys.live())) refetchLive();
+    else void queryClient.invalidateQueries({ queryKey });
   }
 }
 

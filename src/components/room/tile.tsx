@@ -385,30 +385,28 @@ const TileView = ({
 
 type TileProps = ComponentProps<typeof TileView>;
 
-/** Whether `a` and `b` are the same person in the same state, even as separate objects. */
-const sameParticipant = (a: Participant, b: Participant) => {
-  const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof Participant>;
-  return [...keys].every((key) => Object.is(a[key], b[key]));
-};
+/**
+ * Whether `a` and `b` hold the same values, key by key (arrays too, by index); `compare` says
+ * how to compare the keys it names, which are otherwise compared with `Object.is`.
+ */
+const shallowEqual = <T extends object>(
+  a: T,
+  b: T,
+  compare: { [K in keyof T]?: (x: T[K], y: T[K]) => boolean } = {},
+) =>
+  [...new Set([...Object.keys(a), ...Object.keys(b)])].every((key) => {
+    const k = key as keyof T;
+    return (compare[k] ?? Object.is)(a[k], b[k]);
+  });
 
 /**
  * A tile renders again only when a prop of its own changed, so the room page can derive its
  * people (and filter the reactions) anew on every speaking change, and only the speaker's tile
- * follows. The handlers must be stable (`useCallback`, state setters): a new function is a change.
+ * follows: a person or a reaction list is the same when its values are. The handlers must be
+ * stable (`useCallback`, state setters): a new function is a change.
  */
-const sameTile = (prev: TileProps, next: TileProps) => {
-  const keys = new Set([...Object.keys(prev), ...Object.keys(next)]) as Set<keyof TileProps>;
-  return [...keys].every((key) => {
-    if (key === "p") return sameParticipant(prev.p, next.p);
-    if (key === "reactions") {
-      return (
-        prev.reactions.length === next.reactions.length &&
-        prev.reactions.every((r, i) => Object.is(r, next.reactions[i]))
-      );
-    }
-    return Object.is(prev[key], next[key]);
-  });
-};
+const sameTile = (prev: TileProps, next: TileProps) =>
+  shallowEqual(prev, next, { p: shallowEqual, reactions: shallowEqual });
 
 export const Tile = memo(TileView, sameTile);
 
