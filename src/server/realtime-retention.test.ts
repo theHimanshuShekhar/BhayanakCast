@@ -95,6 +95,38 @@ describe("send histories", () => {
     expect(h.hub.retained.sendHistories).toBe(0);
   });
 
+  it("aren't cleared by an earlier exit's timer when they were filled after a reconnect", async () => {
+    const first = await h.connectAs(bo);
+    await first.join(roomId);
+    await first.close();
+    await h.settled();
+    // The first exit's prune is due at +10 s. Back before it, they fill the chat limit at +8 s.
+    await h.advance(1 * SECOND);
+    const second = await h.connectAs(bo);
+    await second.join(roomId);
+    await h.advance(7 * SECOND);
+    for (let i = 0; i < CHAT_RATE_LIMIT.messages; i++) {
+      second.send({ type: "chat.send", text: `m${i}` });
+      await a.waitFor("chat.message");
+    }
+    await second.close();
+    await h.settled();
+    await h.advance(2.5 * SECOND);
+
+    // The first timer's moment has passed; the limit filled at +8 s still holds.
+    const third = await h.connectAs(bo);
+    await third.join(roomId);
+    third.send({ type: "chat.send", text: "one too many" });
+    expect(await third.waitFor("error")).toMatchObject({ code: "rate_limited", re: "chat.send" });
+    expect(h.hub.retained.sendHistories).toBeGreaterThan(0);
+
+    // Their last exit's own timer still prunes in the end.
+    await third.close();
+    await h.settled();
+    await h.advance(SEND_HISTORY_KEEP_MS);
+    expect(h.hub.retained.sendHistories).toBe(0);
+  });
+
   it("are kept for a user who still has another socket open", async () => {
     const b = await activeMember(bo);
     const other = await h.connectAs(bo);

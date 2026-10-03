@@ -665,6 +665,12 @@ export const ERROR_CODES = [
    * reason and end), and the server then closes every socket of theirs (`BANNED_CLOSE_CODE`).
    */
   "banned",
+  /**
+   * Unprompted (no `re`): this socket's session ended (signed out, or revoked from elsewhere),
+   * and the server then closes it (`SESSION_ENDED_CLOSE_CODE`). The user's other sessions' sockets
+   * stay open. The client stops wanting its room and reconnects as a visitor.
+   */
+  "session_ended",
   /** The server failed; the request may be retried. */
   "internal",
 ] as const;

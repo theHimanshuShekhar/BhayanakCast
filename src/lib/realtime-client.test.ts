@@ -264,7 +264,7 @@ describe("RealtimeClient", () => {
     expect(joins()).toBe(4);
   });
 
-  it.each(["taken_over", "banned"] as const)(
+  it.each(["taken_over", "banned", "session_ended"] as const)(
     "stops wanting its room once told %s, even across reconnects",
     (code) => {
       client.joinRoom("r1");
@@ -277,6 +277,28 @@ describe("RealtimeClient", () => {
       expect(latest().sent).toEqual([HELLO]);
     },
   );
+
+  it("doesn't ask a full room again after the session ended (the retry would be anonymous)", () => {
+    client.joinRoom("r1");
+    const first = latest();
+    first.handshake();
+    first.serverSends({
+      type: "error",
+      code: "room_full",
+      message: "full",
+      re: "room.join",
+    });
+    first.serverSends({ type: "error", code: "session_ended", message: "You were signed out" });
+    first.close();
+    vi.advanceTimersByTime(60_000);
+    // Reconnected, welcomed as a visitor, and not a single join since.
+    latest().handshake();
+    vi.advanceTimersByTime(60_000);
+    const joins = FakeSocket.instances.flatMap((s) =>
+      s.sent.filter((m) => (m as { type: string }).type === "room.join"),
+    );
+    expect(joins).toHaveLength(1);
+  });
 
   it("stops wanting its room once an admin ended it, even across reconnects", () => {
     client.joinRoom("r1");

@@ -300,10 +300,14 @@ export class RealtimeClient {
       );
     } else if (
       message.type === "error" &&
-      (message.code === "taken_over" || message.code === "kicked" || message.code === "banned")
+      (message.code === "taken_over" ||
+        message.code === "kicked" ||
+        message.code === "banned" ||
+        message.code === "session_ended")
     ) {
-      // This user joined a room elsewhere, was kicked from this one (ADR 15) or was banned
-      // (ADR 6): never rejoin from here, even after a reconnect.
+      // This user joined a room elsewhere, was kicked from this one (ADR 15), was banned
+      // (ADR 6) or was signed out: never rejoin from here, even after a reconnect (which after
+      // a sign-out is anonymous, and would only be refused).
       this.#stopFullRetry();
       this.#roomId = null;
     } else if (

@@ -313,6 +313,12 @@ export class RoomHub {
   /** Per user id, when (epoch ms) their recent relayed signalling steps were sent. */
   readonly #signalSends = new Map<string, number[]>();
   /**
+   * Per user with no socket, the timer that drops their send histories (`#forgetSendsLater`).
+   * One per user, cancelled when they connect again, so an old exit's timer can't clear the
+   * history of a later session.
+   */
+  readonly #sendPrunes = new Map<string, Timer>();
+  /**
    * Per room an admin ended, who was in their reconnect grace then and so missed `ended`: their
    * rejoin is answered with it (once). Memory only; admin ends are rare. Dropped when their
    * reconnect grace is over (`timer`), as then they're out of the room anyway.
@@ -350,7 +356,11 @@ export class RoomHub {
     this.#connections.add(conn);
     const userId = caller.user?.id;
     if (userId) {
-      void this.#enqueue(() => this.#countOnline(this.#online, userId));
+      void this.#enqueue(() => {
+        this.#countOnline(this.#online, userId);
+        this.#sendPrunes.get(userId)?.cancel();
+        this.#sendPrunes.delete(userId);
+      });
     }
     this.#armIdle(conn);
     return conn;
@@ -503,8 +513,8 @@ export class RoomHub {
         // Someone in their reconnect grace was last here when their socket closed.
         await this.#removeParticipant(room, participant, participant.grace?.since ?? at);
       }
-      for (const conn of [...this.#connections]) {
-        if (conn.caller.user?.id !== userId) continue;
+      const banned = [...this.#connections].filter((conn) => conn.caller.user?.id === userId);
+      for (const conn of banned) {
         conn.roomId = null;
         this.#refuse(conn, "banned", notice);
         try {
@@ -512,8 +522,9 @@ export class RoomHub {
         } catch (error) {
           this.#log("closing a banned user's socket failed", error);
         }
-        await this.#drop(conn);
       }
+      // A failing drop (its database write) mustn't leave their other sockets open.
+      for (const conn of banned) await this.#dropLogged(conn);
     });
   }
 
@@ -524,15 +535,19 @@ export class RoomHub {
    */
   sessionEnded(sessionId: string): Promise<void> {
     return this.#enqueue(async () => {
-      for (const conn of [...this.#connections]) {
-        if (conn.sessionId !== sessionId) continue;
+      const ended = [...this.#connections].filter((conn) => conn.sessionId === sessionId);
+      for (const conn of ended) {
+        // Told first, so a page in a room says why it stopped (the close code alone may not
+        // reach it), as for a ban. Its room is kept: `#drop` starts the reconnect grace there.
+        this.#refuse(conn, "session_ended", "You were signed out");
         try {
           conn.transport.close(SESSION_ENDED_CLOSE_CODE, "session ended");
         } catch (error) {
           this.#log("closing a signed-out socket failed", error);
         }
-        await this.#drop(conn);
       }
+      // A failing drop (its database write) mustn't leave the session's other sockets open.
+      for (const conn of ended) await this.#dropLogged(conn);
     });
   }
 
@@ -1064,6 +1079,15 @@ export class RoomHub {
   // -------------------------------------------------------------------------------------------
   // Resilience (#25): reconnect grace, heartbeats, checkpoints and restart recovery
 
+  /** `#drop`, logging a failure instead of throwing, for loops that must reach every socket. */
+  async #dropLogged(conn: HubConnection): Promise<void> {
+    try {
+      await this.#drop(conn);
+    } catch (error) {
+      this.#log("dropping a closed socket failed", error);
+    }
+  }
+
   /** `conn`'s socket is gone: forget it, and start its user's reconnect grace in their room. */
   async #drop(conn: HubConnection): Promise<void> {
     if (conn.closed) return;
@@ -1511,16 +1535,20 @@ export class RoomHub {
 
   /**
    * `userId` has no socket left: drop their rate-limit histories after `SEND_HISTORY_KEEP_MS`,
-   * unless they have one again by then (their next exit schedules it again). Not at once: a
-   * reconnect would reset their limits.
+   * unless they connect again first (which cancels it; their next exit starts a new one). Not at
+   * once: a reconnect would reset their limits.
    */
   #forgetSendsLater(userId: string): void {
-    this.#setTimer(SEND_HISTORY_KEEP_MS, () => {
+    this.#sendPrunes.get(userId)?.cancel();
+    const timer = this.#setTimer(SEND_HISTORY_KEEP_MS, () => {
+      if (this.#sendPrunes.get(userId) !== timer) return;
+      this.#sendPrunes.delete(userId);
       if (this.#online.has(userId)) return;
       this.#chatSends.delete(userId);
       this.#reactionSends.delete(userId);
       this.#signalSends.delete(userId);
     });
+    this.#sendPrunes.set(userId, timer);
   }
 
   /**

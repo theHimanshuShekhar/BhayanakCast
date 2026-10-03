@@ -160,9 +160,10 @@ export function createAuth(db: Db, config: AuthConfig) {
         },
       },
       session: {
-        // Every way a session ends (sign-out, revoking one or all, a user's removal, an expired
-        // one found at a request) deletes its row through here: its open realtime sockets close.
-        // A ban revokes the user's sessions too, but tells their sockets `banned` itself
+        // Every way a session ends through Better Auth (sign-out, revoking one or all, a user's
+        // removal, an expired one found at a request) deletes its row through here: its open
+        // realtime sockets close. The daily purge of expired sessions deletes rows itself, and
+        // tells the hub on its own (src/server/maintenance.ts). A ban revokes the user's sessions too, but tells their sockets `banned` itself
         // (src/server/admin-users.ts), which a plain close here would pre-empt.
         delete: {
           after: async (session, ctx) => {

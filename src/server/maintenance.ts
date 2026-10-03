@@ -6,16 +6,23 @@
 import { lt } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import { session } from "../db/schema/index.ts";
+import { getLiveHub } from "./live-hub.ts";
 import { purgeExpiredRooms } from "./stats.ts";
 
 const INTERVAL_MS = 24 * 60 * 60 * 1000;
 
-/** Delete Better Auth sessions past their expiry; returns how many went. */
+/**
+ * Delete Better Auth sessions past their expiry; returns how many went. The rows go straight
+ * through Drizzle, not Better Auth's session-delete hook (src/lib/auth.ts), so the live hub is
+ * told here: a socket still open on one of them closes.
+ */
 export async function purgeExpiredSessions(db: Db, now: Date = new Date()): Promise<number> {
   const deleted = await db
     .delete(session)
     .where(lt(session.expiresAt, now))
     .returning({ id: session.id });
+  const hub = getLiveHub();
+  if (hub) await Promise.all(deleted.map(({ id }) => hub.sessionEnded(id)));
   return deleted.length;
 }
 

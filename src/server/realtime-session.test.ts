@@ -1,6 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BANNED_CLOSE_CODE, SESSION_ENDED_CLOSE_CODE } from "../lib/realtime.ts";
 import { type RealtimeHarness, startRealtimeHarness, type TestUser } from "./realtime-harness.ts";
+import type { RoomStore } from "./room-store.ts";
 
 // A session that ends (sign-out, revoke) closes its own sockets, and only those (#63). Better
 // Auth's session-delete hook (src/lib/auth.ts) tells the live hub (./live-hub.ts).
@@ -34,6 +35,14 @@ describe("signing out", () => {
 
     await h.auth.api.signOut({ headers: headersOf(bo) });
 
+    // Told why first (a page in a room says so), then closed.
+    for (const socket of [b, bLobby]) {
+      expect(await socket.waitFor("error")).toEqual({
+        type: "error",
+        code: "session_ended",
+        message: "You were signed out",
+      });
+    }
     expect(await b.closed()).toBe(SESSION_ENDED_CLOSE_CODE);
     expect(await bLobby.closed()).toBe(SESSION_ENDED_CLOSE_CODE);
     expect(a.isClosed).toBe(false);
@@ -104,5 +113,50 @@ describe("a ban", () => {
 
     expect(await b.waitFor("error")).toMatchObject({ code: "banned", message: "Reason: spam." });
     expect(await b.closed()).toBe(BANNED_CLOSE_CODE);
+  });
+});
+
+describe("when the database fails while dropping a socket", () => {
+  it("still closes every socket of the session (and of a banned user)", async () => {
+    let failing = false;
+    await h.close();
+    h = await startRealtimeHarness({
+      wrapStore: (store) =>
+        new Proxy(store, {
+          get(target, key, receiver) {
+            const value: unknown = Reflect.get(target, key, receiver);
+            if (key !== "checkpointPresence" || typeof value !== "function") return value;
+            return async (...args: unknown[]) => {
+              if (failing) throw new Error("checkpointPresence is down");
+              return Reflect.apply(value, target, args);
+            };
+          },
+        }) as RoomStore,
+    });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      ana = await h.createUser("ana");
+      bo = await h.createUser("bo");
+      roomId = await h.createRoom(ana, { name: "ana's room" });
+      // In a room first, so dropping it writes a checkpoint; the lobby socket comes after it.
+      const inRoom = await h.connectAs(ana);
+      await inRoom.join(roomId);
+      const lobby = await h.connectAs(ana);
+      const boRoom = await h.connectAs(bo);
+      await boRoom.join(roomId);
+      const boLobby = await h.connectAs(bo);
+      failing = true;
+
+      await h.auth.api.signOut({ headers: headersOf(ana) });
+      expect(await inRoom.closed()).toBe(SESSION_ENDED_CLOSE_CODE);
+      expect(await lobby.closed()).toBe(SESSION_ENDED_CLOSE_CODE);
+
+      await h.hub.disconnectUser(bo.id, "Reason: spam.");
+      expect(await boRoom.closed()).toBe(BANNED_CLOSE_CODE);
+      expect(await boLobby.closed()).toBe(BANNED_CLOSE_CODE);
+      failing = false;
+    } finally {
+      error.mockRestore();
+    }
   });
 });

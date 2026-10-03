@@ -25,6 +25,7 @@ import { loadCurrentSession, useCurrentSession } from "~/lib/current-user";
 import { siteMeta } from "~/lib/embed";
 import { siteOrigin } from "~/lib/embed.functions";
 import { useLobbyLive } from "~/lib/lobby-live";
+import { getRealtimeClient } from "~/lib/realtime-client";
 import type { CreateRoomInput } from "~/lib/rooms";
 import { createRoomFn } from "~/lib/rooms.functions";
 import { roomKeys, roomQuery } from "~/lib/rooms.queries";
@@ -97,6 +98,18 @@ function AppShell() {
   const { join } = useSearch({ strict: false });
   // In a room on a phone, the room's own control bar is the bottom bar.
   const inRoom = useRouterState({ select: (s) => s.location.pathname.startsWith("/room/") });
+  // The session ended elsewhere (signed out in another tab, sessions revoked): the socket was
+  // closed and the page is a visitor now, so reload who it is. Not on a room page, which shows
+  // its own notice (the room route's guard would send it away from it); its "back to rooms"
+  // navigation reloads the session.
+  useEffect(() => {
+    if (inRoom) return;
+    return getRealtimeClient().subscribe((message) => {
+      if (message.type !== "error" || message.code !== "session_ended") return;
+      queryClient.removeQueries({ type: "inactive" });
+      void Promise.all([queryClient.invalidateQueries(), router.invalidate()]);
+    });
+  }, [inRoom, queryClient, router]);
   const joinRoom = useQuery({ ...roomQuery(join ?? ""), enabled: !user && !!join }).data;
   const joinPrompt: SignInPrompt | null =
     !user && join ? { kind: "join", roomName: joinRoom?.name } : null;

@@ -308,7 +308,8 @@ export interface RoomLiveResult {
    * Why this page isn't (or is no longer) in the room, if it isn't: the server's refusal of its
    * join (`not_found`; `room_full`, which the realtime client keeps retrying until a snapshot
    * clears it; `kicked`), `taken_over` once the same user joined a room from another tab or
-   * device, or `kicked` once a host, mod or admin removed them.
+   * device, `kicked` once a host, mod or admin removed them, or `session_ended` once they were
+   * signed out (in another tab, or by revoking sessions).
    */
   error: ServerMessageOf<"error"> | null;
   /** An admin ended the room (ADR 6): nobody is in it any more. */
@@ -448,6 +449,7 @@ export function useRoomLive(
         if (
           message.re === "room.join" ||
           message.code === "taken_over" ||
+          message.code === "session_ended" ||
           (message.code === "kicked" && !message.re)
         ) {
           setResult((r) => ({ ...r, error: message }));
