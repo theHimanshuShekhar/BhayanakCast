@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Db } from "../db/client.ts";
 import { session, user } from "../db/schema/index.ts";
 import { createTestDb } from "../db/test-db.ts";
+import { registerLiveHub } from "./live-hub.ts";
 import { purgeExpiredSessions, runMaintenance } from "./maintenance.ts";
+import type { RoomHub } from "./room-hub.ts";
 
 const NOW = new Date("2026-10-02T12:00:00Z");
 const HOUR = 60 * 60 * 1000;
@@ -31,6 +33,27 @@ describe("purgeExpiredSessions", () => {
     expect(await purgeExpiredSessions(db, NOW)).toBe(1);
     expect(await sessionIds()).toEqual(["live"]);
     expect(await purgeExpiredSessions(db, NOW)).toBe(0);
+  });
+
+  it("tells the live hub about each purged session, and only those", async () => {
+    await db.insert(session).values({
+      id: "expired2",
+      token: "t3",
+      userId: "a",
+      expiresAt: new Date(NOW.getTime() - HOUR),
+    });
+    const sessionEnded = vi.fn().mockResolvedValue(undefined);
+    const unregister = registerLiveHub({ sessionEnded } as unknown as RoomHub);
+    try {
+      await purgeExpiredSessions(db, NOW);
+    } finally {
+      unregister();
+    }
+    expect(sessionEnded.mock.calls.map(([id]) => id).sort()).toEqual(["expired", "expired2"]);
+  });
+
+  it("purges with no live hub running", async () => {
+    expect(await purgeExpiredSessions(db, NOW)).toBe(1);
   });
 });
 

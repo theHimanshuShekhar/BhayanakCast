@@ -47,6 +47,14 @@ export const IDLE_TIMEOUT_MS = 60_000;
 export const IDLE_CLOSE_CODE = 4000;
 /** The close code the server uses for the sockets of a user an admin banned (after `banned`). */
 export const BANNED_CLOSE_CODE = 4001;
+/** The close code the server uses for the sockets of a session that ended (sign-out, revoke). */
+export const SESSION_ENDED_CLOSE_CODE = 4003;
+/**
+ * The message of the `forbidden` refusal an anonymous socket gets for anything but `hello` and
+ * `ping`. A page that was in a room and is told this for its `room.join` lost its session
+ * without hearing `session_ended`.
+ */
+export const SIGN_IN_FIRST = "Sign in first";
 /** Longest chat message after trimming, in UTF-16 code units (what an input's maxLength counts). */
 export const CHAT_MAX_LENGTH = 500;
 /** How many recent chat messages a live room keeps in memory for joiners (ADR 4 addendum). */
@@ -663,6 +671,12 @@ export const ERROR_CODES = [
    * reason and end), and the server then closes every socket of theirs (`BANNED_CLOSE_CODE`).
    */
   "banned",
+  /**
+   * Unprompted (no `re`): this socket's session ended (signed out, or revoked from elsewhere),
+   * and the server then closes it (`SESSION_ENDED_CLOSE_CODE`). The user's other sessions' sockets
+   * stay open. The client stops wanting its room and reconnects as a visitor.
+   */
+  "session_ended",
   /** The server failed; the request may be retried. */
   "internal",
 ] as const;
@@ -699,6 +713,20 @@ export type ServerMessage = z.infer<typeof serverMessage>;
 export type ServerMessageType = ServerMessage["type"];
 /** The server message of type `T`. */
 export type ServerMessageOf<T extends ServerMessageType> = Extract<ServerMessage, { type: T }>;
+
+/**
+ * Whether `error` says this page's session is gone: `session_ended`, or the refusal an anonymous
+ * socket gets for `room.join` (the page's socket reconnected without a session, by a path that
+ * didn't hear `session_ended`, e.g. a join from the pre-join lobby after the session ended there).
+ * Either way the page is out of the room, as for a kick.
+ */
+export function isSignedOutError(error: ServerMessageOf<"error"> | null): boolean {
+  if (!error) return false;
+  return (
+    error.code === "session_ended" ||
+    (error.code === "forbidden" && error.re === "room.join" && error.message === SIGN_IN_FIRST)
+  );
+}
 
 // ---------------------------------------------------------------------------------------------
 // Parsing

@@ -25,9 +25,12 @@ import { loadCurrentSession, useCurrentSession } from "~/lib/current-user";
 import { siteMeta } from "~/lib/embed";
 import { siteOrigin } from "~/lib/embed.functions";
 import { useLobbyLive } from "~/lib/lobby-live";
+import { getRealtimeClient } from "~/lib/realtime-client";
+import { wasInRoom } from "~/lib/room-live";
 import type { CreateRoomInput } from "~/lib/rooms";
 import { createRoomFn } from "~/lib/rooms.functions";
 import { roomKeys, roomQuery } from "~/lib/rooms.queries";
+import { followSessionEnded } from "~/lib/session-ended";
 import { SettingsProvider, useDocumentAppearance } from "~/lib/settings";
 import { getSettings } from "~/lib/settings-fns";
 import type { RouterContext } from "~/router";
@@ -97,6 +100,22 @@ function AppShell() {
   const { join } = useSearch({ strict: false });
   // In a room on a phone, the room's own control bar is the bottom bar.
   const inRoom = useRouterState({ select: (s) => s.location.pathname.startsWith("/room/") });
+  // The session ended elsewhere: see ~/lib/session-ended.
+  useEffect(
+    () =>
+      followSessionEnded({
+        client: getRealtimeClient(),
+        pathname: () => router.state.location.pathname,
+        inRoom: wasInRoom,
+        onNavigated: (listener) => router.subscribe("onResolved", listener),
+        dropCachedReads: () => {
+          queryClient.removeQueries({ type: "inactive" });
+          void queryClient.invalidateQueries();
+        },
+        reloadSession: () => void router.invalidate(),
+      }),
+    [queryClient, router],
+  );
   const joinRoom = useQuery({ ...roomQuery(join ?? ""), enabled: !user && !!join }).data;
   const joinPrompt: SignInPrompt | null =
     !user && join ? { kind: "join", roomName: joinRoom?.name } : null;

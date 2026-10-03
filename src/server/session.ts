@@ -51,6 +51,19 @@ export function getSessionFromRequest(source: HeaderSource): Promise<AuthSession
   return resolveSession(auth, toHeaders(source));
 }
 
+/** Who opened a socket, and with which session (null for a visitor). */
+export interface Authenticated {
+  caller: Caller;
+  sessionId: string | null;
+}
+
+/** `callerFromSession`, with the session's id so the hub can close its sockets when it ends. */
+export function authenticatedFromSession(
+  session: Pick<AuthSession, "user" | "session"> | null,
+): Authenticated {
+  return { caller: callerFromSession(session), sessionId: session?.session.id ?? null };
+}
+
 /** The caller a resolved session (or its absence) stands for. */
 export function callerFromSession(session: Pick<AuthSession, "user"> | null): Caller {
   if (!session) return { user: null, role: "visitor" };

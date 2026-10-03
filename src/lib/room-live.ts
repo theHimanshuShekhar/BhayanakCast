@@ -309,7 +309,8 @@ export interface RoomLiveResult {
    * join (`not_found`; `room_full`, and `internal` while the server is starting or a database
    * call failed, which the realtime client keeps retrying until a snapshot clears them;
    * `kicked`), `taken_over` once the same user joined a room from another tab or
-   * device, or `kicked` once a host, mod or admin removed them.
+   * device, `kicked` once a host, mod or admin removed them, or `session_ended` once they were
+   * signed out (in another tab, or by revoking sessions).
    */
   error: ServerMessageOf<"error"> | null;
   /** An admin ended the room (ADR 6): nobody is in it any more. */
@@ -449,6 +450,7 @@ export function useRoomLive(
         if (
           message.re === "room.join" ||
           message.code === "taken_over" ||
+          message.code === "session_ended" ||
           (message.code === "kicked" && !message.re)
         ) {
           setResult((r) => ({ ...r, error: message }));
