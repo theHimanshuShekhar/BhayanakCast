@@ -17,6 +17,7 @@
 import { ROOM_CAPACITY } from "./format";
 import {
   type ClientMessage,
+  isSignedOutError,
   PING_INTERVAL_MS,
   PROTOCOL_VERSION,
   parseServerMessage,
@@ -303,11 +304,12 @@ export class RealtimeClient {
       (message.code === "taken_over" ||
         message.code === "kicked" ||
         message.code === "banned" ||
-        message.code === "session_ended")
+        isSignedOutError(message))
     ) {
       // This user joined a room elsewhere, was kicked from this one (ADR 15), was banned
-      // (ADR 6) or was signed out: never rejoin from here, even after a reconnect (which after
-      // a sign-out is anonymous, and would only be refused).
+      // (ADR 6) or was signed out (told so, or refused the join as anonymous): never rejoin from
+      // here, even after a reconnect (which after a sign-out is anonymous, and would only be
+      // refused).
       this.#stopFullRetry();
       this.#roomId = null;
     } else if (

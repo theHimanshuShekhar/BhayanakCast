@@ -81,7 +81,7 @@ test("signing out in another tab takes a room page out of the room, and signing 
   await page.getByRole("button", { name: "Turn camera on" }).click();
   await expect(page.getByRole("button", { name: "Turn camera off" })).toBeEnabled();
   expect(await liveTracks()).toBeGreaterThan(0);
-  const joinsBefore = (await sockets()).joins;
+  const { joins: joinsBefore, welcomes: welcomesBefore } = await sockets();
 
   // The same browser's other tab signs out: the cookie, and so the room tab's session, is gone.
   const other = await newPage(context);
@@ -96,8 +96,7 @@ test("signing out in another tab takes a room page out of the room, and signing 
   await expect.poll(liveTracks).toBe(0);
 
   // The client reconnects as a visitor (a fresh welcome) and stays out: no `room.join` goes out.
-  const welcomesAtNotice = (await sockets()).welcomes;
-  await expect.poll(async () => (await sockets()).welcomes).toBeGreaterThan(welcomesAtNotice);
+  await expect.poll(async () => (await sockets()).welcomes).toBeGreaterThan(welcomesBefore);
   await page.waitForTimeout(500);
   expect((await sockets()).joins).toBe(joinsBefore);
   await expect(notice).toBeVisible();

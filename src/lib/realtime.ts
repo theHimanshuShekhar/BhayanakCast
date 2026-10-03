@@ -714,6 +714,20 @@ export type ServerMessageType = ServerMessage["type"];
 /** The server message of type `T`. */
 export type ServerMessageOf<T extends ServerMessageType> = Extract<ServerMessage, { type: T }>;
 
+/**
+ * Whether `error` says this page's session is gone: `session_ended`, or the refusal an anonymous
+ * socket gets for `room.join` (the page's socket reconnected without a session, by a path that
+ * didn't hear `session_ended`, e.g. a join from the pre-join lobby after the session ended there).
+ * Either way the page is out of the room, as for a kick.
+ */
+export function isSignedOutError(error: ServerMessageOf<"error"> | null): boolean {
+  if (!error) return false;
+  return (
+    error.code === "session_ended" ||
+    (error.code === "forbidden" && error.re === "room.join" && error.message === SIGN_IN_FIRST)
+  );
+}
+
 // ---------------------------------------------------------------------------------------------
 // Parsing
 

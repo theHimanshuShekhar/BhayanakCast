@@ -39,6 +39,7 @@ import {
 } from "~/lib/local-media";
 import {
   type FeedEntry,
+  isSignedOutError,
   type KnockEntry,
   type MediaState,
   REACTION_EMOJIS,
@@ -46,7 +47,6 @@ import {
 } from "~/lib/realtime";
 import {
   feedLine,
-  isSignedOutError,
   markInRoom,
   moderate,
   sendChat,

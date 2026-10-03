@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ServerMessage } from "./realtime";
+import { type ServerMessage, SIGN_IN_FIRST } from "./realtime";
 import { followSessionEnded } from "./session-ended";
 
 const ENDED: ServerMessage = {
@@ -34,6 +34,7 @@ function setup(path: string, entered: string[] = []) {
   return {
     deps,
     ended: () => listener(ENDED),
+    send: (message: ServerMessage) => listener(message),
     navigateTo(path: string) {
       state.path = path;
       navigated();
@@ -78,9 +79,33 @@ describe("followSessionEnded", () => {
     expect(t.deps.client.restart).toHaveBeenCalledOnce();
   });
 
+  it("restarts when the tab goes to another room's page, not only home", () => {
+    const t = setup("/room/r1", ["r1"]);
+    t.ended();
+    t.navigateTo("/room/r2");
+    expect(t.deps.dropCachedReads).toHaveBeenCalledOnce();
+    expect(t.deps.client.restart).toHaveBeenCalledOnce();
+  });
+
+  it("is armed by an anonymous room.join refusal too, which a page that missed session_ended gets", () => {
+    const t = setup("/room/r1", ["r1"]);
+    t.send({ type: "error", code: "forbidden", message: SIGN_IN_FIRST, re: "room.join" });
+    expect(t.deps.reloadSession).not.toHaveBeenCalled();
+    t.navigateTo("/");
+    expect(t.deps.dropCachedReads).toHaveBeenCalledOnce();
+    expect(t.deps.client.restart).toHaveBeenCalledOnce();
+  });
+
   it("ignores other messages, and navigation with no session ended", () => {
     const t = setup("/room/r1", ["r1"]);
+    t.send({ type: "lobby.snapshot", online: 3 });
+    // Refused for other reasons: a kick, a private room, a different message type.
+    t.send({ type: "error", code: "kicked", message: "removed", re: "room.join" });
+    t.send({ type: "error", code: "forbidden", message: "This room is private", re: "room.join" });
+    t.send({ type: "error", code: "forbidden", message: SIGN_IN_FIRST, re: "chat.send" });
     t.navigateTo("/");
+    expect(t.deps.reloadSession).not.toHaveBeenCalled();
+    expect(t.deps.dropCachedReads).not.toHaveBeenCalled();
     expect(t.deps.client.restart).not.toHaveBeenCalled();
   });
 });

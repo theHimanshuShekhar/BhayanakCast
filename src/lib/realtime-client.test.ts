@@ -278,6 +278,22 @@ describe("RealtimeClient", () => {
     },
   );
 
+  it("stops wanting its room once an anonymous socket's join is refused, across reconnects", () => {
+    client.joinRoom("r1");
+    const first = latest();
+    first.handshake();
+    first.serverSends({
+      type: "error",
+      code: "forbidden",
+      message: "Sign in first",
+      re: "room.join",
+    });
+    first.close();
+    vi.advanceTimersByTime(1_000);
+    latest().handshake();
+    expect(latest().sent).toEqual([HELLO]);
+  });
+
   it("doesn't ask a full room again after the session ended (the retry would be anonymous)", () => {
     client.joinRoom("r1");
     const first = latest();
