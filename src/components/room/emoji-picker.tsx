@@ -103,7 +103,7 @@ export const EmojiPicker = ({
         <Popover.Positioner side="top" align="end" sideOffset={10} className="z-[160] outline-0">
           <Popover.Popup
             finalFocus={returnFocus}
-            className="p-1.5 bg-surface border border-border-strong rounded-[var(--radius)] shadow-deep outline-0 origin-[var(--transform-origin)] transition-[scale,opacity] duration-100 data-starting-style:opacity-0 data-starting-style:scale-[0.98] data-ending-style:opacity-0"
+            className="p-1.5 bg-surface border border-border-strong rounded-[var(--radius)] shadow-deep outline-0 origin-[var(--transform-origin)] transition-[scale,opacity] duration-100 data-starting-style:opacity-0 motion-safe:data-starting-style:scale-[0.98] data-ending-style:opacity-0"
           >
             <Popover.Title className="sr-only">Emoji</Popover.Title>
             <fieldset

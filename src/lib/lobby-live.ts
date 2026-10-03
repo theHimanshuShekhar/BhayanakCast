@@ -19,20 +19,26 @@ import { roomKeys } from "./rooms.queries";
  * The query keys to invalidate for a lobby `message`, by what changed in a public room:
  * - `created`, `count`, `streamers`, `renamed`, `host`: the live list and the home summary;
  * - `thumbnail`: the live list only (the summary has no images);
- * - `ended`: every room read (past lists too) and the home summary;
+ * - `ended`: every room read (past lists, the live list and the home summary included);
  * - a fresh snapshot after a reconnect (`reconnected`): every room read, since anything may have
  *   changed while the socket was down.
+ * `invalidateLobbyKeys` coalesces the refetches of the live list and the summary that the first
+ * two kinds of change ask for by their own keys, and refetches `roomKeys.all` at once.
  */
 export function lobbyInvalidations(message: ServerMessage, reconnected: boolean): QueryKey[] {
   if (message.type === "lobby.snapshot") return reconnected ? [roomKeys.all] : [];
   if (message.type !== "lobby.changed" || !message.room) return [];
-  if (message.room.change === "ended") return [roomKeys.all, homeKeys.summary()];
+  if (message.room.change === "ended") return [roomKeys.all];
   if (message.room.change === "thumbnail") return [roomKeys.live()];
   return [roomKeys.live(), homeKeys.summary()];
 }
 
-/** Thumbnail refetches are spaced at least this far apart: many streamers upload in step. */
-const THUMBNAIL_REFETCH_MS = 5_000;
+/**
+ * Live room list refetches are spaced at least this far apart: many streamers upload in step,
+ * and on a busy lobby every join, leave and rename would otherwise refetch the list for every
+ * home viewer.
+ */
+const LIVE_LIST_REFETCH_MS = 5_000;
 
 /**
  * Home summary refetches are spaced at least this far apart: a busy lobby changes many times a
@@ -68,27 +74,27 @@ export function coalesce(run: () => void, ms: number): () => void {
   };
 }
 
-/** Whether `key` starts with `prefix`, as a query key matches the keys under it. */
-const startsWith = (key: QueryKey, prefix: QueryKey) =>
-  prefix.length <= key.length && prefix.every((part, i) => part === key[i]);
+const sameKey = (a: QueryKey, b: QueryKey) =>
+  a.length === b.length && a.every((part, i) => part === b[i]);
 
 /**
- * Invalidate `keys` (from `lobbyInvalidations`), but leave the home summary to `refetchSummary`,
- * a `coalesce`d refetch of it, wherever a key covers it (`roomKeys.all` does).
+ * Invalidate `keys` (from `lobbyInvalidations`). The home summary's own key goes to
+ * `refetchSummary` and the live room list's to `refetchLive`, `coalesce`d refetches: they are
+ * what the changes that come in bursts (joins, leaves, renames, thumbnails) ask for. Any other
+ * key (`roomKeys.all`: a room ended, a reconnect) invalidates what it covers at once, the live
+ * list and the summary too. That is once per room or reconnect, and an ended room must leave
+ * the lists now, not when a window ends.
  */
 export function invalidateLobbyKeys(
   queryClient: Pick<QueryClient, "invalidateQueries">,
   keys: QueryKey[],
   refetchSummary: () => void,
+  refetchLive: () => void,
 ): void {
-  const summary = homeKeys.summary();
   for (const queryKey of keys) {
-    void queryClient.invalidateQueries({
-      queryKey,
-      predicate: (query) =>
-        query.queryKey.length !== summary.length || !startsWith(query.queryKey, summary),
-    });
-    if (startsWith(summary, queryKey)) refetchSummary();
+    if (sameKey(queryKey, homeKeys.summary())) refetchSummary();
+    else if (sameKey(queryKey, roomKeys.live())) refetchLive();
+    else void queryClient.invalidateQueries({ queryKey });
   }
 }
 
@@ -150,9 +156,9 @@ function follow(queryClient: QueryClient): () => void {
     Number.isFinite(pageSettleMs) ? pageSettleMs : undefined,
   );
   let snapshots = 0;
-  const refetchCards = coalesce(
+  const refetchLive = coalesce(
     () => void queryClient.invalidateQueries({ queryKey: roomKeys.live() }),
-    THUMBNAIL_REFETCH_MS,
+    LIVE_LIST_REFETCH_MS,
   );
   const refetchSummary = coalesce(
     () => void queryClient.invalidateQueries({ queryKey: homeKeys.summary(), exact: true }),
@@ -170,11 +176,12 @@ function follow(queryClient: QueryClient): () => void {
     if (message.type === "lobby.snapshot") onlineCount.snapshot(message.online);
     else onlineCount.changed(message.online);
     const reconnected = message.type === "lobby.snapshot" && snapshots++ > 0;
-    if (message.type === "lobby.changed" && message.room?.change === "thumbnail") {
-      refetchCards();
-      return;
-    }
-    invalidateLobbyKeys(queryClient, lobbyInvalidations(message, reconnected), refetchSummary);
+    invalidateLobbyKeys(
+      queryClient,
+      lobbyInvalidations(message, reconnected),
+      refetchSummary,
+      refetchLive,
+    );
   });
   client.start();
   return () => {

@@ -34,6 +34,15 @@ function app(request: Request): Response {
   if (pathname.startsWith("/api/auth/")) {
     return Response.json(null, { headers: { "cache-control": "max-age=600" } });
   }
+  if (pathname.startsWith("/api/og/")) {
+    return new Response("png", {
+      headers: {
+        "content-type": "image/png",
+        "cache-control": "public, max-age=60",
+        "x-content-type-options": "nosniff",
+      },
+    });
+  }
   if (pathname === "/boom") throw new Error("the app fell over");
   if (pathname === "/moved") return Response.redirect("http://localhost/elsewhere", 302);
   return html();
@@ -140,6 +149,13 @@ describe("/api", () => {
   it("makes auth responses private, no-store whatever the handler said", async () => {
     const response = await get("/api/auth/get-session");
     expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
+  it("leaves a room card's short public cache alone: it is the same for everyone (ADR 22)", async () => {
+    const response = await get("/api/og/room/some-room.png");
+    expect(response.headers.get("cache-control")).toBe("public, max-age=60");
+    expect(response.headers.get("content-type")).toBe("image/png");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
   });
 

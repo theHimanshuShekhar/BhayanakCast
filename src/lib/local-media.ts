@@ -9,6 +9,10 @@
  * - The chosen device ids are remembered in localStorage; whether each was on never is.
  * - Choosing another device while one is on swaps its track (a new `MediaStreamTrack` object),
  *   so consumers follow `track` identity, e.g. `RTCRtpSender.replaceTrack` on change.
+ * - A device that goes away while on (unplugged, or access revoked: its track `ended`, or a
+ *   `devicechange` no longer lists it) is off with `lost` set, until it is turned on again or
+ *   another device is chosen: the room says so and offers the switch. Firefox may only `mute`
+ *   a lost mic, which also happens for harmless reasons, so `devicechange` is the check there.
  * - A screen share (`startShare`) asks the browser's own picker every time, for the screen
  *   and its tab or system audio where the browser offers it, tuned for the room kind
  *   (`shareHintFor`). The browser's own "stop sharing" turns it off.
@@ -47,6 +51,8 @@ export interface LocalTrackState {
   track: MediaStreamTrack | null;
   /** Set when the last attempt to turn it on failed; cleared by the next attempt. */
   failure: LocalTrackFailure | null;
+  /** True after it was on and its device went away; kept through a failed retry, cleared once it's on or turned off. */
+  lost: boolean;
 }
 
 /**
@@ -56,7 +62,7 @@ export interface LocalTrackState {
 export type ShareFailure = LocalTrackFailure | "late";
 
 /** The screen share: its video as `track`, and `audio`. */
-export interface LocalShareState extends Omit<LocalTrackState, "failure"> {
+export interface LocalShareState extends Omit<LocalTrackState, "failure" | "lost"> {
   /** The tab or system audio while `on`, if the browser gave any; else null. */
   audio: MediaStreamTrack | null;
   failure: ShareFailure | null;
@@ -72,7 +78,7 @@ export interface LocalMediaState {
   share: LocalShareState;
 }
 
-const OFF: LocalTrackState = { status: "off", track: null, failure: null };
+const OFF: LocalTrackState = { status: "off", track: null, failure: null, lost: false };
 const SHARE_OFF: LocalShareState = { status: "off", track: null, audio: null, failure: null };
 
 export const LOCAL_MEDIA_INITIAL: LocalMediaState = {
@@ -214,13 +220,32 @@ export class LocalMedia {
   /** List the devices again (labels appear once permission is given). */
   async refreshDevices(): Promise<void> {
     if (!this.#mediaDevices) return;
+    // The tracks the list is about: one started while it was being taken isn't judged by it.
+    const before = { mic: this.#state.mic.track, cam: this.#state.cam.track };
     let all: MediaDeviceInfo[];
     try {
       all = await this.#mediaDevices.enumerateDevices();
     } catch {
       return;
     }
-    this.#set({ devices: { mic: devicesOf(all, "mic"), cam: devicesOf(all, "cam") } });
+    const devices = { mic: devicesOf(all, "mic"), cam: devicesOf(all, "cam") };
+    this.#set({ devices });
+    // An unplugged device doesn't always end its track (Firefox mutes a mic): a muted track
+    // whose device the browser no longer lists (an empty list too: it was the only one) is
+    // lost. Muted alone isn't (the OS or the browser can mute a working device).
+    for (const kind of ["mic", "cam"] as const) {
+      const track = before[kind];
+      const id = track?.getSettings().deviceId;
+      if (
+        track &&
+        track === this.#state[kind].track &&
+        track.muted &&
+        id &&
+        !devices[kind].some((d) => d.id === id)
+      ) {
+        this.#lose(kind);
+      }
+    }
   }
 
   /**
@@ -231,11 +256,12 @@ export class LocalMedia {
     const current = this.#state[kind];
     if (current.status === "on" && current.track) return current.track;
     const attempt = ++this.#attempt[kind];
+    const lost = current.lost;
     if (!this.#mediaDevices) {
-      this.#setTrack(kind, { ...OFF, failure: "unsupported" });
+      this.#setTrack(kind, { ...OFF, failure: "unsupported", lost });
       return null;
     }
-    this.#setTrack(kind, { status: "starting", track: null, failure: null });
+    this.#setTrack(kind, { status: "starting", track: null, failure: null, lost: false });
     let track: MediaStreamTrack | null = null;
     let failure: LocalTrackFailure | null = null;
     const selected = this.#state.selected[kind];
@@ -259,17 +285,17 @@ export class LocalMedia {
       return null;
     }
     if (!track) {
-      this.#setTrack(kind, { ...OFF, failure });
+      this.#setTrack(kind, { ...OFF, failure, lost });
       return null;
     }
     const live = track;
-    // Unplugged, or revoked in the browser's UI: it's off now.
-    live.addEventListener("ended", () => {
-      if (this.#state[kind].track !== live) return;
-      this.#attempt[kind]++;
-      this.#setTrack(kind, OFF);
-    });
-    this.#setTrack(kind, { status: "on", track: live, failure: null });
+    // Unplugged, or revoked in the browser's UI: it's lost. `onended`, not `addEventListener`:
+    // in Playwright's Firefox a script-dispatched `ended` (e2e/device-loss.spec.ts) reached
+    // `onended` only, while Chromium ran both. We own these tracks; nothing else sets it.
+    live.onended = () => {
+      if (this.#state[kind].track === live) this.#lose(kind);
+    };
+    this.#setTrack(kind, { status: "on", track: live, failure: null, lost: false });
     // Permission given: device labels (and ids, in some browsers) are listed now.
     void this.refreshDevices();
     return live;
@@ -284,15 +310,16 @@ export class LocalMedia {
 
   /**
    * Choose the `kind` device `deviceId` (null: the browser's default) and remember it. If
-   * `kind` is on, its track is swapped for one from the new device.
+   * `kind` is on, or was just lost, its track is swapped for one from the new device.
    */
   async select(kind: LocalDeviceKind, deviceId: string | null): Promise<void> {
     if (deviceId === this.#state.selected[kind]) return;
     this.#set({ selected: { ...this.#state.selected, [kind]: deviceId } });
     this.#saveSelected();
-    if (this.#state[kind].status === "off") return;
-    // Some cameras can't be opened twice, so the old one stops first.
-    this.disable(kind);
+    if (this.#state[kind].status === "off" && !this.#state[kind].lost) return;
+    // Some cameras can't be opened twice, so the old one stops first (a lost one is stopped
+    // already, and stays lost if this one fails too).
+    if (!this.#state[kind].lost) this.disable(kind);
     await this.enable(kind);
   }
 
@@ -353,9 +380,9 @@ export class LocalMedia {
     // Music, not speech: encoded for fidelity.
     if (audio) audio.contentHint = "music";
     // The browser's own "stop sharing" (or the shared window closing): it's off now.
-    video.addEventListener("ended", () => {
+    video.onended = () => {
       if (this.#state.share.track === video) this.stopShare();
-    });
+    };
     this.#set({ share: { status: "on", track: video, audio, failure: null } });
     return video;
   }
@@ -380,6 +407,13 @@ export class LocalMedia {
       if (!track) throw new DOMException("no track", "NotFoundError");
       return track;
     });
+  }
+
+  /** `kind`'s device went away: stop its track and mark it lost. */
+  #lose(kind: LocalDeviceKind): void {
+    this.#attempt[kind]++;
+    this.#state[kind].track?.stop();
+    this.#setTrack(kind, { ...OFF, lost: true });
   }
 
   #onDeviceChange = () => {

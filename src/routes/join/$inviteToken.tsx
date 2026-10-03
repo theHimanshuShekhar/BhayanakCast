@@ -6,6 +6,7 @@ import { DeviceCheck, useDeviceState } from "~/components/room/lobby";
 import { SignInButton } from "~/components/sign-in-button";
 import { Btn, MonoCaps } from "~/components/ui";
 import { useCurrentSession } from "~/lib/current-user";
+import { privateRoomMeta } from "~/lib/embed";
 import { type InvitedRoom, invitePath } from "~/lib/invites";
 import { inviteQuery } from "~/lib/invites.queries";
 import { type KnockState, useKnock } from "~/lib/knock-live";
@@ -18,6 +19,10 @@ import { roomKeys } from "~/lib/rooms.queries";
 export const Route = createFileRoute("/join/$inviteToken")({
   loader: ({ context, params }) =>
     context.queryClient.ensureQueryData(inviteQuery(params.inviteToken)),
+  // Generic whether or not the token is valid, and no `og:url` at all: the link is the room's
+  // key, so nothing in the head may carry it or what it opens, and a crawler keeps the URL it
+  // was given (ADR 22).
+  head: ({ match }) => ({ meta: privateRoomMeta(match.context.origin) }),
   component: JoinRoute,
 });
 
@@ -44,7 +49,7 @@ function InvalidInvite() {
     <div className="px-10 py-20 text-center" role="alert">
       <h1 className="m-0 mb-2 text-lg">this invite link is no longer valid</h1>
       <p className="m-0 mb-4 text-muted text-[12.5px]">ask the host for a new one.</p>
-      <Link to="/" className="text-primary">
+      <Link to="/" className="text-primary-strong">
         back to rooms
       </Link>
     </div>

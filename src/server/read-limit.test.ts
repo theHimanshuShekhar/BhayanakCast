@@ -21,8 +21,8 @@ function allowed(
 }
 
 describe("public read limits", () => {
-  it("are search 30, profile 60 and home 120 a minute", () => {
-    expect(PUBLIC_READ_LIMITS).toEqual({ search: 30, profile: 60, home: 120 });
+  it("are search 30, card 30, profile 60 and home 120 a minute", () => {
+    expect(PUBLIC_READ_LIMITS).toEqual({ search: 30, card: 30, profile: 60, home: 120 });
     expect(PUBLIC_READ_WINDOW_MS).toBe(60_000);
   });
 

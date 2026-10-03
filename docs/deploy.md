@@ -46,6 +46,10 @@ In the Cloudflare Zero Trust dashboard, go to **Networks → Tunnels**, open the
 
 WebSockets are on by default for the zone (**Network → WebSockets**). Leave them on.
 
+### Link previews and Cloudflare's bot protection
+
+Discord, X, Slack, WhatsApp and the other link-preview crawlers read the page's `<meta>` tags and the room card image (ADR 22) through this hostname, so Cloudflare must let them in. Check **Security → Bots** for the zone. **Bot Fight Mode** challenges requests it scores as automated, and a crawler can't solve a challenge, so a blocked one shows the link as bare text. Cloudflare keeps a list of verified bots (Discordbot, Twitterbot, facebookexternalhit, Slackbot and others) that it doesn't challenge, so the default settings should work, but test it once after deploy with the checklist below. If a crawler is challenged, add a **Security → WAF → Custom rules** skip rule for requests whose `cf.client.bot` is true (Bot Fight Mode on the free plan can't be skipped per rule, so the fallback there is to turn it off for the zone). Don't skip for a user agent alone: anyone can send it.
+
 ### Which IP the tunnel connects from (`TRUSTED_PROXY_IPS`)
 
 Every tunnelled request reaches the app from the cloudflared host, with the visitor's IP in the
@@ -253,6 +257,7 @@ file or mount on the host, which this git-backed stack avoids (ADR 9 addendum). 
 - [ ] The realtime socket connects through the tunnel: the lobby's online count updates, and a room opens.
 - [ ] The app log has no `Ignoring cf-connecting-ip from …` warning. If it does, fix `TRUSTED_PROXY_IPS` (step 2).
 - [ ] A two-person room works across two different networks (one on mobile data, if possible).
+- [ ] Link previews work through the tunnel (ADR 22): paste `https://cast.bhayanak.net` and a public live room's link into a Discord channel, and check both unfurl with the image and the accent colour bar. Then run the room link through the Facebook Sharing Debugger and the X card preview, or check `curl -sA Discordbot https://cast.bhayanak.net/ -L | grep og:` from outside the LAN. A private room's link must show only "A private room on BhayanakCast" (or "This room isn't available").
 - [ ] If you set the TURN usage variables: the dashboard's TURN usage panel was built from Cloudflare's docs and never run against the real API, so check the query once by hand. Run `curl -s https://api.cloudflare.com/client/v4/graphql -H "Authorization: Bearer $CLOUDFLARE_ANALYTICS_API_TOKEN" -H "Content-Type: application/json" --data '{"query":"query { viewer { accounts(filter: {accountTag: \"<account id>\"}) { callsTurnUsageAdaptiveGroups(limit: 10000, filter: {date_geq: \"<YYYY-MM-01>\", date_leq: \"<today>\"}) { dimensions { datetimeHour } sum { egressBytes } } } } }"}'` (query text: `TURN_EGRESS_QUERY` in `src/server/turn-usage.ts`). It should return `data` with no `errors`. Then open `/admin`: the panel shows a number, not "usage unavailable" (the app log says `[turn-usage] Cloudflare analytics failed` with the reason).
 - [ ] The `backup` container is **healthy**, and today's `bhayanakcast-YYYY-MM-DD.sql.gz` is on the NAS share: `docker exec <backup container> ls -l /nas` (section 5, Backups to the NAS).
 - [ ] The latest dump restores into a scratch database, and its table counts match the live database (section 5, Restore).

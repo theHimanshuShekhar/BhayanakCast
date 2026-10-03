@@ -67,7 +67,7 @@ function KnockToastList() {
       <Toast.Root
         key={toast.id}
         toast={toast}
-        className="flex flex-col gap-2.5 p-3 bg-surface border border-border-strong rounded-[var(--radius)] shadow-deep outline-0 transition-[opacity,translate] duration-150 data-starting-style:opacity-0 data-starting-style:-translate-y-1 data-ending-style:opacity-0"
+        className="flex flex-col gap-2.5 p-3 bg-surface border border-border-strong rounded-[var(--radius)] shadow-deep outline-0 transition-[opacity,translate] duration-150 data-starting-style:opacity-0 motion-safe:data-starting-style:-translate-y-1 data-ending-style:opacity-0"
       >
         <div className="flex items-center gap-2.5 min-w-0">
           <Avatar name={knocker.username} image={knocker.image} />

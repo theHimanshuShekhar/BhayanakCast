@@ -7,13 +7,13 @@ import { useSettings } from "~/lib/settings";
 import { Icon, type IconComponent } from "./icons";
 
 export const tipCls =
-  "max-sm:hidden pointer-events-none absolute left-[calc(100%+10px)] top-1/2 -translate-y-1/2 -translate-x-1 px-2.5 py-[5px] bg-surface-3 text-fg border border-border-strong rounded-md text-[11px] tracking-[0.02em] whitespace-nowrap opacity-0 transition-[opacity,transform] duration-150 z-[100] shadow-pop group-hover:opacity-100 group-hover:translate-x-0 group-focus-visible:opacity-100 group-focus-visible:translate-x-0";
+  "max-sm:hidden pointer-events-none absolute left-[calc(100%+10px)] top-1/2 -translate-y-1/2 motion-safe:-translate-x-1 px-2.5 py-[5px] bg-surface-3 text-fg border border-border-strong rounded-md text-[11px] tracking-[0.02em] whitespace-nowrap opacity-0 transition-[opacity,transform] duration-150 z-[100] shadow-pop group-hover:opacity-100 group-hover:translate-x-0 group-focus-visible:opacity-100 group-focus-visible:translate-x-0";
 
 export const railBase =
   "group relative w-10 h-10 max-sm:w-11 max-sm:h-11 rounded-[10px] grid place-items-center transition-[background-color,color] duration-150 cursor-pointer";
 const railIdle = "text-muted hover:bg-surface hover:text-fg";
 const railActive =
-  "bg-primary-soft text-primary shadow-[0_0_0_1px_color-mix(in_oklch,var(--color-primary)_40%,transparent),0_0_16px_var(--color-primary-glow)]";
+  "bg-primary-soft text-primary-strong shadow-[0_0_0_1px_color-mix(in_oklch,var(--color-primary)_40%,transparent),0_0_16px_var(--color-primary-glow)]";
 
 const RailInner = ({
   icon: I,
@@ -141,7 +141,7 @@ export const SideNav = ({
         aria-label="BhayanakCast home"
         // "Active Rooms" below is the same link, so keyboard users get it once.
         tabIndex={-1}
-        className="max-sm:hidden w-10 h-10 rounded-[10px] grid place-items-center bg-surface-2 border border-border font-extrabold text-[11px] tracking-[0.08em] text-primary shadow-card mb-2 hover:shadow-[var(--shadow-card),0_0_18px_var(--color-primary-glow)] transition-shadow no-underline hover:no-underline"
+        className="max-sm:hidden w-10 h-10 rounded-[10px] grid place-items-center bg-surface-2 border border-border font-extrabold text-[11px] tracking-[0.08em] text-primary-strong shadow-card mb-2 hover:shadow-[var(--shadow-card),0_0_18px_var(--color-primary-glow)] transition-shadow no-underline hover:no-underline"
       >
         BC
       </Link>
