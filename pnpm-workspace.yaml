@@ -2,3 +2,6 @@ allowBuilds:
   esbuild: true
 overrides:
   "@esbuild-kit/core-utils>esbuild": ^0.25.0
+  # GHSA-px8p-9vwx-vf98: satori pins fflate 0.7.3 exactly (still in satori 0.35). Only its
+  # inflateSync (WOFF fonts) is used, not the affected unzipSync, but 0.7.5 is the same API.
+  fflate@<0.7.5: 0.7.5
