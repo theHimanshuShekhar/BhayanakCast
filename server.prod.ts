@@ -7,10 +7,11 @@
  * Run after `pnpm build` with `pnpm start` (Node runs this .ts file natively).
  */
 import { fileURLToPath } from "node:url";
-import { getDb } from "./src/db/client.ts";
+import { closeDb, getDb } from "./src/db/client.ts";
 import { env } from "./src/server/env.ts";
 import { startMaintenance } from "./src/server/maintenance.ts";
 import { createProdServer } from "./src/server/prod-server.ts";
+import { createShutdown } from "./src/server/shutdown.ts";
 
 type ServerEntry = { fetch(request: Request): Response | Promise<Response> };
 
@@ -19,7 +20,7 @@ const serverEntryUrl = new URL("./dist/server/server.js", import.meta.url).href;
 
 const { default: app } = (await import(serverEntryUrl)) as { default: ServerEntry };
 
-const { server } = createProdServer({
+const { server, stop } = createProdServer({
   app,
   clientDir,
   port: Number(process.env.PORT ?? 3000),
@@ -28,6 +29,19 @@ const { server } = createProdServer({
 });
 
 // Daily retention purge + stats roll-up (ADR 11).
-startMaintenance(getDb());
+const maintenance = startMaintenance(getDb());
 
 await server.serve();
+
+// `docker stop` sends SIGTERM and kills after 10 s. So: stop the maintenance timer, stop the
+// server (no new connections, realtime sockets closed, which checkpoints each presence interval),
+// end the database pool, whose sockets would keep the process alive, and exit. If a step hangs,
+// `createShutdown` exits after 8 s anyway.
+const shutdown = createShutdown([
+  { name: "maintenance", run: () => maintenance.stop() },
+  { name: "http server and realtime", run: () => stop() },
+  { name: "database pool", run: () => closeDb() },
+]);
+for (const signal of ["SIGTERM", "SIGINT"] as const) {
+  process.once(signal, () => void shutdown(signal));
+}

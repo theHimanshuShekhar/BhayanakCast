@@ -19,6 +19,21 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # The smoke boot's database. The major matches the compose `db`; the tag isn't digest-pinned
+    # (nothing is deployed from here, and Dependabot doesn't track workflow services).
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: bhayanakcast
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v7
 
@@ -59,6 +74,24 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      # Boots the production server as the Dockerfile does (`node src/db/migrate.ts && node
+      # server.prod.ts`, unbundled on Node's type stripping) against the throwaway Postgres above,
+      # and polls /api/health. Catches what only fails at runtime: syntax Node can't strip, a bad
+      # import, a failing migration, the fail-closed env check. The values are dummies but valid.
+      # It shows in CI; it doesn't gate the deploy (docs/deploy.md).
+      - name: Smoke boot (production server)
+        timeout-minutes: 3
+        run: scripts/smoke-boot.sh
+        env:
+          NODE_ENV: production
+          PORT: "3000"
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/bhayanakcast
+          BETTER_AUTH_URL: http://localhost:3000
+          BETTER_AUTH_SECRET: ci-smoke-boot-secret-0123456789abcdef
+          DISCORD_CLIENT_ID: ci-discord-client-id
+          DISCORD_CLIENT_SECRET: ci-discord-client-secret
+          TRUSTED_PROXY_IPS: 127.0.0.1
 
       # backup.sh declares its shell (busybox ash) in a `shellcheck shell=` directive.
       - name: Shellcheck (backup sidecar)

@@ -31,12 +31,14 @@ export function createDb(url: string, options: postgres.Options<Record<string, n
   return { db, close: () => client.end() };
 }
 
-let cached: ReturnType<typeof createDb> | undefined;
-
-// A process global, not a module variable: the built SSR bundle and
-// server.prod.ts each load their own copy of this module.
+// Process globals, not module variables: the built SSR bundle and server.prod.ts each load their
+// own copy of this module, and they must share one pool so `closeDb` can end it.
 const PROVIDED_DB = Symbol.for("bhayanakcast.providedDb");
-const registry = globalThis as { [PROVIDED_DB]?: Db };
+const POOL = Symbol.for("bhayanakcast.dbPool");
+const registry = globalThis as {
+  [PROVIDED_DB]?: Db;
+  [POOL]?: ReturnType<typeof createDb>;
+};
 
 /**
  * Serve every `getDb()` in this process from `db` instead of DATABASE_URL.
@@ -51,8 +53,16 @@ export function provideDb(db: Db): void {
 export function getDb(): Db {
   const provided = registry[PROVIDED_DB];
   if (provided) return provided;
-  if (!cached) {
-    cached = createDb(env.DATABASE_URL);
-  }
-  return cached.db;
+  registry[POOL] ??= createDb(env.DATABASE_URL);
+  return registry[POOL].db;
+}
+
+/**
+ * End the pool `getDb()` created, waiting for running queries. Without it the pool's sockets keep
+ * the process from exiting. A no-op when there is none (a provided database is the caller's).
+ */
+export async function closeDb(): Promise<void> {
+  const pool = registry[POOL];
+  registry[POOL] = undefined;
+  await pool?.close();
 }
