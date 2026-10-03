@@ -12,7 +12,7 @@ The stack has three services:
 
 | Service | What it does |
 |---|---|
-| `app` | Built from the `Dockerfile` (Node 26, pnpm via corepack; the base image, corepack and pnpm are pinned, see Pinned images). On start it applies pending Drizzle migrations (`node src/db/migrate.ts`), then serves pages, `/api/*` and the realtime socket `/ws` from one port (`node server.prod.ts`). Published only on `${HOST_BIND}:${HOST_PORT}` (default `10.1.1.160:3000`). Healthcheck: `GET /api/health`, healthy only while Postgres answers `select 1`. |
+| `app` | Built from the `Dockerfile` (Node 26, pnpm via corepack; the base image, corepack and pnpm are pinned, see Pinned images). On start it validates the environment and applies pending Drizzle migrations (`node src/db/migrate.ts`; a bad environment stops it before the schema changes), then serves pages, `/api/*` and the realtime socket `/ws` from one port (`node server.prod.ts`). Published only on `${HOST_BIND}:${HOST_PORT}` (default `10.1.1.160:3000`). Healthcheck: `GET /api/health`, healthy only while Postgres answers `select 1`. |
 | `db` | `postgres:17-alpine`, pinned by digest, with a named local Docker volume (`pgdata`). Never put it on the NAS CIFS share (ADR 9 addendum). Not published on any host port. Healthcheck: `pg_isready`. |
 | `backup` | Built from `backup/` (`postgres:17-alpine`, pinned by digest, plus pinned `rsync` and `supercronic`). Once at start, and then on `BACKUP_SCHEDULE` (nightly by default), it writes a compressed `pg_dump` to its `backups` volume, rsyncs it to the NAS share and prunes old dumps (section 5, Backups to the NAS). Healthcheck: the last run succeeded, recently. |
 

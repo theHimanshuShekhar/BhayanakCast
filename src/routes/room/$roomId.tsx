@@ -15,6 +15,7 @@ import { Sheet } from "~/components/overlays";
 import { ControlBtn } from "~/components/room/control-btn";
 import { DeviceLossNotice } from "~/components/room/device-loss-notice";
 import { KnockToasts } from "~/components/room/knock-toasts";
+import { LeaveGuard } from "~/components/room/leave-guard";
 import { failureText, Lobby } from "~/components/room/lobby";
 import { PeerAudio } from "~/components/room/peer-audio";
 import { QualityDebug } from "~/components/room/quality-debug";
@@ -561,7 +562,7 @@ function RoomPage({
   }, [out, detail.id]);
   // An admin ended the room: home says so.
   useEffect(() => {
-    if (live.ended) navigate({ to: "/", search: { ended: "admin" } });
+    if (live.ended) navigate({ to: "/", search: { ended: "admin" }, ignoreBlocker: true });
   }, [live.ended, navigate]);
 
   // Peer-to-peer media (ADR 1): every connection closes with the room (leave unmounts this).
@@ -704,7 +705,7 @@ function RoomPage({
 
   const leave = () => {
     markInRoom(detail.id, false);
-    navigate({ to: "/" });
+    navigate({ to: "/", ignoreBlocker: true });
   };
   // Chat and the feed name people by username: resolve it to the user id of whoever has (or,
   // if removed since, had) that name here.
@@ -1059,6 +1060,7 @@ function RoomPage({
         </div>
       </div>
 
+      <LeaveGuard roomId={detail.id} active={joined && !out} sentHome={live.ended} />
       {isPrivate && <KnockToasts roomId={detail.id} />}
       <DeviceLossNotice onRestored={(kind) => setMedia((m) => ({ ...m, [kind]: true }))} />
       {settings.showChat && (

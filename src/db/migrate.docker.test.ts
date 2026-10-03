@@ -3,14 +3,15 @@
  * it can't hold a lock against a second runner. Needs Docker; `pnpm test:migrate`. Each test gets
  * its own empty database in the one container.
  */
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import postgres from "postgres";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { type PostgresContainer, startPostgresContainer } from "./docker-postgres.ts";
 import {
   applyMigrations,
@@ -42,12 +43,12 @@ function writeMigrations(migrations: { tag: string; when: number; sql: string }[
   return folder;
 }
 
-/** Run `node src/db/migrate.ts` the way the container does. */
-async function runMigrateScript(databaseUrl: string) {
+/** Run `node src/db/migrate.ts` the way the container does (`env` adds to Vitest's NODE_ENV=test). */
+async function runMigrateScript(databaseUrl: string, env: Record<string, string> = {}) {
   try {
     const { stdout, stderr } = await promisify(execFile)(process.execPath, ["src/db/migrate.ts"], {
       cwd: repoRoot,
-      env: { ...process.env, DATABASE_URL: databaseUrl },
+      env: { ...process.env, DATABASE_URL: databaseUrl, ...env },
     });
     return { code: 0, stdout, stderr };
   } catch (err) {
@@ -176,6 +177,78 @@ describe("startup script", () => {
   it("refuses an unusable DATABASE_URL by saying what to do", async () => {
     const run = await runMigrateScript("postgres://bhayanakcast:pa/ss@db:5432/bhayanakcast");
     expect(run.code).toBe(1);
-    expect(run.stderr).toMatch(/DATABASE_URL .*percent-encode/);
+    expect(run.stderr).toMatch(/DATABASE_URL: .*percent-encode/);
+  });
+
+  it("validates the whole environment before it touches the database", async () => {
+    // A production environment missing its secrets, against a database that is up: nothing may
+    // be migrated, or a bad deploy would change the schema and then refuse to start.
+    const run = await runMigrateScript(dbUrl, {
+      NODE_ENV: "production",
+      BETTER_AUTH_SECRET: "",
+      TRUSTED_PROXY_IPS: "",
+    });
+    expect(run.code).toBe(1);
+    expect(run.stderr).toMatch(/Invalid environment configuration/);
+    expect(run.stderr).toMatch(/BETTER_AUTH_SECRET/);
+    expect(run.stdout).not.toContain("Migrations applied");
+    expect(await tableExists("drizzle.__drizzle_migrations")).toBe(false);
   });
 });
+
+// Needs `pnpm build` (server.prod.ts serves dist/); CI builds before this suite.
+describe.skipIf(!fs.existsSync(path.join(repoRoot, "dist/server/server.js")))(
+  "production server",
+  () => {
+    it("exits by itself, with code 0, soon after SIGTERM", async () => {
+      await applyMigrations(client, realMigrations);
+      // The env schema wants a real port (not 0), so ask the OS for a free one.
+      const probe = net.createServer();
+      await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
+      const freePort = (probe.address() as net.AddressInfo).port;
+      await new Promise((resolve) => probe.close(resolve));
+      const server = spawn(process.execPath, ["server.prod.ts"], {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          NODE_ENV: "production",
+          PORT: String(freePort),
+          DATABASE_URL: dbUrl,
+          BETTER_AUTH_URL: "http://localhost:3000",
+          BETTER_AUTH_SECRET: "migrate-test-secret-0123456789abcdef",
+          DISCORD_CLIENT_ID: "id",
+          DISCORD_CLIENT_SECRET: "secret",
+          TRUSTED_PROXY_IPS: "127.0.0.1",
+        },
+      });
+      let output = "";
+      server.stdout.on("data", (chunk) => {
+        output += chunk;
+      });
+      server.stderr.on("data", (chunk) => {
+        output += chunk;
+      });
+      const exited = new Promise<{ code: number | null; signal: string | null }>((resolve) =>
+        server.once("exit", (code, signal) => resolve({ code, signal })),
+      );
+      try {
+        // The pool is open by then: the maintenance pass queries the database on boot.
+        await vi.waitFor(() => expect(output).toMatch(/\[maintenance\] sessions/), {
+          timeout: 30_000,
+        });
+        const sent = Date.now();
+        server.kill("SIGTERM");
+        const result = await Promise.race([
+          exited,
+          new Promise<"hung">((resolve) => setTimeout(() => resolve("hung"), 10_000)),
+        ]);
+        // 10 s is Docker's grace before SIGKILL.
+        expect(result, output).not.toBe("hung");
+        expect(result, output).toEqual({ code: 0, signal: null });
+        expect(Date.now() - sent).toBeLessThan(10_000);
+      } finally {
+        server.kill("SIGKILL");
+      }
+    });
+  },
+);

@@ -9,7 +9,7 @@
 import { Debouncer } from "@tanstack/pacer";
 import { type QueryClient, type QueryKey, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useSyncExternalStore } from "react";
-import { banNoticeHref } from "./ban";
+import { banNoticeHref, markLeavingForBan } from "./ban";
 import { homeKeys } from "./home.queries";
 import type { ServerMessage } from "./realtime";
 import { getRealtimeClient } from "./realtime-client";
@@ -162,6 +162,7 @@ function follow(queryClient: QueryClient): () => void {
     if (message.type === "error" && message.code === "banned") {
       // An admin banned this user (ADR 6), which ended their session: load home afresh as a
       // visitor, with the ban notice, so nothing the page holds as them survives.
+      markLeavingForBan();
       window.location.assign(banNoticeHref(message.message));
       return;
     }

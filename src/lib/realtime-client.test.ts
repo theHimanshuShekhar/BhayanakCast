@@ -13,8 +13,11 @@ class FakeSocket extends EventTarget {
   readyState = FakeSocket.CONNECTING;
   readonly sent: unknown[] = [];
 
-  constructor(readonly url: string) {
+  readonly url: string;
+
+  constructor(url: string) {
     super();
+    this.url = url;
     FakeSocket.instances.push(this);
   }
 
