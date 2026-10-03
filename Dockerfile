@@ -29,7 +29,9 @@ WORKDIR /app
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 # server.prod.ts runs unbundled on Node's native TypeScript support and imports
-# from src/server and src/db; migrations are applied from ./drizzle at start.
+# from src/server and src/db. migrate.ts validates the whole environment, then applies migrations
+# from ./drizzle, so a bad environment stops the container before the schema changes. CI boots this
+# same command (scripts/smoke-boot.sh); keep it the same as docker-compose.yml's `command`.
 COPY package.json server.prod.ts ./
 COPY src ./src
 COPY drizzle ./drizzle

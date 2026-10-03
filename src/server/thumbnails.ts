@@ -30,11 +30,12 @@ export class NotStreamingError extends Error {
 
 /** Thrown for an upload that isn't a WebP or JPEG within the byte and pixel limits. */
 export class InvalidThumbnailError extends Error {
-  constructor(
-    message: string,
-    readonly reason: "type" | "size",
-  ) {
+  readonly reason: "type" | "size";
+
+  // Not a parameter property: Node's type stripping can't run those (erasableSyntaxOnly).
+  constructor(message: string, reason: "type" | "size") {
     super(message);
+    this.reason = reason;
     this.name = "InvalidThumbnailError";
   }
 }

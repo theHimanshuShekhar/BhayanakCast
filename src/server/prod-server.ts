@@ -10,6 +10,9 @@ import { CLIENT_IP_HEADER, createClientIpResolver, rewriteClientIpHeader } from 
 import { attachRealtime, type RealtimeOptions, type RealtimeServer } from "./realtime.ts";
 import { hashedAssetCaching, securityHeaders, withPrivateCaching } from "./security-headers.ts";
 
+/** How long `stop` lets requests in flight finish before closing their connections. */
+const STOP_GRACE_MS = 5_000;
+
 export interface ProdServerOptions {
   app: { fetch(request: Request): Response | Promise<Response> };
   /** The built client assets (`dist/client`). */
@@ -22,7 +25,7 @@ export interface ProdServerOptions {
   realtime?: Omit<RealtimeOptions, "trustedProxies" | "closeUnknownUpgrades">;
 }
 
-/** The server, not yet listening (call `server.serve()`), and its realtime endpoint. */
+/** The server, not yet listening (call `server.serve()`), its realtime endpoint, and `stop`. */
 export function createProdServer(options: ProdServerOptions) {
   const server = serve({
     fetch: withPrivateCaching((request) => options.app.fetch(request)),
@@ -31,6 +34,8 @@ export function createProdServer(options: ProdServerOptions) {
     port: options.port,
     hostname: options.hostname,
     manual: true,
+    // `stop` below is the shutdown: srvx's own would close the listener on SIGTERM and nothing else.
+    gracefulShutdown: false,
   });
 
   const httpServer = server.node?.server;
@@ -58,5 +63,21 @@ export function createProdServer(options: ProdServerOptions) {
     closeUnknownUpgrades: true,
   });
 
-  return { server, realtime };
+  /**
+   * Stop taking connections, close every realtime socket, and wait for requests in flight. What
+   * is still open after `graceMs` is closed by force, so this can't hang on a stuck request.
+   */
+  async function stop(graceMs = STOP_GRACE_MS): Promise<void> {
+    // Started first, not awaited: it finishes only once the sockets below are closed.
+    const closing = server.close();
+    const forced = setTimeout(() => void server.close(true), graceMs);
+    try {
+      await realtime.close();
+      await closing;
+    } finally {
+      clearTimeout(forced);
+    }
+  }
+
+  return { server, realtime, stop };
 }
