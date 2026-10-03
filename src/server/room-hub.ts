@@ -22,6 +22,11 @@
  * before they are queued, and closes a socket that floods it or has `MAX_PENDING_MESSAGES`
  * waiting (ADR 4 addendum).
  *
+ * A database write that fails mustn't strand the in-memory state it was part of: leaving and
+ * emptying a room log it and carry on, a room end that fails is retried with a backoff while the
+ * room stays ended here, and restart recovery retries until it succeeds (ADR 4 addendum).
+ * `stop()` ends the retries on shutdown.
+ *
  * Adding a client message: add it to the protocol (src/lib/realtime.ts) and a handler to
  * `#handlers` below (the type checker insists). Refusals go through `#refuse(conn, code, …)`.
  */
@@ -92,6 +97,13 @@ export const HOST_GRACE_MS = 30_000;
  * overrides it (e2e runs use a short one).
  */
 export const EMPTY_ROOM_TIMEOUT_MS = 5 * 60_000;
+/**
+ * Restart recovery, and a room end that didn't reach the database, try again after
+ * `RETRY_BASE_MS`, then twice as long each time, never longer than `RETRY_MAX_MS`.
+ */
+export const RETRY_BASE_MS = 1_000;
+export const RETRY_MAX_MS = 30_000;
+const retryDelay = (attempt: number) => Math.min(RETRY_BASE_MS * 2 ** attempt, RETRY_MAX_MS);
 
 /** A knock whose invite link doesn't open a live private room is refused with this. */
 const INVALID_INVITE = "This invite link is no longer valid";
@@ -287,6 +299,16 @@ export class RoomHub {
    * rejoin is answered with it (once). Memory only; admin ends are rare.
    */
   readonly #endedWhileAway = new Map<string, Set<string>>();
+  /**
+   * Rooms that ended in memory but whose end the database hasn't taken yet (`#retryEnd`), with
+   * the timer of the next try. Nobody can join them meanwhile, though the database says live.
+   */
+  readonly #endings = new Map<string, Timer>();
+  /** Restart recovery has succeeded; until then joins and knocks are refused (`#recover`). */
+  #restored = false;
+  #restoreRetry: Timer | undefined;
+  /** `stop` was called: no retries are scheduled or run. */
+  #stopped = false;
   #queue: Promise<void> = Promise.resolve();
   #queued = 0;
 
@@ -296,7 +318,7 @@ export class RoomHub {
     this.#log = deps.log ?? ((message, error) => console.error(`[realtime] ${message}`, error));
     this.#emptyRoomTimeoutMs = deps.emptyRoomTimeoutMs ?? EMPTY_ROOM_TIMEOUT_MS;
     // Restart recovery: the first thing on the queue, so joins wait for it.
-    void this.#enqueue(() => this.#restore());
+    void this.#enqueue(() => this.#recover(0));
     this.#scheduleCheckpoint();
   }
 
@@ -531,9 +553,14 @@ export class RoomHub {
         if (participant.grace) away.add(participant.userId);
         this.#cancelGrace(participant);
         participant.connection.roomId = null;
-        await this.#store.closePresence(room.id, participant.userId, leftAt);
+        // The room's end closes any interval these leave open (`RoomStore.endRoom`).
+        await this.#write("closing a presence interval", () =>
+          this.#store.closePresence(room.id, participant.userId, leftAt),
+        );
         if (participant.media.share) {
-          await this.#store.closeStream(room.id, participant.userId, leftAt);
+          await this.#write("closing a stream interval", () =>
+            this.#store.closeStream(room.id, participant.userId, leftAt),
+          );
         }
       }
       if (away.size) this.#endedWhileAway.set(room.id, away);
@@ -541,6 +568,25 @@ export class RoomHub {
       ended = await this.#endRoom(room, at);
     });
     return ended;
+  }
+
+  /**
+   * Shutting down: stop retrying restart recovery and room ends, for good (call it before the
+   * database goes). A room whose end hadn't landed stays live there, and the next boot's
+   * recovery ends it like any room nobody returns to (ADR 14). Work already queued still runs
+   * (`idle`).
+   */
+  stop(): void {
+    this.#stopped = true;
+    this.#restoreRetry?.cancel();
+    this.#restoreRetry = undefined;
+    if (this.#endings.size > 0) {
+      this.#log(`stopping with ${this.#endings.size} room end(s) not in the database`, [
+        ...this.#endings.keys(),
+      ]);
+    }
+    for (const timer of this.#endings.values()) timer.cancel();
+    this.#endings.clear();
   }
 
   /** Operations waiting on the queue or running (messages, disconnects, timers). */
@@ -587,6 +633,7 @@ export class RoomHub {
       if (!isSignedIn(caller)) {
         return this.#refuse(conn, "forbidden", "Sign in to join rooms", message.type);
       }
+      if (!this.#restored) return this.#refuseStarting(conn, message.type);
       const { roomId } = message;
       const user = caller.user;
       const current = this.#rooms.get(roomId)?.participants.get(user.id);
@@ -611,6 +658,10 @@ export class RoomHub {
       // Kicked is for good (ADR 15), admins included.
       if (await this.#store.isKicked(roomId, user.id)) {
         return this.#refuse(conn, "kicked", "You were removed from this room", message.type);
+      }
+      // Ended here, not yet in the database: the store would still hand it out as live.
+      if (this.#endings.has(roomId)) {
+        return this.#refuse(conn, "not_found", "That room isn't live", message.type);
       }
       const stored = await this.#store.findRoomFor(caller, roomId);
       if (!stored) {
@@ -801,8 +852,17 @@ export class RoomHub {
         username: participant.username,
       });
     }
-    await this.#store.closePresence(room.id, participant.userId, at);
-    if (participant.media.share) await this.#store.closeStream(room.id, participant.userId, at);
+    // A failed write mustn't skip what follows: with the host gone or the room empty, nothing
+    // else would start the host grace or the empty-room timer. An interval left open here is
+    // closed at its last checkpoint by the room's end, the user's next join or a restart (ADR 12).
+    await this.#write("closing a presence interval", () =>
+      this.#store.closePresence(room.id, participant.userId, at),
+    );
+    if (participant.media.share) {
+      await this.#write("closing a stream interval", () =>
+        this.#store.closeStream(room.id, participant.userId, at),
+      );
+    }
     if (!room.lastLeftAt || at > room.lastLeftAt) room.lastLeftAt = at;
     if (participant.userId === room.hostUserId) this.#hostGone(room);
     this.#updateKnockers(room);
@@ -822,7 +882,9 @@ export class RoomHub {
     // Nobody is here to hand host to (e.g. a new room's first visitor left before its creator
     // came): whoever joins next settles it.
     this.#cancelHostGrace(room);
-    await this.#store.markRoomEmpty(room.id, since);
+    // Without `lastEmptyAt` a restart would date the end from older times, but the timer is what
+    // ends the room now, so it starts regardless.
+    await this.#write("marking a room empty", () => this.#store.markRoomEmpty(room.id, since));
     const timer = this.#setTimer(this.#emptyRoomTimeoutMs, async () => {
       if (room.empty?.timer !== timer || this.#rooms.get(room.id) !== room) return;
       if (room.participants.size > 0) return;
@@ -847,7 +909,8 @@ export class RoomHub {
    * `room` ends at `endedAt` and is a past stream from now on: when it became empty if nobody
    * joined in time, or now if an admin ended it (`endRoomByAdmin`). Its intervals close, stats
    * roll up (ADR 11), and its chat and feed go with it (memory only, ADR 4 addendum). True if
-   * this ended it (it was still live in the database).
+   * this ended it (it was still live in the database), or will once the database takes the
+   * end: a write that fails is logged and retried (`#retryEnd`), and the room stays ended here.
    */
   async #endRoom(room: LiveRoom, endedAt: Date): Promise<boolean> {
     this.#cancelEmpty(room);
@@ -857,7 +920,13 @@ export class RoomHub {
     room.feed = [];
     // Its invite link opens nothing now.
     this.#invalidateKnocks(room);
-    const ended = await this.#endStoredRoom(room.id, endedAt);
+    let ended = true;
+    try {
+      ended = await this.#endStoredRoom(room.id, endedAt);
+    } catch (error) {
+      this.#log("ending a room failed, will retry", error);
+      this.#retryEnd(room.id, endedAt, 0);
+    }
     if (!room.isPrivate) {
       this.#lobbyChanged({ roomId: room.id, change: "ended", participantCount: 0 });
     }
@@ -866,13 +935,48 @@ export class RoomHub {
 
   /**
    * End `roomId` at `endedAt` in the database: its host interval and any open presence and
-   * stream intervals close, and its stats roll up. True if it was live until now.
+   * stream intervals close, and its stats roll up. True if it was live until now. Safe to
+   * repeat after a failure part-way: every step is a no-op once done, and the roll-up also
+   * runs for a room that an earlier try ended but didn't get to roll up.
    */
   async #endStoredRoom(roomId: string, endedAt: Date): Promise<boolean> {
     await this.#store.closeHostInterval(roomId, endedAt);
-    if (!(await this.#store.endRoom(roomId, endedAt))) return false;
+    const ended = await this.#store.endRoom(roomId, endedAt);
     await this.#store.rollupEndedRoom(roomId, this.#clock.now());
-    return true;
+    return ended;
+  }
+
+  /**
+   * The end of `roomId` didn't reach the database (attempt `attempt` failed): try again after a
+   * backoff until it does, or `stop`. At most one timer per room, and the wait stops growing at
+   * `RETRY_MAX_MS`. A room left live in the database would sit in the lists with nothing here to
+   * end it, so there's no giving up; until one try lands, no join reopens the room here.
+   */
+  #retryEnd(roomId: string, endedAt: Date, attempt: number): void {
+    if (this.#stopped) return;
+    const timer = this.#setTimer(retryDelay(attempt), async () => {
+      if (this.#endings.get(roomId) !== timer) return;
+      try {
+        await this.#endStoredRoom(roomId, endedAt);
+        this.#endings.delete(roomId);
+      } catch (error) {
+        this.#log("ending a room failed again, will retry", error);
+        this.#retryEnd(roomId, endedAt, attempt + 1);
+      }
+    });
+    this.#endings.set(roomId, timer);
+  }
+
+  /**
+   * Run a database write whose failure the caller can live with: log it and carry on, so the
+   * in-memory follow-ups after it still happen.
+   */
+  async #write(what: string, write: () => Promise<unknown>): Promise<void> {
+    try {
+      await write();
+    } catch (error) {
+      this.#log(`${what} failed`, error);
+    }
   }
 
   // -------------------------------------------------------------------------------------------
@@ -1116,6 +1220,28 @@ export class RoomHub {
   }
 
   /**
+   * `#restore`, and if it fails (the database isn't answering), again after a backoff until it
+   * succeeds or `stop`. It isn't blocking the queue meanwhile, so joins and knocks are refused
+   * (`#refuseStarting`) until it has: a room opened by a join first would be missing the people
+   * the last server left in it.
+   */
+  async #recover(attempt: number): Promise<void> {
+    if (this.#stopped) return;
+    try {
+      await this.#restore();
+      this.#restored = true;
+    } catch (error) {
+      const delay = retryDelay(attempt);
+      this.#log(`restart recovery failed, trying again in ${delay} ms`, error);
+      this.#restoreRetry = this.#setTimer(delay, () => this.#recover(attempt + 1));
+    }
+  }
+
+  #refuseStarting(conn: HubConnection, re: ClientMessageType): void {
+    this.#refuse(conn, "internal", "The server is still starting, try again in a moment", re);
+  }
+
+  /**
    * Restart recovery (ADR 4 addendum): reload live rooms with their roles, and treat everyone
    * whose presence interval the last server left open as having just disconnected. Those who
    * come back within the reconnect grace continue their interval; the rest close at their
@@ -1124,16 +1250,23 @@ export class RoomHub {
   async #restore(): Promise<void> {
     const now = this.#clock.now();
     for (const stored of await this.#store.loadLiveRooms()) {
-      if (this.#rooms.has(stored.id)) continue;
+      // Known already (created since boot), or ended here and waiting for the database to say so.
+      if (this.#rooms.has(stored.id) || this.#endings.has(stored.id)) continue;
       const room = this.#addRoom(stored);
       for (const presence of stored.presences) {
         if (!room.lastLeftAt || presence.lastSeenAt > room.lastLeftAt) {
           room.lastLeftAt = presence.lastSeenAt;
         }
         if (now.getTime() - presence.lastSeenAt.getTime() > RESTORE_STALE_AFTER_MS) {
-          await this.#store.closePresence(room.id, presence.userId, presence.lastSeenAt);
+          // Best effort, so one failed write can't leave the room half restored (a retry would
+          // skip it as known); the room's end closes what stays open.
+          await this.#write("closing a stale presence interval", () =>
+            this.#store.closePresence(room.id, presence.userId, presence.lastSeenAt),
+          );
           if (presence.sharing) {
-            await this.#store.closeStream(room.id, presence.userId, presence.lastSeenAt);
+            await this.#write("closing a stale stream interval", () =>
+              this.#store.closeStream(room.id, presence.userId, presence.lastSeenAt),
+            );
           }
           continue;
         }
@@ -1674,6 +1807,7 @@ export class RoomHub {
   async #knock(conn: HubConnection, message: ClientMessageOf<"knock.request">) {
     const caller = conn.caller;
     if (!isSignedIn(caller)) return;
+    if (!this.#restored) return this.#refuseStarting(conn, message.type);
     const stored = await this.#store.findInvitedRoom(message.inviteToken);
     // Every live room is in memory (created: `announce`; after a restart: `#restore`).
     const room = stored && this.#rooms.get(stored.id);
