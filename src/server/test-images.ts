@@ -74,3 +74,18 @@ export function webpHeader(
   }
   return bytes;
 }
+
+/** A real 64x36 lossy WebP, which decodes (the helpers above only declare a size). */
+export const WEBP_64X36 = Buffer.from(
+  "UklGRpoCAABXRUJQVlA4WAoAAAAgAAAAPwAAIwAASUNDUMgBAAAAAAHIAAAAAAQwAABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAAABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAAAChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAAAAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVogAAAAAAAA9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAAAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBuAGMALgAgADIAMAAxADZWUDggrAAAABAGAJ0BKkAAJAA+zVaeS6ekoqGwCqjwGYljALsz30sLf0DfakZXKpWXOt0tqi5vPYWSK+63HAiLAAD+uOTc33N8th+vRGdJzA2zeNKvE7d7aCZzbBr8XB37yX92UCs8JC5QjkUUQ1BLEy2G2jhC5g8JS72mnGycRjs2JilymgOtCn0mkWaP4Uk62iT9ck/G9d40cb0RDlRL9GXjxKmzR75snbBo4QL+0/kAAAA=",
+  "base64",
+);
+
+/** The size a PNG declares in its IHDR, or null if `bytes` isn't a PNG. */
+export function pngSize(bytes: Uint8Array): { width: number; height: number } | null {
+  const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  if (bytes.length < 24 || !signature.every((byte, i) => bytes[i] === byte)) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const isIhdr = String.fromCharCode(...bytes.subarray(12, 16)) === "IHDR";
+  return isIhdr ? { width: view.getUint32(16), height: view.getUint32(20) } : null;
+}

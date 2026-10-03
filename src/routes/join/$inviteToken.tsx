@@ -6,6 +6,7 @@ import { DeviceCheck, useDeviceState } from "~/components/room/lobby";
 import { SignInButton } from "~/components/sign-in-button";
 import { Btn, MonoCaps } from "~/components/ui";
 import { useCurrentSession } from "~/lib/current-user";
+import { privateRoomMeta } from "~/lib/embed";
 import { type InvitedRoom, invitePath } from "~/lib/invites";
 import { inviteQuery } from "~/lib/invites.queries";
 import { type KnockState, useKnock } from "~/lib/knock-live";
@@ -18,6 +19,9 @@ import { roomKeys } from "~/lib/rooms.queries";
 export const Route = createFileRoute("/join/$inviteToken")({
   loader: ({ context, params }) =>
     context.queryClient.ensureQueryData(inviteQuery(params.inviteToken)),
+  // Generic whether or not the token is valid, and no URL naming it: the link is the room's key,
+  // so nothing in a tag may carry it or what it opens (ADR 22).
+  head: ({ match }) => ({ meta: privateRoomMeta(match.context.origin) }),
   component: JoinRoute,
 });
 

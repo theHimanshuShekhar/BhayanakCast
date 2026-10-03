@@ -38,3 +38,12 @@ export function limitPublicRead(kind: PublicRead): void {
   setResponseHeader("retry-after", String(PUBLIC_READ_WINDOW_MS / 1000));
   throw new ReadRateLimitedError();
 }
+
+/**
+ * `limitPublicRead` for an API route, which has the `Request` itself: whether its client IP may
+ * do a `kind` read now. The route answers 429 when not.
+ */
+export function allowPublicRead(request: Request, kind: PublicRead): boolean {
+  const ip = request.headers.get(CLIENT_IP_HEADER)?.trim() || "unknown";
+  return readLimiter.allow(kind, ip, new Date());
+}

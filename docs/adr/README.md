@@ -23,3 +23,4 @@
 | [19](0019-favorites-and-notifications.md) | Favorites are a badge; no notifications |
 | [20](0020-anonymous-lobby-socket.md) | Anonymous read-only lobby socket for visitors; upgrade on sign-in |
 | [21](0021-one-room-connection.md) | One room connection per user (takeover); full rooms refuse |
+| [22](0022-link-embeds.md) | Link embeds: OG/Twitter tags per page, satori + resvg room cards, nothing private in a tag |
