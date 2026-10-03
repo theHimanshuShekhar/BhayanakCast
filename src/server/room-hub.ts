@@ -219,8 +219,12 @@ interface LiveRoom {
   feed: FeedEntry[];
   /** `hostUserId`'s host interval is known to be open (`RoomStore.setHost` has run). */
   hostRecorded: boolean;
-  /** Set while the host is away (ADR 14): until when, and the timer that hands host on. */
-  hostGrace?: { until: Date; timer: Timer };
+  /**
+   * Set while the host is away (ADR 14): until when, and the timer that hands host on. With
+   * `returning`, the host is here and the timer only retries writing their return (`room.join`):
+   * nobody is shown it as an absence, and the host leaving or dropping starts a real grace.
+   */
+  hostGrace?: { until: Date; timer: Timer; returning?: boolean };
   /** The latest time anyone left (a presence interval closed); where an emptied room ends. */
   lastLeftAt?: Date;
   /** Set while nobody is here (ADR 14): since when, and the timer that ends the room. */
@@ -599,9 +603,9 @@ export class RoomHub {
    * refused and stats rolled up. Anyone in their reconnect grace hears `ended` when they rejoin.
    * A live room this hub doesn't hold (not loaded) ends in the database only, on the same queue
    * as joins, so none can load it meanwhile. True if this call ended the room; false if it
-   * wasn't live (already ended, say by its empty-room timer, or unknown). Also true when the
-   * database write failed: the room is ended here, and the end is retried until it lands
-   * (`#retryEnd`).
+   * wasn't live (already ended, say by its empty-room timer or an earlier call whose database
+   * write is still being retried, or unknown). Also true when the database write failed: the
+   * room is ended here, and the end is retried until it lands (`#retryEnd`).
    */
   async endRoomByAdmin(roomId: string): Promise<boolean> {
     let ended = false;
@@ -609,6 +613,10 @@ export class RoomHub {
       const at = this.#clock.now();
       const room = this.#rooms.get(roomId);
       if (!room) {
+        // Already ended here, its end not yet in the database (`#retryEnd`): that retry carries
+        // it at the time it ended, and nothing is audited twice, as for a room an empty-room
+        // timer ended.
+        if (this.#endings.has(roomId)) return;
         ended = await this.#endStoredRoom(roomId, at);
         return;
       }
@@ -707,9 +715,12 @@ export class RoomHub {
       if (!this.#restored) return this.#refuseStarting(conn, message.type);
       const { roomId } = message;
       const user = caller.user;
-      const current = this.#rooms.get(roomId)?.participants.get(user.id);
-      if (conn.roomId === roomId && current?.connection === conn) {
-        // Already here: a repeated join just resends the snapshot.
+      const live = this.#rooms.get(roomId);
+      const current = live?.participants.get(user.id);
+      if (live && conn.roomId === roomId && current?.connection === conn) {
+        // Already here: a repeated join just resends the snapshot, after finishing a host's
+        // return that a failed write left undone (the join below was answered `internal`).
+        if (await this.#hostBack(live, user.id)) this.#announceHost(live, this.#clock.now(), conn);
         return this.#sendSnapshot(conn, roomId);
       }
 
@@ -791,7 +802,10 @@ export class RoomHub {
       } catch (error) {
         // The join failed, so the room is as empty as before and must still end on time.
         if (room.participants.size === 0 && !room.empty) {
-          await this.#roomEmptied(room, emptySince ?? joinedAt);
+          // Only the time left since it became empty, so failing joins can't keep it open.
+          const since = emptySince ?? joinedAt;
+          const left = this.#emptyRoomTimeoutMs - (this.#clock.now().getTime() - since.getTime());
+          await this.#roomEmptied(room, since, Math.max(0, left));
         }
         throw error;
       }
@@ -814,9 +828,25 @@ export class RoomHub {
       conn.roomId = roomId;
       let back = false;
       let newHost = false;
-      if (takesHost) newHost = await this.#takeHost(room, user.id, joinedAt);
-      else if (awaitsCreator) this.#startHostGrace(room, joinedAt);
-      else back = await this.#hostBack(room, user.id);
+      // The joiner is in the room now, so a failed host write mustn't abandon the join: nothing
+      // would announce them, update the lobby or start the host grace. It is logged, the join
+      // finishes, and the host grace below hands host over, retrying until the write lands.
+      let hostWriteFailed = false;
+      let returningHost = false;
+      try {
+        if (takesHost) newHost = await this.#takeHost(room, user.id, joinedAt);
+        else if (awaitsCreator) this.#startHostGrace(room, joinedAt);
+        else back = await this.#hostBack(room, user.id);
+      } catch (error) {
+        hostWriteFailed = true;
+        this.#log(`taking host in room ${room.id} failed`, error);
+        // The host is here, so the grace running (a visitor started it) only retries their
+        // return from now on, and isn't shown as an absence.
+        if (room.hostUserId === user.id && room.hostGrace) {
+          room.hostGrace.returning = true;
+          returningHost = true;
+        }
+      }
       this.#sendSnapshot(conn, roomId);
       this.#broadcast(
         room,
@@ -833,8 +863,16 @@ export class RoomHub {
           username: user.username,
         });
       }
-      if (back) this.#announceHost(room, joinedAt, conn);
+      if (back || returningHost) this.#announceHost(room, joinedAt, conn);
       this.#lobbyRoomCount(room);
+      // Host is still the absent one (or nobody): their grace starts and, if it runs out, host
+      // passes to whoever is here. A hostless room has no one to wait for, so its takeover is
+      // tried again after the first backoff, unannounced. When the joiner is the host themselves
+      // (the creator, or a host back after a restart), a host grace already running stays, marked
+      // as their return's retry: on expiry it retries the write instead of handing host on
+      // (`#startHostGrace`), and it isn't shown as an absence.
+      if (hostWriteFailed && room.hostUserId === null) this.#startHostGrace(room, joinedAt, 1);
+      else if (hostWriteFailed && room.hostUserId !== user.id) this.#hostGone(room);
     },
 
     "room.leave": async (conn) => {
@@ -947,9 +985,14 @@ export class RoomHub {
 
   /**
    * Nobody is left in `room`, the last of them since `since`: record it (`rooms.lastEmptyAt`)
-   * and start the timer that ends the room unless someone joins first.
+   * and start the timer that ends the room unless someone joins first (after `waitMs`, a whole
+   * empty-room timeout unless the caller says part of it has passed).
    */
-  async #roomEmptied(room: LiveRoom, since: Date): Promise<void> {
+  async #roomEmptied(
+    room: LiveRoom,
+    since: Date,
+    waitMs = this.#emptyRoomTimeoutMs,
+  ): Promise<void> {
     this.#cancelEmpty(room);
     // Nobody is here to hand host to (e.g. a new room's first visitor left before its creator
     // came): whoever joins next settles it.
@@ -957,7 +1000,7 @@ export class RoomHub {
     // Without `lastEmptyAt` a restart would date the end from older times, but the timer is what
     // ends the room now, so it starts regardless.
     await this.#bestEffort("marking a room empty", () => this.#store.markRoomEmpty(room.id, since));
-    const timer = this.#setTimer(this.#emptyRoomTimeoutMs, async () => {
+    const timer = this.#setTimer(waitMs, async () => {
       if (room.empty?.timer !== timer || this.#rooms.get(room.id) !== room) return;
       if (room.participants.size > 0) return;
       await this.#endRoom(room, since);
@@ -1029,10 +1072,7 @@ export class RoomHub {
    */
   #retryEnd(roomId: string, endedAt: Date, failures: number, error: unknown): void {
     const delay = retryDelay(failures - 1);
-    this.#log(
-      `ending room ${roomId} failed (try ${failures}), ${this.#stopped ? "not retrying: stopped" : `trying again in ${delay} ms`}`,
-      error,
-    );
+    this.#log(`ending room ${roomId} failed (try ${failures}), ${this.#retryNote(delay)}`, error);
     if (this.#stopped) return;
     const timer = this.#setTimer(delay, async () => {
       if (this.#endings.get(roomId) !== timer) return;
@@ -1044,6 +1084,11 @@ export class RoomHub {
       }
     });
     this.#endings.set(roomId, timer);
+  }
+
+  /** The end of a failure's log line: when the retry comes, or that none does. */
+  #retryNote(delayMs: number): string {
+    return this.#stopped ? "not retrying: stopped" : `trying again in ${delayMs} ms`;
   }
 
   /**
@@ -1153,12 +1198,17 @@ export class RoomHub {
   /**
    * `userId` (present in `room`) is its host from `at`: persist it, opening their host interval
    * (nothing to write for a host whose interval is already open). Callers tell the room.
-   * True if host moved to someone else (worth a feed entry), not just (re)confirmed.
+   * True if host moved to someone else (worth a feed entry), not just (re)confirmed. Memory and
+   * the host grace change only once the write has landed: if it throws, host and the grace stay
+   * as they were, so a later try (or the grace) still finds the hand-over or return to do.
    */
   async #takeHost(room: LiveRoom, userId: string, at: Date): Promise<boolean> {
-    this.#cancelHostGrace(room);
-    if (room.hostUserId === userId && room.hostRecorded) return false;
+    if (room.hostUserId === userId && room.hostRecorded) {
+      this.#cancelHostGrace(room);
+      return false;
+    }
     await this.#store.setHost(room.id, userId, at);
+    this.#cancelHostGrace(room);
     const previous = room.hostUserId;
     if (previous && previous !== userId) room.roles.delete(previous);
     room.roles.set(userId, "host");
@@ -1177,7 +1227,8 @@ export class RoomHub {
 
   /**
    * The host just disconnected from or left `room`: unless nobody is left (whoever joins next
-   * becomes host), start the host grace if it isn't running yet, and tell everyone.
+   * becomes host), start the host grace if it isn't running yet, and tell everyone. A grace that
+   * is only a present host's return retry gives way to a full one.
    */
   #hostGone(room: LiveRoom): void {
     if (room.participants.size === 0) {
@@ -1186,7 +1237,7 @@ export class RoomHub {
       this.#cancelHostGrace(room);
       return;
     }
-    if (room.hostGrace) return;
+    if (room.hostGrace && !room.hostGrace.returning) return;
     const at = this.#clock.now();
     this.#startHostGrace(room, at);
     this.#announceHost(room, at);
@@ -1198,26 +1249,41 @@ export class RoomHub {
    * the hand-over is tried again after a backoff (`failures` so far), until it lands, the host
    * returns, the room ends or empties, or `stop`.
    */
-  #startHostGrace(room: LiveRoom, at: Date, failures = 0): void {
+  #startHostGrace(room: LiveRoom, at: Date, failures = 0, returning = false): void {
     this.#cancelHostGrace(room);
     const delay = failures === 0 ? HOST_GRACE_MS : retryDelay(failures - 1);
     const timer = this.#setTimer(delay, async (firedAt) => {
       if (room.hostGrace?.timer !== timer || this.#rooms.get(room.id) !== room) return;
       room.hostGrace = undefined;
+      let retryingReturn = false;
       try {
-        await this.#handOverHost(room, firedAt);
+        // A host here with a socket means the grace runs only because their return didn't write
+        // (`room.join`): finish that rather than give host away. (A ban or kick hands over
+        // while the host is still in the room, hence not in `#handOverHost`.)
+        const host = room.hostUserId ? room.participants.get(room.hostUserId) : undefined;
+        if (host && !host.grace) {
+          retryingReturn = true;
+          await this.#takeHost(room, host.userId, firedAt);
+          this.#announceHost(room, firedAt);
+        } else {
+          await this.#handOverHost(room, firedAt);
+        }
       } catch (error) {
         const next = retryDelay(failures);
         this.#log(
-          `handing host over in room ${room.id} failed (try ${failures + 1}), ${this.#stopped ? "not retrying: stopped" : `trying again in ${next} ms`}`,
+          `handing host over in room ${room.id} failed (try ${failures + 1}), ${this.#retryNote(next)}`,
           error,
         );
         if (!this.#stopped && room.participants.size > 0) {
-          this.#startHostGrace(room, at, failures + 1);
+          this.#startHostGrace(room, at, failures + 1, retryingReturn);
         }
       }
     });
-    room.hostGrace = { until: new Date(at.getTime() + HOST_GRACE_MS), timer };
+    room.hostGrace = {
+      until: new Date(at.getTime() + HOST_GRACE_MS),
+      timer,
+      ...(returning ? { returning } : {}),
+    };
   }
 
   /**
@@ -1278,6 +1344,13 @@ export class RoomHub {
     room.hostGrace = undefined;
   }
 
+  /** When the absent host's grace ends, as shown to clients; null if the host isn't away. */
+  #graceUntil(room: LiveRoom): string | null {
+    const grace = room.hostGrace;
+    // No host to wait for, or a present host whose return is only being retried.
+    return grace && room.hostUserId && !grace.returning ? grace.until.toISOString() : null;
+  }
+
   /** Tell everyone in `room` (but `except`) who the host is, and whether they're away. */
   #announceHost(room: LiveRoom, at: Date, except?: HubConnection): void {
     this.#broadcast(
@@ -1285,7 +1358,7 @@ export class RoomHub {
       {
         kind: "hostChanged",
         hostUserId: room.hostUserId,
-        graceUntil: room.hostGrace?.until.toISOString() ?? null,
+        graceUntil: this.#graceUntil(room),
       },
       at,
       except,
@@ -1369,7 +1442,7 @@ export class RoomHub {
       this.#restored = true;
     } catch (error) {
       const delay = retryDelay(attempt);
-      this.#log(`restart recovery failed (try ${attempt + 1}), trying again in ${delay} ms`, error);
+      this.#log(`restart recovery failed (try ${attempt + 1}), ${this.#retryNote(delay)}`, error);
       if (this.#stopped) return;
       this.#restoreRetry = this.#setTimer(delay, () => this.#recover(attempt + 1));
     }
@@ -1464,6 +1537,7 @@ export class RoomHub {
   #sendSnapshot(conn: HubConnection, roomId: string): void {
     const room = this.#rooms.get(roomId);
     if (!room) return;
+    const graceUntil = this.#graceUntil(room);
     this.#send(conn, {
       type: "room.snapshot",
       roomId,
@@ -1472,7 +1546,7 @@ export class RoomHub {
       participants: [...room.participants.values()].map((p) => this.#view(room, p)),
       chat: [...room.chat],
       feed: [...room.feed],
-      ...(room.hostGrace ? { hostGraceUntil: room.hostGrace.until.toISOString() } : {}),
+      ...(graceUntil ? { hostGraceUntil: graceUntil } : {}),
     });
     const participant = conn.caller.user && room.participants.get(conn.caller.user.id);
     if (participant?.connection !== conn) return;

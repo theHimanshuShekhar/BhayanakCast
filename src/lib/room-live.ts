@@ -306,8 +306,9 @@ export interface RoomLiveResult {
   room: RoomLive | null;
   /**
    * Why this page isn't (or is no longer) in the room, if it isn't: the server's refusal of its
-   * join (`not_found`; `room_full`, which the realtime client keeps retrying until a snapshot
-   * clears it; `kicked`), `taken_over` once the same user joined a room from another tab or
+   * join (`not_found`; `room_full`, and `internal` while the server is starting or a database
+   * call failed, which the realtime client keeps retrying until a snapshot clears them;
+   * `kicked`), `taken_over` once the same user joined a room from another tab or
    * device, `kicked` once a host, mod or admin removed them, or `session_ended` once they were
    * signed out (in another tab, or by revoking sessions).
    */

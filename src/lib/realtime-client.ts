@@ -180,6 +180,8 @@ export class RealtimeClient {
   /** Be in `roomId`: join now if connected, and again after every reconnect. */
   joinRoom(roomId: string): void {
     this.#stopFullRetry();
+    // A different room's refusals say nothing about this one's: its backoff starts over.
+    if (this.#roomId !== roomId) this.#fullAttempt = 0;
     this.#roomId = roomId;
     this.start();
     this.send({ type: "room.join", roomId });
