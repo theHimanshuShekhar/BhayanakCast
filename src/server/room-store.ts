@@ -22,6 +22,7 @@ import {
   streamIntervals,
   user,
 } from "../db/schema/index.ts";
+import { type AdminRole, toAdminRole } from "../lib/admin.ts";
 import type { RoomRole } from "../lib/realtime.ts";
 import type { SignedInCaller } from "./caller.ts";
 import { rollupEndedRoom } from "./stats.ts";
@@ -45,6 +46,8 @@ export interface OpenPresence {
   userId: string;
   username: string;
   image: string | null;
+  /** Their site-wide role, which no socket carries until they return (ADR 15). */
+  role: AdminRole;
   startedAt: Date;
   lastSeenAt: Date;
   /** They also have an open stream interval in the room (they were sharing). */
@@ -246,6 +249,7 @@ export function createDbRoomStore(db: Db): RoomStore {
           userId: presenceIntervals.userId,
           username: sql<string>`coalesce(${user.discordUsername}, ${user.name})`,
           image: user.image,
+          role: user.role,
           startedAt: presenceIntervals.startedAt,
           lastSeenAt: presenceIntervals.lastSeenAt,
         })
@@ -264,10 +268,12 @@ export function createDbRoomStore(db: Db): RoomStore {
         .from(streamIntervals)
         .where(and(inArray(streamIntervals.roomId, ids), isNull(streamIntervals.endedAt)));
       const sharing = new Set(streaming.map((s) => `${s.roomId}:${s.userId}`));
-      for (const { roomId, ...presence } of open) {
-        restored
-          .get(roomId)
-          ?.presences.push({ ...presence, sharing: sharing.has(`${roomId}:${presence.userId}`) });
+      for (const { roomId, role, ...presence } of open) {
+        restored.get(roomId)?.presences.push({
+          ...presence,
+          role: toAdminRole(role),
+          sharing: sharing.has(`${roomId}:${presence.userId}`),
+        });
       }
       return [...restored.values()];
     },

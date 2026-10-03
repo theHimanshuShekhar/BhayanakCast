@@ -47,6 +47,8 @@ export const IDLE_TIMEOUT_MS = 60_000;
 export const IDLE_CLOSE_CODE = 4000;
 /** The close code the server uses for the sockets of a user an admin banned (after `banned`). */
 export const BANNED_CLOSE_CODE = 4001;
+/** The close code the server uses for the sockets of a session that ended (sign-out, revoke). */
+export const SESSION_ENDED_CLOSE_CODE = 4003;
 /** Longest chat message after trimming, in UTF-16 code units (what an input's maxLength counts). */
 export const CHAT_MAX_LENGTH = 500;
 /** How many recent chat messages a live room keeps in memory for joiners (ADR 4 addendum). */

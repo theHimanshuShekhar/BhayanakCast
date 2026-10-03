@@ -6,9 +6,9 @@
  *   await hub.disconnect(connection);                   // it closed
  *
  * An admin ban reaches it as `hub.disconnectUser(userId, notice)`, an admin role change as
- * `hub.setUserRole(userId, role)`, an admin ending a room as `hub.endRoomByAdmin(roomId)`, and a
- * regenerated invite link as `hub.inviteRotated(roomId)`
- * (./live-hub.ts).
+ * `hub.setUserRole(userId, role)`, an admin ending a room as `hub.endRoomByAdmin(roomId)`, a
+ * regenerated invite link as `hub.inviteRotated(roomId)`, and a session that ended (sign-out,
+ * revoke) as `hub.sessionEnded(sessionId)` (./live-hub.ts).
  *
  * The WebSocket layer (./realtime.ts) is a thin adapter over these; tests drive the same
  * calls through real sockets (./realtime-harness.ts). The hub never touches `Date`, timers or
@@ -63,6 +63,7 @@ import {
   type RoomEvent,
   type RoomParticipant,
   type RoomRole,
+  SESSION_ENDED_CLOSE_CODE,
   type ServerMessage,
   SIGNAL_RATE_LIMIT,
 } from "../lib/realtime.ts";
@@ -105,6 +106,17 @@ export const RETRY_BASE_MS = 1_000;
 export const RETRY_MAX_MS = 30_000;
 const retryDelay = (attempt: number) => Math.min(RETRY_BASE_MS * 2 ** attempt, RETRY_MAX_MS);
 
+/**
+ * How long a user's rate-limit histories (chat, reactions, signalling) are kept once their last
+ * socket is gone: the longest window any of them counts, so a quick reconnect doesn't reset a
+ * limit, but nothing outlives its use.
+ */
+export const SEND_HISTORY_KEEP_MS = Math.max(
+  CHAT_RATE_LIMIT.windowMs,
+  REACTION_RATE_LIMIT.windowMs,
+  SIGNAL_RATE_LIMIT.windowMs,
+);
+
 /** A knock whose invite link doesn't open a live private room is refused with this. */
 const INVALID_INVITE = "This invite link is no longer valid";
 
@@ -131,9 +143,14 @@ export interface RoomHubDeps {
 
 class HubConnection implements Connection {
   readonly id: number;
-  /** Replaced when an admin promotes or demotes the user (`setUserRole`). */
+  /**
+   * Replaced when an admin promotes or demotes the user (`setUserRole`), which also reaches the
+   * closed connection of someone in their reconnect grace: it is what says if they're an admin.
+   */
   caller: Caller;
   readonly transport: Transport;
+  /** The Better Auth session it was opened with (null for an anonymous socket). */
+  readonly sessionId: string | null;
   /** Sent a valid `hello`. */
   greeted = false;
   /** Which visitor this anonymous socket counts as online (`#visitors`), once greeted. */
@@ -154,10 +171,11 @@ class HubConnection implements Connection {
   /** Per message type, when (epoch ms) its recent accepted messages arrived (`LIMITS_BY_TYPE`). */
   readonly recentByType = new Map<string, number[]>();
 
-  constructor(id: number, caller: Caller, transport: Transport) {
+  constructor(id: number, caller: Caller, transport: Transport, sessionId: string | null = null) {
     this.id = id;
     this.caller = caller;
     this.transport = transport;
+    this.sessionId = sessionId;
   }
 }
 
@@ -296,9 +314,10 @@ export class RoomHub {
   readonly #signalSends = new Map<string, number[]>();
   /**
    * Per room an admin ended, who was in their reconnect grace then and so missed `ended`: their
-   * rejoin is answered with it (once). Memory only; admin ends are rare.
+   * rejoin is answered with it (once). Memory only; admin ends are rare. Dropped when their
+   * reconnect grace is over (`timer`), as then they're out of the room anyway.
    */
-  readonly #endedWhileAway = new Map<string, Set<string>>();
+  readonly #endedWhileAway = new Map<string, { users: Set<string>; timer: Timer }>();
   /**
    * Rooms that ended in memory but whose end the database hasn't taken yet (`#retryEnd`), with
    * the timer of the next try. Nobody can join them meanwhile, though the database says live.
@@ -322,9 +341,12 @@ export class RoomHub {
     this.#scheduleCheckpoint();
   }
 
-  /** Register a newly opened socket for `caller` (a visitor for an anonymous socket). */
-  connect(transport: Transport, caller: Caller): Connection {
-    const conn = new HubConnection(this.#nextId++, caller, transport);
+  /**
+   * Register a newly opened socket for `caller` (a visitor for an anonymous socket), opened with
+   * the session `sessionId`, if any: `sessionEnded` closes it when that session ends.
+   */
+  connect(transport: Transport, caller: Caller, sessionId: string | null = null): Connection {
+    const conn = new HubConnection(this.#nextId++, caller, transport, sessionId);
     this.#connections.add(conn);
     const userId = caller.user?.id;
     if (userId) {
@@ -496,6 +518,25 @@ export class RoomHub {
   }
 
   /**
+   * The session `sessionId` ended (sign-out, revoke, expiry found out): every socket opened with
+   * it is closed (`SESSION_ENDED_CLOSE_CODE`), and its user is as for any lost socket (their
+   * reconnect grace in a room, then they leave). Sockets of the user's other sessions stay open.
+   */
+  sessionEnded(sessionId: string): Promise<void> {
+    return this.#enqueue(async () => {
+      for (const conn of [...this.#connections]) {
+        if (conn.sessionId !== sessionId) continue;
+        try {
+          conn.transport.close(SESSION_ENDED_CLOSE_CODE, "session ended");
+        } catch (error) {
+          this.#log("closing a signed-out socket failed", error);
+        }
+        await this.#drop(conn);
+      }
+    });
+  }
+
+  /**
    * The host regenerated `roomId`'s invite link (ADR 16): knocks pending through the old one end,
    * their knockers told it's no longer valid, as when the room ends.
    */
@@ -508,7 +549,8 @@ export class RoomHub {
 
   /**
    * An admin promoted `userId` to admin or demoted them (ADR 6 addendum): their open sockets
-   * gain or lose admin powers from their next message, without reconnecting. A new admin in a
+   * gain or lose admin powers from their next message, without reconnecting, and so does their
+   * place in a room while they're in their reconnect grace (ADR 15). A new admin in a
    * room gets the knocks already pending there, as a new mod would.
    */
   setUserRole(userId: string, role: AdminRole): Promise<void> {
@@ -521,6 +563,10 @@ export class RoomHub {
       });
       for (const conn of this.#connections) {
         if (conn.caller.user?.id === userId) conn.caller = { ...conn.caller, role };
+      }
+      // Someone in their reconnect grace has no open socket, but is the same admin (or not).
+      for (const { participant } of inRooms) {
+        participant.connection.caller = { ...participant.connection.caller, role };
       }
       for (const { room, participant, approved } of inRooms) {
         if (!approved) this.#sendPendingKnocks(room, participant);
@@ -560,7 +606,7 @@ export class RoomHub {
         // The room's end closes any interval these leave open (`RoomStore.endRoom`).
         await this.#closeIntervals(room.id, participant, leftAt);
       }
-      if (away.size) this.#endedWhileAway.set(room.id, away);
+      if (away.size) this.#noteEndedWhileAway(room.id, away);
       room.participants.clear();
       ended = await this.#endRoom(room, at);
     });
@@ -589,6 +635,18 @@ export class RoomHub {
   /** Operations waiting on the queue or running (messages, disconnects, timers). */
   get queued(): number {
     return this.#queued;
+  }
+
+  /**
+   * Per-user memory the hub holds, for tests and monitoring: rate-limit histories (one per user
+   * and kind) and rooms' ended-while-away notes. Both are bounded (`SEND_HISTORY_KEEP_MS`,
+   * `RECONNECT_GRACE_MS`).
+   */
+  get retained(): { sendHistories: number; endedWhileAway: number } {
+    return {
+      sendHistories: this.#chatSends.size + this.#reactionSends.size + this.#signalSends.size,
+      endedWhileAway: this.#endedWhileAway.size,
+    };
   }
 
   /** Resolves once every queued operation (messages, disconnects, timers) has finished. */
@@ -638,12 +696,9 @@ export class RoomHub {
         // Already here: a repeated join just resends the snapshot.
         return this.#sendSnapshot(conn, roomId);
       }
-      await this.#leaveRoom(conn);
 
       // Back from a reconnect grace during which an admin ended the room: tell them now.
-      const away = this.#endedWhileAway.get(roomId);
-      if (away?.delete(user.id)) {
-        if (away.size === 0) this.#endedWhileAway.delete(roomId);
+      if (this.#takeEndedWhileAway(roomId, user.id)) {
         return this.#send(conn, {
           type: "room.event",
           roomId,
@@ -691,6 +746,8 @@ export class RoomHub {
           message.type,
         );
       }
+      // Only now that the join can't be refused: a refusal leaves them in their current room.
+      await this.#leaveRoom(conn);
       await this.#takeOverElsewhere(user.id, roomId);
       await this.#endGraceElsewhere(user.id, roomId);
 
@@ -1328,11 +1385,10 @@ export class RoomHub {
           username: presence.username,
           image: presence.image,
           joinedAt: presence.startedAt,
-          connection: this.#goneConnection({
-            id: presence.userId,
-            username: presence.username,
-            image: presence.image,
-          }),
+          connection: this.#goneConnection(
+            { id: presence.userId, username: presence.username, image: presence.image },
+            presence.role,
+          ),
           // Their share lasts until they re-announce on return, or ends with the grace.
           media: { ...MEDIA_OFF, share: presence.sharing },
         };
@@ -1353,10 +1409,10 @@ export class RoomHub {
   }
 
   /** A stand-in, already-closed socket for someone restored from the DB with none yet. */
-  #goneConnection(user: SignedInCaller["user"]): HubConnection {
+  #goneConnection(user: SignedInCaller["user"], role: AdminRole): HubConnection {
     const conn = new HubConnection(
       this.#nextId++,
-      { user, role: "user" },
+      { user, role },
       { send: () => {}, close: () => {} },
     );
     conn.closed = true;
@@ -1447,8 +1503,47 @@ export class RoomHub {
    */
   #goOffline(conn: HubConnection): void {
     const userId = conn.caller.user?.id;
-    if (userId) this.#countOffline(this.#online, userId);
-    else if (conn.visitorKey) this.#countOffline(this.#visitors, conn.visitorKey);
+    if (userId) {
+      this.#countOffline(this.#online, userId);
+      if (!this.#online.has(userId)) this.#forgetSendsLater(userId);
+    } else if (conn.visitorKey) this.#countOffline(this.#visitors, conn.visitorKey);
+  }
+
+  /**
+   * `userId` has no socket left: drop their rate-limit histories after `SEND_HISTORY_KEEP_MS`,
+   * unless they have one again by then (their next exit schedules it again). Not at once: a
+   * reconnect would reset their limits.
+   */
+  #forgetSendsLater(userId: string): void {
+    this.#setTimer(SEND_HISTORY_KEEP_MS, () => {
+      if (this.#online.has(userId)) return;
+      this.#chatSends.delete(userId);
+      this.#reactionSends.delete(userId);
+      this.#signalSends.delete(userId);
+    });
+  }
+
+  /**
+   * An admin ended `roomId` while `users` were in their reconnect grace: remember to tell them
+   * when they rejoin (`#takeEndedWhileAway`), but only for as long as that grace would have run.
+   */
+  #noteEndedWhileAway(roomId: string, users: Set<string>): void {
+    this.#endedWhileAway.get(roomId)?.timer.cancel();
+    const timer = this.#setTimer(RECONNECT_GRACE_MS, () => {
+      if (this.#endedWhileAway.get(roomId)?.timer === timer) this.#endedWhileAway.delete(roomId);
+    });
+    this.#endedWhileAway.set(roomId, { users, timer });
+  }
+
+  /** True once if `userId` was away when an admin ended `roomId` and hasn't been told yet. */
+  #takeEndedWhileAway(roomId: string, userId: string): boolean {
+    const away = this.#endedWhileAway.get(roomId);
+    if (!away?.users.delete(userId)) return false;
+    if (away.users.size === 0) {
+      away.timer.cancel();
+      this.#endedWhileAway.delete(roomId);
+    }
+    return true;
   }
 
   /** One socket fewer for `key` in `openSockets`; the lobby hears of its last. */

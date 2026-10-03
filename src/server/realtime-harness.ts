@@ -47,7 +47,7 @@ import { attachRealtime, type RealtimeServer } from "./realtime.ts";
 import { RoomHub } from "./room-hub.ts";
 import { createDbRoomStore, type RoomStore } from "./room-store.ts";
 import { createRoom } from "./rooms.ts";
-import { callerFromSession, resolveSession, toHeaders } from "./session.ts";
+import { authenticatedFromSession, resolveSession, toHeaders } from "./session.ts";
 
 // Real time, not the fake clock's: how long a wait for a message (or for the server to see a
 // close) lasts before the test fails. Only a failing test ever waits it out, so it's generous: a
@@ -129,6 +129,8 @@ export interface ConnectOptions {
 
 export interface RealtimeHarness {
   db: Db;
+  /** The Better Auth instance the sockets authenticate against (for sign-out, revokes, bans). */
+  auth: ReturnType<typeof createAuth>;
   clock: FakeClock;
   /** The current hub (a new one after `restart`). */
   readonly hub: RoomHub;
@@ -136,6 +138,8 @@ export interface RealtimeHarness {
   url: string;
   /** A signed-in user with a real session, via the test-only sign-in. */
   createUser(username: string, options?: { admin?: boolean; image?: string }): Promise<TestUser>;
+  /** The same user signed in again: a second session, with its own cookie (another device). */
+  signInAgain(user: TestUser): Promise<TestUser>;
   /** A live public room hosted by `host` (through `createRoom`, like the create dialog). */
   createRoom(host: TestUser, input?: Partial<CreateRoomInput>): Promise<string>;
   /** Open a socket as `user` (null: no cookie) without the handshake. Rejects if refused. */
@@ -193,7 +197,7 @@ export async function startRealtimeHarness(
       hub,
       authenticate: async (request) => {
         await options.beforeAuthenticate?.(request);
-        return callerFromSession(await resolveSession(auth, toHeaders(request)));
+        return authenticatedFromSession(await resolveSession(auth, toHeaders(request)));
       },
       anonymousSocketsPerIp: options.anonymousSocketsPerIp ?? 100,
       socketsPerUser: options.socketsPerUser ?? 100,
@@ -212,14 +216,12 @@ export async function startRealtimeHarness(
   const clients = new Set<HarnessClient>();
   let nextDiscordId = 100_000;
 
-  async function createUser(username: string, options: { admin?: boolean; image?: string } = {}) {
-    const discordId = String(nextDiscordId++);
-    if (options.admin) adminDiscordIds.add(discordId);
+  async function signIn(discordId: string, username: string, image?: string): Promise<TestUser> {
     const response = await auth.handler(
       new Request(`${testEnv.BETTER_AUTH_URL}/api/auth/test/sign-in`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ discordId, username, image: options.image }),
+        body: JSON.stringify({ discordId, username, image }),
       }),
     );
     if (!response.ok) throw new Error(`Test sign-in failed: ${await response.text()}`);
@@ -229,6 +231,12 @@ export async function startRealtimeHarness(
       .map((c) => c.split(";")[0])
       .join("; ");
     return { id: userId, username, discordId, cookie };
+  }
+
+  async function createUser(username: string, options: { admin?: boolean; image?: string } = {}) {
+    const discordId = String(nextDiscordId++);
+    if (options.admin) adminDiscordIds.add(discordId);
+    return signIn(discordId, username, options.image);
   }
 
   function headersFor(user: TestUser | null, extra: Record<string, string> = {}) {
@@ -266,12 +274,14 @@ export async function startRealtimeHarness(
 
   return {
     db,
+    auth,
     clock,
     get hub() {
       return running.hub;
     },
     url,
     createUser,
+    signInAgain: (user) => signIn(user.discordId, user.username),
     async createRoom(host, input = {}) {
       const caller = {
         user: { id: host.id, username: host.username, image: null },

@@ -1,6 +1,12 @@
 import { and, asc, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { presenceIntervals, roomMembers, rooms, streamIntervals } from "../db/schema/index.ts";
+import {
+  presenceIntervals,
+  roomMembers,
+  rooms,
+  streamIntervals,
+  user,
+} from "../db/schema/index.ts";
 import { type ClientMessage, MEDIA_OFF } from "../lib/realtime.ts";
 import { ROOM_NAME_MAX } from "../lib/rooms.ts";
 import {
@@ -381,5 +387,64 @@ describe("admins", () => {
     });
     await h.settled();
     expect(c.received.some((m) => m.type === "error" && m.code === "kicked")).toBe(false);
+  });
+
+  // ADR 15: hosts and mods can't act on an admin, whether or not the admin has a socket (#63).
+  describe("who are away", () => {
+    it("stay immune to the host while in their reconnect grace, and a promotion in it counts", async () => {
+      const [a, b] = await inRoom([ana, bo]);
+      await b.close();
+      await h.settled();
+
+      // Promoted while their socket is gone: nothing has a socket to update, but the role is theirs.
+      await h.db.update(user).set({ role: "admin" }).where(eq(user.id, bo.id));
+      await h.hub.setUserRole(bo.id, "admin");
+      expect(await refused(a, { type: "mod.kick", userId: bo.id })).toMatchObject({
+        code: "forbidden",
+        message: "You can't moderate an admin",
+      });
+      expect(await refused(a, { type: "mod.setRole", userId: bo.id, role: "mod" })).toMatchObject({
+        code: "forbidden",
+      });
+      expect(await memberRow(bo.id)).toBeNull();
+
+      // Still in the room, and still an admin when they come back on a new socket.
+      const back = await h.connectAs(bo);
+      await back.join(roomId);
+      back.send({ type: "room.rename", name: "renamed by an admin who was away" });
+      await a.waitForEvent("renamed");
+    });
+
+    it("lose the immunity when demoted in their reconnect grace", async () => {
+      const root = await h.createUser("root", { admin: true });
+      const [a, r] = await inRoom([ana, root]);
+      await r.close();
+      await h.settled();
+      expect(await refused(a, { type: "mod.kick", userId: root.id })).toMatchObject({
+        code: "forbidden",
+      });
+
+      await h.hub.setUserRole(root.id, "user");
+      a.send({ type: "mod.kick", userId: root.id });
+      expect(await a.waitForEvent("kicked")).toMatchObject({ event: { userId: root.id } });
+    });
+
+    it("are still admins after a server restart restored them", async () => {
+      const root = await h.createUser("root", { admin: true });
+      await inRoom([ana, root]);
+
+      await h.restart({ downFor: 5 * SECOND });
+      // The host is back first; the admin is still in their grace, with no socket yet.
+      const [a] = await inRoom([ana]);
+      expect(await refused(a, { type: "mod.kick", userId: root.id })).toMatchObject({
+        code: "forbidden",
+        message: "You can't moderate an admin",
+      });
+
+      // A role change reaches them too.
+      await h.hub.setUserRole(root.id, "user");
+      a.send({ type: "mod.kick", userId: root.id });
+      expect(await a.waitForEvent("kicked")).toMatchObject({ event: { userId: root.id } });
+    });
   });
 });

@@ -7,6 +7,7 @@
  * (`cf-connecting-ip` only from a trusted proxy, ./client-ip.ts). A signed-in user may hold at
  * most `socketsPerUser` sockets (tabs and devices); more are refused with 429, like visitors'.
  * A socket that stops reading is dropped once `MAX_BUFFERED_BYTES` are waiting to be sent to it.
+ * The hub is told which session each socket was opened with and closes them when it ends.
  *
  * `ws` runs in no-server mode on the server's `upgrade` event and only takes upgrades on
  * `REALTIME_PATH`, leaving any others (Vite's HMR socket in dev) to their own listeners.
@@ -24,16 +25,17 @@ import { registerLiveHub } from "./live-hub.ts";
 import { onRoomAnnouncement } from "./room-announcements.ts";
 import { type Connection, RoomHub } from "./room-hub.ts";
 import { createDbRoomStore } from "./room-store.ts";
-import { callerFromSession, getSessionFromRequest } from "./session.ts";
+import { type Authenticated, authenticatedFromSession, getSessionFromRequest } from "./session.ts";
 
 export interface RealtimeOptions {
   /** Defaults to a hub on the system clock and the process database. */
   hub?: RoomHub;
   /**
-   * Who is opening the socket, from the upgrade request. Defaults to the Better Auth session
-   * cookie (banned users count as signed out).
+   * Who is opening the socket, and with which session, from the upgrade request. Defaults to the
+   * Better Auth session cookie (banned users count as signed out). A session that later ends
+   * closes its sockets (`RoomHub.sessionEnded`, from Better Auth's session-delete hook).
    */
-  authenticate?: (request: IncomingMessage) => Promise<Caller>;
+  authenticate?: (request: IncomingMessage) => Promise<Authenticated>;
   /**
    * Open anonymous sockets allowed per client IP (ADR 20); more are refused with 429.
    * Defaults to `REALTIME_ANONYMOUS_SOCKETS_PER_IP`.
@@ -70,8 +72,8 @@ export interface RealtimeServer {
   close(): Promise<void>;
 }
 
-const authenticateFromSession = async (request: IncomingMessage): Promise<Caller> =>
-  callerFromSession(await getSessionFromRequest(request));
+const authenticateFromSession = async (request: IncomingMessage): Promise<Authenticated> =>
+  authenticatedFromSession(await getSessionFromRequest(request));
 
 export function attachRealtime(server: Server, options: RealtimeOptions = {}): RealtimeServer {
   const hub =
@@ -99,7 +101,7 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
   const unregisterHub = registerLiveHub(hub);
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_CLIENT_MESSAGE_BYTES });
 
-  function serve(ws: WebSocket, caller: Caller): void {
+  function serve(ws: WebSocket, { caller, sessionId }: Authenticated): void {
     // Listeners first, so a close is never missed (`terminate` after a later throw fires it);
     // `connection` is set once the hub has registered the socket.
     let connection: Connection | undefined;
@@ -117,6 +119,7 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
         close: (code, reason) => ws.close(code, reason),
       },
       caller,
+      sessionId,
     );
     connection = registered;
     ws.on("message", (data, isBinary) => {
@@ -140,9 +143,9 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
   async function upgrade(request: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
     socket.on("error", () => socket.destroy());
     if (!isSameOrigin(request)) return refuse(socket, 403, "Forbidden");
-    let caller: Caller;
+    let authenticated: Authenticated;
     try {
-      caller = await authenticate(request);
+      authenticated = await authenticate(request);
     } catch (error) {
       console.error("[realtime] authenticating an upgrade failed", error);
       return refuse(socket, 500, "Internal Server Error");
@@ -150,6 +153,7 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
     // The client left while we were authenticating: `close` has already fired, so a count
     // taken now would never be released.
     if (socket.destroyed) return;
+    const { caller } = authenticated;
     // Held until the TCP socket closes, whether the handshake completes or not.
     if (caller.user) {
       if (!takeSlot(socketsByUser, caller.user.id, userLimit, socket)) {
@@ -165,7 +169,7 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
       // The 101 is already written, so a throw here can't be answered with an HTTP status
       // (`failUpgrade` would write it into the WebSocket stream): drop the socket instead.
       try {
-        serve(ws, caller);
+        serve(ws, authenticated);
       } catch (error) {
         console.error("[realtime] serving a new socket failed", error);
         ws.terminate();

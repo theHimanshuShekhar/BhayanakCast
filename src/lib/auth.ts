@@ -13,6 +13,7 @@ import { type Db, getDb } from "../db/client.ts";
 import * as schema from "../db/schema/index.ts";
 import { CLIENT_IP_HEADER } from "../server/client-ip.ts";
 import { adminDiscordIds, type Env, env, isTestSignInEnabled } from "../server/env.ts";
+import { getLiveHub } from "../server/live-hub.ts";
 import { recordNewUser } from "../server/stats.ts";
 import { describeBan } from "./ban.ts";
 import { testSignIn } from "./test-sign-in.ts";
@@ -24,6 +25,9 @@ import { testSignIn } from "./test-sign-in.ts";
  * it would otherwise be unbounded and could impersonate another user.
  */
 const SERVER_OWNED_USER_FIELDS = ["name", "discordId", "discordUsername", "image"] as const;
+
+/** The admin plugin's ban endpoint, which revokes the banned user's sessions. */
+const BAN_PATH = "/admin/ban-user";
 
 /** Account-linking and session-editing endpoints the app doesn't use. */
 const UNUSED_ACCOUNT_PATHS = ["/link-social", "/unlink-account", "/update-session"];
@@ -156,6 +160,17 @@ export function createAuth(db: Db, config: AuthConfig) {
         },
       },
       session: {
+        // Every way a session ends (sign-out, revoking one or all, a user's removal, an expired
+        // one found at a request) deletes its row through here: its open realtime sockets close.
+        // A ban revokes the user's sessions too, but tells their sockets `banned` itself
+        // (src/server/admin-users.ts), which a plain close here would pre-empt.
+        delete: {
+          after: async (session, ctx) => {
+            if (ctx?.path === BAN_PATH) return;
+            // Not awaited: the hub works through its own queue, and signing out needn't wait on it.
+            void getLiveHub()?.sessionEnded(session.id);
+          },
+        },
         create: {
           // Existing users added to ADMIN_DISCORD_IDS later are promoted on their next sign-in.
           after: async (session) => {
