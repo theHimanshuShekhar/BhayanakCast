@@ -92,7 +92,7 @@ function RoomNotFound() {
     <div className="px-10 py-20 text-center">
       <h1 className="m-0 mb-2 text-lg">room not found</h1>
       <p className="m-0 mb-4 text-muted text-[12.5px]">it may have ended or never existed.</p>
-      <Link to="/" className="text-primary">
+      <Link to="/" className="text-primary-strong">
         back to rooms
       </Link>
     </div>
@@ -114,7 +114,7 @@ function RoomNotice({
     <div className="px-10 py-20 text-center" role={waiting ? "status" : "alert"}>
       <h1 className="m-0 mb-2 text-lg">{title}</h1>
       <p className="m-0 mb-4 text-muted text-[12.5px]">{children}</p>
-      <Link to="/" className="text-primary">
+      <Link to="/" className="text-primary-strong">
         back to rooms
       </Link>
     </div>
@@ -341,7 +341,7 @@ function RoomName({ name, canRename }: { name: string; canRename: boolean }) {
         }}
         className="h-6 pointer-coarse:h-8 min-w-0 w-56 px-2 rounded-md bg-surface border border-border text-[11.5px] text-fg outline-0 focus:border-primary"
       />
-      <button type="submit" className="text-[11px] text-primary cursor-pointer">
+      <button type="submit" className="text-[11px] text-primary-strong cursor-pointer">
         save
       </button>
       <button
@@ -627,24 +627,39 @@ function RoomPage({
     if (target) sendReaction(emoji, target.userId);
   };
 
+  // The tiles' handlers below don't change between renders (a tile renders again when a prop
+  // changes, and a new function is one), so they read what they need when they run.
+  const peopleNow = useRef(participants);
+  useLayoutEffect(() => {
+    peopleNow.current = participants;
+  });
+
   // WebSocket commands (ADR 15): the server authorises them and broadcasts the result.
-  const onModerate = (id: string, action: ModAction) => {
-    const target = participants.find((p) => p.id === id);
+  const onModerate = useCallback((id: string, action: ModAction) => {
+    const target = peopleNow.current.find((p) => p.id === id);
     if (!target) return;
     const userId = target.userId;
     // A kick is permanent for the room (ADR 15), so it asks first.
     if (action === "kick") setKickTarget(target);
     else if (action === "stopShare") moderate({ type: "mod.stopShare", userId });
     else moderate({ type: "mod.setRole", userId, role: action === "promote" ? "mod" : "member" });
-  };
+  }, []);
 
-  const toggleMute = (id: string) =>
-    setMutedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  const toggleMute = useCallback(
+    (id: string) =>
+      setMutedIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      }),
+    [],
+  );
+  const onVolume = useCallback(
+    (id: string, volume: number) => setVolumes((v) => ({ ...v, [id]: volume })),
+    [],
+  );
+  const onPin = useCallback((id: string) => setPinnedId((cur) => (cur === id ? null : id)), []);
 
   // Hiding everyone not sharing leaves the streamers: the others' cameras are paused towards
   // this page (ADR 13 addendum).
@@ -665,25 +680,27 @@ function RoomPage({
   const hostName = participants.find((p) => p.role === "host")?.name ?? detail.host;
   const zones = useMemo(() => stageZones(stage, showNonSharers), [stage, showNonSharers]);
   const density = DENSITY[settings.density];
-  // What every tile on the stage gets, whichever zone shows it.
+  // What every tile on the stage gets, whichever zone shows it. A tile renders again only when
+  // one of these changes for it (see `Tile`), so everything here is a value, a track or a stable
+  // handler: a speaking change renders the speaker's tile alone.
   const tileProps = (p: Participant) => ({
     p,
     myRole,
     admin,
     locallyMuted: mutedIds.has(p.id),
     volume: volumes[p.id] ?? 1,
-    onVolume: (id: string, volume: number) => setVolumes((v) => ({ ...v, [id]: volume })),
+    onVolume,
     cameraTrack: p.you ? local.cam.track : mesh.remote[p.userId]?.cam,
     onCameraShown,
     screenTrack: p.you ? local.share.track : mesh.remote[p.userId]?.screen,
     shareVolume: shareVolumes[p.id] ?? 1,
     onShareVolume: mesh.shareAudio.has(p.userId) ? onShareVolume : undefined,
     reactions: reactions.filter((r) => r.targetUserId === p.userId),
-    onPin: (id: string) => setPinnedId((cur) => (cur === id ? null : id)),
+    onPin,
     onToggleMute: toggleMute,
     onModerate,
     cantConnect: mesh.states[p.userId] === "failed",
-    onRetry: () => mesh.retry(p.userId),
+    onRetry: mesh.retry,
   });
 
   // The room ended or was hidden from us since the page loaded.
@@ -765,7 +782,7 @@ function RoomPage({
               type="button"
               aria-pressed={showNonSharers}
               title="Show people who aren't sharing"
-              className={`inline-flex items-center gap-2 h-7 px-2.5 rounded-lg border text-[11px] whitespace-nowrap cursor-pointer ${showNonSharers ? "bg-primary-soft border-[color-mix(in_oklch,var(--color-primary)_45%,transparent)] text-primary" : "bg-surface border-border text-fg-muted"}`}
+              className={`inline-flex items-center gap-2 h-7 px-2.5 rounded-lg border text-[11px] whitespace-nowrap cursor-pointer ${showNonSharers ? "bg-primary-soft border-[color-mix(in_oklch,var(--color-primary)_45%,transparent)] text-primary-strong" : "bg-surface border-border text-fg-muted"}`}
               onClick={() => setShowNonSharers((v) => !v)}
             >
               <span

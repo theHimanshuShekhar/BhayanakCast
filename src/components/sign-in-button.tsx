@@ -42,7 +42,7 @@ export const SignInButton = ({
         onClick={start}
         disabled={pending}
         aria-label={LABEL}
-        className={`${railBase} bg-primary-soft text-primary hover:bg-primary hover:text-primary-ink disabled:opacity-60 disabled:cursor-wait`}
+        className={`${railBase} bg-primary-soft text-primary-strong hover:bg-primary hover:text-primary-ink disabled:opacity-60 disabled:cursor-wait`}
       >
         <span className="inline-flex">
           <DiscordMark />

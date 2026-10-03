@@ -39,7 +39,7 @@ function ProfileNotFound() {
     <div className="px-10 py-20 text-center">
       <h1 className="m-0 mb-2 text-lg">user not found</h1>
       <p className="m-0 mb-4 text-muted text-[12.5px]">no profile with this id</p>
-      <Link to="/" className="text-primary">
+      <Link to="/" className="text-primary-strong">
         back
       </Link>
     </div>
@@ -172,7 +172,7 @@ function ProfilePage({ profile }: { profile: Profile }) {
                 {username}
               </h1>
               {canFavorite && isFavorite && (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-[3px] rounded-full bg-[color-mix(in_oklch,var(--color-primary)_18%,transparent)] border border-[color-mix(in_oklch,var(--color-primary)_40%,transparent)] text-primary text-[10px] tracking-[0.08em] uppercase font-semibold">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-[3px] rounded-full bg-[color-mix(in_oklch,var(--color-primary)_18%,transparent)] border border-[color-mix(in_oklch,var(--color-primary)_40%,transparent)] text-primary-strong text-[10px] tracking-[0.08em] uppercase font-semibold">
                   <Icon.Sparkle size={10} /> favorite
                 </span>
               )}
@@ -270,7 +270,7 @@ function ProfilePage({ profile }: { profile: Profile }) {
                   params={{ userId: co.id }}
                   className="group flex items-center gap-3 sm:gap-3.5 px-3 sm:px-4 py-3 border-b border-border-subtle text-left !text-fg transition-colors duration-[120ms] last:border-b-0 hover:bg-surface-2 hover:no-underline"
                 >
-                  <span className="w-[22px] flex-shrink-0 text-[11px] font-bold text-subtle tracking-[0.06em] group-hover:text-primary transition-colors">
+                  <span className="w-[22px] flex-shrink-0 text-[11px] font-bold text-subtle tracking-[0.06em] group-hover:text-primary-strong transition-colors">
                     #{i + 1}
                   </span>
                   <Avatar name={co.username} image={co.image} size="md" ring={i === 0} />
@@ -279,7 +279,7 @@ function ProfilePage({ profile }: { profile: Profile }) {
                     <div className="text-[10.5px] text-subtle tracking-[0.04em]">time together</div>
                   </div>
                   <div className="flex flex-col items-end gap-1.5 sm:min-w-[140px]">
-                    <div className="text-[13px] font-bold text-primary tracking-[-0.01em]">
+                    <div className="text-[13px] font-bold text-primary-strong tracking-[-0.01em]">
                       {formatCotime(co.secondsTogether)}
                     </div>
                     <div className="w-20 sm:w-[120px] h-1 rounded-full bg-surface-3 overflow-hidden">

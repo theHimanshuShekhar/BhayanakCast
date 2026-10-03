@@ -285,7 +285,7 @@ export const SettingsDialog = ({
               aria-label={a.name}
               aria-pressed={settings.accentHue === a.h}
               onClick={() => update({ accentHue: a.h })}
-              className={`w-7 h-7 rounded-lg border border-border-strong cursor-pointer transition-transform hover:scale-[1.08] ${settings.accentHue === a.h ? "outline-2 outline-fg outline-offset-2" : ""}`}
+              className={`w-7 h-7 rounded-lg border border-border-strong cursor-pointer transition-transform motion-safe:hover:scale-[1.08] ${settings.accentHue === a.h ? "outline-2 outline-fg outline-offset-2" : ""}`}
               style={{ background: `oklch(0.68 0.19 ${a.h})` }}
             />
           ))}
@@ -355,7 +355,7 @@ export const SignInPromptDialog = ({
       footer={<Btn onClick={() => onOpenChange(false)}>not now</Btn>}
     >
       <div className="flex items-start gap-3">
-        <span className="w-10 h-10 shrink-0 rounded-xl grid place-items-center bg-surface-2 border border-border text-primary shadow-[var(--shadow-card),0_0_18px_var(--color-primary-glow)]">
+        <span className="w-10 h-10 shrink-0 rounded-xl grid place-items-center bg-surface-2 border border-border text-primary-strong shadow-[var(--shadow-card),0_0_18px_var(--color-primary-glow)]">
           {create ? <Icon.Broadcast size={18} /> : <Icon.Headset size={18} />}
         </span>
         <p className="m-0 text-[12.5px] text-muted leading-relaxed">
@@ -404,7 +404,7 @@ export const ProfileMenu = ({
     </Menu.Trigger>
     <Menu.Portal>
       <Menu.Positioner side="right" align="end" sideOffset={14} className="z-[150] outline-0">
-        <Menu.Popup className="w-[260px] bg-surface border border-border-strong rounded-[var(--radius)] shadow-deep overflow-hidden outline-0 origin-[var(--transform-origin)] transition-[scale,opacity] duration-100 data-starting-style:opacity-0 data-starting-style:scale-[0.98] data-ending-style:opacity-0">
+        <Menu.Popup className="w-[260px] bg-surface border border-border-strong rounded-[var(--radius)] shadow-deep overflow-hidden outline-0 origin-[var(--transform-origin)] transition-[scale,opacity] duration-100 data-starting-style:opacity-0 motion-safe:data-starting-style:scale-[0.98] data-ending-style:opacity-0">
           <div className="flex items-center gap-2.5 px-3 py-3 border-b border-border-subtle bg-canvas">
             <Avatar name={username} image={image} size="lg" ring />
             <div className="flex-1 min-w-0">

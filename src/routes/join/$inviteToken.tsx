@@ -49,7 +49,7 @@ function InvalidInvite() {
     <div className="px-10 py-20 text-center" role="alert">
       <h1 className="m-0 mb-2 text-lg">this invite link is no longer valid</h1>
       <p className="m-0 mb-4 text-muted text-[12.5px]">ask the host for a new one.</p>
-      <Link to="/" className="text-primary">
+      <Link to="/" className="text-primary-strong">
         back to rooms
       </Link>
     </div>
