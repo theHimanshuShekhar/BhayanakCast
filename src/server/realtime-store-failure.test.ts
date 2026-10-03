@@ -144,6 +144,82 @@ describe("leaving when the database write fails", () => {
   });
 });
 
+describe("joining an empty room when the database write fails", () => {
+  it.each(["markRoomOccupied", "openPresence"])(
+    "keeps the empty-room timer when %s throws",
+    async (method) => {
+      await joinAndLeave();
+      await h.advance(60 * SECOND);
+      failing.set(method, 1);
+      const b = await h.connectAs(bo);
+      b.send({ type: "room.join", roomId });
+      expect(await b.waitFor("error")).toMatchObject({ code: "internal", re: "room.join" });
+
+      // Still empty since T0 (the wait starts over from the failed join, but dates from then).
+      await h.advance(EMPTY_ROOM_TIMEOUT_MS);
+      expect(await roomRow()).toEqual({ lastEmptyAt: t(0), endedAt: T0, rolledUp: true });
+    },
+  );
+});
+
+describe("handing host on when the database write fails", () => {
+  it("keeps the host, then retries the hand-over with a backoff", async () => {
+    const a = await h.connectAs(ana);
+    await a.join(roomId);
+    const b = await h.connectAs(bo);
+    await b.join(roomId);
+    failing.set("setHost", Infinity);
+    calls = {};
+
+    a.send({ type: "room.leave" });
+    // The grace is announced as usual; when it runs out the hand-over fails and nothing changes.
+    expect((await b.waitForEvent("hostChanged")).event).toMatchObject({ hostUserId: ana.id });
+    await h.advance(HOST_GRACE_MS);
+    expect(calls.setHost).toBe(1);
+    expect(
+      logged(`handing host over in room ${roomId} failed (try 1), trying again in 1000 ms`),
+    ).toBe(true);
+    await b.waitForEvent("left");
+    expect(b.pending()).toEqual([]);
+
+    failing.delete("setHost");
+    await h.advance(RETRY_BASE_MS);
+    expect(calls.setHost).toBe(2);
+    expect((await b.waitForEvent("hostChanged")).event).toMatchObject({ hostUserId: bo.id });
+  });
+
+  it("still removes a banned host, and passes host on after the grace", async () => {
+    const a = await h.connectAs(ana);
+    await a.join(roomId);
+    const b = await h.connectAs(bo);
+    await b.join(roomId);
+    failing.set("setHost", Infinity);
+
+    await h.hub.disconnectUser(ana.id, "banned for testing");
+    expect(await a.waitFor("error")).toMatchObject({ code: "banned" });
+    await a.closed();
+    expect((await b.waitForEvent("left")).event).toEqual({ kind: "left", userId: ana.id });
+    expect((await b.waitForEvent("hostChanged")).event).toMatchObject({ hostUserId: ana.id });
+
+    failing.delete("setHost");
+    await h.advance(HOST_GRACE_MS);
+    expect((await b.waitForEvent("hostChanged")).event).toMatchObject({ hostUserId: bo.id });
+  });
+
+  it("still removes a kicked host", async () => {
+    const admin = await h.createUser("root", { admin: true });
+    const a = await h.connectAs(ana);
+    await a.join(roomId);
+    const r = await h.connectAs(admin);
+    await r.join(roomId);
+    failing.set("setHost", Infinity);
+
+    r.send({ type: "mod.kick", userId: ana.id });
+    expect((await r.waitForEvent("kicked")).event).toMatchObject({ userId: ana.id });
+    expect(await a.waitFor("error", (m) => m.code === "kicked")).toBeDefined();
+  });
+});
+
 describe("ending a room when the database write fails", () => {
   it("keeps it ended here, retries with a doubling backoff, and settles when the database is back", async () => {
     await joinAndLeave();
@@ -158,7 +234,7 @@ describe("ending a room when the database write fails", () => {
     expect(await b.waitFor("error")).toMatchObject({ code: "not_found", re: "room.join" });
     // ...though the database still says live.
     expect((await roomRow()).endedAt).toBeNull();
-    expect(logged("ending a room failed")).toBe(true);
+    expect(logged(`ending room ${roomId} failed (try 1)`)).toBe(true);
     expect(calls.endRoom).toBe(1);
 
     // Tries after 1 s, then 2 s, then 4 s.
@@ -197,14 +273,29 @@ describe("ending a room when the database write fails", () => {
     expect(calls.endRoom).toBe(7);
   });
 
-  it("finishes the roll-up that an earlier try left undone", async () => {
+  it("leaves a failed roll-up to the daily purge: the end landed, so nothing is retried", async () => {
     await joinAndLeave();
-    failing.set("rollupEndedRoom", 1);
+    failing.set("rollupEndedRoom", Infinity);
     await h.advance(EMPTY_ROOM_TIMEOUT_MS);
-    // The end itself landed; only the stats roll-up failed.
     expect(await roomRow()).toEqual({ lastEmptyAt: t(0), endedAt: T0, rolledUp: false });
+    expect(logged("rolling up a room's stats failed")).toBe(true);
+
+    await h.advance(RETRY_MAX_MS * 4);
+    expect(calls.endRoom).toBe(1);
+    expect(calls.rollupEndedRoom).toBe(1);
+  });
+
+  it("names the room, the try and the wait in the log", async () => {
+    await joinAndLeave();
+    failing.set("endRoom", Infinity);
+    await h.advance(EMPTY_ROOM_TIMEOUT_MS);
     await h.advance(RETRY_BASE_MS);
-    expect((await roomRow()).rolledUp).toBe(true);
+    expect(
+      logged(`ending room ${roomId} failed (try 1), trying again in ${RETRY_BASE_MS} ms`),
+    ).toBe(true);
+    expect(
+      logged(`ending room ${roomId} failed (try 2), trying again in ${2 * RETRY_BASE_MS} ms`),
+    ).toBe(true);
   });
 
   it("still sends everyone home when an admin ends a room and the writes fail", async () => {
@@ -298,6 +389,25 @@ describe("restart recovery when the database is down", () => {
     expect(await roomRow()).toEqual({ lastEmptyAt: T0, endedAt: null, rolledUp: false });
     await h.advance(EMPTY_ROOM_TIMEOUT_MS);
     expect(await roomRow()).toEqual({ lastEmptyAt: T0, endedAt: T0, rolledUp: true });
+  });
+
+  it("refuses a knock too until it has succeeded", async () => {
+    const secret = await h.createRoom(ana, { isPrivate: true });
+    const [row] = await h.db
+      .select({ token: rooms.inviteToken })
+      .from(rooms)
+      .where(eq(rooms.id, secret));
+    failing.set("loadLiveRooms", Infinity);
+    await h.restart();
+
+    const b = await h.connectAs(bo);
+    b.send({ type: "knock.request", inviteToken: row?.token ?? "" });
+    expect(await b.waitFor("error")).toMatchObject({ code: "internal", re: "knock.request" });
+
+    failing.delete("loadLiveRooms");
+    await h.advance(RETRY_BASE_MS);
+    b.send({ type: "knock.request", inviteToken: row?.token ?? "" });
+    expect(await b.waitFor("knock.status")).toMatchObject({ status: "waiting_for_host" });
   });
 
   it("stops retrying when the hub stops", async () => {
