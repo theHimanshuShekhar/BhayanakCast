@@ -6,9 +6,9 @@ import { createRoomOnPage, uniqueRoomName } from "./rooms";
 // A mic or camera that goes away mid-call (#79): the room says so and offers another device.
 // A fake device can't be unplugged, so the page records the tracks the app sets an `onended`
 // handler on (the very objects its handler is on, in either browser) and the test fires `ended`
-// on them, as the browser does for an unplugged or revoked device. The app uses `onended`
-// because Firefox never calls `addEventListener` listeners on a track for a dispatched event
-// (src/lib/local-media.ts, `whenEnded`).
+// on them, as the browser does for an unplugged or revoked device. The app uses `onended`:
+// in Playwright's Firefox, a script-dispatched `ended` on a track reaches `onended` but not
+// `addEventListener` listeners (Chromium runs both), so the spec can't rely on listeners.
 
 /** Keep every track something sets `onended` on in `window.__tracks`. */
 async function recordTracks(page: Page) {
@@ -63,7 +63,7 @@ test("a camera that goes away is announced, and another can be picked in the roo
 
   expect(await endTracks(page, "video")).toBeGreaterThan(0);
 
-  // The room turns the camera off, says why, and offers the lobby's device picker.
+  // The room turns the camera off, says why, and offers the pre-join device picker.
   const notice = page.getByRole("region", { name: "camera disconnected" });
   await expect(notice).toBeVisible();
   await expect(notice.getByRole("alert")).toContainText("your camera was disconnected");

@@ -15,7 +15,7 @@ type FakeTrack = MediaStreamTrack & {
   contentHint: string;
   /** Mute it, as Firefox does a mic that was unplugged (no `ended`). */
   mute: () => void;
-  endHandlerOnly: () => void;
+  endViaOnended: () => void;
 };
 
 function fakeTrack(kind: "audio" | "video", deviceId: string | null): FakeTrack {
@@ -43,8 +43,8 @@ function fakeTrack(kind: "audio" | "video", deviceId: string | null): FakeTrack 
       track.onended?.();
       for (const listener of ended) listener();
     },
-    /** As a dispatched `ended` does in Firefox: the `onended` handler only, no listeners. */
-    endHandlerOnly() {
+    /** `ended` reaches the `onended` handler only, no listeners. */
+    endViaOnended() {
       track.stopped = true;
       track.onended?.();
     },
@@ -239,14 +239,14 @@ describe("LocalMedia", () => {
     expect(media.getSnapshot().mic).toMatchObject({ status: "on", track: mic, lost: false });
   });
 
-  it("hears `ended` through the onended handler alone (Firefox ignores listeners on tracks)", async () => {
+  it("hears `ended` when it reaches the onended handler alone", async () => {
     const media = new LocalMedia({ mediaDevices: fakeDevices() });
     const cam = (await media.enable("cam")) as FakeTrack;
-    cam.endHandlerOnly();
+    cam.endViaOnended();
     expect(media.getSnapshot().cam).toMatchObject({ status: "off", track: null, lost: true });
     // A shared screen too.
     const video = (await media.startShare("detail")) as FakeTrack;
-    video.endHandlerOnly();
+    video.endViaOnended();
     expect(media.getSnapshot().share.status).toBe("off");
   });
 

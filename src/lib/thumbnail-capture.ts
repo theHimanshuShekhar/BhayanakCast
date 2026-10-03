@@ -137,6 +137,12 @@ export async function uploadShareThumbnail(
 }
 
 /**
+ * The longest a whole upload (capture and send) may take before it counts as failed: the
+ * capture waits up to 3 s for a frame, the send up to `UPLOAD_TIMEOUT_MS`, and the rest is margin.
+ */
+export const UPLOAD_DEADLINE_MS = 30_000;
+
+/**
  * When to try again after a failed first upload, each from the failure before it. Then it is the
  * normal cadence: capped, so a server that is down isn't hammered.
  */
@@ -163,11 +169,20 @@ export function startThumbnailUploads(
   // The first upload and its retries are still going, and an upload is in flight.
   let retrying = true;
   let inFlight = false;
+  // One upload, capture and send: a capture that never settles (`grabFrame`, `video.play`) is a
+  // failure too, instead of leaving `inFlight` and `retrying` set for the rest of the share.
   const run = async () => {
     inFlight = true;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
     try {
-      return await upload(roomId, track);
+      return await Promise.race([
+        upload(roomId, track).catch(() => false),
+        new Promise<boolean>((resolve) => {
+          deadline = setTimeout(() => resolve(false), UPLOAD_DEADLINE_MS);
+        }),
+      ]);
     } finally {
+      clearTimeout(deadline);
       inFlight = false;
     }
   };

@@ -241,7 +241,7 @@ export function DeviceCheck({
 /** The chosen `kind` device, from the devices the browser lists. */
 export function DevicePicker({ kind }: { kind: LocalDeviceKind }) {
   const local = useLocalMedia();
-  // Unique: the lobby and a room's device-lost notice both show one.
+  // Unique: the pre-join step and a room's device-lost notice both show one.
   const id = `${kind}-device-${useId()}`;
   const devices = local.devices[kind];
   const selected = local.selected[kind] ?? "";

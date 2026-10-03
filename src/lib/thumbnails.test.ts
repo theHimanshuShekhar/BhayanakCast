@@ -3,6 +3,7 @@ import {
   postThumbnail,
   RETRY_DELAYS_MS,
   startThumbnailUploads,
+  UPLOAD_DEADLINE_MS,
   UPLOAD_TIMEOUT_MS,
 } from "./thumbnail-capture.ts";
 import {
@@ -219,11 +220,70 @@ describe("startThumbnailUploads", () => {
       .mockImplementationOnce(() => new Promise<boolean>((resolve) => (settle = resolve)))
       .mockResolvedValue(true);
     const track = { readyState: "live" } as MediaStreamTrack;
-    startThumbnailUploads("r1", track, upload, 60_000);
-    await vi.advanceTimersByTimeAsync(180_000);
+    // Several interval turns pass inside the deadline, while the first upload is slow.
+    startThumbnailUploads("r1", track, upload, 5_000);
+    await vi.advanceTimersByTimeAsync(UPLOAD_DEADLINE_MS - 1);
     expect(upload).toHaveBeenCalledTimes(1);
     settle(true);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(upload).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("startThumbnailUploads with a capture that never settles", () => {
+  afterEach(() => vi.useRealTimers());
+
+  const never = () => new Promise<boolean>(() => {});
+
+  it("counts a hung first upload as failed after the deadline, retries, and goes on", async () => {
+    vi.useFakeTimers();
+    const upload = vi
+      .fn<() => Promise<boolean>>()
+      .mockImplementationOnce(never)
+      .mockResolvedValue(true);
+    const track = { readyState: "live" } as MediaStreamTrack;
+    startThumbnailUploads("r1", track, upload, 600_000);
+    await vi.advanceTimersByTimeAsync(UPLOAD_DEADLINE_MS - 1);
+    expect(upload).toHaveBeenCalledTimes(1);
+    // Failed at the deadline; the first retry follows 10 s later.
+    await vi.advanceTimersByTimeAsync(1 + RETRY_DELAYS_MS[0] - 1);
+    expect(upload).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(upload).toHaveBeenCalledTimes(2);
+    // Worked: the interval carries on.
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(upload).toHaveBeenCalledTimes(3);
+  });
+
+  it("goes on uploading on the interval after a hung one", async () => {
+    vi.useFakeTimers();
+    const upload = vi
+      .fn<() => Promise<boolean>>()
+      .mockResolvedValueOnce(true)
+      .mockImplementationOnce(never)
+      .mockResolvedValue(true);
+    const track = { readyState: "live" } as MediaStreamTrack;
+    startThumbnailUploads("r1", track, upload, 60_000);
     await vi.advanceTimersByTimeAsync(60_000);
+    expect(upload).toHaveBeenCalledTimes(2);
+    // Hung: skipped while in flight, but only until the deadline.
+    await vi.advanceTimersByTimeAsync(UPLOAD_DEADLINE_MS);
+    expect(upload).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(upload).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(upload).toHaveBeenCalledTimes(4);
+  });
+
+  it("counts an upload that rejects as failed too", async () => {
+    vi.useFakeTimers();
+    const upload = vi
+      .fn<() => Promise<boolean>>()
+      .mockRejectedValueOnce(new Error("boom"))
+      .mockResolvedValue(true);
+    const track = { readyState: "live" } as MediaStreamTrack;
+    startThumbnailUploads("r1", track, upload, 600_000);
+    await vi.advanceTimersByTimeAsync(RETRY_DELAYS_MS[0]);
     expect(upload).toHaveBeenCalledTimes(2);
   });
 });

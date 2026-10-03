@@ -1,5 +1,5 @@
 // "Your camera was disconnected": shown in the room when a mic or camera goes away while on
-// (unplugged, or access revoked), with the lobby's device picker to switch to another one and
+// (unplugged, or access revoked), with the pre-join device picker to switch to another one and
 // a button to try the same one again.
 import { Icon } from "~/components/icons";
 import { Btn, iconBtnCls } from "~/components/ui";

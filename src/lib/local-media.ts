@@ -178,16 +178,6 @@ function failureOf(error: unknown): LocalTrackFailure {
   return "busy";
 }
 
-/**
- * Call `handler` once `track` ends by itself. Uses `onended`, not `addEventListener`: in
- * Firefox (checked in headless Playwright Firefox), a `MediaStreamTrack`'s `addEventListener`
- * listeners are never called for a dispatched event, `ended` or any other, while `onended`
- * is, so a listener would miss a lost device there. We own these tracks; nothing else sets it.
- */
-function whenEnded(track: MediaStreamTrack, handler: () => void): void {
-  track.onended = handler;
-}
-
 const isNamed = (e: unknown): e is { name: string } =>
   typeof e === "object" && e !== null && typeof (e as { name?: unknown }).name === "string";
 
@@ -299,10 +289,12 @@ export class LocalMedia {
       return null;
     }
     const live = track;
-    // Unplugged, or revoked in the browser's UI: it's lost.
-    whenEnded(live, () => {
+    // Unplugged, or revoked in the browser's UI: it's lost. `onended`, not `addEventListener`:
+    // in Playwright's Firefox a script-dispatched `ended` (e2e/device-loss.spec.ts) reached
+    // `onended` only, while Chromium ran both. We own these tracks; nothing else sets it.
+    live.onended = () => {
       if (this.#state[kind].track === live) this.#lose(kind);
-    });
+    };
     this.#setTrack(kind, { status: "on", track: live, failure: null, lost: false });
     // Permission given: device labels (and ids, in some browsers) are listed now.
     void this.refreshDevices();
@@ -388,9 +380,9 @@ export class LocalMedia {
     // Music, not speech: encoded for fidelity.
     if (audio) audio.contentHint = "music";
     // The browser's own "stop sharing" (or the shared window closing): it's off now.
-    whenEnded(video, () => {
+    video.onended = () => {
       if (this.#state.share.track === video) this.stopShare();
-    });
+    };
     this.#set({ share: { status: "on", track: video, audio, failure: null } });
     return video;
   }
