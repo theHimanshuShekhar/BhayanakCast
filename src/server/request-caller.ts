@@ -32,8 +32,7 @@ const readLimiter = createReadLimiter(env.PUBLIC_READ_LIMIT_SCALE);
  * (`pnpm dev`) every request counts as one client.
  */
 export function limitPublicRead(kind: PublicRead): void {
-  const ip = getRequestHeader(CLIENT_IP_HEADER)?.trim() || "unknown";
-  if (readLimiter.allow(kind, ip, new Date())) return;
+  if (allowRead(kind, getRequestHeader(CLIENT_IP_HEADER))) return;
   setResponseStatus(429);
   setResponseHeader("retry-after", String(PUBLIC_READ_WINDOW_MS / 1000));
   throw new ReadRateLimitedError();
@@ -41,9 +40,12 @@ export function limitPublicRead(kind: PublicRead): void {
 
 /**
  * `limitPublicRead` for an API route, which has the `Request` itself: whether its client IP may
- * do a `kind` read now. The route answers 429 when not.
+ * do a `kind` read now. What the route answers when not is up to it.
  */
 export function allowPublicRead(request: Request, kind: PublicRead): boolean {
-  const ip = request.headers.get(CLIENT_IP_HEADER)?.trim() || "unknown";
-  return readLimiter.allow(kind, ip, new Date());
+  return allowRead(kind, request.headers.get(CLIENT_IP_HEADER));
+}
+
+function allowRead(kind: PublicRead, clientIp: string | null | undefined): boolean {
+  return readLimiter.allow(kind, clientIp?.trim() || "unknown", new Date());
 }

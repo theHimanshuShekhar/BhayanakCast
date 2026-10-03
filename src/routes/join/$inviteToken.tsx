@@ -19,8 +19,9 @@ import { roomKeys } from "~/lib/rooms.queries";
 export const Route = createFileRoute("/join/$inviteToken")({
   loader: ({ context, params }) =>
     context.queryClient.ensureQueryData(inviteQuery(params.inviteToken)),
-  // Generic whether or not the token is valid, and no URL naming it: the link is the room's key,
-  // so nothing in a tag may carry it or what it opens (ADR 22).
+  // Generic whether or not the token is valid, and no `og:url` at all: the link is the room's
+  // key, so nothing in the head may carry it or what it opens, and a crawler keeps the URL it
+  // was given (ADR 22).
   head: ({ match }) => ({ meta: privateRoomMeta(match.context.origin) }),
   component: JoinRoute,
 });

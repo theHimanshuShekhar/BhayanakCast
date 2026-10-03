@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  homeMeta,
   type MetaTag,
   OG_IMAGE_HEIGHT,
   OG_IMAGE_WIDTH,
@@ -47,14 +48,19 @@ const room = (overrides: Partial<LiveRoomCard> = {}): LiveRoomCard => ({
 });
 
 /** Every page carries these, whatever it is about. */
-function expectFullEmbed(meta: MetaTag[], url: string) {
+function expectFullEmbed(meta: MetaTag[], url: string | null) {
+  // Each tag once: a duplicate would leave a crawler to pick one.
+  const keys = meta.flatMap((m) => m.name ?? m.property ?? []);
+  expect(new Set(keys).size).toBe(keys.length);
+  expect(meta.filter((m) => "title" in m)).toHaveLength(1);
+  expect(meta.filter((m) => m.property === "og:url")).toHaveLength(url ? 1 : 0);
   expect(tag(meta, "description")).toBeTruthy();
   expect(tag(meta, "theme-color")).toBe(THEME_COLOR);
   expect(tag(meta, "og:type")).toBe("website");
   expect(tag(meta, "og:site_name")).toBe("BhayanakCast");
   expect(tag(meta, "og:title")).toBeTruthy();
   expect(tag(meta, "og:description")).toBe(tag(meta, "description"));
-  expect(tag(meta, "og:url")).toBe(url);
+  expect(tag(meta, "og:url")).toBe(url ?? undefined);
   expect(tag(meta, "og:image")).toMatch(/^https:\/\/cast\.example\.test\//);
   expect(tag(meta, "og:image:type")).toBe("image/png");
   expect(tag(meta, "og:image:width")).toBe("1200");
@@ -75,10 +81,17 @@ describe("the image size the tags declare", () => {
 });
 
 describe("the site's tags", () => {
-  const meta = siteMeta(ORIGIN);
+  const meta = homeMeta(ORIGIN);
 
   it("carry the full Open Graph, Twitter, description and theme-colour set", () => {
     expectFullEmbed(meta, `${ORIGIN}/`);
+  });
+
+  it("are the default under other pages without a canonical URL of their own", () => {
+    expectFullEmbed(siteMeta(ORIGIN), null);
+    expect(siteMeta(ORIGIN).filter((m) => m.property !== "og:url")).toEqual(
+      meta.filter((m) => m.property !== "og:url"),
+    );
   });
 
   it("point at the committed share image, absolute on the configured origin", () => {
@@ -92,7 +105,7 @@ describe("the site's tags", () => {
   });
 
   it("use the origin it is given, not a hard-coded host", () => {
-    expect(tag(siteMeta("https://other.example"), "og:url")).toBe("https://other.example/");
+    expect(tag(homeMeta("https://other.example"), "og:url")).toBe("https://other.example/");
     expect(everything(meta)).not.toContain("bhayanak.net");
   });
 });
@@ -100,7 +113,8 @@ describe("the site's tags", () => {
 describe("a public live room's tags", () => {
   it("name the room, its host and how many are watching, and link its own card", () => {
     const meta = roomMeta(ORIGIN, room());
-    expectFullEmbed(meta, `${ORIGIN}/room/r_public1`);
+    // The URL that answers with these tags (/room/<id> redirects there), not /room/<id> itself.
+    expectFullEmbed(meta, `${ORIGIN}/?join=r_public1`);
     expect(tag(meta, "og:title")).toBe("Friday ranked grind");
     expect(tag(meta, "og:description")).toBe(
       "Live now · hosted by nebula.wav · 7 watching · join on BhayanakCast",
@@ -131,7 +145,7 @@ describe("a public live room's tags", () => {
 
   it("escape an id that isn't URL-safe", () => {
     const meta = roomMeta(ORIGIN, room({ id: "a b/c" }));
-    expect(tag(meta, "og:url")).toBe(`${ORIGIN}/room/a%20b%2Fc`);
+    expect(tag(meta, "og:url")).toBe(`${ORIGIN}/?join=a%20b%2Fc`);
     expect(tag(meta, "og:image")).toContain("/api/og/room/a%20b%2Fc.png");
   });
 });
@@ -148,7 +162,7 @@ describe("a private room's tags", () => {
   it("are the generic ones, even if a private room is handed to the public builder", () => {
     const meta = roomMeta(ORIGIN, privateRoom);
     expect(meta).toEqual(privateRoomMeta(ORIGIN));
-    expectFullEmbed(meta, `${ORIGIN}/`);
+    expectFullEmbed(meta, null);
     expect(tag(meta, "og:title")).toBe("A private room on BhayanakCast");
   });
 
@@ -165,8 +179,8 @@ describe("an invite link's tags", () => {
   // The route builds them from the origin alone: no token and no room ever reach the builder.
   const meta = privateRoomMeta(ORIGIN);
 
-  it("are generic, with the site image and the site as their URL", () => {
-    expectFullEmbed(meta, `${ORIGIN}/`);
+  it("are generic, with the site image and no og:url (the crawler keeps the link it was given)", () => {
+    expectFullEmbed(meta, null);
     expect(tag(meta, "og:title")).toBe("A private room on BhayanakCast");
     expect(tag(meta, "og:image")).toBe(`${ORIGIN}${SITE_IMAGE_PATH}`);
   });

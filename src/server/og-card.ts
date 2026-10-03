@@ -18,7 +18,7 @@ import satori, { type Font } from "satori";
 import { OG_IMAGE_HEIGHT, OG_IMAGE_WIDTH } from "../lib/embed.ts";
 import { initials } from "../lib/format.ts";
 
-export const OG = {
+const OG = {
   /** `--color-bg` (midnight ink). */
   bg: "#0a0f1a",
   /** `--color-surface-2` (lifted slate). */
@@ -74,7 +74,7 @@ export function drawable(text: string, fallback: string): string {
 }
 
 /** The logo mark of public/favicon.svg, with sRGB colours. `rx` rounds the tile (0: full bleed). */
-export function logoSvg(rx = 15): string {
+function logoSvg(rx = 15): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="${rx}" fill="${OG.surface2}"/><g fill="${OG.fg}" fill-rule="evenodd"><path d="M 12 18 H 23 C 30 18 33 21 33 25 C 33 28 31 30 29 31 C 32 32 34 34 34 38 C 34 43 30 46 23 46 H 12 Z M 18 23 V 29 H 23 C 26 29 27 28 27 26 C 27 24 26 23 23 23 Z M 18 34 V 41 H 23 C 26 41 28 40 28 38 C 28 35 26 34 23 34 Z"/><path d="M 54 20 V 26 C 51 24 49 23 46 23 C 42 23 41 26 41 32 C 41 38 42 41 46 41 C 49 41 51 40 54 38 V 44 C 52 46 49 47 46 47 C 38 47 35 42 35 32 C 35 22 38 17 46 17 C 49 17 52 18 54 20 Z"/></g><rect x="12" y="51" width="42" height="4" rx="2" fill="${OG.primary}"/></svg>`;
 }
 

@@ -38,12 +38,25 @@ const decode = (value: string) =>
 function readHead(html: string) {
   const head = /<head>([\s\S]*?)<\/head>/.exec(html)?.[1] ?? "";
   const tags = new Map<string, string>();
+  const seen: string[] = [];
   for (const [tag] of head.matchAll(/<meta\b[^>]*>/g)) {
     const attr = (name: string) => new RegExp(`\\b${name}="([^"]*)"`).exec(tag)?.[1];
     const key = attr("name") ?? attr("property");
     const content = attr("content");
-    if (key && content !== undefined) tags.set(key, decode(content));
+    if (key && content !== undefined) {
+      tags.set(key, decode(content));
+      seen.push(key);
+    }
   }
+  // A Map would hide a tag set twice (say, a page's and the root's): each must appear once.
+  const embedKeys = seen.filter(
+    (k) => /^(og:|twitter:)/.test(k) || ["description", "theme-color"].includes(k),
+  );
+  expect(
+    embedKeys.filter((k, i) => embedKeys.indexOf(k) !== i),
+    "tags that appear twice",
+  ).toEqual([]);
+  expect(head.match(/<title[ >]/g) ?? [], "title tags").toHaveLength(1);
   const title = decode(/<title>([\s\S]*?)<\/title>/.exec(head)?.[1] ?? "");
   const icons = [...head.matchAll(/<link\b[^>]*\brel="(icon|apple-touch-icon)"[^>]*>/g)].map(
     ([tag]) => /\bhref="([^"]*)"/.exec(tag)?.[1] ?? "",
@@ -69,12 +82,18 @@ async function expectCardPng(response: APIResponse) {
 }
 
 /** The tags every page has, with `image` the absolute URL of its card. */
-function expectFullTags(tags: Map<string, string>, origin: string, url: string, image: string) {
+function expectFullTags(
+  tags: Map<string, string>,
+  origin: string,
+  /** `og:url`; null when the page names none (an invite link). */
+  url: string | null,
+  image: string,
+) {
   expect(tags.get("description")).toBeTruthy();
   expect(tags.get("theme-color")).toBe("#5d90ff");
   expect(tags.get("og:type")).toBe("website");
   expect(tags.get("og:site_name")).toBe("BhayanakCast");
-  expect(tags.get("og:url")).toBe(url);
+  expect(tags.get("og:url")).toBe(url ?? undefined);
   expect(tags.get("og:image")).toBe(image);
   expect(tags.get("og:image")).toMatch(new RegExp(`^${origin}/`));
   expect(tags.get("og:image:width")).toBe("1200");
@@ -130,12 +149,15 @@ test("a public live room's link gives every crawler the room's own title, descri
     const { response, tags, title } = await crawl(request, `/room/${roomId}`, userAgent);
     // The room's own tags, though the visitor was sent on to /?join=<id>.
     expect(response.url(), crawler).toContain(`/?join=${roomId}`);
+    // `og:url` is the page that answers with these tags, not /room/<id>, which redirects to it:
+    // Facebook and LinkedIn follow it, and two pages must not be each other's canonical.
     expectFullTags(
       tags,
       origin,
-      `${origin}/room/${roomId}`,
+      `${origin}/?join=${roomId}`,
       `${origin}/api/og/room/${roomId}.png?v=0`,
     );
+    expect(tags.get("og:url"), crawler).toBe(response.url());
     expect(tags.get("og:title"), crawler).toBe(name);
     expect(tags.get("og:description"), crawler).toBe(
       "Live now · hosted by embed.host · 1 watching · join on BhayanakCast",
@@ -158,6 +180,24 @@ test("a public live room's link gives every crawler the room's own title, descri
   // The HTML itself stays private to its caller (it embeds the session's loader data).
   const page = await request.get(`/room/${roomId}`);
   expect(page.headers()["cache-control"]).toBe("private, no-store");
+});
+
+test("a signed-in person who opens the room's embed URL goes on into the room", async ({
+  page,
+  context,
+  browser,
+}) => {
+  const [hostId = ""] = await createUsers(browser, ["embed.redirhost"]);
+  const roomId = await seedRoom(context, {
+    name: uniqueRoomName("embed redirect"),
+    hostUserId: hostId,
+    createdAt: minutesAgo(10),
+    presence: [{ userId: hostId, startedAt: minutesAgo(5) }],
+  });
+  await signIn(context, { username: "embed.redirviewer" });
+  await page.goto(`/?join=${roomId}`);
+  await expect(page).toHaveURL(new RegExp(`/room/${roomId}$`));
+  await expect(page.getByRole("button", { name: "Enter room" })).toBeVisible();
 });
 
 test("a private room's link and card reveal nothing about the room", async ({
@@ -231,7 +271,9 @@ test("an invite link's tags are generic and carry no token, name or host", async
 
     for (const userAgent of Object.values(CRAWLERS)) {
       const { head, tags, title } = await crawl(request, `/join/${token}`, userAgent);
-      expectFullTags(tags, origin, `${origin}/`, `${origin}/og-image.png`);
+      // No og:url at all: the crawler keeps the link it was given.
+      expectFullTags(tags, origin, null, `${origin}/og-image.png`);
+      expect(tags.has("og:url")).toBe(false);
       expect(tags.get("og:title")).toBe("A private room on BhayanakCast");
       expect(title).toBe("A private room on BhayanakCast");
       for (const secret of [token, name, "invite.embedhost", "/join/"]) {

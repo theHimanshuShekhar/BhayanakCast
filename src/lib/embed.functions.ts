@@ -6,7 +6,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { env } from "~/server/env";
 
-export const getSiteOriginFn = createServerFn({ method: "GET" }).handler(
+const getSiteOriginFn = createServerFn({ method: "GET" }).handler(
   (): string => new URL(env.BETTER_AUTH_URL).origin,
 );
 

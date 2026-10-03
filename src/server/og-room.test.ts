@@ -9,14 +9,8 @@ import {
   user,
 } from "../db/schema/index.ts";
 import { createTestDb } from "../db/test-db.ts";
-import {
-  CARD_CACHE_CONTROL,
-  CardCache,
-  cardResponse,
-  fetchAvatar,
-  roomCardPng,
-  siteImageResponse,
-} from "./og-room.ts";
+import { CARD_CACHE_CONTROL, cardResponse, siteImageResponse } from "./og-response.ts";
+import { CardCache, fetchAvatar, roomCardPng } from "./og-room.ts";
 import { pngSize, WEBP_64X36 } from "./test-images.ts";
 
 const T0 = new Date("2026-10-03T12:00:00Z");

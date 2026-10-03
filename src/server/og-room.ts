@@ -7,7 +7,7 @@
  * card, indistinguishable from each other, and a private room's thumbnail is never read.
  */
 import type { Db } from "../db/client.ts";
-import { newestThumbnailMs, SITE_IMAGE_PATH } from "../lib/embed.ts";
+import { newestThumbnailMs } from "../lib/embed.ts";
 import { discordAvatarUrl } from "../lib/format.ts";
 import type { Caller } from "./caller.ts";
 import { backdropDataUri } from "./og-backdrop.ts";
@@ -18,7 +18,7 @@ import { getThumbnail } from "./thumbnails.ts";
 const VISITOR: Caller = { user: null, role: "visitor" };
 
 /** Rendered cards kept: a few dozen rooms are live at once, and a card is about 200 KB. */
-export const CARD_CACHE_SIZE = 32;
+const CARD_CACHE_SIZE = 32;
 
 /** An LRU of promises, so unfurls of one room arriving together share one render. */
 export class CardCache {
@@ -120,31 +120,5 @@ export async function roomCardPng(
       watching: room.participantCount,
       backdrop,
     });
-  });
-}
-
-/** `Cache-Control` of a card: Discord and friends cache an embed on their side too. */
-export const CARD_CACHE_CONTROL = "public, max-age=60";
-
-/** The route's answer for a card. */
-export function cardResponse(png: Uint8Array): Response {
-  return new Response(new Uint8Array(png), {
-    headers: {
-      "content-type": "image/png",
-      "cache-control": CARD_CACHE_CONTROL,
-      "x-content-type-options": "nosniff",
-    },
-  });
-}
-
-/**
- * The route's answer when there is no room card: the committed site image, the same for a
- * private, ended or unknown room and for a render that failed. Cached like a card, so a crawler
- * that hits an ended room's old link doesn't come back at once.
- */
-export function siteImageResponse(): Response {
-  return new Response(null, {
-    status: 302,
-    headers: { location: SITE_IMAGE_PATH, "cache-control": CARD_CACHE_CONTROL },
   });
 }

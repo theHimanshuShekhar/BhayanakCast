@@ -14,12 +14,12 @@ import type { Profile } from "./profiles";
 import type { Recap } from "./recaps";
 import type { LiveRoomCard } from "./rooms";
 
-export const SITE_NAME = "BhayanakCast";
+const SITE_NAME = "BhayanakCast";
 /** The browser tab's title on the home page and wherever a page sets none. */
-export const SITE_TITLE = "BhayanakCast · your crew, your screens, one room";
+const SITE_TITLE = "BhayanakCast · your crew, your screens, one room";
 /** The card's title: Discord shows the site name above it, so it doesn't repeat the name. */
 const SITE_CARD_TITLE = "Your crew. Your screens. One room.";
-export const SITE_DESCRIPTION =
+const SITE_DESCRIPTION =
   "Live screen sharing for small groups. Up to 3 people share their screens at once to up to 10 in a room: no downloads, just sign in with Discord.";
 
 /** The brand accent (`--color-primary`, oklch(0.68 0.19 265)); Discord colours its embed bar with it. */
@@ -39,8 +39,8 @@ interface EmbedPage {
   documentTitle?: string;
   title: string;
   description: string;
-  /** Absolute canonical URL. */
-  url: string;
+  /** Absolute canonical URL; none leaves `og:url` out, so a crawler keeps the URL it was given. */
+  url?: string;
   /** Absolute URL of a 1200x630 PNG. */
   image: string;
   imageAlt: string;
@@ -56,7 +56,7 @@ function embedMeta(page: EmbedPage): MetaTag[] {
     { property: "og:site_name", content: SITE_NAME },
     { property: "og:title", content: page.title },
     { property: "og:description", content: page.description },
-    { property: "og:url", content: page.url },
+    ...(page.url ? [{ property: "og:url", content: page.url }] : []),
     { property: "og:image", content: page.image },
     { property: "og:image:type", content: "image/png" },
     { property: "og:image:width", content: String(OG_IMAGE_WIDTH) },
@@ -75,18 +75,28 @@ function siteCard(origin: string, overrides: Partial<EmbedPage> = {}): EmbedPage
   return {
     title: SITE_CARD_TITLE,
     description: SITE_DESCRIPTION,
-    url: `${origin}/`,
     image: `${origin}${SITE_IMAGE_PATH}`,
     imageAlt: SITE_IMAGE_ALT,
     ...overrides,
   };
 }
 
-/** The site's own tags: home, and the default under every page that sets none. */
+/**
+ * The site's tags without a canonical URL: the default under every page that sets none (the
+ * root route's), since a canonical URL belongs to the page that is it.
+ */
 export const siteMeta = (origin: string): MetaTag[] =>
   embedMeta(siteCard(origin, { documentTitle: SITE_TITLE }));
 
-/** A private room, or an invite link to one: nothing about the room, and no URL that names it. */
+/** The home page's tags: the site's, with the site root as its URL. */
+export const homeMeta = (origin: string): MetaTag[] =>
+  embedMeta(siteCard(origin, { documentTitle: SITE_TITLE, url: `${origin}/` }));
+
+/**
+ * A private room, or an invite link to one: nothing about the room, and no `og:url`, so the URL
+ * a crawler was given (an invite link is a bearer token) is the one it keeps, and nothing here
+ * can name it.
+ */
 export const privateRoomMeta = (origin: string): MetaTag[] =>
   embedMeta(
     siteCard(origin, {
@@ -102,6 +112,7 @@ export const privateRoomMeta = (origin: string): MetaTag[] =>
 export const unavailableRoomMeta = (origin: string): MetaTag[] =>
   embedMeta(
     siteCard(origin, {
+      url: `${origin}/`,
       title: "This room isn't available",
       description: "It has ended or is private. See what's live on BhayanakCast.",
     }),
@@ -136,7 +147,9 @@ export function roomMeta(origin: string, room: RoomEmbedSource): MetaTag[] {
       `${room.participantCount} watching`,
       "join on BhayanakCast",
     ].join(" · "),
-    url: `${origin}/room/${encodeURIComponent(room.id)}`,
+    // The URL that answers with these tags: /room/<id> redirects a visitor here, so naming it
+    // would make the two pages each other's canonical.
+    url: `${origin}/?join=${encodeURIComponent(room.id)}`,
     image: `${origin}${image}`,
     imageAlt: `${room.name}, live on BhayanakCast`,
   });
