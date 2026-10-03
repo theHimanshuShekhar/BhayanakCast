@@ -119,7 +119,7 @@ const StatCard = ({
       )}
       {delta !== undefined && delta !== null && (
         <div
-          className={`inline-flex items-center gap-[5px] text-[10.5px] tracking-[0.04em] ${delta >= 0 ? "text-success" : "text-live"}`}
+          className={`inline-flex items-center gap-[5px] text-[10.5px] tracking-[0.04em] ${delta >= 0 ? "text-success-ink" : "text-live-ink"}`}
         >
           {delta >= 0 ? "▲" : "▼"} {Math.abs(delta)}%{" "}
           <span className="text-subtle text-[9.5px]">vs prev 30d</span>

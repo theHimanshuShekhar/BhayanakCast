@@ -17,8 +17,8 @@ colors:
   lifted-slate-high: "oklch(0.355 0.034 265)"
   screen-well: "oklch(0.14 0.02 260)"
   readout-white: "oklch(0.98 0.005 260)"
-  readout-dim: "oklch(0.82 0.01 260)"
-  readout-muted: "oklch(0.72 0.012 260)"
+  readout-dim: "oklch(0.87 0.01 260)"
+  readout-muted: "oklch(0.76 0.012 260)"
   readout-faint: "oklch(0.68 0.012 260)"
   hairline-subtle: "oklch(1 0 0 / 0.09)"
   hairline: "oklch(1 0 0 / 0.14)"
@@ -195,7 +195,7 @@ The palette is a dark tonal ladder carrying three signal colors, and each signal
 - **Slate Panel** (`slate-panel`): cards, tiles and default buttons.
 - **Lifted Slate** / **Lifted Slate High** (`lifted-slate`, `lifted-slate-high`): hover fills, default chips, active segments and tooltips.
 - **Screen Well** (`screen-well`): the fixed near-black behind stream mosaics. It doesn't change with theme, because screens always sit in the dark.
-- **Readout White → Faint** (`readout-white`, `readout-dim`, `readout-muted`, `readout-faint`): a four-step text ladder for primary text, secondary text, labels and metadata, and timestamps and other metadata. Every step clears 4.5:1 on every panel up to Lifted Slate (faint, the dimmest, at 4.7:1), in both themes: `src/styles/contrast.test.ts` fails if a token drops under. Text in the accent uses `--color-primary-strong`, not `--color-primary`: the accent fill is under 3:1 on the light theme's panels.
+- **Readout White → Faint** (`readout-white`, `readout-dim`, `readout-muted`, `readout-faint`): a four-step text ladder for primary text, secondary text, labels, and the quietest metadata such as timestamps, counts and separators. Faint stays a non-essential tier: nothing a reader must act on is set in it. Every step still clears 4.5:1 on every panel up to Lifted Slate (faint is 4.7:1 on Lifted Slate in the dark theme, 4.54:1 on the light theme's second panel), and `src/styles/contrast.test.ts` fails if a token drops under. Text in the accent uses `--color-primary-strong`, not `--color-primary`: the accent fill is under 3:1 on the light theme's panels.
 - **Hairlines** (`hairline-subtle`, `hairline`, `hairline-strong`): white borders at 9%, 14% and 21% alpha (black at 8%, 14% and 22% in light theme). Dashed subtle hairlines divide card footers and chat system lines.
 
 ### Named Rules

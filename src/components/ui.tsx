@@ -48,7 +48,7 @@ export const Avatar = ({
       : "";
   return (
     <span
-      className={`inline-grid place-items-center rounded-full text-[oklch(0.2_0.02_260)] font-bold flex-shrink-0 leading-none ${SIZE_CLS[size]} ${ringCls} ${overlayCls} ${className}`}
+      className={`inline-grid place-items-center rounded-full text-avatar-ink font-bold flex-shrink-0 leading-none ${SIZE_CLS[size]} ${ringCls} ${overlayCls} ${className}`}
       style={{ background: `linear-gradient(135deg, ${c1}, ${c2})` }}
     >
       {shown ? (

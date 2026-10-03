@@ -50,12 +50,21 @@ const oklchToLinear = (L: number, C: number, H: number) => {
 
 const inGamut = (rgb: readonly number[]) => rgb.every((c) => c >= -0.0001 && c <= 1.0001);
 
-/** oklch to sRGB. An out-of-gamut colour loses chroma until it fits, as browsers map it. */
-const oklch = (L: number, C: number, H: number, a = 1): Rgba => {
-  let lo = 0;
-  let hi = C;
+/**
+ * How an oklch colour outside the sRGB gamut becomes a displayable one. Chromium clips each
+ * channel, which is what the page gets in practice; the CSS Color 4 spec reduces chroma until the
+ * colour fits, and a browser may do that instead. The two can differ by a lot (`oklch(0.47 0.2 190)`
+ * is #007874 clipped and #006c67 reduced), so every pair is scored both ways and the lower ratio
+ * counts.
+ */
+type Gamut = "clip" | "reduce";
+const GAMUTS: readonly Gamut[] = ["clip", "reduce"];
+
+const oklch = (gamut: Gamut, L: number, C: number, H: number, a = 1): Rgba => {
   let rgb = oklchToLinear(L, C, H);
-  if (!inGamut(rgb)) {
+  if (gamut === "reduce" && !inGamut(rgb)) {
+    let lo = 0;
+    let hi = C;
     for (let i = 0; i < 30; i++) {
       const mid = (lo + hi) / 2;
       if (inGamut(oklchToLinear(L, mid, H))) lo = mid;
@@ -90,17 +99,18 @@ const contrast = (fg: Rgba, bg: Rgba) => {
   return ((hi ?? 0) + 0.05) / ((lo ?? 0) + 0.05);
 };
 
-/** A colour pair's two sides, resolved for one theme and accent hue. */
-const palette = (theme: Theme, hue: number) => {
+/** A colour pair's two sides, resolved for one theme, accent hue and gamut model. */
+const palette = (theme: Theme, hue: number, gamut: Gamut) => {
   const tokens = theme === "dark" ? dark : light;
   const lch = (name: string) => {
     const raw = tokens[`--color-${name}`];
     if (!raw) throw new Error(`no --color-${name} token`);
     return parseOklch(raw.replaceAll("var(--accent-h)", String(hue)));
   };
+  const color = (L: number, C: number, H: number, a = 1) => oklch(gamut, L, C, H, a);
   const tok = (name: string): Rgba => {
     const [L, C, H, A] = lch(name);
-    return oklch(L, C, H, A);
+    return color(L, C, H, A);
   };
   /**
    * `color-mix(in oklch, <token> <pct>%, <with>)`. `transparent` keeps the token's colour at
@@ -109,15 +119,15 @@ const palette = (theme: Theme, hue: number) => {
   const mix = (name: string, pct: number, withColour: string): Rgba => {
     const [L, C, H, A] = lch(name);
     const t = pct / 100;
-    if (withColour === "transparent") return oklch(L, C, H, A * t);
-    if (withColour === "black") return oklch(L * t, C * t, H, A);
+    if (withColour === "transparent") return color(L, C, H, A * t);
+    if (withColour === "black") return color(L * t, C * t, H, A);
     const [L2, C2, H2] = lch(withColour);
     let dH = H2 - H;
     if (dH > 180) dH -= 360;
     if (dH < -180) dH += 360;
-    return oklch(L * t + L2 * (1 - t), C * t + C2 * (1 - t), H + dH * (1 - t), 1);
+    return color(L * t + L2 * (1 - t), C * t + C2 * (1 - t), H + dH * (1 - t), 1);
   };
-  return { tok, mix };
+  return { tok, mix, color };
 };
 
 type P = ReturnType<typeof palette>;
@@ -135,9 +145,9 @@ const WHITE: Rgba = { r: 1, g: 1, b: 1, a: 1 };
 const WHITE_AT = (a: number): Rgba => ({ ...WHITE, a });
 const BLACK_AT = (a: number): Rgba => ({ r: 0, g: 0, b: 0, a });
 // DESIGN.md: screens sit in the dark Screen Well in either theme.
-const SCREEN_WELL = oklch(0.14, 0.02, 260);
-// `text-[oklch(0.2_0.02_260)]` on `Avatar`: a pastel gradient has no theme, so its ink has none.
-const AVATAR_INK = oklch(0.2, 0.02, 260);
+const screenWell = (p: P) => p.color(0.14, 0.02, 260);
+// What a pill over a screen can sit on at worst: a white thumbnail (a stream of a white page).
+const WHITE_THUMBNAIL = WHITE;
 
 const PANELS = ["bg", "canvas", "surface", "surface-2"] as const;
 const pairs: Pair[] = [];
@@ -237,6 +247,18 @@ pairs.push(
     bg: (p) => over(p.mix("success", 15, "transparent"), p.tok("surface")),
   },
   {
+    label: "text-success-ink on bg-surface (admin stat delta, up)",
+    min: 4.5,
+    fg: (p) => p.tok("success-ink"),
+    bg: (p) => p.tok("surface"),
+  },
+  {
+    label: "text-live-ink on bg-surface (admin stat delta, down)",
+    min: 4.5,
+    fg: (p) => p.tok("live-ink"),
+    bg: (p) => p.tok("surface"),
+  },
+  {
     label: "text-white on live 72% + black (live chip, your share)",
     min: 4.5,
     fg: () => WHITE,
@@ -246,36 +268,42 @@ pairs.push(
     label: "text-white on black/55 over the Screen Well (tile controls, pills)",
     min: 4.5,
     fg: () => WHITE,
-    bg: () => over(BLACK_AT(0.55), SCREEN_WELL),
+    bg: (p) => over(BLACK_AT(0.55), screenWell(p)),
   },
   {
-    label: "text-white/85 on black/55 over the Screen Well (time pill)",
+    label: "text-white on black/55 over a white thumbnail (pills, worst case)",
     min: 4.5,
-    fg: () => WHITE_AT(0.85),
-    bg: () => over(BLACK_AT(0.55), SCREEN_WELL),
+    fg: () => WHITE,
+    bg: () => over(BLACK_AT(0.55), WHITE_THUMBNAIL),
   },
   {
     label: "text-white on black/70 over the Screen Well (tile notice)",
     min: 4.5,
     fg: () => WHITE,
-    bg: () => over(BLACK_AT(0.7), SCREEN_WELL),
+    bg: (p) => over(BLACK_AT(0.7), screenWell(p)),
+  },
+  {
+    label: "text-white on black/70 over a white thumbnail (tile notice, worst case)",
+    min: 4.5,
+    fg: () => WHITE,
+    bg: () => over(BLACK_AT(0.7), WHITE_THUMBNAIL),
   },
   {
     label: "text-white/60 on the Screen Well (no thumbnail yet)",
     min: 4.5,
     fg: () => WHITE_AT(0.6),
-    bg: () => SCREEN_WELL,
+    bg: (p) => screenWell(p),
   },
-  // Initials on an avatar's gradient: both ends of every gradient, in dark ink (see `Avatar`).
+  // Initials on an avatar's gradient: both ends of every gradient, in `avatar-ink` (see `Avatar`).
   ...AVATARS.flatMap((a) =>
     [a.c1, a.c2].map(
       (end): Pair => ({
         label: `avatar initials on ${end}`,
         min: 4.5,
-        fg: () => AVATAR_INK,
-        bg: () => {
+        fg: (p) => p.tok("avatar-ink"),
+        bg: (p) => {
           const [L, C, H] = parseOklch(end);
-          return oklch(L, C, H);
+          return p.color(L, C, H);
         },
       }),
     ),
@@ -296,11 +324,14 @@ const failing = (theme: Theme) => {
   const out: string[] = [];
   for (const pair of pairs) {
     for (const { h } of pair.accent ? ACCENTS : [{ h: 265 }]) {
-      const p = palette(theme, h);
-      const ratio = contrast(pair.fg(p), pair.bg(p));
+      const [clip, reduce] = GAMUTS.map((gamut) => {
+        const p = palette(theme, h, gamut);
+        return contrast(pair.fg(p), pair.bg(p));
+      }) as [number, number];
+      const ratio = Math.min(clip, reduce);
       if (process.env.CONTRAST_TABLE) {
         console.log(
-          `${theme}\t${pair.accent ? h : "-"}\t${ratio.toFixed(2)}\t${pair.min}\t${pair.label}`,
+          `${theme}\t${pair.accent ? h : "-"}\t${ratio.toFixed(2)}\t${pair.min}\t${pair.label}\t${clip.toFixed(2)}\t${reduce.toFixed(2)}`,
         );
       }
       if (ratio < pair.min)
@@ -328,9 +359,23 @@ describe("colour contrast", () => {
     expect(css).toMatch(/\sa\s*\{[^}]*color:\s*var\(--color-primary-strong\)/);
   });
 
+  it("maps out-of-gamut colours both ways, as Chromium and the CSS spec do", () => {
+    const hex = ({ r, g, b }: Rgba) =>
+      `#${[r, g, b]
+        .map((c) =>
+          Math.round(c * 255)
+            .toString(16)
+            .padStart(2, "0"),
+        )
+        .join("")}`;
+    // Rendered in headless Chromium: #007874. Reducing chroma (as done here) gives a darker teal.
+    expect(hex(oklch("clip", 0.47, 0.2, 190))).toBe("#007874");
+    expect(hex(oklch("reduce", 0.47, 0.2, 190))).toBe("#006965");
+  });
+
   it("computes WCAG ratios correctly", () => {
-    expect(contrast(oklch(1, 0, 0), oklch(0, 0, 0))).toBeCloseTo(21, 1);
-    expect(contrast(oklch(0, 0, 0), oklch(0, 0, 0))).toBeCloseTo(1, 5);
+    expect(contrast(oklch("clip", 1, 0, 0), oklch("clip", 0, 0, 0))).toBeCloseTo(21, 1);
+    expect(contrast(oklch("clip", 0, 0, 0), oklch("clip", 0, 0, 0))).toBeCloseTo(1, 5);
     // #767676 on white is the textbook 4.54:1.
     expect(contrast({ r: 0x76 / 255, g: 0x76 / 255, b: 0x76 / 255, a: 1 }, WHITE)).toBeCloseTo(
       4.54,

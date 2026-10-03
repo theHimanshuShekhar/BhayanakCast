@@ -36,9 +36,10 @@ A first Impeccable critique of the room (21/40) led to these deliberate deviatio
 - **"viewers" toggle:** it keeps its earlier addendum's behaviour and now hides the camera row and the chips.
 
 ## Addendum: contrast and reduced motion (2026-10-03)
-`src/styles/contrast.test.ts` computes WCAG contrast for every text and background pair the app uses, in both themes and at every accent hue, and fails under 4.5:1 (3:1 for the focus ring). It found the rest of what the design pass left.
-- **Subtle text** is timestamps and metadata, so it reaches 4.5:1 on every panel: dark `--color-subtle` goes from L 0.45 (1.8:1 on Lifted Slate) to 0.68, light from 0.55 to 0.51. Dark `--color-muted` goes from 0.68 to 0.72 to stay a step above it.
-- **Accent text** is `text-primary-strong` (links, the active rail item, stat numbers, the focus ring). The accent fill was 2.9:1 on light panels. Dark `--color-primary-strong` is L 0.74, up from 0.68, so it clears 4.5:1 on every panel at all six hues.
+`src/styles/contrast.test.ts` computes WCAG contrast for every text and background pair the app uses, in both themes and at every accent hue, and fails under 4.5:1 (3:1 for the focus ring). Each colour is scored two ways, because Chromium clips an out-of-gamut oklch colour per channel while the CSS spec reduces its chroma, and the lower ratio counts. It found the rest of what the design pass left.
+- **Subtle text** is timestamps and metadata, so it reaches 4.5:1 on every panel: dark `--color-subtle` goes from L 0.45 (1.8:1 on Lifted Slate) to 0.68, light from 0.55 to 0.51. The dark ladder above it widens to keep its steps: `--color-muted` is 0.76 (was 0.68) and `--color-fg-muted` 0.87 (was 0.82).
+- **Accent text** is `text-primary-strong` (links, the active rail item, stat numbers, the focus ring). The accent fill was 2.9:1 on light panels. Light `--color-primary-strong` is L 0.44, down from 0.47: clipped as Chromium does, the cyan hue was 4.06:1 on a chip. Dark is L 0.74, up from 0.68. Both clear their thresholds on every panel at all six hues, under both gamut models.
 - **Placeholders** are `--color-muted` at full opacity: Tailwind's half-opacity placeholder was under 3:1.
-- **Avatar initials** are dark ink: white was 1.6:1 on the amber gradient.
+- **Avatar initials** are `--color-avatar-ink`, dark in both themes: white was 1.6:1 on the amber gradient.
+- **Small status text:** the admin stat deltas use `text-success-ink` and `text-live-ink`, as `text-success` and `text-live` were 1.8:1 and 3.0:1 on light panels. The time pill on a room card is plain white, as 85% white fell short on a white thumbnail.
 - **Motion:** the spatial parts of popup, toast, tooltip and toolbar transitions, and the accent swatch's hover scale, are `motion-safe:`. Opacity still fades.
