@@ -13,6 +13,9 @@ type FakeTrack = MediaStreamTrack & {
   end: () => void;
   deviceId: string | null;
   contentHint: string;
+  /** Mute it, as Firefox does a mic that was unplugged (no `ended`). */
+  mute: () => void;
+  endHandlerOnly: () => void;
 };
 
 function fakeTrack(kind: "audio" | "video", deviceId: string | null): FakeTrack {
@@ -22,15 +25,28 @@ function fakeTrack(kind: "audio" | "video", deviceId: string | null): FakeTrack 
     deviceId,
     contentHint: "",
     stopped: false,
+    muted: false,
+    mute() {
+      track.muted = true;
+    },
+    getSettings: () => ({ deviceId: deviceId ?? undefined }),
     stop() {
       track.stopped = true;
     },
+    onended: null as (() => void) | null,
     addEventListener(type: string, listener: () => void) {
       if (type === "ended") ended.add(listener);
     },
+    /** The device went away: `ended` reaches the `onended` handler and every listener. */
     end() {
       track.stopped = true;
+      track.onended?.();
       for (const listener of ended) listener();
+    },
+    /** As a dispatched `ended` does in Firefox: the `onended` handler only, no listeners. */
+    endHandlerOnly() {
+      track.stopped = true;
+      track.onended?.();
     },
   };
   return track as unknown as FakeTrack;
@@ -117,7 +133,12 @@ describe("LocalMedia", () => {
   it("starts with mic and camera off, asking for nothing", () => {
     const mediaDevices = fakeDevices();
     const media = new LocalMedia({ mediaDevices });
-    expect(media.getSnapshot().mic).toEqual({ status: "off", track: null, failure: null });
+    expect(media.getSnapshot().mic).toEqual({
+      status: "off",
+      track: null,
+      failure: null,
+      lost: false,
+    });
     expect(media.getSnapshot().cam.status).toBe("off");
     expect(mediaDevices.calls).toEqual([]);
   });
@@ -130,7 +151,7 @@ describe("LocalMedia", () => {
     expect(mediaDevices.calls).toHaveLength(1);
     expect(mediaDevices.calls[0]?.audio).toBeUndefined();
     expect(mediaDevices.calls[0]?.video).toMatchObject({ deviceId: { exact: "cam-2" } });
-    expect(media.getSnapshot().cam).toEqual({ status: "on", track, failure: null });
+    expect(media.getSnapshot().cam).toEqual({ status: "on", track, failure: null, lost: false });
     expect(media.getSnapshot().mic.status).toBe("off");
   });
 
@@ -147,7 +168,12 @@ describe("LocalMedia", () => {
       mediaDevices: fakeDevices({ fail: { any: "NotAllowedError" } }),
     });
     expect(await media.enable("mic")).toBeNull();
-    expect(media.getSnapshot().mic).toEqual({ status: "off", track: null, failure: "denied" });
+    expect(media.getSnapshot().mic).toEqual({
+      status: "off",
+      track: null,
+      failure: "denied",
+      lost: false,
+    });
   });
 
   it("tells a busy device and an unsupported browser apart", async () => {
@@ -180,7 +206,12 @@ describe("LocalMedia", () => {
     expect(cam.stopped).toBe(false);
     media.release();
     expect(cam.stopped).toBe(true);
-    expect(media.getSnapshot().cam).toEqual({ status: "off", track: null, failure: null });
+    expect(media.getSnapshot().cam).toEqual({
+      status: "off",
+      track: null,
+      failure: null,
+      lost: false,
+    });
   });
 
   it("drops a track that arrives after it was turned off", async () => {
@@ -193,11 +224,136 @@ describe("LocalMedia", () => {
     expect(media.getSnapshot().cam.status).toBe("off");
   });
 
-  it("is off once its track ends by itself (unplugged)", async () => {
+  it("is off and lost once its track ends by itself (unplugged)", async () => {
     const media = new LocalMedia({ mediaDevices: fakeDevices() });
     const cam = (await media.enable("cam")) as FakeTrack;
+    const mic = (await media.enable("mic")) as FakeTrack;
     cam.end();
-    expect(media.getSnapshot().cam.status).toBe("off");
+    expect(media.getSnapshot().cam).toEqual({
+      status: "off",
+      track: null,
+      failure: null,
+      lost: true,
+    });
+    // Only that device.
+    expect(media.getSnapshot().mic).toMatchObject({ status: "on", track: mic, lost: false });
+  });
+
+  it("hears `ended` through the onended handler alone (Firefox ignores listeners on tracks)", async () => {
+    const media = new LocalMedia({ mediaDevices: fakeDevices() });
+    const cam = (await media.enable("cam")) as FakeTrack;
+    cam.endHandlerOnly();
+    expect(media.getSnapshot().cam).toMatchObject({ status: "off", track: null, lost: true });
+    // A shared screen too.
+    const video = (await media.startShare("detail")) as FakeTrack;
+    video.endHandlerOnly();
+    expect(media.getSnapshot().share.status).toBe("off");
+  });
+
+  it("isn't lost when turned off by the user, or released", async () => {
+    const media = new LocalMedia({ mediaDevices: fakeDevices() });
+    const cam = (await media.enable("cam")) as FakeTrack;
+    media.disable("cam");
+    // `stop()` fires no `ended`, but a late one from the old track must change nothing.
+    cam.end();
+    expect(media.getSnapshot().cam.lost).toBe(false);
+    await media.enable("mic");
+    media.release();
+    expect(media.getSnapshot().mic.lost).toBe(false);
+  });
+
+  it("clears lost when turned on again, and a failed retry stays lost", async () => {
+    const mediaDevices = fakeDevices({ fail: { gone: "NotReadableError" } });
+    const storage = memoryStorage({ [DEVICES_STORAGE_KEY]: JSON.stringify({ cam: "gone" }) });
+    const media = new LocalMedia({ mediaDevices, storage });
+    await media.select("cam", null);
+    const first = (await media.enable("cam")) as FakeTrack;
+    first.end();
+    expect(media.getSnapshot().cam.lost).toBe(true);
+    // Still unplugged: the retry fails, and says why, with the notice still due.
+    await media.select("cam", "gone");
+    expect(media.getSnapshot().cam).toMatchObject({ status: "off", failure: "busy", lost: true });
+    // Another device takes over.
+    await media.select("cam", "cam-2");
+    const second = media.getSnapshot().cam;
+    expect(second).toMatchObject({ status: "on", failure: null, lost: false });
+    expect((second.track as FakeTrack).deviceId).toBe("cam-2");
+  });
+
+  it("an unplugged mic Firefox only mutes is lost once devicechange no longer lists it", async () => {
+    const mediaDevices = fakeDevices({
+      devices: [device("audioinput", "m1", "USB mic"), device("audioinput", "m2", "Built-in")],
+    });
+    const storage = memoryStorage({ [DEVICES_STORAGE_KEY]: JSON.stringify({ mic: "m1" }) });
+    const media = new LocalMedia({ mediaDevices, storage });
+    const unsubscribe = media.subscribe(() => {});
+    await flush();
+    const mic = (await media.enable("mic")) as FakeTrack;
+    await flush();
+    // Muted but still listed (the OS muted it): not lost.
+    mic.mute();
+    mediaDevices.fireDeviceChange();
+    await flush();
+    expect(media.getSnapshot().mic.status).toBe("on");
+    // Unplugged: gone from the list.
+    mediaDevices.devices = [device("audioinput", "m2", "Built-in")];
+    mediaDevices.fireDeviceChange();
+    await flush();
+    expect(media.getSnapshot().mic).toMatchObject({ status: "off", track: null, lost: true });
+    expect(mic.stopped).toBe(true);
+    unsubscribe();
+  });
+
+  it("a muted sole mic is lost once the list goes empty", async () => {
+    const mediaDevices = fakeDevices({ devices: [device("audioinput", "m1", "USB mic")] });
+    const storage = memoryStorage({ [DEVICES_STORAGE_KEY]: JSON.stringify({ mic: "m1" }) });
+    const media = new LocalMedia({ mediaDevices, storage });
+    const unsubscribe = media.subscribe(() => {});
+    await flush();
+    const mic = (await media.enable("mic")) as FakeTrack;
+    await flush();
+    mic.mute();
+    mediaDevices.devices = [];
+    mediaDevices.fireDeviceChange();
+    await flush();
+    expect(media.getSnapshot().mic).toMatchObject({ status: "off", track: null, lost: true });
+    unsubscribe();
+  });
+
+  it("doesn't judge a track that started while the list was being taken", async () => {
+    const mediaDevices = fakeDevices({ devices: [device("audioinput", "m1", "USB mic")] });
+    const storage = memoryStorage({ [DEVICES_STORAGE_KEY]: JSON.stringify({ mic: "m1" }) });
+    const media = new LocalMedia({ mediaDevices, storage });
+    const old = (await media.enable("mic")) as FakeTrack;
+    old.mute();
+    // The list is taken (and answers without the old device) while a new track replaces it.
+    let stale: (list: MediaDeviceInfo[]) => void = () => {};
+    let calls = 0;
+    mediaDevices.enumerateDevices = () =>
+      ++calls === 1
+        ? new Promise((resolve) => (stale = resolve))
+        : Promise.resolve([device("audioinput", "m2", "Built-in")]);
+    const refreshing = media.refreshDevices();
+    await media.select("mic", "m2");
+    await flush();
+    const fresh = media.getSnapshot().mic.track as FakeTrack;
+    fresh.mute();
+    stale([device("audioinput", "m3", "Other")]);
+    await refreshing;
+    expect(media.getSnapshot().mic).toMatchObject({ status: "on", track: fresh, lost: false });
+  });
+
+  it("keeps a live, unmuted device through a devicechange that doesn't list it", async () => {
+    const mediaDevices = fakeDevices({ devices: [device("videoinput", "c1", "Cam")] });
+    const storage = memoryStorage({ [DEVICES_STORAGE_KEY]: JSON.stringify({ cam: "c1" }) });
+    const media = new LocalMedia({ mediaDevices, storage });
+    const unsubscribe = media.subscribe(() => {});
+    await media.enable("cam");
+    mediaDevices.devices = [device("videoinput", "c2", "Other")];
+    mediaDevices.fireDeviceChange();
+    await flush();
+    expect(media.getSnapshot().cam.status).toBe("on");
+    unsubscribe();
   });
 
   it("remembers the chosen devices, but not whether they were on", async () => {

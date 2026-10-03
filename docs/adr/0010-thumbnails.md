@@ -23,3 +23,7 @@ Date: 2026-09-27 · Status: accepted
 
 ## Addendum: declared size is checked too (2026-10-02)
 - The magic bytes aren't enough: a small file can declare a huge size, and every viewer of the room card would decode it. The upload route reads the size from the header itself (JPEG frame headers, WebP `VP8 `, `VP8L` and `VP8X`) and refuses anything declaring more than twice the capture size (960x540), a margin for a changed capture. A header that can't be read is refused too.
+
+## Addendum: uploads time out and are retried (2026-10-02)
+- An upload is no longer fire-and-forget: it gives up after 15 s (`AbortSignal.timeout`), and a refusal (any non-2xx) counts as a failure like a network error.
+- If a share's first upload fails (or no frame could be captured), it is retried after 10 s, then 30 s, then 60 s, each wait counted from the failed attempt, so a room card isn't left on its placeholder for a whole 3 minutes. After the third retry it is left to the normal cadence; retries stop with the share. Later failures aren't retried early: the card keeps its last thumbnail and the next interval tries again.

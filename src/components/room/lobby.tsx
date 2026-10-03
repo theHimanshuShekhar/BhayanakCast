@@ -1,6 +1,6 @@
 // The pre-join lobby (CONTEXT.md): pick and preview mic and camera before entering a room.
 // Both start off, and the browser asks for permission only when one is first turned on.
-import { type ReactNode, useEffect, useRef } from "react";
+import { type ReactNode, useEffect, useId, useRef } from "react";
 import { watchAudioLevel } from "~/lib/audio-level";
 import {
   getLocalMedia,
@@ -239,9 +239,10 @@ export function DeviceCheck({
 }
 
 /** The chosen `kind` device, from the devices the browser lists. */
-function DevicePicker({ kind }: { kind: LocalDeviceKind }) {
+export function DevicePicker({ kind }: { kind: LocalDeviceKind }) {
   const local = useLocalMedia();
-  const id = `lobby-${kind}-device`;
+  // Unique: the lobby and a room's device-lost notice both show one.
+  const id = `${kind}-device-${useId()}`;
   const devices = local.devices[kind];
   const selected = local.selected[kind] ?? "";
   // The remembered device shows even when it isn't listed: unplugged now, or (before

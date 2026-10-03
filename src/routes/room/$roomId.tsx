@@ -13,6 +13,7 @@ import {
 import { Icon } from "~/components/icons";
 import { Sheet } from "~/components/overlays";
 import { ControlBtn } from "~/components/room/control-btn";
+import { DeviceLossNotice } from "~/components/room/device-loss-notice";
 import { KnockToasts } from "~/components/room/knock-toasts";
 import { failureText, Lobby } from "~/components/room/lobby";
 import { PeerAudio } from "~/components/room/peer-audio";
@@ -1059,6 +1060,7 @@ function RoomPage({
       </div>
 
       {isPrivate && <KnockToasts roomId={detail.id} />}
+      <DeviceLossNotice onRestored={(kind) => setMedia((m) => ({ ...m, [kind]: true }))} />
       {settings.showChat && (
         <RoomSide
           participants={people}
