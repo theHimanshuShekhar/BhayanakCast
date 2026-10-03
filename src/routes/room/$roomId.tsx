@@ -24,6 +24,7 @@ import { isModerator, type ModAction, Tile } from "~/components/room/tile";
 import { Btn, Chip } from "~/components/ui";
 import { useAppActions } from "~/lib/app-actions";
 import { useCurrentSession } from "~/lib/current-user";
+import { roomMeta } from "~/lib/embed";
 import { fmtMins, MAX_STREAMERS } from "~/lib/format";
 import { inviteUrl } from "~/lib/invites";
 import { getInviteTokenFn, regenerateInviteTokenFn } from "~/lib/invites.functions";
@@ -68,14 +69,20 @@ import {
 
 export const Route = createFileRoute("/room/$roomId")({
   // Visitors go home with the "sign in to join" prompt open. A UX guard only: the room
-  // server functions and socket check the session themselves.
+  // server functions and socket check the session themselves. Crawlers are visitors too: the
+  // home route reads `join` and serves this room's link-embed tags (src/routes/index.tsx).
   beforeLoad: ({ context, params }) => {
     if (!context.session.user) throw redirect({ to: "/", search: { join: params.roomId } });
   },
   loader: async ({ context, params }) => {
     const room = await context.queryClient.ensureQueryData(roomQuery(params.roomId));
     if (!room) throw notFound();
+    return room;
   },
+  // Only a signed-in person gets this far, so no crawler reads these: it is the home route's
+  // head that serves them this room's tags. The two agree, though (a private room stays generic).
+  head: ({ loaderData, match }) =>
+    loaderData ? { meta: roomMeta(match.context.origin, loaderData) } : {},
   notFoundComponent: RoomNotFound,
   component: RoomRoute,
 });

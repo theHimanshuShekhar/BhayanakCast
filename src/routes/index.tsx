@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useMemo, useState } from "react";
 import { HomeNotice } from "~/components/home-notice";
 import { Icon, type IconComponent } from "~/components/icons";
@@ -11,6 +11,7 @@ import { Avatar, Btn, Chip } from "~/components/ui";
 import { useAppActions } from "~/lib/app-actions";
 import { type SignInErrorSearch, validateSignInErrorSearch } from "~/lib/ban";
 import { useCurrentSession } from "~/lib/current-user";
+import { homeMeta, roomMeta, unavailableRoomMeta } from "~/lib/embed";
 import { homeSummaryQuery } from "~/lib/home.queries";
 import { useOnlineCount } from "~/lib/lobby-live";
 import {
@@ -35,16 +36,38 @@ export const Route = createFileRoute("/")({
     ...(search.ended === "admin" ? { ended: "admin" as const } : {}),
     ...validateSignInErrorSearch(search),
   }),
+  // The room's link-embed tags name this URL (`/?join=<id>`) as the room's own, so someone
+  // signed in who opens it goes on into the room. (A UX redirect only; the room route and the
+  // room server functions check access themselves.)
+  beforeLoad: ({ context, search }) => {
+    if (context.session.user && search.join) {
+      throw redirect({ to: "/room/$roomId", params: { roomId: search.join } });
+    }
+  },
   loaderDeps: ({ search }) => ({ join: search.join }),
   loader: async ({ context, deps }) => {
     const { queryClient, session } = context;
-    await Promise.all([
+    const [, , , joinRoom] = await Promise.all([
       queryClient.ensureQueryData(liveRoomsQuery()),
       queryClient.ensureQueryData(pastRoomsQuery()),
       queryClient.ensureQueryData(homeSummaryQuery()),
       // The shell's "sign in to join" prompt names this room.
       !session.user && deps.join ? queryClient.ensureQueryData(roomQuery(deps.join)) : null,
     ]);
+    // For the link-embed tags: `null` is a room the visitor can't see (ended, unknown or
+    // private, which look alike), `undefined` no room asked for.
+    return { joinRoom: !session.user && deps.join ? (joinRoom ?? null) : undefined };
+  },
+  // A crawler has no session, so it was sent here from /room/<id> (src/routes/room/$roomId.tsx)
+  // and reads that room's own tags here.
+  head: ({ loaderData, match }) => {
+    const { origin } = match.context;
+    if (!loaderData || loaderData.joinRoom === undefined) return { meta: homeMeta(origin) };
+    return {
+      meta: loaderData.joinRoom
+        ? roomMeta(origin, loaderData.joinRoom)
+        : unavailableRoomMeta(origin),
+    };
   },
   component: HomePage,
 });

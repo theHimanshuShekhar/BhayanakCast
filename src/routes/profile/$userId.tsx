@@ -6,6 +6,7 @@ import { SectionHead } from "~/components/section-head";
 import { Avatar, Btn } from "~/components/ui";
 import { useAppActions } from "~/lib/app-actions";
 import { useCurrentSession } from "~/lib/current-user";
+import { profileMeta } from "~/lib/embed";
 import { toggleFavoriteFn } from "~/lib/favorites.functions";
 import { favoriteKeys, isFavoriteQuery } from "~/lib/favorites.queries";
 import { avatarFor, formatCotime } from "~/lib/format";
@@ -25,7 +26,10 @@ export const Route = createFileRoute("/profile/$userId")({
     if (user && user.id !== params.userId) {
       await context.queryClient.ensureQueryData(isFavoriteQuery(params.userId));
     }
+    return profile;
   },
+  head: ({ loaderData, match }) =>
+    loaderData ? { meta: profileMeta(match.context.origin, loaderData) } : {},
   notFoundComponent: ProfileNotFound,
   component: ProfileRoute,
 });

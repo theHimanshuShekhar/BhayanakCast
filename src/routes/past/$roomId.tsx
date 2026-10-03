@@ -11,6 +11,7 @@ import {
 } from "~/components/room-cards";
 import { DOTS, SectionHead } from "~/components/section-head";
 import { Avatar, Chip } from "~/components/ui";
+import { recapMeta } from "~/lib/embed";
 import { fmtAgo, fmtMins } from "~/lib/format";
 import type { Recap, RecapPerson, RecapSpan } from "~/lib/recaps";
 import { recapQuery } from "~/lib/recaps.queries";
@@ -20,7 +21,10 @@ export const Route = createFileRoute("/past/$roomId")({
   loader: async ({ context, params }) => {
     const recap = await context.queryClient.ensureQueryData(recapQuery(params.roomId));
     if (!recap) throw notFound();
+    return recap;
   },
+  head: ({ loaderData, match }) =>
+    loaderData ? { meta: recapMeta(match.context.origin, loaderData) } : {},
   notFoundComponent: RecapNotFound,
   component: PastStreamRoute,
 });

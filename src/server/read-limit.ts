@@ -8,17 +8,20 @@ import { READ_RATE_LIMITED_MESSAGE } from "../lib/profiles.ts";
 import { withinRateLimit } from "./rate-limit.ts";
 
 /** What a public read is limited as: each kind has its own budget per IP. */
-export type PublicRead = "profile" | "search" | "home";
+export type PublicRead = "profile" | "search" | "home" | "card";
 
 export const PUBLIC_READ_WINDOW_MS = 60_000;
 
 /**
  * At most this many reads of each kind per IP in any `PUBLIC_READ_WINDOW_MS`. A page load costs
  * one profile or home read, and the pages refetch about once a minute (`STATS_REFRESH_MS`) or
- * when the lobby changes; search runs once typing pauses, so it gets the smallest budget.
+ * when the lobby changes; search runs once typing pauses, so it gets the smallest budget. A room
+ * card (`/api/og/room/<id>.png`, ADR 22) is fetched by link unfurlers, a few times per pasted
+ * link; drawing one costs about 150 ms of CPU, so its budget is as small as search's.
  */
 export const PUBLIC_READ_LIMITS: Record<PublicRead, number> = {
   search: 30,
+  card: 30,
   profile: 60,
   home: 120,
 };

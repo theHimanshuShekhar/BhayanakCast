@@ -22,6 +22,8 @@ import { SignInButton } from "~/components/sign-in-button";
 import { AppActionsContext } from "~/lib/app-actions";
 import { signOut } from "~/lib/auth-client";
 import { loadCurrentSession, useCurrentSession } from "~/lib/current-user";
+import { siteMeta } from "~/lib/embed";
+import { siteOrigin } from "~/lib/embed.functions";
 import { useLobbyLive } from "~/lib/lobby-live";
 import type { CreateRoomInput } from "~/lib/rooms";
 import { createRoomFn } from "~/lib/rooms.functions";
@@ -36,20 +38,29 @@ const ZOD_JITLESS_SCRIPT = "globalThis.__zod_globalConfig={jitless:true};";
 
 export const Route = createRootRouteWithContext<RouterContext>()({
   // Runs on the server for SSR and again on each client navigation (via the server fn).
-  beforeLoad: async () => ({ session: await loadCurrentSession() }),
+  // `origin` is the site's public URL, for the absolute URLs in every page's link-embed tags.
+  beforeLoad: async () => {
+    const [session, origin] = await Promise.all([loadCurrentSession(), siteOrigin()]);
+    return { session, origin };
+  },
   // Initial appearance settings, rendered into <html> during SSR. After that the client's copy
   // is authoritative, so this only reloads when the router is invalidated (e.g. sign-out).
   loader: () => getSettings(),
   staleTime: Number.POSITIVE_INFINITY,
-  head: () => ({
+  // The site's link-embed tags are the default; a page with its own (room, recap, profile,
+  // invite) overrides them by name (src/lib/embed.ts).
+  head: ({ match }) => ({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "BhayanakCast · your crew, your screens, one room" },
+      ...siteMeta(match.context.origin),
     ],
     links: [
       { rel: "stylesheet", href: appCss },
       { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
+      // Some unfurlers and browsers ignore an SVG icon.
+      { rel: "icon", type: "image/png", sizes: "48x48", href: "/favicon.png" },
+      { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
     ],
     // Zod 4 probes for `new Function` as each object schema is created, and a CSP without
     // `unsafe-eval` reports the caught throw as a violation (ADR 9 addendum on security headers).

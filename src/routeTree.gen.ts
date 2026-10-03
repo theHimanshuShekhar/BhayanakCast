@@ -17,6 +17,7 @@ import { Route as PastRoomIdRouteImport } from './routes/past/$roomId'
 import { Route as ProfileUserIdRouteImport } from './routes/profile/$userId'
 import { Route as RoomRoomIdRouteImport } from './routes/room/$roomId'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as ApiOgRoomRoomIdRouteImport } from './routes/api/og/room/$roomId'
 import { Route as ApiThumbnailsRoomIdIndexRouteImport } from './routes/api/thumbnails/$roomId/index'
 import { Route as ApiThumbnailsRoomIdUserIdRouteImport } from './routes/api/thumbnails/$roomId/$userId'
 
@@ -60,6 +61,11 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiOgRoomRoomIdRoute = ApiOgRoomRoomIdRouteImport.update({
+  id: '/api/og/room/$roomId',
+  path: '/api/og/room/$roomId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiThumbnailsRoomIdIndexRoute =
   ApiThumbnailsRoomIdIndexRouteImport.update({
     id: '/api/thumbnails/$roomId/',
@@ -82,6 +88,7 @@ export interface FileRoutesByFullPath {
   '/profile/$userId': typeof ProfileUserIdRoute
   '/room/$roomId': typeof RoomRoomIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/og/room/$roomId': typeof ApiOgRoomRoomIdRoute
   '/api/thumbnails/$roomId/$userId': typeof ApiThumbnailsRoomIdUserIdRoute
   '/api/thumbnails/$roomId/': typeof ApiThumbnailsRoomIdIndexRoute
 }
@@ -94,6 +101,7 @@ export interface FileRoutesByTo {
   '/profile/$userId': typeof ProfileUserIdRoute
   '/room/$roomId': typeof RoomRoomIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/og/room/$roomId': typeof ApiOgRoomRoomIdRoute
   '/api/thumbnails/$roomId/$userId': typeof ApiThumbnailsRoomIdUserIdRoute
   '/api/thumbnails/$roomId': typeof ApiThumbnailsRoomIdIndexRoute
 }
@@ -107,6 +115,7 @@ export interface FileRoutesById {
   '/profile/$userId': typeof ProfileUserIdRoute
   '/room/$roomId': typeof RoomRoomIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/og/room/$roomId': typeof ApiOgRoomRoomIdRoute
   '/api/thumbnails/$roomId/$userId': typeof ApiThumbnailsRoomIdUserIdRoute
   '/api/thumbnails/$roomId/': typeof ApiThumbnailsRoomIdIndexRoute
 }
@@ -121,6 +130,7 @@ export interface FileRouteTypes {
     | '/profile/$userId'
     | '/room/$roomId'
     | '/api/auth/$'
+    | '/api/og/room/$roomId'
     | '/api/thumbnails/$roomId/$userId'
     | '/api/thumbnails/$roomId/'
   fileRoutesByTo: FileRoutesByTo
@@ -133,6 +143,7 @@ export interface FileRouteTypes {
     | '/profile/$userId'
     | '/room/$roomId'
     | '/api/auth/$'
+    | '/api/og/room/$roomId'
     | '/api/thumbnails/$roomId/$userId'
     | '/api/thumbnails/$roomId'
   id:
@@ -145,6 +156,7 @@ export interface FileRouteTypes {
     | '/profile/$userId'
     | '/room/$roomId'
     | '/api/auth/$'
+    | '/api/og/room/$roomId'
     | '/api/thumbnails/$roomId/$userId'
     | '/api/thumbnails/$roomId/'
   fileRoutesById: FileRoutesById
@@ -158,6 +170,7 @@ export interface RootRouteChildren {
   ProfileUserIdRoute: typeof ProfileUserIdRoute
   RoomRoomIdRoute: typeof RoomRoomIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiOgRoomRoomIdRoute: typeof ApiOgRoomRoomIdRoute
   ApiThumbnailsRoomIdUserIdRoute: typeof ApiThumbnailsRoomIdUserIdRoute
   ApiThumbnailsRoomIdIndexRoute: typeof ApiThumbnailsRoomIdIndexRoute
 }
@@ -220,6 +233,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/og/room/$roomId': {
+      id: '/api/og/room/$roomId'
+      path: '/api/og/room/$roomId'
+      fullPath: '/api/og/room/$roomId'
+      preLoaderRoute: typeof ApiOgRoomRoomIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/thumbnails/$roomId/': {
       id: '/api/thumbnails/$roomId/'
       path: '/api/thumbnails/$roomId'
@@ -246,6 +266,7 @@ const rootRouteChildren: RootRouteChildren = {
   ProfileUserIdRoute: ProfileUserIdRoute,
   RoomRoomIdRoute: RoomRoomIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiOgRoomRoomIdRoute: ApiOgRoomRoomIdRoute,
   ApiThumbnailsRoomIdUserIdRoute: ApiThumbnailsRoomIdUserIdRoute,
   ApiThumbnailsRoomIdIndexRoute: ApiThumbnailsRoomIdIndexRoute,
 }
