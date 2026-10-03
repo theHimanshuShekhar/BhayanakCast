@@ -1,6 +1,14 @@
 // Stage tile — screen share / camera / viewer-only. Ported from docs/design/prototype/room.jsx.
 import { Menu } from "@base-ui/react/menu";
-import { type CSSProperties, type MouseEvent, type RefObject, useRef, useState } from "react";
+import {
+  type ComponentProps,
+  type CSSProperties,
+  type MouseEvent,
+  memo,
+  type RefObject,
+  useRef,
+  useState,
+} from "react";
 import { avatarFor } from "~/lib/format";
 import type { Participant, RoomRole } from "~/lib/types";
 import {
@@ -57,7 +65,7 @@ const displayName = (p: Participant) => (p.you ? `${p.name} (you)` : p.name);
  */
 export type TileVariant = "screen" | "camera" | "chip";
 
-export const Tile = ({
+const TileView = ({
   p,
   variant,
   className = "",
@@ -105,8 +113,8 @@ export const Tile = ({
   onModerate: (id: string, action: ModAction) => void;
   /** This page's connection to them failed, even after an ICE restart (ADR 3). */
   cantConnect?: boolean;
-  /** Try connecting to them again. */
-  onRetry?: () => void;
+  /** Try connecting to them (their user id) again. */
+  onRetry?: (userId: string) => void;
 }) => {
   const ref = useRef<HTMLDivElement>(null);
   const fullscreenElement = useFullscreenElement();
@@ -123,7 +131,9 @@ export const Tile = ({
       setTapped((t) => !t);
     }
   };
-  const cantConnectState = cantConnect && <CantConnect name={p.name} onRetry={onRetry} />;
+  const cantConnectState = cantConnect && (
+    <CantConnect name={p.name} onRetry={onRetry && (() => onRetry(p.userId))} />
+  );
 
   if (variant === "chip") {
     // Someone with neither a share nor a camera on: a compact chip, so screens keep the stage.
@@ -372,6 +382,35 @@ export const Tile = ({
     </div>
   );
 };
+
+type TileProps = ComponentProps<typeof TileView>;
+
+/** Whether `a` and `b` are the same person in the same state, even as separate objects. */
+const sameParticipant = (a: Participant, b: Participant) => {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof Participant>;
+  return [...keys].every((key) => Object.is(a[key], b[key]));
+};
+
+/**
+ * A tile renders again only when a prop of its own changed, so the room page can derive its
+ * people (and filter the reactions) anew on every speaking change, and only the speaker's tile
+ * follows. The handlers must be stable (`useCallback`, state setters): a new function is a change.
+ */
+const sameTile = (prev: TileProps, next: TileProps) => {
+  const keys = new Set([...Object.keys(prev), ...Object.keys(next)]) as Set<keyof TileProps>;
+  return [...keys].every((key) => {
+    if (key === "p") return sameParticipant(prev.p, next.p);
+    if (key === "reactions") {
+      return (
+        prev.reactions.length === next.reactions.length &&
+        prev.reactions.every((r, i) => Object.is(r, next.reactions[i]))
+      );
+    }
+    return Object.is(prev[key], next[key]);
+  });
+};
+
+export const Tile = memo(TileView, sameTile);
 
 /** Over a tile whose connection failed: say so, with a retry (under the chips and controls). */
 const CantConnect = ({ name, onRetry }: { name: string; onRetry?: () => void }) => (
