@@ -31,7 +31,8 @@ services:
       REALTIME_SOCKETS_PER_USER: ${REALTIME_SOCKETS_PER_USER:-}
       PUBLIC_READ_LIMIT_SCALE: ${PUBLIC_READ_LIMIT_SCALE:-}
       REALTIME_EMPTY_ROOM_TIMEOUT_MS: ${REALTIME_EMPTY_ROOM_TIMEOUT_MS:-}
-    # Apply pending migrations, then start the server (the image's default command too).
+    # Validate the environment and apply pending migrations (src/db/migrate.ts does both, in that
+    # order), then start the server. The image's default command too: keep them the same.
     command: ["sh", "-c", "node src/db/migrate.ts && exec node server.prod.ts"]
     depends_on:
       db:

@@ -109,7 +109,8 @@ function AppShell() {
   // Cached reads were made as the old caller (private rooms, say): drop or refetch them all.
   const signOutToHome = async () => {
     await signOut();
-    await navigate({ to: "/" });
+    // Signing out is leaving any room: not for the room page's leave guard to question.
+    await navigate({ to: "/", ignoreBlocker: true });
     queryClient.removeQueries({ type: "inactive" });
     await Promise.all([queryClient.invalidateQueries(), router.invalidate()]);
   };

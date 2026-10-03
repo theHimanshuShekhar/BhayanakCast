@@ -4,6 +4,11 @@
  * React takes over, and input typed or clicks landing before then are lost, which flakes
  * under load. The root route marks `<html data-hydrated>` once hydrated (src/routes/__root.tsx).
  *
+ * Every page also accepts the browser's native leave prompt (`beforeunload`), which the room
+ * page raises while joined (src/components/room/leave-guard.tsx): left unanswered, Playwright
+ * dismisses it and the reload or navigation never happens. A spec checking for the prompt
+ * listens to `dialog` events itself as well.
+ *
  * The `page` fixture is patched already; wrap pages from other contexts with `newPage`.
  *
  * Screen sharing: Chromium's fake media UI captures a fake screen (with tab audio), but
@@ -21,10 +26,22 @@ export async function waitForHydration(page: Page): Promise<void> {
 
 const patched = new WeakSet<Page>();
 
-/** Make `page.goto` and `page.reload` also wait for hydration. Returns the same page. */
+/** Pages (by URL) that raised a `beforeunload` prompt outside a room during the running test. */
+const strayPrompts: string[] = [];
+
+/**
+ * Make `page.goto` and `page.reload` also wait for hydration, and accept the browser's leave
+ * prompt. Returns the same page.
+ */
 export function hydrating(page: Page): Page {
   if (patched.has(page)) return page;
   patched.add(page);
+  page.on("dialog", (dialog) => {
+    if (dialog.type() !== "beforeunload") return;
+    // Only a room page in a room has one to raise; anywhere else it's a bug (see below).
+    if (!new URL(page.url()).pathname.startsWith("/room/")) strayPrompts.push(page.url());
+    dialog.accept().catch(() => {});
+  });
   const goto = page.goto.bind(page);
   const reload = page.reload.bind(page);
   page.goto = async (...args) => {
@@ -77,7 +94,20 @@ async function fakeScreenCapture(context: BrowserContext): Promise<void> {
 
 const withScreenCapture = new WeakSet<Browser>();
 
-export const test = base.extend<object, { browser: Browser }>({
+export const test = base.extend<{ strayPrompts: undefined }, { browser: Browser }>({
+  // The fixture accepts the leave prompt on every page, so one raised where it shouldn't be
+  // (the lobby, home) would otherwise pass unnoticed: fail the test at teardown.
+  strayPrompts: [
+    // biome-ignore lint/correctness/noEmptyPattern: Playwright needs the destructuring form
+    async ({}, use) => {
+      strayPrompts.length = 0;
+      await use(undefined);
+      if (strayPrompts.length > 0) {
+        throw new Error(`leave prompt outside a room page: ${strayPrompts.join(", ")}`);
+      }
+    },
+    { auto: true },
+  ],
   browser: [
     async ({ browser, browserName }, use) => {
       if (browserName === "firefox" && !withScreenCapture.has(browser)) {

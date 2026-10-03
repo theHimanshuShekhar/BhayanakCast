@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { createTestDb } from "../db/test-db.ts";
+import { REALTIME_PATH } from "../lib/realtime.ts";
 import { CLIENT_IP_HEADER } from "./client-ip.ts";
 import { FakeClock } from "./clock.ts";
 import { createProdServer } from "./prod-server.ts";
@@ -87,5 +88,40 @@ describe("a trusted proxy", () => {
     // Without the header, or with one that isn't an IP, the proxy's own address stands in.
     expect(await seenBy()).toBe("127.0.0.1");
     expect(await seenBy({ [CLIENT_IP_HEADER]: "not-an-ip" })).toBe("127.0.0.1");
+  });
+});
+
+describe("stop", () => {
+  it("closes the realtime sockets and the listener, and resolves", async () => {
+    const assets = await mkdtemp(join(tmpdir(), "bhayanakcast-prod-server-"));
+    const { db, close: closeTestDb } = await createTestDb();
+    const { server, stop } = createProdServer({
+      app: { fetch: () => new Response("ok") },
+      clientDir: assets,
+      port: 0,
+      hostname: "127.0.0.1",
+      trustedProxies: [],
+      realtime: { hub: new RoomHub({ clock: new FakeClock(), store: createDbRoomStore(db) }) },
+    });
+    try {
+      await server.serve();
+      await server.ready();
+      const base = server.url ?? "";
+      // `server.url` ends in a slash, so join the path with `URL` rather than by concatenation.
+      const ws = new WebSocket(new URL(REALTIME_PATH, base.replace("http", "ws")));
+      await new Promise((resolve, reject) => {
+        ws.once("open", resolve);
+        ws.once("error", reject);
+      });
+      const closed = new Promise((resolve) => ws.once("close", resolve));
+
+      await stop();
+
+      await closed;
+      await expect(fetch(base)).rejects.toThrow();
+    } finally {
+      await closeTestDb();
+      await rm(assets, { recursive: true, force: true });
+    }
   });
 });
