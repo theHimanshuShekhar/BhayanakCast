@@ -24,7 +24,11 @@ export const CARD_CACHE_SIZE = 32;
 export class CardCache {
   private readonly cards = new Map<string, Promise<Uint8Array>>();
 
-  constructor(private readonly max = CARD_CACHE_SIZE) {}
+  private readonly max: number;
+
+  constructor(max = CARD_CACHE_SIZE) {
+    this.max = max;
+  }
 
   get size(): number {
     return this.cards.size;
