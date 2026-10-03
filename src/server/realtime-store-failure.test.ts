@@ -155,11 +155,125 @@ describe("joining an empty room when the database write fails", () => {
       b.send({ type: "room.join", roomId });
       expect(await b.waitFor("error")).toMatchObject({ code: "internal", re: "room.join" });
 
-      // Still empty since T0 (the wait starts over from the failed join, but dates from then).
-      await h.advance(EMPTY_ROOM_TIMEOUT_MS);
+      // Still empty since T0, and ends on time: the failed join didn't restart the wait.
+      await h.advance(EMPTY_ROOM_TIMEOUT_MS - 60 * SECOND - 1);
+      expect((await roomRow()).endedAt).toBeNull();
+      await h.advance(1);
       expect(await roomRow()).toEqual({ lastEmptyAt: t(0), endedAt: T0, rolledUp: true });
     },
   );
+
+  it("doesn't let joins that keep failing hold an empty room open", async () => {
+    await joinAndLeave();
+    for (let minute = 1; minute <= 2; minute++) {
+      await h.advance(60 * SECOND);
+      failing.set("openPresence", 1);
+      const b = await h.connectAs(bo);
+      b.send({ type: "room.join", roomId });
+      expect(await b.waitFor("error")).toMatchObject({ code: "internal", re: "room.join" });
+    }
+    // Two minutes in, with the room empty since T0: it ends five minutes after T0.
+    await h.advance(EMPTY_ROOM_TIMEOUT_MS - 120 * SECOND - 1);
+    expect((await roomRow()).endedAt).toBeNull();
+    await h.advance(1);
+    expect(await roomRow()).toEqual({ lastEmptyAt: t(0), endedAt: T0, rolledUp: true });
+  });
+});
+
+describe("taking host when the database write fails", () => {
+  it("still finishes a join whose setHost fails, and hands host over after the grace", async () => {
+    // ana's room is empty (she left), so whoever joins takes host.
+    await joinAndLeave();
+    const watcher = await h.connectAs(cy);
+    failing.set("setHost", 1);
+
+    const b = await h.connectAs(bo);
+    const snapshot = await b.join(roomId);
+    expect(snapshot.hostUserId).toBe(ana.id);
+    expect(await b.waitFor("feed.entry", (m) => m.entry.kind === "joined")).toBeDefined();
+    expect(
+      await watcher.waitFor(
+        "lobby.changed",
+        (m) => m.room?.change === "count" && m.room.participantCount === 1,
+      ),
+    ).toBeDefined();
+    expect(logged(`taking host in room ${roomId} failed`)).toBe(true);
+    // The absent host's grace is running, announced to the joiner.
+    expect((await b.waitForEvent("hostChanged")).event).toEqual({
+      kind: "hostChanged",
+      hostUserId: ana.id,
+      graceUntil: t(HOST_GRACE_MS / SECOND),
+    });
+    expect(b.pending()).toEqual([]);
+
+    await h.advance(HOST_GRACE_MS);
+    expect((await b.waitForEvent("hostChanged")).event).toEqual({
+      kind: "hostChanged",
+      hostUserId: bo.id,
+      graceUntil: null,
+    });
+  });
+
+  it("keeps retrying the hand-over after such a join while the write keeps failing", async () => {
+    await joinAndLeave();
+    failing.set("setHost", Infinity);
+    const b = await h.connectAs(bo);
+    await b.join(roomId);
+    await h.advance(HOST_GRACE_MS);
+    expect(logged(`handing host over in room ${roomId} failed (try 1)`)).toBe(true);
+
+    failing.clear();
+    await h.advance(RETRY_BASE_MS);
+    expect((await b.waitForEvent("hostChanged", (m) => m.event.graceUntil === null)).event).toEqual(
+      { kind: "hostChanged", hostUserId: bo.id, graceUntil: null },
+    );
+  });
+
+  it("doesn't start a grace for the host themselves joining their own room", async () => {
+    const watcher = await h.connectAs(cy);
+    failing.set("setHost", 1);
+    const a = await h.connectAs(ana);
+    const snapshot = await a.join(roomId);
+    expect(snapshot.hostUserId).toBe(ana.id);
+    expect(snapshot.hostGraceUntil).toBeUndefined();
+    expect(await a.waitFor("feed.entry", (m) => m.entry.kind === "joined")).toBeDefined();
+    expect(
+      await watcher.waitFor(
+        "lobby.changed",
+        (m) => m.room?.change === "count" && m.room.participantCount === 1,
+      ),
+    ).toBeDefined();
+    await h.advance(HOST_GRACE_MS * 2);
+    expect(a.pending()).toEqual([]);
+  });
+
+  it("leaves a returning host's grace running when setHost fails, and finishes the return on the retry", async () => {
+    const a = await h.connectAs(ana);
+    await a.join(roomId);
+    const b = await h.connectAs(bo);
+    await b.join(roomId);
+    await h.restart({ downFor: 5 * SECOND });
+
+    const b2 = await h.connectAs(bo);
+    expect((await b2.join(roomId)).hostGraceUntil).toBe(t(35));
+    await h.advance(10 * SECOND);
+    failing.set("setHost", 1);
+    const a2 = await h.connectAs(ana);
+    a2.send({ type: "room.join", roomId });
+    expect(await a2.waitFor("error")).toMatchObject({ code: "internal", re: "room.join" });
+    // Not back yet as far as the room is told, and the grace is still running.
+    expect(b2.pending()).toEqual([]);
+
+    // The client asks again: the return is finished and announced.
+    expect((await a2.join(roomId)).hostUserId).toBe(ana.id);
+    expect((await b2.waitForEvent("hostChanged")).event).toEqual({
+      kind: "hostChanged",
+      hostUserId: ana.id,
+      graceUntil: null,
+    });
+    await h.advance(HOST_GRACE_MS * 2);
+    expect(b2.pending()).toEqual([]);
+  });
 });
 
 describe("handing host on when the database write fails", () => {
@@ -320,6 +434,22 @@ describe("ending a room when the database write fails", () => {
     failing.clear();
     await h.advance(RETRY_BASE_MS);
     expect(await roomRow()).toEqual({ lastEmptyAt: null, endedAt: T0, rolledUp: true });
+  });
+
+  it("leaves a second admin end alone while the first end is still being retried", async () => {
+    await joinAndLeave();
+    failing.set("endRoom", Infinity);
+    await h.advance(EMPTY_ROOM_TIMEOUT_MS);
+    expect(calls.endRoom).toBe(1);
+
+    // Ended here already, so not ended again (and not audited again): no write now, and the
+    // retry still lands the end at the time it happened, not at the admin's.
+    expect(await h.hub.endRoomByAdmin(roomId)).toBe(false);
+    expect(calls.endRoom).toBe(1);
+    await h.advance(5 * SECOND);
+    failing.clear();
+    await h.advance(RETRY_MAX_MS);
+    expect(await roomRow()).toEqual({ lastEmptyAt: t(0), endedAt: T0, rolledUp: true });
   });
 
   it("stops retrying when the hub stops", async () => {
