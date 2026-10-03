@@ -32,7 +32,7 @@ function RecapNotFound() {
       <p className="m-0 mb-4 text-muted text-[12.5px]">
         past streams are kept for 30 days, then only stats remain.
       </p>
-      <Link to="/" className="text-primary">
+      <Link to="/" className="text-primary-strong">
         back to rooms
       </Link>
     </div>

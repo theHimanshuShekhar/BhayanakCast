@@ -1,6 +1,7 @@
 import type { ScreenKind } from "./types";
 
-const AVATARS = [
+/** For tests. */
+export const AVATARS = [
   { c1: "oklch(0.85 0.18 85)", c2: "oklch(0.7 0.2 30)" },
   { c1: "oklch(0.8 0.17 220)", c2: "oklch(0.65 0.2 280)" },
   { c1: "oklch(0.82 0.2 145)", c2: "oklch(0.7 0.18 190)" },

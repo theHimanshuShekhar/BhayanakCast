@@ -42,7 +42,7 @@ const ChatText = ({ text, me }: { text: string; me: string | null }) =>
           <span
             // biome-ignore lint/suspicious/noArrayIndexKey: tokens have no stable identity
             key={i}
-            className={`text-primary font-semibold ${token.username === me ? "bg-primary-soft rounded px-0.5" : ""}`}
+            className={`text-primary-strong font-semibold ${token.username === me ? "bg-primary-soft rounded px-0.5" : ""}`}
           >
             {token.text}
           </span>
@@ -55,7 +55,7 @@ const ChatText = ({ text, me }: { text: string; me: string | null }) =>
             href={token.href}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-primary underline underline-offset-2 break-all"
+            className="text-primary-strong underline underline-offset-2 break-all"
           >
             {token.text}
           </a>
@@ -432,7 +432,7 @@ export const RoomSide = ({
                 aria-label="Send"
                 disabled={!canSend}
                 title={canSend ? undefined : "joining the room…"}
-                className="!w-7 !h-7 !text-primary disabled:opacity-40 disabled:cursor-wait"
+                className="!w-7 !h-7 !text-primary-strong disabled:opacity-40 disabled:cursor-wait"
               >
                 <Icon.Send size={14} />
               </IconBtn>

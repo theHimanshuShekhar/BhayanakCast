@@ -85,7 +85,7 @@ function RoomNotFound() {
     <div className="px-10 py-20 text-center">
       <h1 className="m-0 mb-2 text-lg">room not found</h1>
       <p className="m-0 mb-4 text-muted text-[12.5px]">it may have ended or never existed.</p>
-      <Link to="/" className="text-primary">
+      <Link to="/" className="text-primary-strong">
         back to rooms
       </Link>
     </div>
@@ -107,7 +107,7 @@ function RoomNotice({
     <div className="px-10 py-20 text-center" role={waiting ? "status" : "alert"}>
       <h1 className="m-0 mb-2 text-lg">{title}</h1>
       <p className="m-0 mb-4 text-muted text-[12.5px]">{children}</p>
-      <Link to="/" className="text-primary">
+      <Link to="/" className="text-primary-strong">
         back to rooms
       </Link>
     </div>
@@ -334,7 +334,7 @@ function RoomName({ name, canRename }: { name: string; canRename: boolean }) {
         }}
         className="h-6 pointer-coarse:h-8 min-w-0 w-56 px-2 rounded-md bg-surface border border-border text-[11.5px] text-fg outline-0 focus:border-primary"
       />
-      <button type="submit" className="text-[11px] text-primary cursor-pointer">
+      <button type="submit" className="text-[11px] text-primary-strong cursor-pointer">
         save
       </button>
       <button
@@ -775,7 +775,7 @@ function RoomPage({
               type="button"
               aria-pressed={showNonSharers}
               title="Show people who aren't sharing"
-              className={`inline-flex items-center gap-2 h-7 px-2.5 rounded-lg border text-[11px] whitespace-nowrap cursor-pointer ${showNonSharers ? "bg-primary-soft border-[color-mix(in_oklch,var(--color-primary)_45%,transparent)] text-primary" : "bg-surface border-border text-fg-muted"}`}
+              className={`inline-flex items-center gap-2 h-7 px-2.5 rounded-lg border text-[11px] whitespace-nowrap cursor-pointer ${showNonSharers ? "bg-primary-soft border-[color-mix(in_oklch,var(--color-primary)_45%,transparent)] text-primary-strong" : "bg-surface border-border text-fg-muted"}`}
               onClick={() => setShowNonSharers((v) => !v)}
             >
               <span

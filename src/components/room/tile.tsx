@@ -273,7 +273,7 @@ const TileView = ({
 
       <div
         data-tapped={tapped || undefined}
-        className={`absolute top-2.5 right-2.5 z-[4] flex pointer-coarse:flex-wrap pointer-coarse:justify-end gap-1 p-[3px] rounded-[10px] border border-white/14 opacity-0 -translate-y-1 transition-[opacity,transform] duration-[160ms] group-hover:opacity-100 group-hover:translate-y-0 focus-within:opacity-100 focus-within:translate-y-0 has-data-popup-open:opacity-100 has-data-popup-open:translate-y-0 pointer-coarse:data-tapped:opacity-100 pointer-coarse:data-tapped:translate-y-0 pointer-coarse:not-data-tapped:not-focus-within:not-has-data-popup-open:pointer-events-none ${glassPill}`}
+        className={`absolute top-2.5 right-2.5 z-[4] flex pointer-coarse:flex-wrap pointer-coarse:justify-end gap-1 p-[3px] rounded-[10px] border border-white/14 opacity-0 motion-safe:-translate-y-1 transition-[opacity,transform] duration-[160ms] group-hover:opacity-100 group-hover:translate-y-0 focus-within:opacity-100 focus-within:translate-y-0 has-data-popup-open:opacity-100 has-data-popup-open:translate-y-0 pointer-coarse:data-tapped:opacity-100 pointer-coarse:data-tapped:translate-y-0 pointer-coarse:not-data-tapped:not-focus-within:not-has-data-popup-open:pointer-events-none ${glassPill}`}
       >
         <button
           type="button"
