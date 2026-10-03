@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { presenceIntervals, rooms } from "../db/schema/index.ts";
+import type { ServerMessage } from "../lib/realtime.ts";
 import { type RealtimeHarness, startRealtimeHarness, type TestUser } from "./realtime-harness.ts";
 import {
   EMPTY_ROOM_TIMEOUT_MS,
@@ -294,6 +295,92 @@ describe("taking host when the database write fails", () => {
     expect((await b.waitForEvent("hostChanged", (m) => m.event.graceUntil === null)).event).toEqual(
       { kind: "hostChanged", hostUserId: ana.id, graceUntil: null },
     );
+  });
+
+  describe("a host who leaves or drops while their return is being retried", () => {
+    /** bo first, ana (the creator) joins at +10 s with `setHost` failing for good. */
+    async function creatorJoinsAfterVisitor() {
+      const b = await h.connectAs(bo);
+      await b.join(roomId);
+      await h.advance(10 * SECOND);
+      failing.set("setHost", Infinity);
+      const a = await h.connectAs(ana);
+      const snapshot = await a.join(roomId);
+      return { a, b, snapshot };
+    }
+    const hostEvents = (client: { received: readonly ServerMessage[] }) =>
+      client.received.flatMap((m) =>
+        m.type === "room.event" && m.event.kind === "hostChanged" ? [m.event] : [],
+      );
+
+    it("doesn't show a present host as away, in the snapshot or the announcements", async () => {
+      const { a, b, snapshot } = await creatorJoinsAfterVisitor();
+      expect(snapshot.hostUserId).toBe(ana.id);
+      expect(snapshot.hostGraceUntil).toBeUndefined();
+      const c = await h.connectAs(cy);
+      expect((await c.join(roomId)).hostGraceUntil).toBeUndefined();
+
+      failing.clear();
+      await h.advance(HOST_GRACE_MS);
+      // Back in her seat: the return lands and everyone hears it with no grace.
+      for (const client of [a, b, c]) {
+        expect(hostEvents(client).every((e) => e.graceUntil === null)).toBe(true);
+      }
+      expect(hostEvents(b).at(-1)).toEqual({
+        kind: "hostChanged",
+        hostUserId: ana.id,
+        graceUntil: null,
+      });
+    });
+
+    it.each([
+      ["drops", 0],
+      ["drops", 15],
+      ["leaves", 0],
+      ["leaves", 15],
+    ] as const)(
+      "a host who %s %i s into the retry gets a full announced grace",
+      async (how, after) => {
+        const { a, b } = await creatorJoinsAfterVisitor();
+        // +10 s now; the first retry fires at +30 s. Move to the chosen time past it.
+        await h.advance(HOST_GRACE_MS - 10 * SECOND + after * SECOND);
+        const graceUntil = t(HOST_GRACE_MS / SECOND + after + HOST_GRACE_MS / SECOND);
+        if (how === "drops") await a.close();
+        else a.send({ type: "room.leave" });
+        await h.advance(0);
+
+        const event = (
+          await b.waitForEvent("hostChanged", (m) => m.event.graceUntil === graceUntil)
+        ).event;
+        expect(event).toEqual({ kind: "hostChanged", hostUserId: ana.id, graceUntil });
+        // Not handed on before the full grace is over, writes working again or not.
+        failing.clear();
+        await h.advance(HOST_GRACE_MS - SECOND);
+        expect(hostEvents(b).filter((e) => e.hostUserId === bo.id)).toEqual([]);
+        await h.advance(SECOND);
+        expect(
+          (await b.waitForEvent("hostChanged", (m) => m.event.hostUserId === bo.id)).event,
+        ).toEqual({ kind: "hostChanged", hostUserId: bo.id, graceUntil: null });
+      },
+    );
+
+    it("a host who drops before the first retry also gets a full grace from the drop", async () => {
+      const { a, b } = await creatorJoinsAfterVisitor();
+      await h.advance(15 * SECOND); // +25 s
+      await a.close();
+      await h.advance(0);
+      const graceUntil = t(25 + HOST_GRACE_MS / SECOND);
+      expect(
+        (await b.waitForEvent("hostChanged", (m) => m.event.graceUntil === graceUntil)).event,
+      ).toEqual({ kind: "hostChanged", hostUserId: ana.id, graceUntil });
+      failing.clear();
+      await h.advance(HOST_GRACE_MS - SECOND);
+      expect(hostEvents(b).filter((e) => e.hostUserId === bo.id)).toEqual([]);
+      await h.advance(SECOND);
+      expect(
+        (await b.waitForEvent("hostChanged", (m) => m.event.hostUserId === bo.id)).event,
+      ).toEqual({ kind: "hostChanged", hostUserId: bo.id, graceUntil: null });
+    });
   });
 
   it("takes host for a joiner of a hostless room whose setHost fails, without announcing an absent host", async () => {

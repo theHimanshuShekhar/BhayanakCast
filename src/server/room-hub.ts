@@ -200,8 +200,12 @@ interface LiveRoom {
   feed: FeedEntry[];
   /** `hostUserId`'s host interval is known to be open (`RoomStore.setHost` has run). */
   hostRecorded: boolean;
-  /** Set while the host is away (ADR 14): until when, and the timer that hands host on. */
-  hostGrace?: { until: Date; timer: Timer };
+  /**
+   * Set while the host is away (ADR 14): until when, and the timer that hands host on. With
+   * `returning`, the host is here and the timer only retries writing their return (`room.join`):
+   * nobody is shown it as an absence, and the host leaving or dropping starts a real grace.
+   */
+  hostGrace?: { until: Date; timer: Timer; returning?: boolean };
   /** The latest time anyone left (a presence interval closed); where an emptied room ends. */
   lastLeftAt?: Date;
   /** Set while nobody is here (ADR 14): since when, and the timer that ends the room. */
@@ -755,6 +759,7 @@ export class RoomHub {
       // would announce them, update the lobby or start the host grace. It is logged, the join
       // finishes, and the host grace below hands host over, retrying until the write lands.
       let hostWriteFailed = false;
+      let returningHost = false;
       try {
         if (takesHost) newHost = await this.#takeHost(room, user.id, joinedAt);
         else if (awaitsCreator) this.#startHostGrace(room, joinedAt);
@@ -762,6 +767,12 @@ export class RoomHub {
       } catch (error) {
         hostWriteFailed = true;
         this.#log(`taking host in room ${room.id} failed`, error);
+        // The host is here, so the grace running (a visitor started it) only retries their
+        // return from now on, and isn't shown as an absence.
+        if (room.hostUserId === user.id && room.hostGrace) {
+          room.hostGrace.returning = true;
+          returningHost = true;
+        }
       }
       this.#sendSnapshot(conn, roomId);
       this.#broadcast(
@@ -779,13 +790,14 @@ export class RoomHub {
           username: user.username,
         });
       }
-      if (back) this.#announceHost(room, joinedAt, conn);
+      if (back || returningHost) this.#announceHost(room, joinedAt, conn);
       this.#lobbyRoomCount(room);
       // Host is still the absent one (or nobody): their grace starts and, if it runs out, host
       // passes to whoever is here. A hostless room has no one to wait for, so its takeover is
       // tried again after the first backoff, unannounced. When the joiner is the host themselves
-      // (the creator, or a host back after a restart), a host grace already running stays: on
-      // expiry it retries their return instead of handing host on (`#startHostGrace`).
+      // (the creator, or a host back after a restart), a host grace already running stays, marked
+      // as their return's retry: on expiry it retries the write instead of handing host on
+      // (`#startHostGrace`), and it isn't shown as an absence.
       if (hostWriteFailed && room.hostUserId === null) this.#startHostGrace(room, joinedAt, 1);
       else if (hostWriteFailed && room.hostUserId !== user.id) this.#hostGone(room);
     },
@@ -1133,7 +1145,8 @@ export class RoomHub {
 
   /**
    * The host just disconnected from or left `room`: unless nobody is left (whoever joins next
-   * becomes host), start the host grace if it isn't running yet, and tell everyone.
+   * becomes host), start the host grace if it isn't running yet, and tell everyone. A grace that
+   * is only a present host's return retry gives way to a full one.
    */
   #hostGone(room: LiveRoom): void {
     if (room.participants.size === 0) {
@@ -1142,7 +1155,7 @@ export class RoomHub {
       this.#cancelHostGrace(room);
       return;
     }
-    if (room.hostGrace) return;
+    if (room.hostGrace && !room.hostGrace.returning) return;
     const at = this.#clock.now();
     this.#startHostGrace(room, at);
     this.#announceHost(room, at);
@@ -1154,18 +1167,20 @@ export class RoomHub {
    * the hand-over is tried again after a backoff (`failures` so far), until it lands, the host
    * returns, the room ends or empties, or `stop`.
    */
-  #startHostGrace(room: LiveRoom, at: Date, failures = 0): void {
+  #startHostGrace(room: LiveRoom, at: Date, failures = 0, returning = false): void {
     this.#cancelHostGrace(room);
     const delay = failures === 0 ? HOST_GRACE_MS : retryDelay(failures - 1);
     const timer = this.#setTimer(delay, async (firedAt) => {
       if (room.hostGrace?.timer !== timer || this.#rooms.get(room.id) !== room) return;
       room.hostGrace = undefined;
+      let retryingReturn = false;
       try {
         // A host here with a socket means the grace runs only because their return didn't write
         // (`room.join`): finish that rather than give host away. (A ban or kick hands over
         // while the host is still in the room, hence not in `#handOverHost`.)
         const host = room.hostUserId ? room.participants.get(room.hostUserId) : undefined;
         if (host && !host.grace) {
+          retryingReturn = true;
           await this.#takeHost(room, host.userId, firedAt);
           this.#announceHost(room, firedAt);
         } else {
@@ -1178,11 +1193,15 @@ export class RoomHub {
           error,
         );
         if (!this.#stopped && room.participants.size > 0) {
-          this.#startHostGrace(room, at, failures + 1);
+          this.#startHostGrace(room, at, failures + 1, retryingReturn);
         }
       }
     });
-    room.hostGrace = { until: new Date(at.getTime() + HOST_GRACE_MS), timer };
+    room.hostGrace = {
+      until: new Date(at.getTime() + HOST_GRACE_MS),
+      timer,
+      ...(returning ? { returning } : {}),
+    };
   }
 
   /**
@@ -1243,6 +1262,13 @@ export class RoomHub {
     room.hostGrace = undefined;
   }
 
+  /** When the absent host's grace ends, as shown to clients; null if the host isn't away. */
+  #graceUntil(room: LiveRoom): string | null {
+    const grace = room.hostGrace;
+    // No host to wait for, or a present host whose return is only being retried.
+    return grace && room.hostUserId && !grace.returning ? grace.until.toISOString() : null;
+  }
+
   /** Tell everyone in `room` (but `except`) who the host is, and whether they're away. */
   #announceHost(room: LiveRoom, at: Date, except?: HubConnection): void {
     this.#broadcast(
@@ -1250,7 +1276,7 @@ export class RoomHub {
       {
         kind: "hostChanged",
         hostUserId: room.hostUserId,
-        graceUntil: room.hostUserId ? (room.hostGrace?.until.toISOString() ?? null) : null,
+        graceUntil: this.#graceUntil(room),
       },
       at,
       except,
@@ -1430,6 +1456,7 @@ export class RoomHub {
   #sendSnapshot(conn: HubConnection, roomId: string): void {
     const room = this.#rooms.get(roomId);
     if (!room) return;
+    const graceUntil = this.#graceUntil(room);
     this.#send(conn, {
       type: "room.snapshot",
       roomId,
@@ -1438,9 +1465,7 @@ export class RoomHub {
       participants: [...room.participants.values()].map((p) => this.#view(room, p)),
       chat: [...room.chat],
       feed: [...room.feed],
-      ...(room.hostGrace && room.hostUserId
-        ? { hostGraceUntil: room.hostGrace.until.toISOString() }
-        : {}),
+      ...(graceUntil ? { hostGraceUntil: graceUntil } : {}),
     });
     const participant = conn.caller.user && room.participants.get(conn.caller.user.id);
     if (participant?.connection !== conn) return;
