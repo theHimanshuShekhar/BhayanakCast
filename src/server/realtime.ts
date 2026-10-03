@@ -66,7 +66,7 @@ export interface RealtimeServer {
   hub: RoomHub;
   /** Sockets open right now (server side). */
   readonly openSockets: number;
-  /** Stop taking upgrades and close every open socket. */
+  /** Stop taking upgrades, close every open socket and stop the hub's retries (`RoomHub.stop`). */
   close(): Promise<void>;
 }
 
@@ -215,6 +215,8 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
       server.off("upgrade", onUpgrade);
       stopAnnouncements();
       unregisterHub();
+      // No retrying restart recovery or room ends from here: the database pool closes next.
+      hub.stop();
       for (const ws of wss.clients) ws.terminate();
       await new Promise<void>((resolve) => wss.close(() => resolve()));
       await hub.idle();

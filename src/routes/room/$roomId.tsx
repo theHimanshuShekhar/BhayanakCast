@@ -727,6 +727,16 @@ function RoomPage({
     );
   }
 
+  if (live.error?.code === "internal" && live.error.re === "room.join") {
+    // The client asks again by itself (src/lib/realtime-client.ts), and the snapshot that
+    // finally answers it clears this notice.
+    return (
+      <RoomNotice title="connecting…" waiting>
+        the server isn't ready yet. you'll join {roomName} automatically in a moment.
+      </RoomNotice>
+    );
+  }
+
   const leave = () => {
     markInRoom(detail.id, false);
     navigate({ to: "/", ignoreBlocker: true });

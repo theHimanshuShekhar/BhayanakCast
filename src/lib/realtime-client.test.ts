@@ -83,6 +83,7 @@ beforeEach(() => {
     WebSocket: FakeSocket as unknown as typeof WebSocket,
     backoff: (attempt) => 1_000 * 2 ** attempt,
     fullRoomBackoff: (attempt) => 2_000 + 1_000 * attempt,
+    internalBackoff: (attempt) => 500 * 2 ** attempt,
   });
   statuses = [];
   client.onStatus((status) => statuses.push(status));
@@ -206,6 +207,101 @@ describe("RealtimeClient", () => {
     });
     vi.advanceTimersByTime(15_000); // (within one ping interval: the socket stays up)
     expect(joins()).toBe(4);
+  });
+
+  it("asks again with backoff when the server fails the join, until it gets in", () => {
+    const joins = () =>
+      latest().sent.filter((m) => (m as { type: string }).type === "room.join").length;
+    const failed = (re: string) =>
+      latest().serverSends({
+        type: "error",
+        code: "internal",
+        message: "The server is still starting, try again in a moment",
+        re,
+      });
+    client.joinRoom("r1");
+    latest().handshake();
+    expect(joins()).toBe(1);
+
+    // Not about the join: nothing to ask again.
+    failed("chat.send");
+    vi.advanceTimersByTime(10_000);
+    expect(joins()).toBe(1);
+
+    failed("room.join");
+    vi.advanceTimersByTime(499);
+    expect(joins()).toBe(1);
+    vi.advanceTimersByTime(1);
+    expect(joins()).toBe(2);
+
+    failed("room.join");
+    vi.advanceTimersByTime(999);
+    expect(joins()).toBe(2);
+    vi.advanceTimersByTime(1);
+    expect(joins()).toBe(3);
+
+    // A free spot in the lobby doesn't hasten a retry that isn't waiting for one.
+    failed("room.join");
+    latest().serverSends({
+      type: "lobby.changed",
+      online: 12,
+      room: { roomId: "r1", change: "count", participantCount: 2 },
+    });
+    expect(joins()).toBe(3);
+    vi.advanceTimersByTime(2_000);
+    expect(joins()).toBe(4);
+
+    latest().serverSends({
+      type: "room.snapshot",
+      roomId: "r1",
+      name: "room",
+      hostUserId: null,
+      participants: [],
+      chat: [],
+      feed: [],
+    });
+    vi.advanceTimersByTime(10_000);
+    expect(joins()).toBe(4);
+  });
+
+  it("starts its retry backoff over when it moves to a different room", () => {
+    const joins = (roomId: string) =>
+      latest().sent.filter(
+        (m) =>
+          (m as { type: string; roomId?: string }).type === "room.join" &&
+          (m as { roomId?: string }).roomId === roomId,
+      ).length;
+    const refused = (code: "internal" | "room_full") =>
+      latest().serverSends({ type: "error", code, message: "no", re: "room.join" });
+    client.joinRoom("r1");
+    latest().handshake();
+
+    // Two refusals of r1 never reached a snapshot: the next wait would be 2 s.
+    refused("internal");
+    vi.advanceTimersByTime(500);
+    refused("internal");
+    vi.advanceTimersByTime(1_000);
+    expect(joins("r1")).toBe(3);
+
+    // r2's first refusal waits the base time again, not r1's longer one.
+    client.joinRoom("r2");
+    expect(joins("r2")).toBe(1);
+    refused("internal");
+    vi.advanceTimersByTime(499);
+    expect(joins("r2")).toBe(1);
+    vi.advanceTimersByTime(1);
+    expect(joins("r2")).toBe(2);
+
+    // Joining the same room again (a re-render, say) keeps counting: 1 s for the second refusal,
+    // 2 s for the third.
+    refused("internal");
+    client.joinRoom("r2");
+    expect(joins("r2")).toBe(3);
+    refused("internal");
+    vi.advanceTimersByTime(1_999);
+    expect(joins("r2")).toBe(3);
+    vi.advanceTimersByTime(1);
+    expect(joins("r2")).toBe(4);
   });
 
   it.each(["taken_over", "banned"] as const)(
