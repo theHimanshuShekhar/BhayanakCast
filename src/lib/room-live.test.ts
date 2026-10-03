@@ -5,11 +5,13 @@ import {
   type FeedEntry,
   type RoomParticipant,
   type ServerMessage,
+  type ServerMessageOf,
 } from "./realtime";
 import {
   applyRoomMessage,
   CHAT_LINES_KEPT,
   feedLine,
+  isSignedOutError,
   mediaAfterRefusal,
   pendingShareAnswer,
   type RoomLive,
@@ -265,6 +267,31 @@ describe("the feed", () => {
     expect(words({ ...base, kind: "hostChanged" })).toBe("ana is now the host");
     expect(words({ ...base, kind: "kicked", by: mod })).toBe("ana was removed by mo");
     expect(feedLine({ ...base, kind: "joined" })).toMatchObject({ id: "f", at });
+  });
+});
+
+describe("isSignedOutError", () => {
+  const error = (over: Partial<ServerMessageOf<"error">>): ServerMessageOf<"error"> => ({
+    type: "error",
+    code: "forbidden",
+    message: "x",
+    ...over,
+  });
+
+  it("is true for a session that ended, and for an anonymous socket's refusal of a join", () => {
+    expect(isSignedOutError(error({ code: "session_ended" }))).toBe(true);
+    expect(isSignedOutError(error({ re: "room.join", message: "Sign in first" }))).toBe(true);
+  });
+
+  it("is false for other refusals, a private room's included", () => {
+    expect(isSignedOutError(null)).toBe(false);
+    expect(isSignedOutError(error({ code: "kicked", re: "room.join" }))).toBe(false);
+    expect(
+      isSignedOutError(
+        error({ re: "room.join", message: "This room is private: knock with its invite link" }),
+      ),
+    ).toBe(false);
+    expect(isSignedOutError(error({ re: "chat.send", message: "Sign in first" }))).toBe(false);
   });
 });
 

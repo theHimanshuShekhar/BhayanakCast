@@ -65,6 +65,7 @@ import {
   type RoomRole,
   SESSION_ENDED_CLOSE_CODE,
   type ServerMessage,
+  SIGN_IN_FIRST,
   SIGNAL_RATE_LIMIT,
 } from "../lib/realtime.ts";
 import { createRoomInput, ROOM_NAME_MAX } from "../lib/rooms.ts";
@@ -439,7 +440,7 @@ export class RoomHub {
         if (!parsed.ok) return this.#refuse(conn, "bad_request", parsed.error, parsed.type);
         const message = parsed.message;
         if (!conn.caller.user && !ANONYMOUS_MESSAGES.has(message.type)) {
-          return this.#refuse(conn, "forbidden", "Sign in first", message.type);
+          return this.#refuse(conn, "forbidden", SIGN_IN_FIRST, message.type);
         }
         if (message.type !== "hello" && !conn.greeted) {
           return this.#refuse(conn, "bad_request", "Send hello first", message.type);
@@ -701,7 +702,7 @@ export class RoomHub {
     "room.join": async (conn, message) => {
       const caller = conn.caller;
       if (!isSignedIn(caller)) {
-        return this.#refuse(conn, "forbidden", "Sign in to join rooms", message.type);
+        return this.#refuse(conn, "forbidden", SIGN_IN_FIRST, message.type);
       }
       if (!this.#restored) return this.#refuseStarting(conn, message.type);
       const { roomId } = message;

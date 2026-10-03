@@ -46,6 +46,7 @@ import {
 } from "~/lib/realtime";
 import {
   feedLine,
+  isSignedOutError,
   markInRoom,
   moderate,
   sendChat,
@@ -560,7 +561,7 @@ function RoomPage({
     live.ended ||
     live.error?.code === "not_found" ||
     live.error?.code === "taken_over" ||
-    live.error?.code === "session_ended" ||
+    isSignedOutError(live.error) ||
     live.error?.code === "kicked";
   useEffect(() => {
     if (!out) return;
@@ -713,13 +714,12 @@ function RoomPage({
       </RoomNotice>
     );
   }
-  if (live.error?.code === "session_ended") {
+  if (isSignedOutError(live.error)) {
     // The page keeps the old session until it navigates (the room route's guard would send a
     // visitor away from this notice); "back to rooms" loads the session afresh.
     return (
       <RoomNotice title="you were signed out">
-        your session ended (you signed out in another tab, or from another device), so you left{" "}
-        {roomName}. sign in again to rejoin it.
+        your session ended, so you left {roomName}. sign in again to rejoin it.
       </RoomNotice>
     );
   }

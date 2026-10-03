@@ -49,6 +49,12 @@ export const IDLE_CLOSE_CODE = 4000;
 export const BANNED_CLOSE_CODE = 4001;
 /** The close code the server uses for the sockets of a session that ended (sign-out, revoke). */
 export const SESSION_ENDED_CLOSE_CODE = 4003;
+/**
+ * The message of the `forbidden` refusal an anonymous socket gets for anything but `hello` and
+ * `ping`. A page that was in a room and is told this for its `room.join` lost its session
+ * without hearing `session_ended`.
+ */
+export const SIGN_IN_FIRST = "Sign in first";
 /** Longest chat message after trimming, in UTF-16 code units (what an input's maxLength counts). */
 export const CHAT_MAX_LENGTH = 500;
 /** How many recent chat messages a live room keeps in memory for joiners (ADR 4 addendum). */

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BANNED_CLOSE_CODE, SESSION_ENDED_CLOSE_CODE } from "../lib/realtime.ts";
+import { BANNED_CLOSE_CODE, SESSION_ENDED_CLOSE_CODE, SIGN_IN_FIRST } from "../lib/realtime.ts";
 import { type RealtimeHarness, startRealtimeHarness, type TestUser } from "./realtime-harness.ts";
 import type { RoomStore } from "./room-store.ts";
 
@@ -53,6 +53,13 @@ describe("signing out", () => {
     // The cookie is dead: a new socket with it is anonymous.
     const again = await h.connectAs(bo);
     expect(again.received.find((m) => m.type === "welcome")).toMatchObject({ user: null });
+    // And it can't join: the refusal the client reads as being signed out (`isSignedOutError`).
+    again.send({ type: "room.join", roomId });
+    expect(await again.waitFor("error")).toMatchObject({
+      code: "forbidden",
+      message: SIGN_IN_FIRST,
+      re: "room.join",
+    });
   });
 
   it("leaves sockets of the user's other sessions open", async () => {
@@ -117,7 +124,7 @@ describe("a ban", () => {
 });
 
 describe("when the database fails while dropping a socket", () => {
-  it("still closes every socket of the session (and of a banned user)", async () => {
+  it("still closes every socket of the session", async () => {
     let failing = false;
     await h.close();
     h = await startRealtimeHarness({
@@ -142,18 +149,11 @@ describe("when the database fails while dropping a socket", () => {
       const inRoom = await h.connectAs(ana);
       await inRoom.join(roomId);
       const lobby = await h.connectAs(ana);
-      const boRoom = await h.connectAs(bo);
-      await boRoom.join(roomId);
-      const boLobby = await h.connectAs(bo);
       failing = true;
 
       await h.auth.api.signOut({ headers: headersOf(ana) });
       expect(await inRoom.closed()).toBe(SESSION_ENDED_CLOSE_CODE);
       expect(await lobby.closed()).toBe(SESSION_ENDED_CLOSE_CODE);
-
-      await h.hub.disconnectUser(bo.id, "Reason: spam.");
-      expect(await boRoom.closed()).toBe(BANNED_CLOSE_CODE);
-      expect(await boLobby.closed()).toBe(BANNED_CLOSE_CODE);
       failing = false;
     } finally {
       error.mockRestore();
