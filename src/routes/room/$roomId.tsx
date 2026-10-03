@@ -13,6 +13,7 @@ import {
 import { Icon } from "~/components/icons";
 import { Sheet } from "~/components/overlays";
 import { ControlBtn } from "~/components/room/control-btn";
+import { DeviceLossNotice } from "~/components/room/device-loss-notice";
 import { KnockToasts } from "~/components/room/knock-toasts";
 import { LeaveGuard } from "~/components/room/leave-guard";
 import { failureText, Lobby } from "~/components/room/lobby";
@@ -1061,6 +1062,7 @@ function RoomPage({
 
       <LeaveGuard roomId={detail.id} active={joined && !out} sentHome={live.ended} />
       {isPrivate && <KnockToasts roomId={detail.id} />}
+      <DeviceLossNotice onRestored={(kind) => setMedia((m) => ({ ...m, [kind]: true }))} />
       {settings.showChat && (
         <RoomSide
           participants={people}
