@@ -97,7 +97,7 @@ export const StreamMosaic = ({
           </span>
           {freshness && (
             // Relative times can tick between the server render and hydration.
-            <span className={`${pill} !text-white/85`} suppressHydrationWarning>
+            <span className={pill} suppressHydrationWarning>
               {freshness}
             </span>
           )}

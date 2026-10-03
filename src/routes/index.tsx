@@ -56,7 +56,7 @@ const panelCls = "bg-canvas border border-border rounded-[var(--radius)] shadow-
 
 const PanelHead = ({ icon: I, children }: { icon: IconComponent; children: ReactNode }) => (
   <div className="flex items-center gap-[7px] mb-2.5 text-[11px] uppercase tracking-[0.1em] text-fg-muted font-semibold">
-    <span className="inline-flex text-primary">
+    <span className="inline-flex text-primary-strong">
       <I size={12} />
     </span>{" "}
     {children}
