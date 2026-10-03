@@ -272,7 +272,7 @@ const SortHeader = ({
   const active = sort.key === sortKey;
   return (
     <th
-      className={`${th} ${active ? "!text-primary" : ""}`}
+      className={`${th} ${active ? "!text-primary-strong" : ""}`}
       style={{ textAlign: align }}
       aria-sort={active ? (sort.dir === "desc" ? "descending" : "ascending") : "none"}
     >
@@ -568,7 +568,7 @@ const UsersTable = () => {
                 <td className={`${td} !text-subtle`}>{fmtDate(u.joinedAt)}</td>
                 <td className={td}>
                   {u.role === "admin" ? (
-                    <MonoCaps className="!text-primary">
+                    <MonoCaps className="!text-primary-strong">
                       {u.envAdmin ? "env admin" : "admin"}
                     </MonoCaps>
                   ) : (
@@ -671,7 +671,7 @@ const TopUsersTable = ({ users, label }: { users: LeaderboardEntry[]; label: str
             params={{ userId: u.id }}
             className="group grid grid-cols-[28px_28px_1fr_auto] grid-rows-[auto_auto] gap-x-3 items-center px-4 py-2.5 border-b border-border-subtle last:border-b-0 text-left !text-fg transition-colors hover:bg-surface-2 hover:no-underline"
           >
-            <span className="row-span-2 text-[10.5px] font-bold text-subtle tracking-[0.05em] group-hover:text-primary">
+            <span className="row-span-2 text-[10.5px] font-bold text-subtle tracking-[0.05em] group-hover:text-primary-strong">
               #{i + 1}
             </span>
             <Avatar
@@ -682,7 +682,7 @@ const TopUsersTable = ({ users, label }: { users: LeaderboardEntry[]; label: str
               className="row-span-2"
             />
             <span className="col-start-3 text-[12.5px] font-semibold text-fg">{u.username}</span>
-            <span className="col-start-4 row-start-1 text-[13px] font-bold text-primary tracking-[-0.01em]">
+            <span className="col-start-4 row-start-1 text-[13px] font-bold text-primary-strong tracking-[-0.01em]">
               {u.hours.toFixed(1)}
               <span className="text-subtle font-medium text-[11px]">h</span>
             </span>
@@ -807,7 +807,7 @@ function AdminPage() {
             </h1>
             <p className="m-0 text-xs text-muted">full platform overview · restricted to admins</p>
           </div>
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[color-mix(in_oklch,var(--color-primary)_15%,var(--color-surface))] border border-[color-mix(in_oklch,var(--color-primary)_40%,transparent)] text-[11px] tracking-[0.06em] uppercase font-semibold text-primary shadow-[0_0_16px_var(--color-primary-glow)]">
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[color-mix(in_oklch,var(--color-primary)_15%,var(--color-surface))] border border-[color-mix(in_oklch,var(--color-primary)_40%,transparent)] text-[11px] tracking-[0.06em] uppercase font-semibold text-primary-strong shadow-[0_0_16px_var(--color-primary-glow)]">
             <span className="w-1.5 h-1.5 rounded-full bg-primary shadow-[0_0_8px_var(--color-primary-glow)] animate-bc-pulse" />
             <span>admin access</span>
           </div>

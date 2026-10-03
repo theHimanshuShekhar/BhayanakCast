@@ -34,3 +34,11 @@ A first Impeccable critique of the room (21/40) led to these deliberate deviatio
 - **Phones:** in a room, the app's bottom navigation is hidden, because the room's control bar takes the bottom.
 - **Create dialog:** it no longer guesses a kind or a tag: a new room is "just chatting" with no tags until the host picks. Tags and the description sit behind a disclosure.
 - **"viewers" toggle:** it keeps its earlier addendum's behaviour and now hides the camera row and the chips.
+
+## Addendum: contrast and reduced motion (2026-10-03)
+`src/styles/contrast.test.ts` computes WCAG contrast for every text and background pair the app uses, in both themes and at every accent hue, and fails under 4.5:1 (3:1 for the focus ring). It found the rest of what the design pass left.
+- **Subtle text** is timestamps and metadata, so it reaches 4.5:1 on every panel: dark `--color-subtle` goes from L 0.45 (1.8:1 on Lifted Slate) to 0.68, light from 0.55 to 0.51. Dark `--color-muted` goes from 0.68 to 0.72 to stay a step above it.
+- **Accent text** is `text-primary-strong` (links, the active rail item, stat numbers, the focus ring). The accent fill was 2.9:1 on light panels. Dark `--color-primary-strong` is L 0.74, up from 0.68, so it clears 4.5:1 on every panel at all six hues.
+- **Placeholders** are `--color-muted` at full opacity: Tailwind's half-opacity placeholder was under 3:1.
+- **Avatar initials** are dark ink: white was 1.6:1 on the amber gradient.
+- **Motion:** the spatial parts of popup, toast, tooltip and toolbar transitions, and the accent swatch's hover scale, are `motion-safe:`. Opacity still fades.
