@@ -110,6 +110,11 @@ export type LocalTracks = { [S in MediaSlot]?: MediaStreamTrack | null };
 /** Someone in the room, as the Mesh needs them. */
 export interface MeshParticipant {
   userId: string;
+  /**
+   * What the server says they share now. Telemetry reports a receive stream only while its peer
+   * shares it (ADR 2 addendum); without this everything counts as shared.
+   */
+  media?: { cam: boolean; share: boolean };
 }
 
 /** One remote peer's connection, as the Mesh reports it. */
@@ -401,6 +406,8 @@ export class Mesh {
   readonly #local: Partial<Record<MediaSlot, MediaStreamTrack | null>> = {};
   /** Per peer, whether this page shows each slot of theirs it has said (kept across reconnects). */
   readonly #shown = new Map<string, Map<MediaSlot, boolean>>();
+  /** Per peer, what the server last said they share (from `join`); telemetry follows it. */
+  readonly #media = new Map<string, { cam: boolean; share: boolean }>();
   #closed = false;
   #adjustTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -430,6 +437,10 @@ export class Mesh {
     for (const participant of participants) {
       if (participant.userId === this.#selfId) continue;
       present.add(participant.userId);
+      if (participant.media) {
+        this.#media.set(participant.userId, participant.media);
+        this.#reportSharing(participant.userId);
+      }
       if (!this.#links.has(participant.userId)) this.#open(participant.userId);
     }
     for (const userId of [...this.#links.keys()]) if (!present.has(userId)) this.peerLeft(userId);
@@ -440,6 +451,7 @@ export class Mesh {
     const link = this.#links.get(userId);
     if (!link) return;
     this.#links.delete(userId);
+    this.#media.delete(userId);
     this.#telemetry?.forget(userId);
     this.#shut(link);
     this.#emit({ type: "closed", userId });
@@ -558,6 +570,7 @@ export class Mesh {
     if (shown.get(slot) === visible) return;
     shown.set(slot, visible);
     this.#shown.set(userId, shown);
+    this.#reportSharing(userId);
     const link = this.#links.get(userId);
     if (link?.remoteSession) this.#signal(link, { kind: "visibility", slot, visible });
   }
@@ -1024,7 +1037,7 @@ export class Mesh {
     if (link.adjusting) return undefined;
     if (!this.#live(link)) {
       // A window across a reconnect would average the outage in.
-      this.#telemetry?.forget(link.userId);
+      this.#telemetry?.dropWindows(link.userId);
       return undefined;
     }
     link.adjusting = true;
@@ -1045,6 +1058,19 @@ export class Mesh {
       rungInfo(to),
       reason,
     );
+  }
+
+  /**
+   * Tell telemetry which of `userId`'s streams are in progress towards this page: the screen
+   * while they share it, the camera while it is on and this page shows it (a hidden camera is
+   * paused towards this page, which would read as a stall).
+   */
+  #reportSharing(userId: string): void {
+    const media = this.#media.get(userId);
+    if (!media) return;
+    this.#telemetry?.setSharing(userId, "screen", media.share);
+    const camShown = this.#shown.get(userId)?.get("cam") !== false;
+    this.#telemetry?.setSharing(userId, "cam", media.cam && camShown);
   }
 
   /** Take telemetry readings of the video `link`'s peer sends this page. */

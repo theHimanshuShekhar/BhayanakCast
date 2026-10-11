@@ -1117,6 +1117,104 @@ describe("Mesh quality telemetry (ADR 2 addendum)", () => {
     bo.mesh.close();
   });
 
+  it("stops reporting what bo receives once the server says ana no longer shares it", async () => {
+    const { ana, bo, rows, pass } = await watched();
+    for (let i = 0; i < 3; i++) await pass();
+    expect(rows.bo).toEqual([]);
+    // The roster says ana's share is off. What bo had received goes out once, as a last row,
+    // and no more follows although the stats keep being read (bo's receiver keeps its track).
+    bo.mesh.join([
+      { userId: "ana", media: { cam: false, share: false } },
+      { userId: "bo", media: { cam: false, share: false } },
+    ]);
+    expect(rows.bo.map((r) => [r.peerId, r.slot, r.direction, r.windowMs])).toEqual([
+      ["ana", "screen", "recv", 8_000],
+    ]);
+    for (let i = 0; i < 20; i++) await pass();
+    expect(rows.bo).toHaveLength(1);
+    // Ana's own page goes on reporting what she sends bo.
+    expect(rows.ana.length).toBeGreaterThan(0);
+    ana.mesh.close();
+    bo.mesh.close();
+  });
+
+  it("stays quiet about an ended share through a reconnect", async () => {
+    const { ana, bo, rows, pass } = await watched();
+    for (let i = 0; i < 3; i++) await pass();
+    bo.mesh.join([
+      { userId: "ana", media: { cam: false, share: false } },
+      { userId: "bo", media: { cam: false, share: false } },
+    ]);
+    expect(rows.bo).toHaveLength(1);
+    // The link drops and comes back (no `join` after it): the share is still known to be over.
+    bo.pcs[0]?.setConnectionState("failed");
+    await pass();
+    await pass();
+    connect(bo);
+    for (let i = 0; i < 20; i++) await pass();
+    expect(rows.bo).toHaveLength(1);
+    ana.mesh.close();
+    bo.mesh.close();
+  });
+
+  it("stops reporting a camera this page hides, and starts afresh when it is shown again", async () => {
+    const { ana, bo, rows, pass } = await watched();
+    const roster = [
+      { userId: "ana", media: { cam: true, share: true } },
+      { userId: "bo", media: { cam: false, share: false } },
+    ];
+    bo.mesh.join(roster);
+    ana.mesh.setLocalTracks({ cam: track("ana cam") });
+    await settle();
+    const shown = bo.mesh.peers()[0]?.tracks.cam;
+    const fromAna = bo.pcs[0]?.getReceivers().find((r) => r.track === shown);
+    if (!fromAna) throw new Error("bo is not receiving ana's camera");
+    let seconds = 0;
+    /** A pass with the camera's counters growing (or standing still). */
+    const camPass = async (growing: boolean) => {
+      seconds += 4;
+      const t = growing ? seconds : 12;
+      fromAna.stats = new Map<string, unknown>([
+        [
+          "i",
+          {
+            id: "i",
+            type: "inbound-rtp",
+            kind: "video",
+            timestamp: seconds * 1_000,
+            bytesReceived: t * 240_000,
+            framesDecoded: t * 30,
+          },
+        ],
+      ]);
+      await pass();
+    };
+    const camRows = () => rows.bo.filter((r) => r.slot === "cam");
+    for (let i = 0; i < 3; i++) await camPass(true);
+    expect(camRows()).toEqual([]);
+    // Hidden: it is paused towards bo, so what it had received goes out once and no stall follows.
+    bo.mesh.setVisible("ana", "cam", false);
+    expect(camRows().map((r) => r.windowMs)).toEqual([8_000]);
+    for (let i = 0; i < 12; i++) await camPass(false);
+    expect(camRows()).toHaveLength(1);
+    // Shown again: a new stream, which a standing counter doesn't make a stall of.
+    bo.mesh.setVisible("ana", "cam", true);
+    for (let i = 0; i < 8; i++) await camPass(false);
+    expect(camRows()).toHaveLength(1);
+    // Until it delivers: then it reports a window of its own.
+    for (let i = 0; i < 8; i++) await camPass(true);
+    expect(camRows().map((r) => [r.direction, r.bitrate !== 0])).toEqual([
+      ["recv", true],
+      ["recv", true],
+    ]);
+    // The roster saying the camera is off ends it as well, shown or not.
+    bo.mesh.join([{ userId: "ana", media: { cam: false, share: true } }, { userId: "bo" }]);
+    for (let i = 0; i < 12; i++) await camPass(false);
+    expect(camRows()).toHaveLength(3);
+    ana.mesh.close();
+    bo.mesh.close();
+  });
+
   it("reports a rung change at once, ending the window with where from, to and why", async () => {
     const { ana, bo, rows, pass } = await watched();
     // The first readings of a sender are warm-up; then two lossy passes in a row step it down.

@@ -606,6 +606,104 @@ describe("QualityCollector", () => {
     expect(rows.map((r) => r.bitrate)).toEqual([0]);
   });
 
+  it("sends a share's partial window once when it ends, and no row after", () => {
+    const { rows, c } = collector();
+    for (let s = 0; s <= 12; s += 4) c.observe(receiver, reading(s));
+    expect(rows).toEqual([]);
+    c.setSharing("bo", "screen", false);
+    expect(rows.map((r) => [r.direction, r.trigger, r.windowMs, r.bitrate])).toEqual([
+      ["recv", "window", 12_000, 2_000_000],
+    ]);
+    // The ended share's counters sit still: no stalled rows follow, however long the viewer stays.
+    const last = reading(12);
+    for (let s = 16; s <= 120; s += 4) c.observe(receiver, { ...last, at: s * 1_000 });
+    c.setSharing("bo", "screen", false);
+    expect(rows).toHaveLength(1);
+  });
+
+  it("ignores media that still arrives after the server says the share ended, and the camera is its own", () => {
+    const { rows, c } = collector();
+    const cam = { ...receiver, slot: "cam" } as const;
+    for (let s = 0; s <= 12; s += 4) {
+      c.observe(receiver, reading(s));
+      c.observe(cam, reading(s));
+    }
+    c.setSharing("bo", "screen", false);
+    rows.length = 0;
+    for (let s = 16; s <= 44; s += 4) {
+      c.observe(receiver, reading(s));
+      c.observe(cam, reading(s));
+    }
+    expect(rows.map((r) => [r.slot, r.direction])).toEqual([["cam", "recv"]]);
+  });
+
+  it("has nothing to send for an ended share that was never received, or not read yet", () => {
+    const { rows, c } = collector();
+    c.setSharing("bo", "screen", false);
+    c.observe(receiver, { at: 0, bytes: 0, frames: 0 });
+    c.observe(receiver, { at: 4_000, bytes: 0, frames: 0 });
+    c.setSharing("bo", "screen", false);
+    expect(rows).toEqual([]);
+  });
+
+  it("keeps reporting a stall while the peer is still sharing, and starts a re-share afresh", () => {
+    const { rows, c } = collector();
+    for (let s = 0; s <= 28; s += 4) c.observe(receiver, reading(s));
+    const stalled = reading(28);
+    for (let s = 32; s <= 56; s += 4) c.observe(receiver, { ...stalled, at: s * 1_000 });
+    expect(rows.map((r) => r.bitrate)).toEqual([2_000_000, 0]);
+    c.setSharing("bo", "screen", false);
+    const afterEnd = rows.length;
+    // The same peer shares again over the same receiver, whose counters carry on from the old
+    // share's: nothing new has arrived yet, so it is not a stall.
+    c.setSharing("bo", "screen", true);
+    for (let s = 100; s <= 128; s += 4) c.observe(receiver, { ...stalled, at: s * 1_000 });
+    expect(rows).toHaveLength(afterEnd);
+    // Once media flows it is a stream of its own, a window of the new share alone.
+    for (let s = 132; s <= 156; s += 4) {
+      c.observe(
+        receiver,
+        reading(s - 100, { at: s * 1_000, bytes: 7_000_000 + (s - 128) * 250_000 }),
+      );
+    }
+    expect(rows.slice(afterEnd).map((r) => [r.windowMs, r.bitrate])).toEqual([[28_000, 2_000_000]]);
+  });
+
+  it("stays quiet about an ended share across a reconnect, and a re-share's too", () => {
+    const { rows, c } = collector();
+    for (let s = 0; s <= 12; s += 4) c.observe(receiver, reading(s));
+    c.setSharing("bo", "screen", false);
+    rows.length = 0;
+    // The link drops and comes back: the windows go, what is known of the share does not.
+    c.dropWindows("bo");
+    const still = reading(12);
+    for (let s = 60; s <= 120; s += 4) c.observe(receiver, { ...still, at: s * 1_000 });
+    expect(rows).toEqual([]);
+    c.setSharing("bo", "screen", true);
+    c.observe(receiver, { ...still, at: 124_000 });
+    c.dropWindows("bo");
+    for (let s = 128; s <= 188; s += 4) c.observe(receiver, { ...still, at: s * 1_000 });
+    expect(rows).toEqual([]);
+    // A peer who is gone is forgotten altogether.
+    c.setSharing("bo", "screen", false);
+    c.forget("bo");
+    for (let s = 192; s <= 220; s += 4) c.observe(receiver, { ...still, at: s * 1_000 });
+    expect(rows).toHaveLength(1);
+  });
+
+  it("starts a re-share afresh when its counters start over", () => {
+    const { rows, c } = collector();
+    for (let s = 0; s <= 12; s += 4) c.observe(receiver, reading(s));
+    c.setSharing("bo", "screen", false);
+    rows.length = 0;
+    c.setSharing("bo", "screen", true);
+    for (let s = 100; s <= 128; s += 4) c.observe(receiver, { at: s * 1_000, bytes: 0, frames: 0 });
+    expect(rows).toEqual([]);
+    // Its first bytes are fewer than the old share's last: the old share's count means nothing.
+    for (let s = 132; s <= 156; s += 4) c.observe(receiver, reading(1, { at: s * 1_000 }));
+    expect(rows.map((r) => r.direction)).toEqual(["recv"]);
+  });
+
   it("ends the window where the codec changes, so QP is of one codec", () => {
     const { rows, c } = collector();
     const reads = (seconds: number, codec: string) =>
