@@ -54,20 +54,41 @@ const lineColor = (s: TimelineSeries) => (s.context ? "var(--color-subtle)" : s.
 
 /**
  * The ticks of a time axis from `t0` to `t1` (ms): up to five, fewer on a narrow chart, and never
- * two that read the same (a span of a second shows "0s" once, not five times).
+ * two that read the same (a span of a second shows "0s" once, not five times). A rolling window
+ * (`fromEnd`, the last minute) counts back from its end instead: "-1m" ... "now".
  */
-export function timeTicks(t0: number, t1: number, width: number): { t: number; label: string }[] {
+export function timeTicks(
+  t0: number,
+  t1: number,
+  width: number,
+  fromEnd = false,
+): { t: number; label: string }[] {
   const steps = width >= 360 ? 4 : 2;
   const seen = new Set<string>();
   const ticks: { t: number; label: string }[] = [];
   for (let i = 0; i <= steps; i++) {
     const t = t0 + ((t1 - t0) * i) / steps;
-    const label = fmtDuration((t - t0) / 1_000);
+    const label = fromEnd
+      ? t >= t1
+        ? "now"
+        : `-${fmtDuration((t1 - t) / 1_000)}`
+      : fmtDuration((t - t0) / 1_000);
     if (seen.has(label)) continue;
     seen.add(label);
     ticks.push({ t, label });
   }
   return ticks;
+}
+
+/** `values` without any whose label reads the same as an earlier one (a small range rounds together). */
+export function distinctTicks(values: number[], label: (value: number) => string): number[] {
+  const seen = new Set<string>();
+  return values.filter((value) => {
+    const text = label(value);
+    if (seen.has(text)) return false;
+    seen.add(text);
+    return true;
+  });
 }
 
 /** The width of `ref`'s element in pixels, as it changes. */
@@ -104,6 +125,7 @@ export const TimelineChart = ({
   yFloor = 0,
   yTicks: wantedTicks,
   yLabel,
+  fromEnd = false,
 }: {
   series: TimelineSeries[];
   /** First and last time shown, ms. */
@@ -125,6 +147,8 @@ export const TimelineChart = ({
   yTicks?: number[];
   /** How an axis tick reads. Defaults to `format`. */
   yLabel?: (value: number) => string;
+  /** A rolling window (the last minute): the time axis and the readout count back from its end. */
+  fromEnd?: boolean;
 }) => {
   const [box, W] = useWidth();
   const [hover, setHover] = useState<number | null>(null);
@@ -135,8 +159,8 @@ export const TimelineChart = ({
   const max = yMax ?? niceMax(Math.max(yFloor, ...series.flatMap((s) => s.points.map((p) => p.v))));
   const scaleX = (t: number) => pad.l + (w * (t - t0)) / (t1 - t0);
   const scaleY = (v: number) => pad.t + h - (h * (Math.min(v, max) - yMin)) / (max - yMin);
-  const yTicks = wantedTicks ?? [yMin, (yMin + max) / 2, max];
-  const xTicks = timeTicks(t0, t1, W);
+  const yTicks = distinctTicks(wantedTicks ?? [yMin, (yMin + max) / 2, max], yLabel ?? format);
+  const xTicks = timeTicks(t0, t1, W, fromEnd);
   const path = (s: TimelineSeries) =>
     s.points
       .map((p, i) => {
@@ -266,7 +290,13 @@ export const TimelineChart = ({
           className="pointer-events-none absolute top-0 z-10 min-w-[120px] -translate-x-1/2 rounded-[var(--radius-sm)] border border-border bg-surface px-2.5 py-1.5 text-[10.5px] shadow-pop"
           style={{ left: `${Math.min(80, Math.max(20, (scaleX(hover) / W) * 100))}%` }}
         >
-          <div className="text-muted">{fmtDuration((hover - t0) / 1_000)} in</div>
+          <div className="text-muted">
+            {fromEnd
+              ? t1 - hover < 500
+                ? "now"
+                : `${fmtDuration((t1 - hover) / 1_000)} ago`
+              : `${fmtDuration((hover - t0) / 1_000)} in`}
+          </div>
           {series.map((s) => {
             const p = nearest(s, hover);
             return (

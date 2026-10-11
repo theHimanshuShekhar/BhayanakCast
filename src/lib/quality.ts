@@ -485,6 +485,11 @@ export function shedFirst(senders: readonly Sheddable[]): number | undefined {
 export class UplinkBudget {
   /** Bits per second the targets may add up to. */
   limit: number;
+  /**
+   * Whether `limit` is what was measured of the uplink under strain, and not still the start
+   * (`INITIAL_UPLINK`, a floor ADR 2 assumes) or growth from it.
+   */
+  measured = false;
   #pressure = 0;
   #clean = 0;
   #backoff = 0;
@@ -519,6 +524,7 @@ export class UplinkBudget {
         this.limit,
         Math.max(sent * UPLINK_SHARE, this.limit * UPLINK_DROP_LIMIT),
       );
+      this.measured = true;
     }
     if (this.#growing) {
       this.#growing = false;

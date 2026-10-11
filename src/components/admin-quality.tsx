@@ -1,7 +1,7 @@
 // The admin's view of a room's video quality (ADR 2 and ADR 11 addendums): a table with a row per
 // streamer to viewer pair, and for each a timeline of bitrate, target, QP, loss and rung.
 import { useQuery } from "@tanstack/react-query";
-import { type ReactNode, useState } from "react";
+import { useState } from "react";
 import { pairTimelineQuery, roomQualityQuery } from "~/lib/admin.queries";
 import { fmtDuration } from "~/lib/format";
 import {
@@ -12,6 +12,7 @@ import {
   type QualityPairRow,
   STARVED_MIN_SECONDS,
 } from "~/lib/quality-admin";
+import { fmtMbps, Key, Panel } from "./chart-parts";
 import { CHART_PAD_Y, RUNG_BAND, TimelineChart, type TimelineSeries } from "./timeline-chart";
 import { Avatar, Btn, Chip, MonoCaps } from "./ui";
 
@@ -23,7 +24,6 @@ const td =
 
 const dash = <span className="text-subtle">—</span>;
 
-const fmtMbps = (bps: number) => (bps / 1_000_000).toFixed(1);
 const fmtPercent = (fraction: number) => `${(fraction * 100).toFixed(fraction < 0.1 ? 1 : 0)}%`;
 
 const pathLabel = (path: QualityPair["path"]) =>
@@ -38,31 +38,6 @@ const pairKey = (p: QualityPair) => `${p.streamerId}/${p.viewerId}/${p.slot}`;
 const Person = ({ person }: { person: QualityPairRow["streamer"] }) => (
   <div className="inline-flex items-center gap-2 text-fg-muted">
     <Avatar name={person.username} image={person.image} size="sm" /> {person.username}
-  </div>
-);
-
-/** The line key of a legend: a short stroke of the series' color. */
-const Key = ({ color, children }: { color: string; children: ReactNode }) => (
-  <span className="inline-flex items-center gap-[5px]">
-    <i className="inline-block h-0.5 w-3" style={{ background: color }} /> {children}
-  </span>
-);
-
-const Panel = ({
-  title,
-  legend,
-  children,
-}: {
-  title: string;
-  legend?: ReactNode;
-  children: ReactNode;
-}) => (
-  <div className="min-w-0">
-    <div className="mb-1 flex items-center justify-between gap-2">
-      <h4 className="m-0 text-[11px] font-bold">{title}</h4>
-      {legend && <div className="flex gap-3 text-[10px] text-muted">{legend}</div>}
-    </div>
-    {children}
   </div>
 );
 

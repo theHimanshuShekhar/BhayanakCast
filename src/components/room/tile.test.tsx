@@ -53,6 +53,25 @@ describe("Tile", () => {
     expect(render(bo, { onShareVolume: () => {} })).toContain("Share volume for bo");
   });
 
+  it("offers the quality modal on a share's tile, for the streamer's own share too", () => {
+    expect(render(bo)).not.toContain("Quality bo");
+    expect(render(bo, { onQuality: () => {} })).toContain('aria-label="Quality bo"');
+    expect(render({ ...bo, you: true }, { onQuality: () => {} })).toContain(
+      'aria-label="Quality bo"',
+    );
+  });
+
+  it("offers no quality modal where nothing is shared", () => {
+    const html = render(
+      { ...bo, streaming: false, camera: true },
+      { variant: "camera", onQuality: () => {} },
+    );
+    expect(html).not.toContain("Quality");
+    expect(
+      render({ ...bo, streaming: false }, { variant: "chip", onQuality: () => {} }),
+    ).not.toContain("Quality");
+  });
+
   it("names the person on each control, so a screen reader can tell tiles apart", () => {
     const html = render({ ...bo, streaming: false, camera: true }, { variant: "camera" });
     expect(html).toContain('aria-label="Pin bo"');

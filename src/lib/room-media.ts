@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { keepIceServersFresh } from "./ice";
 import { getIceServersFn, reportIceFn } from "./ice.functions";
-import { Mesh, type PeerQuality, type PeerState } from "./mesh";
+import { Mesh, type PeerQuality, type PeerState, type QualityView } from "./mesh";
 import { QualityReporter, sampleWindowMs } from "./quality-telemetry";
 import { reportQualityFn } from "./quality-telemetry.functions";
 import type { MediaSlot, RoomParticipant } from "./realtime";
@@ -38,6 +38,10 @@ export interface RoomMesh {
   retry: (userId: string) => void;
   /** Each peer's video rung and codec, for the dev overlay (ADR 2). */
   quality: () => PeerQuality[];
+  /** What the quality modal shows of `userId`'s screen share (ADR 2 addendum): see `Mesh`. */
+  streamQuality: (userId: string) => QualityView | undefined;
+  /** Read that pair now, so an open modal stays current (about once a second). */
+  refreshQuality: (userId: string) => Promise<void>;
 }
 
 /** What this page sends everyone (null: nothing). */
@@ -191,7 +195,12 @@ export function useRoomMesh(
 
   const quality = useCallback(() => mesh.current?.quality() ?? [], []);
 
-  return { remote, states, shareAudio, retry, quality };
+  const streamQuality = useCallback((userId: string) => mesh.current?.streamQuality(userId), []);
+  const refreshQuality = useCallback(async (userId: string) => {
+    await mesh.current?.refreshQuality(userId);
+  }, []);
+
+  return { remote, states, shareAudio, retry, quality, streamQuality, refreshQuality };
 }
 
 /** Tell `mesh` whose cameras (of everyone else in `roster`) this page is showing. */
