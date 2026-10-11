@@ -27,8 +27,12 @@ export type Reaction = { id: string; emoji: string; dx: number };
 const tileBase =
   "@container group relative bg-surface border border-border rounded-[var(--radius)] overflow-hidden flex flex-col min-w-0 min-h-0 animate-bc-enter transition-shadow duration-200";
 const glassPill = "bg-black/55 backdrop-blur-[8px] text-white";
-const overlayBtn =
-  "w-[26px] h-[26px] pointer-coarse:w-8 pointer-coarse:h-8 inline-flex items-center justify-center rounded-[var(--radius-sm)] text-white cursor-pointer hover:bg-white/20 transition-colors data-popup-open:bg-white/20";
+const overlayBtnShape =
+  "h-[26px] pointer-coarse:h-8 inline-flex items-center justify-center rounded-[var(--radius-sm)] text-white cursor-pointer hover:bg-white/20 transition-colors data-popup-open:bg-white/20";
+/** An icon button: square. */
+const overlayBtn = `w-[26px] pointer-coarse:w-8 ${overlayBtnShape}`;
+/** The same with a word beside its icon, so it is as wide as it needs to be. */
+const overlayTextBtn = `px-2 gap-1 text-[11px] ${overlayBtnShape}`;
 const menuItem =
   "flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[11.5px] text-fg-muted outline-0 cursor-pointer data-highlighted:bg-surface-2 data-highlighted:text-fg";
 
@@ -85,6 +89,7 @@ const TileView = ({
   onModerate,
   cantConnect = false,
   onRetry,
+  onQuality,
 }: {
   p: Participant;
   variant: TileVariant;
@@ -115,6 +120,8 @@ const TileView = ({
   cantConnect?: boolean;
   /** Try connecting to them (their user id) again. */
   onRetry?: (userId: string) => void;
+  /** Open the quality modal for this stream (the streamer's user id): offered on a share's tile. */
+  onQuality?: (userId: string) => void;
 }) => {
   const ref = useRef<HTMLDivElement>(null);
   const fullscreenElement = useFullscreenElement();
@@ -328,6 +335,17 @@ const TileView = ({
               className="w-14 h-[26px] cursor-pointer accent-white"
             />
           </label>
+        )}
+        {variant === "screen" && p.streaming && onQuality && (
+          <button
+            type="button"
+            className={overlayTextBtn}
+            aria-label={`Quality ${p.name}`}
+            title="Why this looks the way it does"
+            onClick={() => onQuality(p.userId)}
+          >
+            <Icon.Activity size={12} aria-hidden="true" /> quality
+          </button>
         )}
         {canFullscreen && (
           <button

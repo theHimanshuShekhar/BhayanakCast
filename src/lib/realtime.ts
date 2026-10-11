@@ -17,6 +17,7 @@
  */
 import { z } from "zod";
 import { inviteToken } from "./invites.ts";
+import { stepNoteFields } from "./quality-reason.ts";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -197,6 +198,17 @@ export const signalPayload = z.discriminatedUnion("kind", [
     peerSession: pcSession.optional(),
     slot: z.enum(MEDIA_SLOTS),
     visible: z.boolean(),
+  }),
+  /**
+   * A streamer's word to one viewer about their pair's screen share: the step its sender is on,
+   * that step's `maxBitrate` and why (ADR 2 addendum: the quality modal). Sent when any of them
+   * changes and when the pair (re)connects; `seq` orders the sender's messages. Display only.
+   */
+  z.object({
+    kind: z.literal("quality"),
+    session: pcSession,
+    peerSession: pcSession.optional(),
+    ...stepNoteFields,
   }),
 ]);
 export type SignalPayload = z.infer<typeof signalPayload>;

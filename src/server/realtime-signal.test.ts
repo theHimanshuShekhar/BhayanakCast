@@ -60,6 +60,16 @@ const CANDIDATE: SignalPayload = {
   candidate: { candidate: "candidate:1 1 udp 1 127.0.0.1 5000 typ host", sdpMid: "0" },
 };
 const HELLO: SignalPayload = { kind: "hello", session: "pc-2" };
+/** A streamer's word to a viewer about the pair (the quality modal): step, its cap, and why. */
+const STEP: SignalPayload = {
+  kind: "quality",
+  session: "pc-1",
+  peerSession: "pc-2",
+  seq: 4,
+  step: "2968×1242@60",
+  maxBitrate: 10_670_000,
+  reason: "shared",
+};
 const HIDDEN: SignalPayload = {
   kind: "visibility",
   session: "pc-2",
@@ -113,6 +123,15 @@ describe("signal", () => {
       roomId,
       from: bo.id,
       payload: HIDDEN,
+    });
+
+    // A streamer tells a viewer which step the pair is on and why (the quality modal).
+    a.send(signal(bo, STEP));
+    expect(await b.waitFor("signal")).toEqual({
+      type: "signal",
+      roomId,
+      from: ana.id,
+      payload: STEP,
     });
 
     await h.settled();
@@ -261,5 +280,29 @@ describe("signal", () => {
       JSON.stringify({ type: "signal", to: bo.id, payload: { ...HIDDEN, slot: "everything" } }),
     );
     expect(await a.waitFor("error")).toMatchObject({ code: "bad_request", re: "signal" });
+  });
+
+  it("refuses a step message that isn't one: an unknown reason, a number or label out of range", async () => {
+    const [a, b] = await inRoom([ana, bo]);
+    const bad = [
+      { ...STEP, reason: "because" },
+      { ...STEP, seq: 0 },
+      { ...STEP, seq: 1.5 },
+      { ...STEP, step: "" },
+      { ...STEP, step: "x".repeat(33) },
+      { ...STEP, maxBitrate: -1 },
+      { ...STEP, maxBitrate: 2_000_000_000 },
+      { ...STEP, maxBitrate: "3000000" },
+      { kind: "quality", session: "pc-1" },
+    ];
+    for (const payload of bad) {
+      a.sendRaw(JSON.stringify({ type: "signal", to: bo.id, payload }));
+      expect(await a.waitFor("error"), JSON.stringify(payload)).toMatchObject({
+        code: "bad_request",
+        re: "signal",
+      });
+    }
+    await h.settled();
+    expect(b.pending()).toEqual([]);
   });
 });

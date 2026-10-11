@@ -76,6 +76,7 @@ import {
   CAMERA_LADDER,
   type Claim,
   carryOver,
+  DOWN_SAMPLES,
   feeds60,
   fitRung,
   freshLadderState,
@@ -95,7 +96,32 @@ import {
   UplinkBudget,
 } from "./quality";
 import { QualityCollector, type RungInfo } from "./quality-collector";
-import { type PendingSample, type RungReason, readStream } from "./quality-telemetry";
+import {
+  pathLabel,
+  QualityHistory,
+  type QualityPoint,
+  type StepChange,
+  stepChange,
+  streamKey,
+} from "./quality-history";
+import {
+  applyNote,
+  type ChangeCause,
+  causeOf,
+  decodeNote,
+  NoteSender,
+  type PressureCause,
+  pressureCause,
+  reasonOf,
+  type StepBody,
+  type StepNote,
+} from "./quality-reason";
+import {
+  type PendingSample,
+  type RungReason,
+  readStream,
+  type StreamReading,
+} from "./quality-telemetry";
 import type { MediaSlot, SignalPayload } from "./realtime";
 
 /**
@@ -141,6 +167,8 @@ export type MeshEvent =
 
 /** How often each video sender's stats are read to adapt its quality. */
 export const QUALITY_INTERVAL_MS = 4_000;
+/** A reading older than two quality passes no longer says what a sender sends. */
+const STALE_READING_MS = 2 * QUALITY_INTERVAL_MS;
 /** Readings ignored after a sender starts: the bandwidth estimate is still ramping up. */
 const WARMUP_READINGS = 2;
 
@@ -156,6 +184,53 @@ export interface PeerQuality {
   screen?: SlotQuality;
   cam?: SlotQuality;
 }
+
+/**
+ * What the quality modal shows of someone else's share (ADR 2 addendum): what this page
+ * receives, and the streamer's word about the pair (`note`), absent until they have said.
+ */
+export interface ViewerQuality {
+  side: "viewer";
+  /** The streamer. */
+  userId: string;
+  state: PeerState;
+  /** The streamer's step message, once heard. */
+  note?: StepNote;
+  /** `direct` or `relay · UDP`; unknown before the pair is selected. */
+  path?: string;
+  /** The last minute, oldest first. */
+  points: QualityPoint[];
+  changes: StepChange[];
+}
+
+/** One viewer of this page's share, in the streamer's modal. */
+export interface ViewerRow {
+  userId: string;
+  state: PeerState;
+  /** The step its sender is on and why; absent while its sender hasn't started. */
+  note?: StepBody;
+  path?: string;
+  points: QualityPoint[];
+}
+
+/** What the quality modal shows of this page's own share: the upload, and every viewer. */
+export interface StreamerQuality {
+  side: "streamer";
+  /** The uplink budget for video now, bits per second. */
+  budget: number;
+  /** Whether it was measured under strain; until then it is the starting estimate. */
+  budgetMeasured: boolean;
+  /** Everything this page sends (`bps`) against the budget (`capBps`), the last minute. */
+  uplink: QualityPoint[];
+  viewers: ViewerRow[];
+  /** Every viewer's step changes, oldest first. */
+  changes: (StepChange & { userId: string })[];
+}
+
+export type QualityView = ViewerQuality | StreamerQuality;
+
+/** The history key of the uplink as a whole. */
+const UPLINK = "uplink";
 
 /** What one pair's pass over its senders showed, for the uplink budget. */
 interface PairReading {
@@ -326,7 +401,8 @@ const newSession = () => Math.random().toString(36).slice(2, 12);
 type Step =
   | Omit<Extract<SignalPayload, { kind: "description" }>, "session" | "peerSession">
   | Omit<Extract<SignalPayload, { kind: "candidate" }>, "session" | "peerSession">
-  | Omit<Extract<SignalPayload, { kind: "visibility" }>, "session" | "peerSession">;
+  | Omit<Extract<SignalPayload, { kind: "visibility" }>, "session" | "peerSession">
+  | Omit<Extract<SignalPayload, { kind: "quality" }>, "session" | "peerSession">;
 type DescriptionStep = Extract<Step, { kind: "description" }>;
 
 /**
@@ -342,6 +418,8 @@ interface Adaptation extends LadderState {
   /** The latest reading (the next one's `sendBitrate` is measured from it). */
   last?: StatsSample;
   codec?: string;
+  /** What the pressure was down to when it last stepped down under it (`limited` says it holds). */
+  cause?: PressureCause;
 }
 
 interface Link {
@@ -386,6 +464,12 @@ interface Link {
   tuning: Partial<Record<VideoSlot, Promise<void>>>;
   /** Runs out while it is connecting (`CONNECT_TIMEOUT_MS`). */
   connectTimer?: ReturnType<typeof setTimeout>;
+  /** When this side tells the peer the step its screen is on, and why (the quality modal). */
+  notes: NoteSender;
+  /** The step of this side's screen sender that history last noted, to see when it changes. */
+  stepNoted?: string;
+  /** What made the screen sender's latest step change; it goes with every message till the next. */
+  stepCause?: ChangeCause;
 }
 
 export class Mesh {
@@ -408,6 +492,10 @@ export class Mesh {
   readonly #shown = new Map<string, Map<MediaSlot, boolean>>();
   /** Per peer, what the server last said they share (from `join`); telemetry follows it. */
   readonly #media = new Map<string, { cam: boolean; share: boolean }>();
+  /** The last minute of each screen stream, for the quality modal. */
+  readonly #history = new QualityHistory();
+  /** Per streamer, what they last told this page about the step they send it and why. */
+  readonly #notes = new Map<string, StepNote>();
   #closed = false;
   #adjustTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -453,6 +541,8 @@ export class Mesh {
     this.#links.delete(userId);
     this.#media.delete(userId);
     this.#telemetry?.forget(userId);
+    this.#forgetReceived(userId);
+    this.#history.forget(streamKey("send", userId));
     this.#shut(link);
     this.#emit({ type: "closed", userId });
   }
@@ -488,6 +578,13 @@ export class Mesh {
       if (link.pc.signalingState === "have-local-offer") this.#sendDescription(link);
       return;
     }
+    if (payload.kind === "quality") {
+      // Display only, so it skips the negotiation queue. Not from someone the server says isn't
+      // sharing: a message that arrives after their share ended must not outlive it.
+      const note = decodeNote(payload);
+      if (note && this.#media.get(from)?.share !== false) this.#hear(from, note);
+      return;
+    }
     if (payload.kind === "visibility") {
       if (payload.visible === !link.paused.has(payload.slot)) return;
       if (payload.visible) link.paused.delete(payload.slot);
@@ -518,6 +615,8 @@ export class Mesh {
         }
         this.#watchQuality();
       }
+      // A share that ends, or a new capture, is a new stream: the viewers hear about it afresh.
+      if (slot === "screen" && track !== this.#local.screen) this.#endShare();
       this.#local[slot] = track;
       for (const link of this.#links.values()) {
         // It gets the local tracks when it starts.
@@ -536,7 +635,11 @@ export class Mesh {
    */
   resend(): void {
     if (this.#closed) return;
-    for (const link of this.#links.values()) this.#flush(link);
+    for (const link of this.#links.values()) {
+      this.#flush(link);
+      // A step message dropped the same way goes out again (it was never marked delivered).
+      this.#tell(link);
+    }
   }
 
   /**
@@ -630,6 +733,50 @@ export class Mesh {
       });
     }
     this.#fitBudget();
+    // Anything the pass changed (a step, its cost or why) is told to the viewers it concerns.
+    const ceilings = this.#viewerCeilings();
+    for (const link of this.#links.values()) this.#tell(link, ceilings);
+    this.#recordUplink();
+  }
+
+  /**
+   * What the quality modal shows of `userId`'s screen share (ADR 2 addendum), from the last
+   * minute the Mesh has kept of it: someone else's, as a viewer sees it; or this page's own, with
+   * every viewer. Undefined if there is nothing to show (no such peer, or no share of this
+   * page's own).
+   */
+  streamQuality(userId: string): QualityView | undefined {
+    if (userId === this.#selfId) return this.#localQuality();
+    const link = this.#links.get(userId);
+    if (!link) return undefined;
+    const key = streamKey("recv", userId);
+    const note = this.#notes.get(userId);
+    const path = pathLabel(this.#history.latest(key));
+    return {
+      side: "viewer",
+      userId,
+      state: link.state,
+      ...(note && { note }),
+      ...(path && { path }),
+      points: this.#history.points(key),
+      changes: this.#history.changes(key),
+    };
+  }
+
+  /**
+   * Read the pair now, ahead of the next quality pass, so a modal that is open stays current
+   * (call it about once a second): one `getStats` for the receiver of `userId`'s screen, or, for
+   * this page's own, one for each viewer's screen sender.
+   */
+  async refreshQuality(userId: string): Promise<void> {
+    if (this.#closed) return;
+    if (userId !== this.#selfId) {
+      const link = this.#links.get(userId);
+      if (link) await this.#refreshReceived(link);
+      return;
+    }
+    await Promise.all([...this.#links.values()].map((link) => this.#refreshSent(link)));
+    this.#recordUplink();
   }
 
   /** The uplink budget and what all the video senders' targets add up to. For tests. */
@@ -697,6 +844,7 @@ export class Mesh {
       queue: Promise.resolve(),
       restarted: false,
       startedOver,
+      notes: new NoteSender(),
     };
     this.#links.set(userId, link);
     pc.onnegotiationneeded = () => void this.#offer(link);
@@ -794,6 +942,10 @@ export class Mesh {
     if (!isVideoSlot(slot)) return;
     link.tuning[slot] = (link.tuning[slot] ?? Promise.resolve())
       .then(() => this.#applyRung(link, slot, sender))
+      // A new screen sender has its step now (and a resumed one its new step): say so.
+      .then(() => {
+        if (slot === "screen") this.#tell(link);
+      })
       .catch((error: unknown) => this.#log(`tuning the ${slot} to ${link.userId} failed`, error));
   }
 
@@ -1050,9 +1202,21 @@ export class Mesh {
     }
   }
 
-  /** The row for `slot` to `link`'s peer moving from rung `from` to `to` (telemetry). */
-  #rungChanged(link: Link, slot: VideoSlot, from: Rung, to: Rung, reason: RungReason): void {
+  /**
+   * The row for `slot` to `link`'s peer moving from rung `from` to `to` (telemetry), and, for a
+   * screen, what made the move for the quality modal: `pressure` is the cause recorded from the
+   * samples that moved it (`pressureCause`), the other reasons are their own.
+   */
+  #rungChanged(
+    link: Link,
+    slot: VideoSlot,
+    from: Rung,
+    to: Rung,
+    reason: RungReason,
+    pressure?: PressureCause,
+  ): void {
     if (from.label === to.label) return;
+    if (slot === "screen") link.stepCause = causeOf(reason, pressure);
     this.#telemetry?.rungChanged(
       { peerId: link.userId, slot, direction: "send" },
       rungInfo(to),
@@ -1068,27 +1232,65 @@ export class Mesh {
   #reportSharing(userId: string): void {
     const media = this.#media.get(userId);
     if (!media) return;
+    // Their share ended: what was heard and measured of it ends with it (the quality modal).
+    if (!media.share) this.#forgetReceived(userId);
     this.#telemetry?.setSharing(userId, "screen", media.share);
     const camShown = this.#shown.get(userId)?.get("cam") !== false;
     this.#telemetry?.setSharing(userId, "cam", media.cam && camShown);
   }
 
-  /** Take telemetry readings of the video `link`'s peer sends this page. */
+  /**
+   * Take telemetry readings of the video `link`'s peer sends this page, and the quality modal's
+   * of their screen.
+   */
   async #readReceivers(link: Link): Promise<void> {
-    if (!this.#telemetry) return;
     for (const slot of VIDEO_SLOTS) {
-      const track = link.tracks[slot];
-      const receiver = track && link.pc.getReceivers().find((r) => r.track === track);
-      const id = { peerId: link.userId, slot, direction: "recv" } as const;
-      if (!receiver) continue;
-      try {
-        const reading = readStream(await receiver.getStats(), "recv");
-        if (reading && this.#current(link) && link.tracks[slot] === track) {
-          this.#telemetry.observe(id, reading);
-        }
-      } catch (error) {
-        this.#log(`reading ${slot} stats from ${link.userId} failed`, error);
-      }
+      const screenShared = slot === "screen" && this.#sharing(link.userId);
+      // Without telemetry only a screen that is being shared is of interest (the modal's).
+      if (!this.#telemetry && !screenShared) continue;
+      const reading = await this.#readReceiver(link, slot);
+      if (!reading) continue;
+      this.#telemetry?.observe({ peerId: link.userId, slot, direction: "recv" }, reading);
+      if (screenShared) this.#viewReceived(link, reading);
+    }
+  }
+
+  /**
+   * The reading of the `slot` video `link`'s peer sends this page; undefined if there is none
+   * yet, the read failed (logged), or the track or connection changed while it ran.
+   */
+  async #readReceiver(link: Link, slot: VideoSlot): Promise<StreamReading | undefined> {
+    const track = link.tracks[slot];
+    const receiver = track && link.pc.getReceivers().find((r) => r.track === track);
+    if (!receiver) return undefined;
+    try {
+      const reading = readStream(await receiver.getStats(), "recv");
+      return this.#current(link) && link.tracks[slot] === track ? reading : undefined;
+    } catch (error) {
+      this.#log(`reading ${slot} stats from ${link.userId} failed`, error);
+      return undefined;
+    }
+  }
+
+  /**
+   * `parse` of `sender`'s stats; undefined if the read failed (logged), or what the sender sends
+   * or its ladder `state` changed while it ran, so the reading is of something else.
+   */
+  async #readSender<T>(
+    link: Link,
+    slot: VideoSlot,
+    sender: RTCRtpSender,
+    state: Adaptation,
+    parse: (report: RTCStatsReport) => T,
+  ): Promise<T | undefined> {
+    const track = sender.track;
+    try {
+      const parsed = parse(await sender.getStats());
+      const same = this.#current(link) && sender.track === track && link.quality[slot] === state;
+      return same ? parsed : undefined;
+    } catch (error) {
+      this.#log(`reading ${slot} stats for ${link.userId} failed`, error);
+      return undefined;
     }
   }
 
@@ -1099,23 +1301,19 @@ export class Mesh {
       const track = sender?.track;
       if (!sender || !track) continue;
       const state = this.#adaptation(link, slot, track);
-      let report: RTCStatsReport;
-      let sample: StatsSample;
-      try {
-        report = await sender.getStats();
-        sample = readSample(report, state.last);
-      } catch (error) {
-        this.#log(`reading ${slot} stats for ${link.userId} failed`, error);
-        continue;
-      }
-      if (!this.#current(link) || sender.track !== track || link.quality[slot] !== state) continue;
-      const stream = this.#telemetry && readStream(report, "send");
+      const read = await this.#readSender(link, slot, sender, state, (report) => ({
+        sample: readSample(report, state.last),
+        stream: readStream(report, "send"),
+      }));
+      if (!read) continue;
+      const { sample, stream } = read;
       if (stream) {
         this.#telemetry?.observe(
           { peerId: link.userId, slot, direction: "send" },
           stream,
           rungInfo(stepOf(state)),
         );
+        if (slot === "screen") this.#viewSent(link, state, stream);
       }
       if (sample.codec) state.codec = sample.codec;
       state.last = sample;
@@ -1131,12 +1329,198 @@ export class Mesh {
         // Down to the capture's cap when the capture shrank; otherwise the controller's call.
         const reason: RungReason =
           next.rung > state.rung ? "probe" : state.rung > max ? "capture" : "pressure";
-        this.#rungChanged(link, slot, stepOf(state), state.steps[next.rung] as Rung, reason);
-        Object.assign(state, next);
+        // What a step down under pressure was down to (the samples that moved it), for the modal:
+        // on that change, and to say why the pair is held there while it is.
+        const pressure =
+          next.rung < state.rung && reason === "pressure"
+            ? pressureCause(...[...state.window, sample].slice(-DOWN_SAMPLES))
+            : undefined;
+        this.#rungChanged(
+          link,
+          slot,
+          stepOf(state),
+          state.steps[next.rung] as Rung,
+          reason,
+          pressure,
+        );
+        const held = next.rung < state.rung && reason === "pressure" ? pressure : state.cause;
+        Object.assign(state, next, { cause: next.limited ? held : undefined });
       }
       this.#tune(link, slot, sender);
     }
     return reading;
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // The quality modal (ADR 2 addendum): what this page keeps and tells about screen shares.
+
+  /** Whether the server says `userId` shares their screen (everything counts as shared until said). */
+  #sharing(userId: string): boolean {
+    return this.#media.get(userId)?.share !== false;
+  }
+
+  /** `userId`'s share is over (or they are gone): what was heard and measured of it goes. */
+  #forgetReceived(userId: string): void {
+    this.#history.forget(streamKey("recv", userId));
+    this.#notes.delete(userId);
+  }
+
+  /** This page's own share ended or began anew: every viewer hears about it afresh. */
+  #endShare(): void {
+    for (const link of this.#links.values()) {
+      link.notes.reset();
+      link.stepNoted = undefined;
+      link.stepCause = undefined;
+      this.#history.forget(streamKey("send", link.userId));
+    }
+    this.#history.forget(UPLINK);
+  }
+
+  /** Take in what the streamer `from` told this page; a step change is noted for the timeline. */
+  #hear(from: string, note: StepNote): void {
+    const was = this.#notes.get(from);
+    const now = applyNote(was, note);
+    if (now === was) return;
+    this.#notes.set(from, now);
+    if (now.step === was?.step) return;
+    // The first message heard isn't a change this page saw, so it has no cause to give.
+    this.#history.changed(
+      streamKey("recv", from),
+      stepChange(was?.step, now.step, was ? now.cause : undefined),
+    );
+  }
+
+  /** A reading of the screen `link`'s peer sends this page, with the cap they last told of. */
+  #viewReceived(link: Link, reading: StreamReading): void {
+    this.#history.observe(
+      streamKey("recv", link.userId),
+      reading,
+      this.#notes.get(link.userId)?.maxBitrate,
+    );
+  }
+
+  /** A reading of the screen sender to `link`'s peer, with the cap of the step it is on. */
+  #viewSent(link: Link, state: Adaptation, reading: StreamReading): void {
+    this.#history.observe(streamKey("send", link.userId), reading, stepOf(state).maxBitrate);
+  }
+
+  /** Read the screen `link`'s peer sends this page now, for the modal. */
+  async #refreshReceived(link: Link): Promise<void> {
+    if (!this.#live(link) || !this.#sharing(link.userId)) return;
+    const reading = await this.#readReceiver(link, "screen");
+    if (reading) this.#viewReceived(link, reading);
+  }
+
+  /** Read the screen this page sends `link`'s peer now, for the modal. */
+  async #refreshSent(link: Link): Promise<void> {
+    const sender = link.own.get("screen")?.sender;
+    const state = link.quality.screen;
+    if (!sender?.track || !state || !this.#live(link)) return;
+    const reading = await this.#readSender(link, "screen", sender, state, (report) =>
+      readStream(report, "send"),
+    );
+    if (reading) this.#viewSent(link, state, reading);
+  }
+
+  /**
+   * Everything this page sends against the uplink budget: each viewer's screen as last read, and
+   * the cameras as the quality pass last read them (the modal doesn't read those a second).
+   */
+  #recordUplink(): void {
+    if (!this.#local.screen) return;
+    let bps = 0;
+    const now = Date.now();
+    for (const { link, slot, state } of this.#videoSenders()) {
+      if (!this.#live(link)) continue;
+      if (slot !== "screen") {
+        bps += state.last?.sendBitrate ?? 0;
+        continue;
+      }
+      // A viewer not read for a couple of passes (its read hangs, it stopped) sends nothing we know of.
+      const newest = this.#history.points(streamKey("send", link.userId)).at(-1);
+      if (newest && now - newest.at <= STALE_READING_MS) bps += newest.bps ?? 0;
+    }
+    this.#history.record(UPLINK, { bps, capBps: this.#budget.limit });
+  }
+
+  /**
+   * What `link`'s screen sender is on, and why: its step, that step's cost, and the reason
+   * (`reasonOf`) from the controller's state. Undefined while it has no sender or step.
+   */
+  #stepBody(link: Link, ceilings: Map<Link, number>): StepBody | undefined {
+    const state = link.quality.screen;
+    const track = link.own.get("screen")?.sender.track;
+    if (!state || !track) return undefined;
+    const step = stepOf(state);
+    return {
+      step: step.label,
+      maxBitrate: step.maxBitrate,
+      ...(link.stepCause && { cause: link.stepCause }),
+      reason: reasonOf({
+        atTop: state.rung >= SLOTS.screen.cap(track, state.steps),
+        probing: state.probing,
+        limited: state.limited,
+        cause: state.cause,
+        pressure: state.last && pressureCause(state.last),
+        nextBitrate: state.steps[state.rung + 1]?.maxBitrate,
+        ceiling: ceilings.get(link),
+      }),
+    };
+  }
+
+  /**
+   * Note `link`'s step in this page's own timeline when it changed, and tell the peer what it is
+   * on and why when that changed (or the pair connected again). `NoteSender` decides whether it
+   * is due; a send the socket dropped stays due. Called wherever the step or what decides its
+   * reason may have moved: after a quality pass, a connect, a resume, a reconnected socket.
+   */
+  #tell(link: Link, ceilings = this.#viewerCeilings()): void {
+    if (!this.#current(link) || !this.#local.screen || !this.#live(link)) return;
+    const body = this.#stepBody(link, ceilings);
+    if (!body) return;
+    if (link.stepNoted !== body.step) {
+      // The first step noted isn't a change from anything, so it has no cause to give.
+      const cause = link.stepNoted ? body.cause : undefined;
+      this.#history.changed(
+        streamKey("send", link.userId),
+        stepChange(link.stepNoted, body.step, cause),
+      );
+      link.stepNoted = body.step;
+    }
+    const now = Date.now();
+    const note = link.notes.due(body, now);
+    if (note && this.#signal(link, { kind: "quality", ...note })) link.notes.delivered(note, now);
+  }
+
+  /** The quality modal's view of this page's own share (see `streamQuality`). */
+  #localQuality(): StreamerQuality | undefined {
+    if (!this.#local.screen) return undefined;
+    const ceilings = this.#viewerCeilings();
+    const links = [...this.#links.values()].filter((link) => !link.paused.has("screen"));
+    const changes = links.flatMap((link) =>
+      this.#history
+        .changes(streamKey("send", link.userId))
+        .map((change) => ({ ...change, userId: link.userId })),
+    );
+    return {
+      side: "streamer",
+      budget: this.#budget.limit,
+      budgetMeasured: this.#budget.measured,
+      uplink: this.#history.points(UPLINK),
+      viewers: links.map((link) => {
+        const key = streamKey("send", link.userId);
+        const note = this.#stepBody(link, ceilings);
+        const path = pathLabel(this.#history.latest(key));
+        return {
+          userId: link.userId,
+          state: link.state,
+          ...(note && { note }),
+          ...(path && { path }),
+          points: this.#history.points(key),
+        };
+      }),
+      changes: changes.sort((a, b) => a.at - b.at),
+    };
   }
 
   #shut(link: Link): void {
@@ -1167,7 +1551,7 @@ export class Mesh {
 
   async #handle(
     link: Link,
-    payload: Exclude<SignalPayload, { kind: "hello" | "visibility" }>,
+    payload: Exclude<SignalPayload, { kind: "hello" | "visibility" | "quality" }>,
   ): Promise<void> {
     if (!this.#current(link)) return;
     const pc = link.pc;
@@ -1397,6 +1781,11 @@ export class Mesh {
       for (const [slot, visible] of this.#shown.get(link.userId) ?? []) {
         this.#signal(link, { kind: "visibility", slot, visible });
       }
+    }
+    // The same goes for the step this side's screen is on: the peer is told it again.
+    if (state === "connected" || state === "relayed") {
+      link.notes.reset();
+      this.#tell(link);
     }
   }
 

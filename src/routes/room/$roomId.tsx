@@ -19,6 +19,7 @@ import { LeaveGuard } from "~/components/room/leave-guard";
 import { failureText, Lobby } from "~/components/room/lobby";
 import { PeerAudio } from "~/components/room/peer-audio";
 import { QualityDebug } from "~/components/room/quality-debug";
+import { QualityModal } from "~/components/room/quality-modal";
 import { RoomSide } from "~/components/room/side-panel";
 import { isModerator, type ModAction, Tile } from "~/components/room/tile";
 import { Btn, Chip } from "~/components/ui";
@@ -601,6 +602,16 @@ function RoomPage({
     shownCams,
     !out,
   );
+  // The quality modal (ADR 2 addendum) is open on this person's share; it closes with the share.
+  const [qualityId, setQualityId] = useState<string | null>(null);
+  const nameOf = useMemo(
+    () => Object.fromEntries(participants.map((p) => [p.userId, p.name])),
+    [participants],
+  );
+  const qualityShared = participants.some((p) => p.userId === qualityId && p.streaming);
+  useEffect(() => {
+    if (!qualityShared) setQualityId(null);
+  }, [qualityShared]);
   const [volumes, setVolumes] = useState<Record<string, number>>({});
   const [shareVolumes, setShareVolumes] = useState<Record<string, number>>({});
   const onShareVolume = useCallback(
@@ -703,6 +714,7 @@ function RoomPage({
     onModerate,
     cantConnect: mesh.states[p.userId] === "failed",
     onRetry: mesh.retry,
+    onQuality: setQualityId,
   });
 
   // The room ended or was hidden from us since the page loaded.
@@ -921,6 +933,14 @@ function RoomPage({
             names={Object.fromEntries(participants.map((p) => [p.userId, p.name]))}
           />
         )}
+        <QualityModal
+          userId={qualityId}
+          meId={meId}
+          names={nameOf}
+          read={mesh.streamQuality}
+          refresh={mesh.refreshQuality}
+          onClose={() => setQualityId(null)}
+        />
         {Object.entries(mesh.remote).map(
           ([userId, tracks]) =>
             tracks.mic && (

@@ -627,6 +627,24 @@ describe("UplinkBudget", () => {
     expect(budget.room(30 * MBPS)).toBe(0);
   });
 
+  it("is an estimate until the uplink has been measured under strain", () => {
+    const budget = new UplinkBudget();
+    expect(budget.measured).toBe(false);
+    // A clean spell and a probe that grows it are not a measurement of the uplink's limit.
+    pass(budget, calm, UP_SAMPLES);
+    expect(budget.admit(INITIAL_UPLINK, 1.5 * MBPS)).toBe(true);
+    expect(budget.measured).toBe(false);
+    // One strained pass isn't enough either; two in a row measure it.
+    pass(budget, shared);
+    expect(budget.measured).toBe(false);
+    pass(budget, shared);
+    expect(budget.measured).toBe(true);
+    // Strain with nothing sent measures nothing.
+    const idle = new UplinkBudget();
+    pass(idle, { ...shared, sent: 0 }, 2);
+    expect(idle.measured).toBe(false);
+  });
+
   it("admits what fits, and refuses what doesn't before a clean spell", () => {
     const budget = new UplinkBudget(10 * MBPS);
     expect(budget.admit(8 * MBPS, 2 * MBPS)).toBe(true);

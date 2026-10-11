@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { VideoCodecs } from "./codecs";
+import type { QualityView } from "./mesh";
 import {
   CONNECT_TIMEOUT_MS,
   degradationFor,
@@ -982,6 +983,9 @@ describe("Mesh quality ladder (ADR 2)", () => {
     toBo.sender.getStats = () => new Promise(() => {});
     toCy.sender.stats = senderStats(0.1);
     void ana.mesh.adjust();
+    // That first pass never ends (bo's read hangs), but cy's own read does: let it, so the next
+    // pass doesn't find cy still busy and skip it, however many ticks a read takes.
+    await settle();
     // Every pass skips bo and still finishes cy's: warm-up, then a step down.
     for (let i = 0; i < 4; i++) await ana.mesh.adjust();
     expect(rungs(ana.mesh)).toEqual(["1080p30", "900p30"]);
@@ -2089,5 +2093,438 @@ describe("isSameOffer", () => {
   it("tells a new offer apart by its version", () => {
     expect(isSameOffer(offer.replace("- 7 2", "- 7 3"), offer)).toBe(false);
     expect(isSameOffer(offer, undefined)).toBe(false);
+  });
+});
+
+describe("Mesh quality modal: the step message and the last minute (ADR 2 addendum)", () => {
+  type Quality = Extract<SignalPayload, { kind: "quality" }>;
+  const notes = (sent: SignalPayload[]) =>
+    sent.filter((payload): payload is Quality => payload.kind === "quality");
+
+  /** What a receiver's `getStats()` shows `seconds` into a stream: 4 Mbps, 1080p30, no loss. */
+  const inbound = (seconds: number, extra: Record<string, number> = {}) =>
+    new Map<string, unknown>([
+      [
+        "i",
+        {
+          id: "i",
+          type: "inbound-rtp",
+          kind: "video",
+          timestamp: seconds * 1_000,
+          bytesReceived: seconds * 500_000,
+          packetsReceived: seconds * 100,
+          packetsLost: 0,
+          frameWidth: 1920,
+          frameHeight: 1080,
+          framesPerSecond: 30,
+          freezeCount: 0,
+          ...extra,
+        },
+      ],
+    ]);
+
+  /**
+   * Ana shares a 1080p60 screen (text room: frame rate goes before size) to `viewers`, all
+   * connected, with `uplink` bits per second to spend. Ana's steps: 720p30, 900p30, 1080p30,
+   * 1080p60.
+   */
+  async function room(viewers: string[], uplink?: number) {
+    const network = new Map<string, Mesh>();
+    const ana = page("ana", network, undefined, undefined, uplink);
+    const others = viewers.map((id) => ({ id, ...page(id, network) }));
+    const roster = [{ userId: "ana" }, ...viewers.map((userId) => ({ userId }))];
+    for (const mesh of network.values()) mesh.join(roster);
+    await settle();
+    const screen = trackWith("ana screen", { width: 1920, height: 1080, frameRate: 60 }, "text");
+    ana.mesh.setLocalTracks({ screen });
+    await settle();
+    connect(ana, ...others);
+    await settle();
+    const to = ana.pcs.map((pc) => carrying(pc, screen) as FakeTransceiver);
+    return { ana, others, screen, to, roster };
+  }
+
+  /** The receiver of ana's screen on `bo`'s page. */
+  const fromAna = (bo: { mesh: Mesh; pcs: FakePC[] }) => {
+    const shown = bo.mesh.peers()[0]?.tracks.screen;
+    const receiver = bo.pcs[0]?.getReceivers().find((r) => r.track === shown);
+    if (!receiver) throw new Error("bo is not receiving ana's screen");
+    return receiver;
+  };
+
+  it("tells a viewer the step, its cap and why as soon as the pair connects", async () => {
+    const { ana, others } = await room(["bo"]);
+    const [bo] = others as [(typeof others)[number]];
+    // One viewer is entitled to the whole budget: the top step, so "best quality".
+    expect(notes(ana.sent)).toMatchObject([
+      { seq: 1, step: "1080p60", maxBitrate: 6_000_000, reason: "best" },
+    ]);
+    expect(bo.mesh.streamQuality("ana")).toMatchObject({
+      side: "viewer",
+      userId: "ana",
+      note: { step: "1080p60", maxBitrate: 6_000_000, reason: "best" },
+    });
+    ana.mesh.close();
+  });
+
+  it("says the streamer's side is unknown until the first message", async () => {
+    const network = new Map<string, Mesh>();
+    const ana = page("ana", network);
+    const bo = page("bo", network);
+    for (const mesh of network.values()) mesh.join(everyone);
+    await settle();
+    connect(ana, bo);
+    await settle();
+    // Connected, but ana shares nothing: nothing to say.
+    expect(notes(ana.sent)).toEqual([]);
+    expect(bo.mesh.streamQuality("ana")).toMatchObject({ side: "viewer", userId: "ana" });
+    expect(bo.mesh.streamQuality("ana")).not.toHaveProperty("note");
+    expect(bo.mesh.streamQuality("nobody")).toBeUndefined();
+  });
+
+  it("says the upload is shared when the viewer's share of it can't hold the next step", async () => {
+    // 8 Mbps between two viewers: 4 each, so 1080p30 (3 Mbps) fits and 1080p60 (6 Mbps) doesn't.
+    const { ana, others } = await room(["bo", "cy"], 8_000_000);
+    expect(notes(ana.sent)).toMatchObject([
+      { step: "1080p30", maxBitrate: 3_000_000, reason: "shared" },
+      { step: "1080p30", maxBitrate: 3_000_000, reason: "shared" },
+    ]);
+    expect(others[0]?.mesh.streamQuality("ana")).toMatchObject({ note: { reason: "shared" } });
+    ana.mesh.close();
+  });
+
+  it("sends a message when the step changes and the reason with it, and not when nothing did", async () => {
+    const { ana, others, to } = await room(["bo"]);
+    const [bo] = others as [(typeof others)[number]];
+    const toBo = to[0] as FakeTransceiver;
+    toBo.sender.stats = senderStats(0);
+    for (let i = 0; i < 4; i++) await ana.mesh.adjust();
+    await settle();
+    // Clean passes change nothing: still the one message from the connect.
+    expect(notes(ana.sent)).toHaveLength(1);
+
+    // Strain on the pair: after the warm-up and two pressured readings it steps down, and says so.
+    toBo.sender.stats = senderStats(0.1);
+    for (let i = 0; i < 2; i++) await ana.mesh.adjust();
+    await settle();
+    const [, change] = notes(ana.sent);
+    expect(change).toMatchObject({
+      seq: 2,
+      step: "1080p30",
+      maxBitrate: 3_000_000,
+      reason: "connection",
+      cause: "connection",
+    });
+    // The first message has no cause: the pair hadn't changed step yet.
+    expect(notes(ana.sent)[0]).not.toHaveProperty("cause");
+    const view = bo.mesh.streamQuality("ana") as Extract<QualityView, { side: "viewer" }>;
+    expect(view).toMatchObject({
+      note: { seq: 2, step: "1080p30", reason: "connection", cause: "connection" },
+      changes: [{ to: "1080p60" }, { from: "1080p60", to: "1080p30", cause: "connection" }],
+    });
+    expect(view.changes[0]).not.toHaveProperty("cause");
+    // Still held down there on a clean sample, it keeps saying why.
+    toBo.sender.stats = senderStats(0);
+    await ana.mesh.adjust();
+    await settle();
+    expect(notes(ana.sent)).toHaveLength(2);
+    ana.mesh.close();
+  });
+
+  it("says the computer when the encoder is CPU-limited", async () => {
+    const { ana, others, to } = await room(["bo"]);
+    const [bo] = others as [(typeof others)[number]];
+    (to[0] as FakeTransceiver).sender.stats = senderStats(0, "video/VP9", undefined, "cpu");
+    for (let i = 0; i < 4; i++) await ana.mesh.adjust();
+    await settle();
+    expect(bo.mesh.streamQuality("ana")).toMatchObject({
+      note: { step: "1080p30", reason: "computer", cause: "computer" },
+      changes: [{ to: "1080p60" }, { from: "1080p60", to: "1080p30", cause: "computer" }],
+    });
+    ana.mesh.close();
+  });
+
+  it("keeps the cause of a step down under pressure, not the reason now, on the timeline", async () => {
+    const { ana, others, to } = await room(["bo"]);
+    const [bo] = others as [(typeof others)[number]];
+    const toBo = to[0] as FakeTransceiver;
+    // Strain steps it down; a probe back up after a clean window makes it "best" again.
+    toBo.sender.stats = senderStats(0.1);
+    for (let i = 0; i < 4; i++) await ana.mesh.adjust();
+    toBo.sender.stats = senderStats(0);
+    for (let i = 0; i < UP_SAMPLES; i++) await ana.mesh.adjust();
+    await settle();
+    expect(bo.mesh.streamQuality("ana")).toMatchObject({
+      note: { step: "1080p60", reason: "best", cause: "probe" },
+      changes: [
+        { to: "1080p60" },
+        { from: "1080p60", to: "1080p30", cause: "connection" },
+        { from: "1080p30", to: "1080p60", cause: "probe" },
+      ],
+    });
+    ana.mesh.close();
+  });
+
+  it("names a capture resize as the cause of the step it moved the share to", async () => {
+    const network = new Map<string, Mesh>();
+    const ana = page("ana", network);
+    const bo = page("bo", network);
+    for (const mesh of network.values()) mesh.join(everyone);
+    await settle();
+    const settings = { width: 1920, height: 1080, frameRate: 60 };
+    ana.mesh.setLocalTracks({ screen: trackWith("ana screen", settings, "text") });
+    await settle();
+    connect(ana, bo);
+    await settle();
+    // The window is resized to 1280x720: the steps are built again, and it moves to 720p60.
+    Object.assign(settings, { width: 1280, height: 720 });
+    await ana.mesh.adjust();
+    await settle();
+    expect(bo.mesh.streamQuality("ana")).toMatchObject({
+      note: { step: "720p60", cause: "capture" },
+      changes: [{ to: "1080p60" }, { from: "1080p60", to: "720p60", cause: "capture" }],
+    });
+    ana.mesh.close();
+  });
+
+  it("names the shared upload as the cause when the budget steps a pair down for a late viewer", async () => {
+    const network = new Map<string, Mesh>();
+    const ana = page("ana", network, undefined, undefined, 8_000_000);
+    const bo = page("bo", network);
+    const cy = page("cy", network);
+    const duo = [{ userId: "ana" }, { userId: "bo" }];
+    const trio = [...duo, { userId: "cy" }];
+    for (const mesh of [ana.mesh, bo.mesh]) mesh.join(duo);
+    await settle();
+    const screen = trackWith("ana screen", { width: 1920, height: 1080, frameRate: 60 }, "text");
+    ana.mesh.setLocalTracks({ screen });
+    await settle();
+    connect(ana, bo);
+    await settle();
+    // Bo alone has the whole 8 Mbps: 1080p60 (6 Mbps). Cy arrives and is owed 4.
+    for (const mesh of [ana.mesh, bo.mesh, cy.mesh]) mesh.join(trio);
+    await settle();
+    connect(ana, bo, cy);
+    await settle();
+    const senders = ana.pcs.map((pc) => carrying(pc, screen) as FakeTransceiver);
+    for (let i = 0; i < 40; i++) {
+      for (const t of senders) t.sender.stats = senderStats(0);
+      await ana.mesh.adjust();
+    }
+    await settle();
+    const view = bo.mesh.streamQuality("ana") as Extract<QualityView, { side: "viewer" }>;
+    const stepDown = view.changes.find((c) => c.from === "1080p60");
+    expect(stepDown).toMatchObject({ cause: "budget" });
+    ana.mesh.close();
+  });
+
+  it("tells the viewer again after a step message the socket dropped, once it is back", async () => {
+    const { ana, others, to } = await room(["bo"]);
+    const [bo] = others as [(typeof others)[number]];
+    const toBo = to[0] as FakeTransceiver;
+    toBo.sender.stats = senderStats(0);
+    for (let i = 0; i < 2; i++) await ana.mesh.adjust();
+    ana.socket.up = false;
+    toBo.sender.stats = senderStats(0.1);
+    for (let i = 0; i < 2; i++) await ana.mesh.adjust();
+    await settle();
+    // Dropped: the viewer still has the old step.
+    expect(notes(ana.sent)).toHaveLength(1);
+    expect(bo.mesh.streamQuality("ana")).toMatchObject({ note: { step: "1080p60" } });
+
+    ana.socket.up = true;
+    ana.mesh.resend();
+    await settle();
+    expect(notes(ana.sent)).toHaveLength(2);
+    expect(bo.mesh.streamQuality("ana")).toMatchObject({
+      note: { seq: 2, step: "1080p30", reason: "connection" },
+    });
+    // Nothing more to send now.
+    ana.mesh.resend();
+    await settle();
+    expect(notes(ana.sent)).toHaveLength(2);
+    ana.mesh.close();
+  });
+
+  it("tells the viewer the current state again whenever the pair reconnects", async () => {
+    const { ana, others } = await room(["bo"]);
+    const [bo] = others as [(typeof others)[number]];
+    expect(notes(ana.sent)).toHaveLength(1);
+    const pc = ana.pcs[0] as FakePC;
+    pc.setConnectionState("disconnected");
+    pc.setConnectionState("connected");
+    await settle();
+    expect(notes(ana.sent).map((n) => n.seq)).toEqual([1, 2]);
+    expect(bo.mesh.streamQuality("ana")).toMatchObject({ note: { seq: 2, step: "1080p60" } });
+    ana.mesh.close();
+  });
+
+  it("ignores a stale or repeated message", async () => {
+    const { ana, others } = await room(["bo"]);
+    const [bo] = others as [(typeof others)[number]];
+    const first = notes(ana.sent)[0] as Quality;
+    bo.mesh.receive("ana", { ...first, seq: 5, step: "900p30", reason: "shared" });
+    expect(bo.mesh.streamQuality("ana")).toMatchObject({ note: { seq: 5, step: "900p30" } });
+    // Late (a lower number), and a repeat of the number: neither changes anything.
+    bo.mesh.receive("ana", { ...first, seq: 3, step: "720p30", reason: "computer" });
+    bo.mesh.receive("ana", { ...first, seq: 5, step: "720p30", reason: "computer" });
+    expect(bo.mesh.streamQuality("ana")).toMatchObject({
+      note: { seq: 5, step: "900p30", reason: "shared" },
+    });
+    // The timeline holds the steps as they were heard, not the ones refused.
+    expect(bo.mesh.streamQuality("ana")).toMatchObject({
+      changes: [{ to: "1080p60" }, { from: "1080p60", to: "900p30" }],
+    });
+    ana.mesh.close();
+  });
+
+  it("ignores a message that reaches the viewer after the server said the share ended", async () => {
+    const { ana, others, roster } = await room(["bo"]);
+    const [bo] = others as [(typeof others)[number]];
+    const first = notes(ana.sent)[0] as Quality;
+    bo.mesh.join(roster.map((p) => ({ ...p, media: { cam: false, share: false } })));
+    bo.mesh.receive("ana", { ...first, seq: 9, step: "720p30" });
+    expect(bo.mesh.streamQuality("ana")).not.toHaveProperty("note");
+    ana.mesh.close();
+  });
+
+  it("keeps the last minute of what the viewer receives, from the quality passes", async () => {
+    const { ana, others } = await room(["bo"]);
+    const [bo] = others as [(typeof others)[number]];
+    const receiver = fromAna(bo);
+    for (let s = 4; s <= 16; s += 4) {
+      receiver.stats = inbound(s);
+      await bo.mesh.adjust();
+    }
+    const view = bo.mesh.streamQuality("ana") as { points: unknown[] };
+    // Four readings: the first sets the baseline, so three points. 4 Mbps, 1080p30, and the cap
+    // ana told of.
+    expect(view.points).toHaveLength(3);
+    expect(view.points).toMatchObject([
+      { bps: 4_000_000, height: 1080, fps: 30, capBps: 6_000_000 },
+      { bps: 4_000_000 },
+      { bps: 4_000_000 },
+    ]);
+    ana.mesh.close();
+  });
+
+  it("reads the pair again on request, between passes, so an open modal stays current", async () => {
+    const { ana, others } = await room(["bo"]);
+    const [bo] = others as [(typeof others)[number]];
+    const receiver = fromAna(bo);
+    receiver.stats = inbound(4);
+    await bo.mesh.adjust();
+    receiver.stats = inbound(5);
+    await bo.mesh.refreshQuality("ana");
+    receiver.stats = inbound(6, { freezeCount: 2 });
+    await bo.mesh.refreshQuality("ana");
+    const view = bo.mesh.streamQuality("ana") as { points: { freezes?: number }[] };
+    expect(view.points.map((p) => p.freezes)).toEqual([0, 2]);
+    ana.mesh.close();
+  });
+
+  it("keeps a streamer's last minute of each viewer's pair and of the uplink against the budget", async () => {
+    const { ana, to } = await room(["bo", "cy"], 8_000_000);
+    let seconds = 0;
+    const pass = async () => {
+      seconds += 4;
+      for (const t of to) {
+        t.sender.stats = senderStats(0, "video/VP9", {
+          bytesSent: seconds * 250_000,
+          timestamp: seconds * 1_000,
+        });
+      }
+      await ana.mesh.adjust();
+    };
+    for (let i = 0; i < 4; i++) await pass();
+    const view = ana.mesh.streamQuality("ana");
+    expect(view).toMatchObject({ side: "streamer", budget: 8_000_000 });
+    const streamer = view as Extract<typeof view, { side: "streamer" }>;
+    expect(streamer.viewers.map((v) => [v.userId, v.note?.step, v.note?.reason])).toEqual([
+      ["bo", "1080p30", "shared"],
+      ["cy", "1080p30", "shared"],
+    ]);
+    // Each viewer's pair: 2 Mbps measured against its step's 3 Mbps cap.
+    expect(streamer.viewers[0]?.points.at(-1)).toMatchObject({ bps: 2_000_000, capBps: 3_000_000 });
+    // The uplink is both pairs together against the budget.
+    expect(streamer.uplink.at(-1)).toMatchObject({ bps: 4_000_000, capBps: 8_000_000 });
+    // The timeline across all viewers, oldest first, one first step each.
+    expect(streamer.changes.map((c) => [c.userId, c.to, c.cause])).toEqual([
+      ["bo", "1080p30", undefined],
+      ["cy", "1080p30", undefined],
+    ]);
+    // Measured by nothing yet: the budget is still the starting estimate.
+    expect(streamer.budgetMeasured).toBe(false);
+    ana.mesh.close();
+  });
+
+  it("doesn't count a viewer's reading older than two passes in the upload it graphs", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { ana, to } = await room(["bo"], 8_000_000);
+      const toBo = to[0] as FakeTransceiver;
+      const sent = (seconds: number) =>
+        senderStats(0, "video/VP9", {
+          bytesSent: seconds * 250_000,
+          timestamp: seconds * 1_000,
+        });
+      const uplink = () =>
+        (ana.mesh.streamQuality("ana") as Extract<QualityView, { side: "streamer" }>).uplink.at(-1);
+      toBo.sender.stats = sent(0);
+      await ana.mesh.refreshQuality("ana");
+      vi.setSystemTime(Date.now() + 1_000);
+      toBo.sender.stats = sent(1);
+      await ana.mesh.refreshQuality("ana");
+      expect(uplink()?.bps).toBe(2_000_000);
+      // The viewer's reads stop coming (a hung `getStats`, a stopped sender): the same report
+      // again makes no new point, and what was last seen long ago isn't what it sends now.
+      vi.setSystemTime(Date.now() + 20_000);
+      await ana.mesh.refreshQuality("ana");
+      expect(uplink()?.bps).toBe(0);
+      ana.mesh.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("has no view of its own share when it isn't sharing", () => {
+    const network = new Map<string, Mesh>();
+    const ana = page("ana", network);
+    expect(ana.mesh.streamQuality("ana")).toBeUndefined();
+  });
+
+  it("forgets what was kept of a share when it ends, and of a peer when they leave", async () => {
+    const { ana, others, to, roster } = await room(["bo"]);
+    const [bo] = others as [(typeof others)[number]];
+    const receiver = fromAna(bo);
+    receiver.stats = inbound(4);
+    await bo.mesh.adjust();
+    receiver.stats = inbound(8);
+    await bo.mesh.adjust();
+    expect((bo.mesh.streamQuality("ana") as { points: unknown[] }).points).toHaveLength(1);
+
+    // The server says ana's share is over: bo's picture of it goes.
+    bo.mesh.join(roster.map((p) => ({ ...p, media: { cam: false, share: false } })));
+    expect(bo.mesh.streamQuality("ana")).toMatchObject({ points: [], changes: [] });
+    expect(bo.mesh.streamQuality("ana")).not.toHaveProperty("note");
+
+    // Ana's own side: her view goes when she stops, and a share begun anew tells bo afresh.
+    const toBo = to[0] as FakeTransceiver;
+    toBo.sender.stats = senderStats(0, "video/VP9", { bytesSent: 1_000_000, timestamp: 4_000 });
+    await ana.mesh.refreshQuality("ana");
+    ana.mesh.setLocalTracks({ screen: null });
+    expect(ana.mesh.streamQuality("ana")).toBeUndefined();
+    const told = notes(ana.sent).length;
+    ana.mesh.setLocalTracks({
+      screen: trackWith("ana screen 2", { width: 1920, height: 1080, frameRate: 60 }, "text"),
+    });
+    await settle();
+    expect(notes(ana.sent).length).toBeGreaterThan(told);
+    expect(notes(ana.sent).at(-1)?.seq).toBe(told + 1);
+
+    // Leaving drops everything about the peer.
+    bo.mesh.peerLeft("ana");
+    expect(bo.mesh.streamQuality("ana")).toBeUndefined();
+    ana.mesh.close();
   });
 });
