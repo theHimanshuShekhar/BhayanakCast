@@ -29,15 +29,15 @@ export const MAX_ROOM_SAMPLES = 50_000;
 export const MAX_PAIR_SAMPLES = 5_000;
 
 /**
- * A pair is "starved" when its target bitrate stays well below the rung's `maxBitrate` while the
- * sender stays on a high rung: the controller reads no pressure there (the encoder reports no
+ * A pair is "starved" when its target bitrate stays well below the step's `maxBitrate` while the
+ * sender stays on a high step: the controller reads no pressure there (the encoder reports no
  * limit under `maintain-resolution`) yet the picture is only as good as the target. "Well below"
- * is under `STARVED_RATIO` of the rung's, a "high" rung one of at least `STARVED_MIN_RUNG_BITRATE`
- * (1080p30 and up), and it takes `STARVED_SHARE` of the time on such rungs, over at least
+ * is under `STARVED_RATIO` of the step's, a "high" step one that costs at least what the step the
+ * share started on did (steps are built for each share, so no absolute bitrate says what is
+ * high), and it takes `STARVED_SHARE` of the time on such steps, over at least
  * `STARVED_MIN_SECONDS` of it, to count. Provisional, like the controller's own thresholds.
  */
 export const STARVED_RATIO = 0.5;
-export const STARVED_MIN_RUNG_BITRATE = 3_000_000;
 export const STARVED_SHARE = 0.5;
 export const STARVED_MIN_SECONDS = 60;
 
@@ -201,12 +201,16 @@ function pathOf(rows: readonly QualityRow[]): QualityPath | null {
 }
 
 function starvedOf(sent: readonly QualityRow[]): QualityPair["starved"] {
+  // The step it started on: the first one it reported (rows are in time order).
+  const started = sent.find((row) => row.rung !== null && row.maxBitrate !== null)?.maxBitrate;
   const high = sent.filter(
     (row) =>
       row.windowMs > 0 &&
       row.rung !== null &&
       row.maxBitrate !== null &&
-      row.maxBitrate >= STARVED_MIN_RUNG_BITRATE &&
+      started !== undefined &&
+      started !== null &&
+      row.maxBitrate >= started &&
       row.targetBitrate !== null,
   );
   const starved = high.filter(

@@ -416,6 +416,41 @@ describe("the report schema", () => {
     ).toBe(true);
   });
 
+  it("takes the encoded size of a share that isn't 16:9 as its rung label", () => {
+    expect(accepts(row({ rung: "2968×1242@60" }))).toBe(true);
+    expect(
+      accepts(
+        row({ trigger: "rung", rung: "2226×932@30", toRung: "2968×1242@60", reason: "probe" }),
+      ),
+    ).toBe(true);
+    // A small window, and any size a step can have.
+    for (const rung of ["96×54@30", "1×1@30", "12345×99@60"]) {
+      expect(accepts(row({ rung })), rung).toBe(true);
+    }
+    for (const rung of [
+      "2968x1242@60",
+      "2968×1242",
+      "2968×1242@600",
+      "×1242@60",
+      "296800×1242@60",
+    ]) {
+      expect(accepts(row({ rung })), rung).toBe(false);
+    }
+  });
+
+  it("drops a malformed row on its own, and keeps the rest of the report", () => {
+    const parsed = reportQualityInput.safeParse(
+      input([row(), { ...row(), rung: "not a label!" }, row({ peerId: "cy" })]),
+    );
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.samples.map((s) => s.peerId)).toEqual(["bo", "cy"]);
+    // Nothing left of it, or too many rows to read, is refused whole.
+    expect(accepts({ ...row(), rung: "not a label!" })).toBe(false);
+    expect(
+      reportQualityInput.safeParse(input(Array(QUALITY_BATCH_MAX + 1).fill(row()))).success,
+    ).toBe(false);
+  });
+
   it("refuses a rung change that doesn't say where to and why, or a received row with a rung", () => {
     expect(accepts(row({ trigger: "rung" }))).toBe(false);
     expect(accepts(row({ toRung: "900p30", reason: "pressure" }))).toBe(false);

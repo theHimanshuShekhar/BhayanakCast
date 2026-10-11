@@ -2,10 +2,10 @@
  * Adaptive quality (ADR 2): what each video sender to one peer encodes, chosen by a controller
  * that reads that connection's stats every few seconds. There is no user-facing control.
  *
- * A screen share moves along `SCREEN_LADDER` (720p30 at the bottom, 1080p30 by default, 1080p60
- * at the top), a camera along `CAMERA_LADDER` (180p15, and 360p15 by default). `nextRung` is the
- * decision, a pure function of a window of samples and the current rung; `step` wraps it with
- * the bookkeeping of probes:
+ * A screen share moves along steps `screenSteps` builds from its own capture (a scale of the
+ * capture times 30 or 60 fps, about 720p30 at the bottom), a camera along `CAMERA_LADDER` (180p15,
+ * and 360p15 by default). `nextRung` is the decision, a pure function of a window of samples and
+ * the current rung; `step` wraps it with the bookkeeping of probes:
  *
  * - Pressure is loss, a long round trip, a CPU limit, or a bandwidth limit while the estimate is
  *   clearly below what the sender is actually sending. Sending little (a still screen) is never
@@ -19,17 +19,22 @@
  * - It never leaves `[min, max]`; a rung outside them moves inside at once.
  *
  * Every pair adapts on its own connection's stats, but they share one uplink: `UplinkBudget` is
- * the streamer's budget for the sum of all the pairs' target bitrates. A new pair starts at the
- * highest rung that fits what the others leave, a probe up needs room in it (or a clean spell
- * across the whole room, which grows it by that one probe), and pressure on most pairs at once
- * lowers it towards what was measured being sent. `nextRung` and `step` stay pure: they propose
- * a probe, and the Mesh asks the budget before taking it.
+ * the streamer's budget for the sum of all the pairs' target bitrates. Each viewer is entitled to
+ * an equal share of it (less what its link can't use, which the others may climb into), and a
+ * pair's ceiling is the lower of that share and what its own link carries. A new pair starts at
+ * the highest step that fits what the others leave, a probe up needs room in its share (or a
+ * clean spell across the whole room, which grows the budget by that one probe), and pressure on
+ * most pairs at once lowers it towards what was measured being sent. Cameras give way before
+ * screens. `nextRung` and `step` stay pure: they propose a probe, and the Mesh asks the budget
+ * before taking it.
  *
  * The thresholds are provisional (ADR 2 addendum).
  */
 
 export interface Rung {
   label: string;
+  /** Encoded width in pixels, for a screen step (a camera's follows its capture). */
+  width?: number;
   /** Encoded height in pixels (the width follows the capture's aspect ratio). */
   height: number;
   frameRate: number;
@@ -37,22 +42,146 @@ export interface Rung {
   maxBitrate: number;
 }
 
-/** Low to max. The default is `SCREEN_DEFAULT_RUNG`. */
-export const SCREEN_LADDER: readonly Rung[] = [
-  { label: "720p30", height: 720, frameRate: 30, maxBitrate: 1_500_000 },
-  { label: "900p30", height: 900, frameRate: 30, maxBitrate: 2_200_000 },
-  { label: "1080p30", height: 1080, frameRate: 30, maxBitrate: 3_000_000 },
-  { label: "1080p45", height: 1080, frameRate: 45, maxBitrate: 4_500_000 },
-  { label: "1080p60", height: 1080, frameRate: 60, maxBitrate: 6_000_000 },
-];
-export const SCREEN_DEFAULT_RUNG = 2;
-
 /** 180p is where a camera goes under pressure; 360p15 is its default. */
 export const CAMERA_LADDER: readonly Rung[] = [
   { label: "180p15", height: 180, frameRate: 15, maxBitrate: 150_000 },
   { label: "360p15", height: 360, frameRate: 15, maxBitrate: 500_000 },
 ];
 export const CAMERA_DEFAULT_RUNG = 1;
+
+/** The most pixels a share's top step encodes: 2560x1440, the 3.7 MP class (ADR 2 addendum). */
+export const MAX_CAPTURE_PIXELS = 2560 * 1440;
+/** The pixel counts of 1080p, 900p and 720p: the steps below the top, at the capture's shape. */
+const TIER_PIXELS = [1920 * 1080, 1600 * 900, 1280 * 720] as const;
+/** A tier with more than this share of the top's pixels is too close to it to be a step. */
+const NEAR_TOP = 0.8;
+/** The anchor of the bitrate scale: 1080p30 costs this much. */
+export const ANCHOR_BITRATE = 3_000_000;
+/** Bits per pixel per frame, anchored so that 1080p30 is `ANCHOR_BITRATE`: about 0.0482. */
+export const BITS_PER_PIXEL = ANCHOR_BITRATE / (1920 * 1080 * 30);
+/** A capture reporting at least this many frames a second can feed 60 fps steps... */
+const FEEDS_60_FROM = 59;
+/** ...and keeps feeding them until it reports fewer than this (59.94 and 58 are both 60). */
+const FEEDS_60_UNTIL = 50;
+
+/** What a capture reports of itself (`MediaStreamTrack.getSettings()`); absent if unknown. */
+export interface Capture {
+  width?: number;
+  height?: number;
+  frameRate?: number;
+}
+
+/** What a step down gives up first: `framerate` (text-like rooms) or `size` (motion rooms). */
+export type StepOrder = "framerate" | "size";
+
+interface Size {
+  width: number;
+  height: number;
+}
+const even = (n: number) => Math.max(2, 2 * Math.round(n / 2));
+
+/**
+ * `size` fitted to `MAX_CAPTURE_PIXELS` by pixel count, in its own shape, and never enlarged: a
+ * 3440x1440 screen becomes 2968x1242, a 5120x1440 one 3620x1018, a 1440x2560 portrait one stays.
+ */
+export function fitCapture({ width, height }: Size): Size {
+  const fit = Math.min(1, Math.sqrt(MAX_CAPTURE_PIXELS / (width * height)));
+  return { width: even(width * fit), height: even(height * fit) };
+}
+
+/**
+ * Whether a capture reporting `frameRate` can feed 60 fps steps. An unknown rate can, and a
+ * capture that did before keeps doing so until it reports well below 60, so a rate that dithers
+ * around the cutoff doesn't rebuild the steps (`was` is the answer last time).
+ */
+export function feeds60(frameRate: number | undefined, was?: boolean): boolean {
+  if (frameRate === undefined) return true;
+  return frameRate >= FEEDS_60_FROM || (was === true && frameRate >= FEEDS_60_UNTIL);
+}
+
+/**
+ * The steps of a screen share, lowest first, built from its capture: each is a size times 30 or
+ * 60 fps (60 only if the capture delivers it), and its `maxBitrate` is pixels x fps x
+ * `BITS_PER_PIXEL`, so a step costs what it encodes whatever the shape of the screen.
+ *
+ * - **Sizes.** The top is the capture fitted to the pixel cap (`fitCapture`). Below it come the
+ *   capture's shape at the pixel counts of 1080p, 900p and 720p, as far as they are well below
+ *   the top. The lowest is about 720p's (today's floor); a capture smaller than that gets one
+ *   size, never upscaled.
+ * - **Order.** Text-like rooms (`giveUpFirst` `framerate`) lose 60 -> 30 fps at full size before
+ *   any size; motion rooms (`size`) keep 60 fps while they shrink, and lose it only at the
+ *   smallest size, which is the 30 fps floor.
+ * - **Labels.** `1080p30` for a 16:9 size, else the encoded size, like `2968×1242@60`.
+ *
+ * A capture of unknown size is taken to be 1920x1080. A step's height is what the Mesh scales the
+ * capture's to (`scaleResolutionDownBy`). `frameRate` is only compared with 60 via `feeds60`.
+ */
+export function screenSteps(capture: Capture, giveUpFirst: StepOrder): Rung[] {
+  const known = (capture.width ?? 0) > 0 && (capture.height ?? 0) > 0;
+  const top = fitCapture({
+    width: known ? (capture.width as number) : 1920,
+    height: known ? (capture.height as number) : 1080,
+  });
+  const topPixels = top.width * top.height;
+  const below = TIER_PIXELS.filter((pixels) => pixels < topPixels * NEAR_TOP).map((pixels) => {
+    const scale = Math.sqrt(pixels / topPixels);
+    return { width: even(top.width * scale), height: even(top.height * scale) };
+  });
+  const sizes = [...below.reverse(), top];
+  const sixty = feeds60(capture.frameRate);
+  const sizedAt =
+    (frameRate: number) =>
+    (size: Size): [Size, number] => [size, frameRate];
+  const steps =
+    giveUpFirst === "framerate"
+      ? [...sizes.map(sizedAt(30)), ...(sixty ? [sizedAt(60)(top)] : [])]
+      : sixty
+        ? [sizedAt(30)(sizes[0] as Size), ...sizes.map(sizedAt(60))]
+        : sizes.map(sizedAt(30));
+  return steps.map(([size, frameRate]) => ({
+    label:
+      size.width * 9 === size.height * 16
+        ? `${size.height}p${frameRate}`
+        : `${size.width}×${size.height}@${frameRate}`,
+    ...size,
+    frameRate,
+    maxBitrate:
+      Math.round((size.width * size.height * frameRate * BITS_PER_PIXEL) / 10_000) * 10_000,
+  }));
+}
+
+/**
+ * Where a sender whose steps were rebuilt (the capture was resized, or its frame rate became or
+ * stopped being 60) goes in the new `steps`: the step of the same size at the nearest frame rate,
+ * or else, for a new size, the highest step that costs no more than `from` did. So a rebuild that
+ * only adds or drops the 60 fps steps never moves a sender to another size.
+ */
+export function carryOver(from: Rung, steps: readonly Rung[]): number {
+  let same: number | undefined;
+  steps.forEach((step, i) => {
+    if (step.width !== from.width || step.height !== from.height) return;
+    const best = same === undefined ? undefined : (steps[same] as Rung);
+    if (
+      !best ||
+      Math.abs(step.frameRate - from.frameRate) < Math.abs(best.frameRate - from.frameRate)
+    ) {
+      same = i;
+    }
+  });
+  return same ?? fitRung(steps, from.maxBitrate);
+}
+
+/**
+ * The highest rung of `ladder` that a capture of `height` lines can feed: a camera of 240 lines
+ * gains nothing from the 360p rung. An unknown height caps nothing.
+ */
+export function heightCap(ladder: readonly Rung[], height?: number): number {
+  let cap = 0;
+  ladder.forEach((rung, i) => {
+    if (height === undefined || rung.height <= height) cap = i;
+  });
+  return cap;
+}
 
 /** What the encoder says holds it back (`qualityLimitationReason`). */
 export const LIMITS = ["none", "bandwidth", "cpu", "other"] as const;
@@ -164,6 +293,11 @@ export interface LadderState {
   backoff: number;
   /** It stepped up and hasn't yet shown the new rung holds. */
   probing: boolean;
+  /**
+   * Its own link holds it at this rung: it stepped down under pressure, and no higher rung has
+   * held since. The share of the budget it can't use goes to the other pairs (`pairCeilings`).
+   */
+  limited: boolean;
 }
 
 export const freshLadderState = (rung: number): LadderState => ({
@@ -171,6 +305,7 @@ export const freshLadderState = (rung: number): LadderState => ({
   window: [],
   backoff: 0,
   probing: false,
+  limited: false,
 });
 
 /** `state` after `sample`: the window grows, and the rung moves if `nextRung` says so. */
@@ -190,11 +325,12 @@ export function step(
       window: [],
       backoff: failedProbe ? Math.min(state.backoff + 1, MAX_BACKOFF) : state.backoff,
       probing: false,
+      limited: true,
     };
   }
   // A probe that has been clean for a window has held.
   if (state.probing && window.length >= UP_SAMPLES) {
-    return { ...state, window, backoff: 0, probing: false };
+    return { ...state, window, backoff: 0, probing: false, limited: false };
   }
   return { ...state, window };
 }
@@ -219,6 +355,114 @@ export interface UplinkReading {
   sent: number;
 }
 
+/** What limits a viewer's pair besides its share of the budget. */
+export interface PairLimits {
+  /** What the pair's own link carries, bits per second, if it is known to hold the pair down. */
+  link?: number;
+}
+
+/**
+ * A pair's ceiling, in bits per second: the lowest of the limits on it. This is the one place it
+ * is computed, so that a further term (the viewer's receive share) is one more argument here.
+ */
+export const ceilingOf = ({ fairShare, link }: { fairShare: number; link?: number }): number =>
+  Math.min(fairShare, link ?? Number.POSITIVE_INFINITY);
+
+/**
+ * Each viewer's ceiling: the lower of its fair share of `budget` and what its own link carries
+ * (`ceilingOf`). Every viewer is entitled to an equal share; one whose link carries less leaves
+ * the rest of its share to the others, who divide it equally again (and a link that the larger
+ * share then falls under binds in turn). Budget is left unused only when every viewer is
+ * link-limited.
+ */
+export function pairCeilings(budget: number, pairs: readonly PairLimits[]): number[] {
+  const ceilings = pairs.map(() => 0);
+  let open = pairs.map((_, i) => i);
+  let left = Math.max(0, budget);
+  while (open.length > 0) {
+    const fairShare = left / open.length;
+    const ceilingFor = (i: number) => ceilingOf({ fairShare, link: (pairs[i] as PairLimits).link });
+    const limited = open.filter((i) => ceilingFor(i) < fairShare);
+    if (limited.length === 0) {
+      for (const i of open) ceilings[i] = fairShare;
+      break;
+    }
+    for (const i of limited) {
+      ceilings[i] = ceilingFor(i);
+      left -= ceilings[i] as number;
+    }
+    open = open.filter((i) => !limited.includes(i));
+  }
+  return ceilings;
+}
+
+/**
+ * What the budget has been asked for by one claimant: a viewer of the screen (`target` is 0 until
+ * its screen sender starts, but its share is kept for it) or a camera sender.
+ */
+export interface Claim {
+  camera: boolean;
+  /** Bits per second its sender targets now. */
+  target: number;
+  /** A screen's ceiling (`pairCeilings`). A camera has none. */
+  ceiling?: number;
+}
+
+/**
+ * How a claimant `self` asking to target `next` bits per second is judged. Within its own ceiling
+ * it is entitled to it (`within`): its share is its own, and if other pairs sitting above theirs
+ * have used it up, they are the ones to step down (`shedFirst`). Past its ceiling it would take
+ * what other pairs are entitled to, so `committed` counts every other screen at no less than its
+ * ceiling (a viewer that hasn't started included, a camera at its target) for the budget to
+ * judge.
+ */
+export function probeClaim(
+  claims: readonly Claim[],
+  self: number,
+  next: number,
+): { within: boolean; committed: number } {
+  const asking = claims[self];
+  let committed = 0;
+  claims.forEach((claim, i) => {
+    const keep = i === self || claim.camera ? 0 : (claim.ceiling ?? 0);
+    committed += Math.max(claim.target, keep);
+  });
+  return { within: asking?.ceiling !== undefined && next <= asking.ceiling, committed };
+}
+
+/** How far a screen sender's `target` is above its pair's `ceiling`: 0 within it, or if unknown. */
+export const aboveCeiling = (target: number, ceiling?: number): number =>
+  ceiling === undefined ? 0 : Math.max(0, target - ceiling);
+
+/** A video sender that could step down to ease the budget. */
+export interface Sheddable {
+  camera: boolean;
+  /** Its target bitrate now. */
+  bitrate: number;
+  /** How far above its ceiling it targets (0 if within it, and for a camera). */
+  over?: number;
+}
+
+/**
+ * Which of `senders` steps down first when the budget is short: a camera (the heaviest one)
+ * before any screen; then the screen furthest above its ceiling (its pair took what others are
+ * entitled to), then the heaviest. Undefined if there are none.
+ */
+export function shedFirst(senders: readonly Sheddable[]): number | undefined {
+  const rank = (s: Sheddable) => [s.camera ? 1 : 0, s.over ?? 0, s.bitrate];
+  let first: number | undefined;
+  senders.forEach((sender, i) => {
+    if (first === undefined) {
+      first = i;
+      return;
+    }
+    const [a, b] = [rank(sender), rank(senders[first] as Sheddable)];
+    const differs = a.findIndex((v, k) => v !== b[k]);
+    if (differs !== -1 && (a[differs] as number) > (b[differs] as number)) first = i;
+  });
+  return first;
+}
+
 /**
  * The streamer's uplink as one budget for the sum of all its video senders' target bitrates
  * (`maxBitrate` of each one's rung), owned by the Mesh and consulted by every pair's controller.
@@ -230,11 +474,13 @@ export interface UplinkReading {
  *   was being sent then, but by no more than `UPLINK_DROP_LIMIT` at once (a still screen sends
  *   next to nothing, whatever the uplink), and the Mesh steps senders down until their targets
  *   fit.
- * - A probe up that fits the room left in the budget goes ahead. One that doesn't is admitted
- *   only on its sender's turn (the Mesh says whose) after a clean spell (`UP_SAMPLES` passes
- *   without shared strain), and then the budget grows by just that probe, so beyond the budget
- *   one pair at a time tries. If the strain comes back the next spell is twice as long
- *   (`MAX_BACKOFF` doublings); a growth that has held for a window resets it.
+ * - A probe up within the pair's own ceiling (`pairCeilings`) always goes ahead: pairs above
+ *   theirs step down to make room. One past it has to fit the room left in the budget, counting
+ *   every other pair at no less than its ceiling (`probeClaim`), or else is admitted only on its
+ *   sender's turn (the Mesh says whose) after a clean spell (`UP_SAMPLES` passes without shared
+ *   strain), and then the budget grows by just that probe, so beyond the budget one pair at a
+ *   time tries. If the strain comes back the next spell is twice as long (`MAX_BACKOFF`
+ *   doublings); a growth that has held for a window resets it.
  */
 export class UplinkBudget {
   /** Bits per second the targets may add up to. */
@@ -281,8 +527,9 @@ export class UplinkBudget {
   }
 
   /**
-   * Whether a sender may take `extra` bits per second more, with `committed` targeted now. Past
-   * the budget that grows it, if it is the sender's `turn` and a clean spell allows.
+   * Whether a sender may take `extra` bits per second more, with `committed` targeted now (see
+   * `probeClaim`). Past the budget that grows it, if it is the sender's `turn` and a clean spell
+   * allows.
    */
   admit(committed: number, extra: number, turn = true): boolean {
     if (committed + extra <= this.limit) return true;
@@ -292,26 +539,6 @@ export class UplinkBudget {
     this.#growing = true;
     return true;
   }
-}
-
-/**
- * The highest rung of `ladder` the capture can feed: not above its height, nor its frame rate
- * (a share of a 720p window gains nothing from a 1080p rung, nor a 30 fps capture from 60 fps).
- * Unknown settings cap nothing.
- */
-export function captureCap(
-  ladder: readonly Rung[],
-  settings: { height?: number; frameRate?: number },
-): number {
-  let cap = 0;
-  ladder.forEach((rung, i) => {
-    const heightOk = settings.height === undefined || rung.height <= settings.height;
-    // Captures report 29.97 for 30, and cameras dip in the dark: 30 fps is never a reason to cap.
-    const rateOk =
-      settings.frameRate === undefined || rung.frameRate <= Math.max(30, settings.frameRate + 1);
-    if (heightOk && rateOk) cap = i;
-  });
-  return cap;
 }
 
 export type StatsEntry = {

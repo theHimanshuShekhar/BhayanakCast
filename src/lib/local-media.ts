@@ -22,6 +22,7 @@
  * Browser-only: call it from effects and event handlers, never during render.
  */
 import { useSyncExternalStore } from "react";
+import { fitCapture, MAX_CAPTURE_PIXELS } from "./quality";
 import type { RoomKind } from "./rooms";
 
 export type LocalDeviceKind = "mic" | "cam";
@@ -100,14 +101,64 @@ export const CAMERA_CONSTRAINTS: MediaTrackConstraints = {
 };
 
 /**
- * Screen capture: at most 1080p60, the quality ladder's top rung (ADR 2). Each peer's sender
- * encodes at the rung its connection allows (src/lib/quality.ts), 1080p30 to start.
+ * Screen capture: the screen's native size up to about 3.7 MP (2560x1440 class), at up to 60 fps
+ * (ADR 2 addendum). Each peer's sender encodes steps built from what is captured, scaled down
+ * with `scaleResolutionDownBy` (src/lib/quality.ts, `screenSteps`), which fit it to the cap by
+ * pixel count whatever the browser delivered.
+ *
+ * `getDisplayMedia` constraints can't say "at most 3.7 MP": width and height maxes bound a box,
+ * and the browser scales a larger screen down into it, keeping its shape. This box is 2970x1440:
+ * a 16:9 screen is fitted to 2560x1440 by its height, and a 21:9 one (3440x1440) to 2970x1243 by
+ * its width, both at about 3.7 MP, where the old 1920x1080 box gave an ultrawide 1920x804. A
+ * screen of another shape would land well under the cap (a 32:9 one at 67%, a portrait one at
+ * 32%): see `SCREEN_FIRST_BOX`.
  */
 export const SCREEN_CONSTRAINTS: MediaTrackConstraints = {
-  width: { max: 1920 },
-  height: { max: 1080 },
+  width: { max: 2970 },
+  height: { max: 1440 },
   frameRate: { ideal: 60 },
 };
+
+/**
+ * Where `fitScreenCapture` can be used, the first request is for up to 3840 either way, so that
+ * the track's size says how big the screen is in its own shape (a 5120x1440 screen comes as
+ * 3840x1080), and the track is then given the box that fits that shape to the cap. Chromium does
+ * this (the e2e checks it on a canvas track, whose `applyConstraints` scales like a screen's);
+ * Firefox is left on `SCREEN_CONSTRAINTS` (see `LocalMediaOptions.fitScreen`).
+ */
+export const SCREEN_FIRST_BOX: MediaTrackConstraints = {
+  width: { max: 3840 },
+  height: { max: 3840 },
+  frameRate: { ideal: 60 },
+};
+
+/**
+ * Give a screen capture the box that fits its own shape to the pixel cap (`fitCapture`), if it is
+ * over it. A browser that refuses gets the fixed `SCREEN_CONSTRAINTS` box, and one that refuses
+ * that keeps the first box: the senders' steps work from whatever is captured. This is done once,
+ * as the share starts: a window that starts small and is enlarged later can be captured above the
+ * cap (there is no track event for a resize), which the steps still fit to it by pixel count.
+ */
+export async function fitScreenCapture(track: MediaStreamTrack): Promise<void> {
+  const { width, height } = track.getSettings?.() ?? {};
+  const over = !width || !height || width * height > MAX_CAPTURE_PIXELS;
+  if (!over) return;
+  const fit = width && height ? fitCapture({ width, height }) : undefined;
+  const boxes = [
+    ...(fit
+      ? [{ ...SCREEN_CONSTRAINTS, width: { max: fit.width }, height: { max: fit.height } }]
+      : []),
+    SCREEN_CONSTRAINTS,
+  ];
+  for (const box of boxes) {
+    try {
+      await track.applyConstraints(box);
+      return;
+    } catch {
+      // The next box.
+    }
+  }
+}
 
 /** Share audio as it plays: no voice processing (ADR 2 addendum). */
 export const SHARE_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
@@ -154,6 +205,12 @@ export interface LocalMediaOptions {
   storage?: Storage | null;
   /** `navigator.userActivation`, where the browser has it. */
   userActivation?: Pick<UserActivation, "isActive">;
+  /**
+   * Refit a screen capture's box to the pixel cap for its shape (`fitScreenCapture`). Defaults
+   * to every browser but Firefox, where resizing a screen capture's track with
+   * `applyConstraints` is unverified (headless Firefox has no screen to capture).
+   */
+  fitScreen?: boolean;
 }
 
 type Listener = () => void;
@@ -185,6 +242,7 @@ export class LocalMedia {
   readonly #mediaDevices: LocalMediaOptions["mediaDevices"];
   readonly #storage: Storage | null;
   readonly #userActivation: LocalMediaOptions["userActivation"];
+  readonly #fitScreen: boolean;
   readonly #listeners = new Set<Listener>();
   #state: LocalMediaState;
   /** Bumped per kind by every enable/disable, so a slow `getUserMedia` that lost knows it. */
@@ -194,6 +252,9 @@ export class LocalMedia {
     this.#mediaDevices = options.mediaDevices;
     this.#storage = options.storage ?? null;
     this.#userActivation = options.userActivation;
+    this.#fitScreen =
+      options.fitScreen ??
+      (typeof navigator !== "undefined" && !/Firefox\//.test(navigator.userAgent));
     this.#state = { ...LOCAL_MEDIA_INITIAL, selected: this.#loadSelected() };
   }
 
@@ -360,7 +421,7 @@ export class LocalMedia {
     let failure: ShareFailure | null = null;
     try {
       stream = await this.#mediaDevices.getDisplayMedia({
-        video: SCREEN_CONSTRAINTS,
+        video: this.#fitScreen ? SCREEN_FIRST_BOX : SCREEN_CONSTRAINTS,
         audio: SHARE_AUDIO_CONSTRAINTS,
       });
     } catch (error) {
@@ -368,6 +429,7 @@ export class LocalMedia {
     }
     const [video] = stream?.getVideoTracks() ?? [];
     const [audio = null] = stream?.getAudioTracks() ?? [];
+    if (video && this.#fitScreen) await fitScreenCapture(video);
     if (attempt !== this.#attempt.share || !video) {
       // Stopped (or started again) while the picker was open: this one lost.
       for (const track of stream?.getTracks() ?? []) track.stop();

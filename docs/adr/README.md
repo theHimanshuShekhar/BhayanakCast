@@ -3,7 +3,7 @@
 | # | Decision |
 |---|---|
 | [1](0001-p2p-mesh-media.md) | P2P WebRTC full mesh for media; server does signalling + DB only |
-| [2](0002-room-caps-and-quality.md) | 10 people, 3 streamers; 720p30–1080p60 adaptive; best codec per pair; cams 360p15; share audio |
+| [2](0002-room-caps-and-quality.md) | 10 people, 3 streamers; screen steps built from each capture (about 720p30 up to 3.7 MP at 60 fps), a fair share of the upload budget per viewer; best codec per pair; cams 360p15; share audio |
 | [3](0003-nat-traversal.md) | STUN + pluggable TURN; Cloudflare TURN free tier from day one |
 | [4](0004-signalling-websocket.md) | WebSocket in app server for signalling, presence, chat (last 50 in RAM) |
 | [5](0005-tanstack-start.md) | TanStack Start |

@@ -219,8 +219,39 @@ describe("aggregatePairs", () => {
       expect(aggregatePairs(windows(4, "1080p30", 3_000_000, 1_500_000))[0]?.starved).toBeNull();
     });
 
-    it("doesn't flag a low rung, whose target can't be far below its maximum for want of one", () => {
-      expect(aggregatePairs(windows(4, "720p30", 1_500_000, 100_000))[0]?.starved).toBeNull();
+    it("doesn't flag the steps below the one the share started on", () => {
+      // It started on 1080p30 and fell to 720p30: a low target there is the step it fell to.
+      const rows = [
+        ...windows(1, "1080p30", 3_000_000, 2_900_000),
+        ...windows(4, "720p30", 1_330_000, 100_000).map((row) => ({
+          ...row,
+          at: new Date(row.at.getTime() + 100_000_000),
+        })),
+      ];
+      expect(aggregatePairs(rows)[0]?.starved).toBeNull();
+    });
+
+    it("flags a share whose own steps are small, whatever the bitrate", () => {
+      // A 5:4 window or a small share starts on a step of 1.5 Mbps or less: it can be starved too.
+      const [pair] = aggregatePairs(windows(4, "1280×1024@30", 1_900_000, 400_000));
+      expect(pair?.starved).toEqual({ rung: "1280×1024@30", share: 1 });
+      expect(aggregatePairs(windows(4, "720p30", 1_330_000, 100_000))[0]?.starved).toEqual({
+        rung: "720p30",
+        share: 1,
+      });
+    });
+
+    it("judges a share by the step it started on, not by an absolute bitrate", () => {
+      // It started on a 6 Mbps step: a 3 Mbps step it climbed to afterwards doesn't count as the
+      // top, but the first does.
+      const rows = [
+        ...windows(1, "1080p60", 6_000_000, 5_000_000),
+        ...windows(4, "1080p30", 3_000_000, 500_000).map((row) => ({
+          ...row,
+          at: new Date(row.at.getTime() + 100_000_000),
+        })),
+      ];
+      expect(aggregatePairs(rows)[0]?.starved).toBeNull();
     });
 
     it("doesn't flag a sender that reports no target (Firefox)", () => {
@@ -286,6 +317,29 @@ describe("timelineOf", () => {
     expect(timeline.ceiling.map((p) => p.v)).toEqual([3_000_000, 3_000_000, 2_200_000]);
     expect(timeline.changes).toEqual([
       { t: t(40), from: "1080p30", to: "900p30", reason: "pressure" },
+    ]);
+  });
+
+  it("orders the steps of a share built from its own capture by bitrate, labels and all", () => {
+    // An ultrawide's steps are named by their size, and no two shares need share a step.
+    const step = (label: string, maxBitrate: number) => ({ rung: label, maxBitrate });
+    const timeline = timelineOf([
+      sent(30, step("2226×932@30", 3_000_000)),
+      sent(60, step("2968×1242@60", 10_670_000)),
+      sent(90, step("1484×622@30", 1_340_000)),
+      sent(120, step("2226×932@30", 3_000_000)),
+    ]);
+    expect(timeline.rungs).toEqual(["1484×622@30", "2226×932@30", "2968×1242@60"]);
+    expect(timeline.rung.map((p) => p.v)).toEqual([1, 2, 0, 1]);
+    const pairs = aggregatePairs([
+      sent(30, step("2226×932@30", 3_000_000)),
+      sent(60, step("2968×1242@60", 10_670_000)),
+      sent(90, step("1484×622@30", 1_340_000)),
+    ]);
+    expect(pairs[0]?.rungTimes.map((r) => r.rung)).toEqual([
+      "1484×622@30",
+      "2226×932@30",
+      "2968×1242@60",
     ]);
   });
 

@@ -94,6 +94,16 @@ const report = (samples: QualitySample[], roomId = "r1") => ({ roomId, samples }
 const stored = () => db.select().from(qualitySamples);
 
 describe("reporting quality samples", () => {
+  it("keeps the rows of a report that has one unknown label, and labels in the size form", async () => {
+    const odd = { ...sample("bo"), rung: "not a label" } as unknown as QualitySample;
+    const wide = sample("bo", { rung: "2226×932@30", maxBitrate: 3_000_000 });
+    const small = sample("bo", { rung: "96×54@30", maxBitrate: 50_000 });
+    expect(await service.record(asUser("ana"), report([odd, wide, small]), CHROME)).toEqual({
+      stored: 2,
+    });
+    expect((await stored()).map((row) => row.rung).sort()).toEqual(["2226×932@30", "96×54@30"]);
+  });
+
   it("stores a row per sample, dated by the server's clock, with the room's kind and the browser", async () => {
     const result = await service.record(asUser("ana"), report([sample("bo")]), CHROME);
     expect(result).toEqual({ stored: 1 });

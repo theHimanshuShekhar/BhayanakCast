@@ -1,20 +1,31 @@
 import { describe, expect, it } from "vitest";
 import {
+  ANCHOR_BITRATE,
   AUDIO_ALLOWANCE,
+  aboveCeiling,
+  BITS_PER_PIXEL,
   CAMERA_DEFAULT_RUNG,
   CAMERA_LADDER,
-  captureCap,
+  carryOver,
+  ceilingOf,
   DOWN_SAMPLES,
+  feeds60,
+  fitCapture,
   fitRung,
   freshLadderState,
+  heightCap,
   INITIAL_UPLINK,
   MAX_BACKOFF,
+  MAX_CAPTURE_PIXELS,
   nextRung,
+  pairCeilings,
+  probeClaim,
   probeDue,
+  type Rung,
   readSample,
-  SCREEN_DEFAULT_RUNG,
-  SCREEN_LADDER,
   type StatsSample,
+  screenSteps,
+  shedFirst,
   step,
   strained,
   UP_SAMPLES,
@@ -24,6 +35,9 @@ import {
   UplinkBudget,
 } from "./quality";
 
+/** A 1080p60 screen in a text-like room: 720p30, 900p30, 1080p30, 1080p60. */
+const SCREEN_LADDER = screenSteps({ width: 1920, height: 1080, frameRate: 60 }, "framerate");
+const SCREEN_DEFAULT_RUNG = 2;
 const TOP = SCREEN_LADDER.length - 1;
 const GOOD: StatsSample = {
   availableBitrate: 20_000_000,
@@ -46,13 +60,355 @@ function run(samples: StatsSample[], from = SCREEN_DEFAULT_RUNG, max = TOP) {
   return { state, rungs };
 }
 
-describe("screen ladder", () => {
-  it("runs from 720p30 up to 1080p60, starting at 1080p30", () => {
-    expect(SCREEN_LADDER[0]?.label).toBe("720p30");
-    expect(SCREEN_LADDER[TOP]?.label).toBe("1080p60");
-    expect(SCREEN_LADDER[SCREEN_DEFAULT_RUNG]?.label).toBe("1080p30");
-    const bitrates = SCREEN_LADDER.map((r) => r.maxBitrate);
-    expect(bitrates).toEqual([...bitrates].sort((a, b) => a - b));
+const labels = (steps: readonly Rung[]) => steps.map((r) => r.label);
+const mbps = (steps: readonly Rung[]) => steps.map((r) => r.maxBitrate / 1_000_000);
+
+describe("screenSteps", () => {
+  it("anchors a step's bitrate on pixels x fps, so that 1080p30 is 3 Mbps", () => {
+    expect(ANCHOR_BITRATE).toBe(3_000_000);
+    expect(BITS_PER_PIXEL).toBeCloseTo(0.0482, 4);
+    const steps = screenSteps({ width: 1920, height: 1080, frameRate: 60 }, "framerate");
+    const byLabel = Object.fromEntries(steps.map((r) => [r.label, r.maxBitrate]));
+    // Worked by hand: 1920*1080*30 pixels a second is 3.0 Mbps; twice the frames, twice the
+    // bitrate; 1600*900*30 and 1280*720*30 are 0.694 and 0.444 of 1080p30's pixels a second.
+    expect(byLabel).toEqual({
+      "720p30": 1_330_000,
+      "900p30": 2_080_000,
+      "1080p30": 3_000_000,
+      "1080p60": 6_000_000,
+    });
+  });
+
+  it("makes a 16:9 1080p60 capture's steps, dropping frames before size for text", () => {
+    const steps = screenSteps({ width: 1920, height: 1080, frameRate: 60 }, "framerate");
+    expect(labels(steps)).toEqual(["720p30", "900p30", "1080p30", "1080p60"]);
+    expect(steps.map((r) => r.frameRate)).toEqual([30, 30, 30, 60]);
+    expect(steps.map((r) => [r.width, r.height])).toEqual([
+      [1280, 720],
+      [1600, 900],
+      [1920, 1080],
+      [1920, 1080],
+    ]);
+  });
+
+  it("drops size before frames for motion, and keeps the floor at 30 fps", () => {
+    const steps = screenSteps({ width: 1920, height: 1080, frameRate: 60 }, "size");
+    expect(labels(steps)).toEqual(["720p30", "720p60", "900p60", "1080p60"]);
+    expect(mbps(steps)).toEqual([1.33, 2.67, 4.17, 6]);
+  });
+
+  it("fits a 21:9 ultrawide to the pixel cap and keeps every step ultrawide-shaped", () => {
+    // 3440x1440 is 4.95 MP: fitted to 3.7 MP by pixel count (about 2970x1240), not to 1920 wide.
+    const steps = screenSteps({ width: 3440, height: 1440, frameRate: 60 }, "framerate");
+    const top = steps.at(-1) as Rung;
+    expect(top.label).toMatch(/^29[67]\d×12[34]\d@60$/);
+    expect(steps.at(-2)?.label).toMatch(/^29[67]\d×12[34]\d@30$/);
+    expect(top.width).toBeGreaterThan(2960);
+    expect(top.width).toBeLessThan(2985);
+    expect(top.height).toBeGreaterThan(1235);
+    expect(top.height).toBeLessThan(1250);
+    expect((top.width as number) * top.height).toBeLessThanOrEqual(MAX_CAPTURE_PIXELS * 1.001);
+    expect(steps).toHaveLength(5);
+    for (const step of steps) {
+      expect((step.width as number) / step.height).toBeCloseTo(3440 / 1440, 1);
+      expect(step.label).toMatch(/^\d{4}×\d{3,4}@(30|60)$/);
+    }
+    // 1080p, 900p and 720p worth of pixels below the top; the floor is 720p class at 30 fps.
+    const pixels = steps.map((r) => ((r.width as number) * r.height) / 1e6);
+    expect(pixels[0]).toBeGreaterThan(0.89);
+    expect(pixels[0]).toBeLessThan(0.95);
+    expect(pixels[1]).toBeGreaterThan(1.4);
+    expect(pixels[1]).toBeLessThan(1.48);
+    expect(pixels[2]).toBeGreaterThan(2.0);
+    expect(pixels[2]).toBeLessThan(2.15);
+    expect(steps[0]).toMatchObject({ frameRate: 30 });
+    expect(steps[0]?.maxBitrate).toBeGreaterThan(1_300_000);
+    expect(steps[0]?.maxBitrate).toBeLessThan(1_400_000);
+    // The same pixels cost the same as for a 16:9 screen: 1080p's worth is about 3 Mbps.
+    expect(steps[2]?.maxBitrate).toBeGreaterThanOrEqual(2_990_000);
+    expect(steps[2]?.maxBitrate).toBeLessThanOrEqual(3_010_000);
+  });
+
+  it("gives a 1440p screen its native size, with 1440p steps above 1080p", () => {
+    const steps = screenSteps({ width: 2560, height: 1440, frameRate: 60 }, "framerate");
+    expect(labels(steps)).toEqual(["720p30", "900p30", "1080p30", "1440p30", "1440p60"]);
+    expect(steps.at(-1)).toMatchObject({ width: 2560, height: 1440 });
+    expect(mbps(steps)).toEqual([1.33, 2.08, 3, 5.33, 10.67]);
+  });
+
+  it("gives a small window fewer steps and never upscales it", () => {
+    expect(labels(screenSteps({ width: 1280, height: 720, frameRate: 30 }, "framerate"))).toEqual([
+      "720p30",
+    ]);
+    expect(labels(screenSteps({ width: 1280, height: 720, frameRate: 60 }, "size"))).toEqual([
+      "720p30",
+      "720p60",
+    ]);
+    const small = screenSteps({ width: 1000, height: 600, frameRate: 30 }, "framerate");
+    expect(small).toEqual([
+      expect.objectContaining({
+        label: "1000×600@30",
+        width: 1000,
+        height: 600,
+        maxBitrate: 870_000,
+      }),
+    ]);
+    // A window a few lines above 720 has no step a few lines below it.
+    expect(screenSteps({ width: 1344, height: 756, frameRate: 30 }, "size")).toHaveLength(1);
+  });
+
+  it("offers 60 fps only to a capture that delivers it, and 60 when it can't tell", () => {
+    const rates = (frameRate?: number) =>
+      new Set(
+        screenSteps({ width: 1920, height: 1080, ...(frameRate && { frameRate }) }, "size").map(
+          (r) => r.frameRate,
+        ),
+      );
+    expect(rates(30)).toEqual(new Set([30]));
+    expect(rates(29.97)).toEqual(new Set([30]));
+    expect(rates(59.94)).toEqual(new Set([30, 60]));
+    expect(rates()).toEqual(new Set([30, 60]));
+  });
+
+  it("is ordered by bitrate, with distinct labels, for any capture and either order", () => {
+    for (const [width, height] of [
+      [1920, 1080],
+      [3440, 1440],
+      [2560, 1080],
+      [3840, 2160],
+      [5120, 1440],
+      [1080, 1920],
+      [800, 600],
+    ] as const) {
+      for (const order of ["framerate", "size"] as const) {
+        const steps = screenSteps({ width, height, frameRate: 60 }, order);
+        const rates = steps.map((r) => r.maxBitrate);
+        expect(rates, `${width}x${height} ${order}`).toEqual([...rates].sort((a, b) => a - b));
+        expect(new Set(rates).size).toBe(rates.length);
+        expect(new Set(labels(steps)).size).toBe(steps.length);
+        expect(steps[0]?.frameRate).toBe(30);
+        for (const step of steps) {
+          expect(step.width).toBeLessThanOrEqual(width);
+          expect(step.height).toBeLessThanOrEqual(height);
+        }
+        const top = steps.at(-1) as Rung;
+        expect((top.width as number) * top.height).toBeLessThanOrEqual(MAX_CAPTURE_PIXELS * 1.01);
+      }
+    }
+  });
+
+  it("fits a capture to the pixel cap in its own shape, and never enlarges it", () => {
+    const fits = (width: number, height: number) => fitCapture({ width, height });
+    expect(fits(1920, 1080)).toEqual({ width: 1920, height: 1080 });
+    expect(fits(3440, 1440)).toEqual({ width: 2968, height: 1242 });
+    expect(fits(3840, 2160)).toEqual({ width: 2560, height: 1440 });
+    // 32:9 and a portrait screen, the shapes the fixed 2970x1440 box cut short.
+    expect(fits(5120, 1440)).toEqual({ width: 3620, height: 1018 });
+    expect(fits(1440, 2560)).toEqual({ width: 1440, height: 2560 });
+    expect(fits(2160, 3840)).toEqual({ width: 1440, height: 2560 });
+    for (const [w, h] of [
+      [5120, 1440],
+      [2160, 3840],
+      [3440, 1440],
+    ] as const) {
+      const { width, height } = fits(w, h);
+      expect(width * height).toBeGreaterThan(MAX_CAPTURE_PIXELS * 0.99);
+      expect(width * height).toBeLessThanOrEqual(MAX_CAPTURE_PIXELS * 1.001);
+    }
+  });
+
+  it("builds a portrait screen's steps in its own shape too", () => {
+    const steps = screenSteps({ width: 1440, height: 2560, frameRate: 30 }, "size");
+    expect(steps.at(-1)).toMatchObject({ width: 1440, height: 2560, frameRate: 30 });
+    for (const step of steps) {
+      expect(step.height / (step.width as number)).toBeCloseTo(2560 / 1440, 1);
+    }
+  });
+
+  it("takes a capture for a 60 fps one from 59, and keeps doing so until it reports well under", () => {
+    expect(feeds60(undefined)).toBe(true);
+    expect(feeds60(undefined, false)).toBe(true);
+    expect(feeds60(59.94)).toBe(true);
+    expect(feeds60(30)).toBe(false);
+    expect(feeds60(29.97, false)).toBe(false);
+    // A rate that dithers around the cutoff doesn't flip it either way.
+    expect(feeds60(58, true)).toBe(true);
+    expect(feeds60(55, true)).toBe(true);
+    expect(feeds60(58, false)).toBe(false);
+    expect(feeds60(45, true)).toBe(false);
+  });
+
+  it("carries a sender over to the step of the same size when only the frame rates changed", () => {
+    const sixty = screenSteps({ width: 1920, height: 1080, frameRate: 60 }, "size");
+    const thirty = screenSteps({ width: 1920, height: 1080, frameRate: 30 }, "size");
+    // 900p60 -> the 900p step that remains, 900p30; never a smaller size at a lower cost.
+    expect(thirty[carryOver(sixty[2] as Rung, thirty)]?.label).toBe("900p30");
+    // And back: 900p30 isn't in the 60 fps motion steps, the same size at 60 fps is.
+    expect(sixty[carryOver(thirty[1] as Rung, sixty)]?.label).toBe("900p60");
+    // A text room's 1080p60 loses the 60 fps step and keeps its size.
+    const text60 = screenSteps({ width: 1920, height: 1080, frameRate: 60 }, "framerate");
+    const text30 = screenSteps({ width: 1920, height: 1080, frameRate: 30 }, "framerate");
+    expect(text30[carryOver(text60.at(-1) as Rung, text30)]?.label).toBe("1080p30");
+    // No ratchet down however often it flips.
+    let step = sixty[3] as Rung;
+    for (let i = 0; i < 6; i++) {
+      const to = i % 2 === 0 ? thirty : sixty;
+      step = to[carryOver(step, to)] as Rung;
+    }
+    expect(step.height).toBe(1080);
+  });
+
+  it("carries a sender over to a new size at the highest step that costs no more", () => {
+    const wide = screenSteps({ width: 3440, height: 1440, frameRate: 60 }, "framerate");
+    const old = screenSteps({ width: 1920, height: 1080, frameRate: 60 }, "framerate")[2] as Rung;
+    // 1080p30 cost 3 Mbps; the wide screen's 3 Mbps step is 2226x932.
+    expect(wide[carryOver(old, wide)]?.label).toBe("2226×932@30");
+    expect(carryOver({ ...old, maxBitrate: 1 }, wide)).toBe(0);
+    expect(carryOver({ ...old, maxBitrate: 99_000_000 }, wide)).toBe(wide.length - 1);
+  });
+
+  it("caps a camera by its capture's height, and nothing when it can't tell", () => {
+    expect(heightCap(CAMERA_LADDER, 360)).toBe(1);
+    expect(heightCap(CAMERA_LADDER, 480)).toBe(1);
+    expect(heightCap(CAMERA_LADDER, 240)).toBe(0);
+    expect(heightCap(CAMERA_LADDER, 100)).toBe(0);
+    expect(heightCap(CAMERA_LADDER)).toBe(1);
+  });
+
+  it("falls back on a 1080p shape when the capture's size is unknown", () => {
+    expect(labels(screenSteps({}, "framerate"))).toEqual([
+      "720p30",
+      "900p30",
+      "1080p30",
+      "1080p60",
+    ]);
+  });
+});
+
+describe("pairCeilings", () => {
+  const MBPS = 1_000_000;
+  const open = { link: undefined };
+  const via = (link: number) => ({ link });
+  it("divides the budget equally among viewers with no known limit", () => {
+    expect(pairCeilings(12 * MBPS, [open, {}, open])).toEqual([4 * MBPS, 4 * MBPS, 4 * MBPS]);
+    expect(pairCeilings(12 * MBPS, [])).toEqual([]);
+  });
+
+  it("is the lower of a pair's fair share and what its own link carries", () => {
+    expect(pairCeilings(12 * MBPS, [via(1 * MBPS), open, open])[0]).toBe(1 * MBPS);
+    // A link above the equal share is not the lower one.
+    expect(pairCeilings(12 * MBPS, [via(9 * MBPS), open, open])).toEqual([
+      4 * MBPS,
+      4 * MBPS,
+      4 * MBPS,
+    ]);
+  });
+
+  it("gives the share a link-limited viewer can't use to the others", () => {
+    // The first viewer's link carries 1 Mbps: the other two share the remaining 11.
+    expect(pairCeilings(12 * MBPS, [via(1 * MBPS), open, open])).toEqual([
+      1 * MBPS,
+      5.5 * MBPS,
+      5.5 * MBPS,
+    ]);
+  });
+
+  it("settles cascading limits: what the second leaves is shared again", () => {
+    // 10 Mbps over four is 2.5 each, but one carries only 1 (so 3 each), and another only 3.
+    expect(pairCeilings(10 * MBPS, [via(1 * MBPS), via(3 * MBPS), open, open])).toEqual([
+      1 * MBPS,
+      3 * MBPS,
+      3 * MBPS,
+      3 * MBPS,
+    ]);
+    // A viewer whose link only just exceeds the first share is limited by it once others leave.
+    expect(pairCeilings(10 * MBPS, [via(0.5 * MBPS), via(2.7 * MBPS), open, open])).toEqual([
+      0.5 * MBPS,
+      2.7 * MBPS,
+      3.4 * MBPS,
+      3.4 * MBPS,
+    ]);
+  });
+
+  it("leaves budget unused when every viewer is limited, and never goes negative", () => {
+    expect(pairCeilings(10 * MBPS, [via(1 * MBPS), via(2 * MBPS)])).toEqual([1 * MBPS, 2 * MBPS]);
+    expect(pairCeilings(-5, [open, via(3)])).toEqual([0, 0]);
+  });
+});
+
+describe("ceilingOf", () => {
+  it("is the lower of a pair's fair share and what its own link carries", () => {
+    expect(ceilingOf({ fairShare: 5_000_000 })).toBe(5_000_000);
+    expect(ceilingOf({ fairShare: 5_000_000, link: 2_000_000 })).toBe(2_000_000);
+    expect(ceilingOf({ fairShare: 5_000_000, link: 8_000_000 })).toBe(5_000_000);
+  });
+});
+
+describe("aboveCeiling", () => {
+  it("is how far a target is over its ceiling, and 0 within it or without one", () => {
+    expect(aboveCeiling(10_670_000, 7_670_000)).toBe(3_000_000);
+    expect(aboveCeiling(5_000_000, 7_670_000)).toBe(0);
+    expect(aboveCeiling(7_670_000, 7_670_000)).toBe(0);
+    expect(aboveCeiling(5_000_000)).toBe(0);
+  });
+});
+
+describe("shedFirst", () => {
+  const screen = (bitrate: number, over = 0) => ({ camera: false, bitrate, over });
+  const camera = (bitrate: number) => ({ camera: true, bitrate });
+  it("steps a camera down before any screen, however heavy the screens are", () => {
+    expect(shedFirst([screen(6_000_000, 2_000_000), camera(500_000), screen(3_000_000)])).toBe(1);
+    expect(shedFirst([camera(150_000), screen(6_000_000), camera(500_000)])).toBe(2);
+  });
+
+  it("then steps down the screen furthest above its ceiling, and then the heaviest", () => {
+    // The pair that took what others are entitled to goes first, though it isn't the heaviest.
+    expect(
+      shedFirst([screen(6_000_000), screen(5_000_000, 3_000_000), screen(10_000_000, 1_000_000)]),
+    ).toBe(1);
+    // Within their ceilings (over 0), the heaviest goes first.
+    expect(shedFirst([screen(6_000_000, 0), screen(10_000_000, 0), screen(8_000_000, 0)])).toBe(1);
+    expect(shedFirst([screen(3_000_000), screen(6_000_000), screen(4_000_000)])).toBe(1);
+    expect(shedFirst([])).toBeUndefined();
+  });
+});
+
+describe("probeClaim", () => {
+  const MBPS = 1_000_000;
+  const viewer = (target: number, ceiling: number) => ({ camera: false, target, ceiling });
+  const camera = (target: number) => ({ camera: true, target });
+
+  it("entitles a screen to climb to its own ceiling, whoever sits above theirs", () => {
+    // 23 Mbps over three viewers: 7.67 each. Two sit at 10.67, the third at 1.33 wants 2.08.
+    const claims = [
+      viewer(10.67 * MBPS, 7.67 * MBPS),
+      viewer(10.67 * MBPS, 7.67 * MBPS),
+      viewer(1.33 * MBPS, 7.67 * MBPS),
+    ];
+    expect(probeClaim(claims, 2, 2.08 * MBPS).within).toBe(true);
+    expect(probeClaim(claims, 2, 7.67 * MBPS).within).toBe(true);
+    expect(probeClaim(claims, 2, 10.67 * MBPS).within).toBe(false);
+  });
+
+  it("counts every other viewer at no less than its ceiling when a screen would pass its own", () => {
+    // Beyond its ceiling, a screen needs room that nobody is entitled to: a viewer that hasn't
+    // started (target 0) still has its share kept.
+    const claims = [viewer(5 * MBPS, 7.67 * MBPS), viewer(0, 7.67 * MBPS), viewer(0, 7.67 * MBPS)];
+    const { within, committed } = probeClaim(claims, 0, 10.67 * MBPS);
+    expect(within).toBe(false);
+    expect(committed).toBe((5 + 7.67 + 7.67) * MBPS);
+    // Another above its ceiling counts at what it targets.
+    const above = [viewer(5 * MBPS, 7.67 * MBPS), viewer(9 * MBPS, 7.67 * MBPS)];
+    expect(probeClaim(above, 0, 10 * MBPS).committed).toBe(14 * MBPS);
+  });
+
+  it("counts a camera at its target, and a camera's own probe is never within a ceiling", () => {
+    const claims = [viewer(3 * MBPS, 8 * MBPS), camera(0.15 * MBPS), camera(0.5 * MBPS)];
+    expect(probeClaim(claims, 1, 0.5 * MBPS)).toEqual({
+      within: false,
+      committed: 8 * MBPS + 0.65 * MBPS,
+    });
+    expect(probeClaim(claims, -1, 0.5 * MBPS).within).toBe(false);
   });
 });
 
@@ -189,6 +545,18 @@ describe("step", () => {
     ]);
     expect(held.state.backoff).toBe(0);
     expect(held.state.probing).toBe(false);
+  });
+
+  it("marks a sender its own link holds down, until a higher step has held", () => {
+    expect(freshLadderState(2).limited).toBe(false);
+    // A step down under pressure is the link holding it down; so is a probe that failed.
+    const down = run(times(DOWN_SAMPLES, LOSSY));
+    expect(down.state.limited).toBe(true);
+    // A step up on a clean window is a probe: it is still held until it has held for a window.
+    const probing = run([...times(DOWN_SAMPLES, LOSSY), ...times(UP_SAMPLES, GOOD)], 2);
+    expect(probing.state).toMatchObject({ probing: true, limited: true });
+    const held = run([...times(DOWN_SAMPLES, LOSSY), ...times(UP_SAMPLES * 2, GOOD)], 2, 2);
+    expect(held.state).toMatchObject({ probing: false, limited: false });
   });
 
   it("doesn't count a step down for pressure that wasn't a probe as a failed probe", () => {
@@ -333,17 +701,6 @@ describe("UplinkBudget", () => {
     // This one holds for a window: the wait is the short one again.
     pass(budget, calm, UP_SAMPLES);
     expect(budget.admit(budget.limit, MBPS)).toBe(true);
-  });
-});
-
-describe("captureCap", () => {
-  it("caps the ladder at what the capture can feed", () => {
-    expect(captureCap(SCREEN_LADDER, { height: 1080, frameRate: 60 })).toBe(TOP);
-    expect(captureCap(SCREEN_LADDER, { height: 1080, frameRate: 30 })).toBe(2);
-    expect(captureCap(SCREEN_LADDER, { height: 720, frameRate: 60 })).toBe(0);
-    expect(captureCap(SCREEN_LADDER, { height: 1440, frameRate: 59.94 })).toBe(TOP);
-    expect(captureCap(CAMERA_LADDER, { height: 360, frameRate: 12 })).toBe(1);
-    expect(captureCap(SCREEN_LADDER, {})).toBe(TOP);
   });
 });
 
