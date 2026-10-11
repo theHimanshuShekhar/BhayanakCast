@@ -4,6 +4,8 @@ import {
   DEVICES_STORAGE_KEY,
   LocalMedia,
   type LocalMediaOptions,
+  SCREEN_CONSTRAINTS,
+  SCREEN_FIRST_BOX,
   SHARE_AUDIO_CONSTRAINTS,
   shareHintFor,
 } from "./local-media";
@@ -66,11 +68,15 @@ function fakeDevices(
     fail?: Record<string, string>;
     shareAudio?: boolean;
     shareFail?: string;
+    /** The size the screen is captured at; `refuse` is how many `applyConstraints` calls throw. */
+    screen?: { width: number; height: number; refuse?: number };
   } = {},
 ): NonNullable<LocalMediaOptions["mediaDevices"]> & {
   tracks: FakeTrack[];
   calls: MediaStreamConstraints[];
   displayCalls: DisplayMediaStreamOptions[];
+  /** The constraints the screen track was given with `applyConstraints`. */
+  applied: MediaTrackConstraints[];
   fireDeviceChange: () => void;
   devices: MediaDeviceInfo[];
 } {
@@ -79,11 +85,23 @@ function fakeDevices(
     tracks: [] as FakeTrack[],
     calls: [] as MediaStreamConstraints[],
     displayCalls: [] as DisplayMediaStreamOptions[],
+    applied: [] as MediaTrackConstraints[],
     devices: opts.devices ?? [],
     async getDisplayMedia(options: DisplayMediaStreamOptions) {
       fake.displayCalls.push(options);
       if (opts.shareFail) throw new DOMException("nope", opts.shareFail);
       const video = fakeTrack("video", null);
+      if (opts.screen) {
+        const { width, height } = opts.screen;
+        let refused = opts.screen.refuse ?? 0;
+        Object.assign(video, {
+          getSettings: () => ({ width, height }),
+          applyConstraints: async (constraints: MediaTrackConstraints) => {
+            fake.applied.push(constraints);
+            if (refused-- > 0) throw new DOMException("no", "OverconstrainedError");
+          },
+        });
+      }
       const audio = opts.shareAudio === false ? [] : [fakeTrack("audio", null)];
       fake.tracks.push(video, ...audio);
       return {
@@ -488,6 +506,63 @@ describe("LocalMedia screen share", () => {
     expect(unsupported.canShare()).toBe(false);
     expect(await unsupported.startShare("motion")).toBeNull();
     expect(unsupported.getSnapshot().share.failure).toBe("unsupported");
+  });
+});
+
+describe("a screen share's capture box", () => {
+  const share = async (screen: { width: number; height: number; refuse?: number }, fit = true) => {
+    const devices = fakeDevices({ screen });
+    const media = new LocalMedia({ mediaDevices: devices, fitScreen: fit });
+    const track = await media.startShare("motion");
+    return { devices, media, track };
+  };
+  const maxes = (c: MediaTrackConstraints | undefined) =>
+    [c?.width, c?.height].map((range) => (range as { max?: number } | undefined)?.max);
+
+  it("asks for a wide first box, then refits it to the cap for a screen of another shape", async () => {
+    // 5120x1440 (32:9) comes as 3840x1080; the 2970x1440 box would have left it at 67% of the cap.
+    const { devices, track } = await share({ width: 3840, height: 1080 });
+    expect(track).not.toBeNull();
+    expect(devices.displayCalls[0]?.video).toEqual(SCREEN_FIRST_BOX);
+    expect(devices.applied).toHaveLength(1);
+    expect(maxes(devices.applied[0])).toEqual([3620, 1018]);
+    expect(devices.applied[0]?.frameRate).toEqual({ ideal: 60 });
+    // A 4K screen, 3840x2160, goes to 2560x1440.
+    expect(maxes((await share({ width: 3840, height: 2160 })).devices.applied[0])).toEqual([
+      2560, 1440,
+    ]);
+  });
+
+  it("leaves a capture that is under the cap alone, whatever its shape", async () => {
+    for (const [width, height] of [
+      [1440, 2560],
+      [2968, 1242],
+      [1920, 1080],
+      [1280, 720],
+    ] as const) {
+      expect((await share({ width, height })).devices.applied, `${width}x${height}`).toEqual([]);
+    }
+  });
+
+  it("falls back on the fixed box if the fitted one is refused, and on the capture itself if both are", async () => {
+    const first = await share({ width: 3840, height: 1080, refuse: 1 });
+    expect(first.devices.applied.map(maxes)).toEqual([
+      [3620, 1018],
+      [2970, 1440],
+    ]);
+    expect(first.devices.applied[1]).toEqual(SCREEN_CONSTRAINTS);
+    expect(first.track).not.toBeNull();
+    const both = await share({ width: 3840, height: 1080, refuse: 2 });
+    expect(both.devices.applied).toHaveLength(2);
+    expect(both.track).not.toBeNull();
+    expect(both.media.getSnapshot().share.status).toBe("on");
+  });
+
+  it("keeps the fixed box where refitting isn't used (Firefox)", async () => {
+    const { devices, track } = await share({ width: 2970, height: 836 }, false);
+    expect(track).not.toBeNull();
+    expect(devices.displayCalls[0]?.video).toEqual(SCREEN_CONSTRAINTS);
+    expect(devices.applied).toEqual([]);
   });
 });
 

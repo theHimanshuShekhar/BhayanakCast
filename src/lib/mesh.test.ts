@@ -13,8 +13,6 @@ import {
 } from "./mesh";
 import {
   INITIAL_UPLINK,
-  SCREEN_DEFAULT_RUNG,
-  SCREEN_LADDER,
   UP_SAMPLES,
   UPLINK_DROP_LIMIT,
   UPLINK_FLOOR,
@@ -708,16 +706,19 @@ const carrying = (pc: FakePC | undefined, sent: MediaStreamTrack) =>
   pc?.transceivers.find((t) => t.sender.track === sent);
 
 describe("Mesh quality ladder (ADR 2)", () => {
-  /** Ana shares a 1080p60 screen to bo and cy, all connected. */
+  /**
+   * Ana shares a 1080p60 screen to bo and cy, all connected, with 8 Mbps to spend: 4 each, so that
+   * each starts at 1080p30 (3 Mbps), the highest step that fits.
+   */
   async function sharing() {
     const network = new Map<string, Mesh>();
-    const ana = page("ana", network);
+    const ana = page("ana", network, undefined, undefined, 8_000_000);
     const bo = page("bo", network);
     const cy = page("cy", network);
     const room = [{ userId: "ana" }, { userId: "bo" }, { userId: "cy" }];
     for (const mesh of network.values()) mesh.join(room);
     await settle();
-    const screen = trackWith("ana screen", { height: 1080, frameRate: 60 }, "motion");
+    const screen = trackWith("ana screen", { width: 1920, height: 1080, frameRate: 60 }, "text");
     ana.mesh.setLocalTracks({ screen });
     await settle();
     connect(ana, bo, cy);
@@ -731,11 +732,11 @@ describe("Mesh quality ladder (ADR 2)", () => {
   }
   const rungs = (mesh: Mesh) => mesh.quality().map((q) => q.screen?.rung);
 
-  it("starts each viewer's share at 1080p30, scaled from the capture", async () => {
+  it("starts each viewer's share at the highest step its share fits, scaled from the capture", async () => {
     const { ana, toBo, toCy } = await sharing();
     for (const t of [toBo, toCy]) {
       expect(t.sender.getParameters().encodings?.[0]).toMatchObject({
-        maxBitrate: SCREEN_LADDER[SCREEN_DEFAULT_RUNG]?.maxBitrate,
+        maxBitrate: 3_000_000,
         maxFramerate: 30,
         scaleResolutionDownBy: 1,
       });
@@ -759,7 +760,7 @@ describe("Mesh quality ladder (ADR 2)", () => {
       { rung: "1080p30", codec: "video/VP9" },
     ]);
     expect(toBo.sender.getParameters().encodings?.[0]).toMatchObject({
-      maxBitrate: 2_200_000,
+      maxBitrate: 2_080_000,
       maxFramerate: 30,
       scaleResolutionDownBy: 1080 / 900,
     });
@@ -773,7 +774,7 @@ describe("Mesh quality ladder (ADR 2)", () => {
     expect(rungs(ana.mesh)[0]).toBe("1080p30");
     expect(toBo.sender.getParameters().encodings?.[0]?.maxBitrate).toBe(3_000_000);
     // The room kind's degradation preference survives the retuning.
-    expect(toBo.sender.getParameters().degradationPreference).toBe("maintain-framerate");
+    expect(toBo.sender.getParameters().degradationPreference).toBe("maintain-resolution");
     ana.mesh.close();
   });
 
@@ -784,9 +785,130 @@ describe("Mesh quality ladder (ADR 2)", () => {
     expect(rungs(ana.mesh)[0]).toBe("1080p60");
     expect(toBo.sender.getParameters().encodings?.[0]).toMatchObject({ maxFramerate: 60 });
 
-    ana.mesh.setLocalTracks({ screen: trackWith("ana screen 2", { height: 1080, frameRate: 60 }) });
+    // A window of 720p30 is a share of its own: it starts over on its own steps (only 720p30).
+    ana.mesh.setLocalTracks({
+      screen: trackWith("ana screen 2", { width: 1280, height: 720, frameRate: 30 }, "text"),
+    });
     await settle();
-    expect(rungs(ana.mesh)[0]).toBe("1080p30");
+    expect(rungs(ana.mesh)[0]).toBe("720p30");
+    ana.mesh.close();
+  });
+
+  it("builds an ultrawide's steps from its own capture, instead of pinning it to 720p", async () => {
+    const network = new Map<string, Mesh>();
+    const ana = page("ana", network);
+    const bo = page("bo", network);
+    for (const mesh of network.values()) mesh.join(everyone);
+    await settle();
+    // 3440x1440 at 60 fps in a code room: 2968x1242 at most, frame rate dropped before size.
+    const screen = trackWith("ultrawide", { width: 3440, height: 1440, frameRate: 60 }, "text");
+    ana.mesh.setLocalTracks({ screen });
+    await settle();
+    connect(ana, bo);
+    await settle();
+    const to = carrying(ana.pcs[0], screen) as FakeTransceiver;
+    // One viewer is entitled to the whole 23 Mbps: it starts at the top of its own steps, in the
+    // capture's shape, scaled down from 1440 lines (10.67 Mbps for 2968x1242 at 60 fps).
+    expect(rungs(ana.mesh)).toEqual(["2968×1242@60"]);
+    expect(to.sender.getParameters().encodings?.[0]).toMatchObject({
+      maxBitrate: 10_670_000,
+      maxFramerate: 60,
+      scaleResolutionDownBy: 1440 / 1242,
+    });
+    // Pressure drops frames before size: 2968x1242 at 30 fps (5.33 Mbps), and so on down.
+    to.sender.stats = senderStats(0.1);
+    for (let i = 0; i < 4; i++) await ana.mesh.adjust();
+    expect(rungs(ana.mesh)).toEqual(["2968×1242@30"]);
+    expect(to.sender.getParameters().encodings?.[0]).toMatchObject({
+      maxBitrate: 5_330_000,
+      maxFramerate: 30,
+      scaleResolutionDownBy: 1440 / 1242,
+    });
+    ana.mesh.close();
+  });
+
+  it("gives a motion room steps that shrink before they lose frames", async () => {
+    const network = new Map<string, Mesh>();
+    const ana = page("ana", network);
+    const bo = page("bo", network);
+    for (const mesh of network.values()) mesh.join(everyone);
+    await settle();
+    const screen = trackWith("game", { width: 1920, height: 1080, frameRate: 60 }, "motion");
+    ana.mesh.setLocalTracks({ screen });
+    await settle();
+    connect(ana, bo);
+    await settle();
+    const to = carrying(ana.pcs[0], screen) as FakeTransceiver;
+    expect(rungs(ana.mesh)).toEqual(["1080p60"]);
+    // Pressure shrinks it at 60 fps, and only at the smallest size goes to 30: the floor.
+    to.sender.stats = senderStats(0.1);
+    const seen: (string | undefined)[] = [];
+    for (let i = 0; i < 2; i++) await ana.mesh.adjust();
+    for (let step = 0; step < 3; step++) {
+      for (let i = 0; i < 2; i++) await ana.mesh.adjust();
+      seen.push(rungs(ana.mesh)[0]);
+    }
+    expect(seen).toEqual(["900p60", "720p60", "720p30"]);
+    expect(to.sender.getParameters().encodings?.[0]).toMatchObject({
+      maxBitrate: 1_330_000,
+      maxFramerate: 30,
+      scaleResolutionDownBy: 1.5,
+    });
+    ana.mesh.close();
+  });
+
+  it("keeps a share's size when its frame rate flips, and ignores a rate that dithers", async () => {
+    const network = new Map<string, Mesh>();
+    const ana = page("ana", network);
+    const bo = page("bo", network);
+    for (const mesh of network.values()) mesh.join(everyone);
+    await settle();
+    // A game at 1080p whose capture reports 30 fps: steps of 720p30, 900p30 and 1080p30.
+    const capture = { width: 1920, height: 1080, frameRate: 30 };
+    const screen = trackWith("game", capture, "motion");
+    ana.mesh.setLocalTracks({ screen });
+    await settle();
+    connect(ana, bo);
+    await settle();
+    expect(rungs(ana.mesh)).toEqual(["1080p30"]);
+    // It starts reporting 60: the steps are built again and the share stays at 1080 lines, at the
+    // frame rate it can now have, not at the 720p60 that costs no more than 1080p30 did.
+    capture.frameRate = 60;
+    await ana.mesh.adjust();
+    expect(rungs(ana.mesh)).toEqual(["1080p60"]);
+    // Dithering around 60 changes nothing, and neither does a flip back and forth:
+    // 1080p60 -> 1080p30 -> 1080p60 keeps the size.
+    for (const frameRate of [58, 59.9, 55, 58]) {
+      capture.frameRate = frameRate;
+      await ana.mesh.adjust();
+      expect(rungs(ana.mesh)).toEqual(["1080p60"]);
+    }
+    for (const frameRate of [30, 60, 30, 60]) {
+      capture.frameRate = frameRate;
+      await ana.mesh.adjust();
+      expect(rungs(ana.mesh)[0]).toMatch(/^1080p/);
+    }
+    ana.mesh.close();
+  });
+
+  it("caps a camera at what its capture feeds", async () => {
+    const network = new Map<string, Mesh>();
+    const ana = page("ana", network);
+    const bo = page("bo", network);
+    for (const mesh of network.values()) mesh.join(everyone);
+    await settle();
+    // A 240-line camera has nothing for the 360p rung's 500 kbps to carry.
+    const cam = trackWith("cam", { width: 426, height: 240, frameRate: 15 });
+    ana.mesh.setLocalTracks({ cam });
+    await settle();
+    connect(ana, bo);
+    await settle();
+    const to = carrying(ana.pcs[0], cam) as FakeTransceiver;
+    expect(ana.mesh.quality()[0]).toMatchObject({ cam: { rung: "180p15" } });
+    expect(to.sender.getParameters().encodings?.[0]).toMatchObject({ maxBitrate: 150_000 });
+    to.sender.stats = senderStats(0);
+    for (let i = 0; i < 2 + UP_SAMPLES * 2; i++) await ana.mesh.adjust();
+    expect(ana.mesh.quality()[0]).toMatchObject({ cam: { rung: "180p15" } });
     ana.mesh.close();
   });
 
@@ -796,8 +918,8 @@ describe("Mesh quality ladder (ADR 2)", () => {
     const bo = page("bo", network);
     for (const mesh of network.values()) mesh.join(everyone);
     await settle();
-    const screen = trackWith("small window", { height: 720, frameRate: 30 });
-    const cam = trackWith("cam", { height: 360, frameRate: 15 });
+    const screen = trackWith("small window", { width: 1280, height: 720, frameRate: 30 });
+    const cam = trackWith("cam", { width: 640, height: 360, frameRate: 15 });
     ana.mesh.setLocalTracks({ screen, cam });
     await settle();
     connect(ana, bo);
@@ -872,7 +994,9 @@ describe("Mesh quality ladder (ADR 2)", () => {
     page("bo", network);
     for (const mesh of network.values()) mesh.join(everyone);
     await settle();
-    ana.mesh.setLocalTracks({ screen: trackWith("s", { height: 1080, frameRate: 60 }) });
+    ana.mesh.setLocalTracks({
+      screen: trackWith("s", { width: 1920, height: 1080, frameRate: 60 }),
+    });
     await settle();
     let reads = 0;
     for (const t of ana.pcs[0]?.transceivers ?? []) {
@@ -896,11 +1020,11 @@ describe("Mesh quality telemetry (ADR 2 addendum)", () => {
       onQuality: (row: PendingSample) => rows[who].push(row),
       sampleWindowMs: 24_000,
     });
-    const ana = page("ana", network, undefined, undefined, undefined, options("ana"));
+    const ana = page("ana", network, undefined, undefined, 4_000_000, options("ana"));
     const bo = page("bo", network, undefined, undefined, undefined, options("bo"));
     for (const mesh of network.values()) mesh.join(everyone);
     await settle();
-    const screen = trackWith("ana screen", { height: 1080, frameRate: 60 }, "motion");
+    const screen = trackWith("ana screen", { width: 1920, height: 1080, frameRate: 60 }, "text");
     ana.mesh.setLocalTracks({ screen });
     await settle();
     connect(ana, bo);
@@ -949,10 +1073,15 @@ describe("Mesh quality telemetry (ADR 2 addendum)", () => {
     for (let i = 0; i < 6; i++) await pass();
     expect(rows).toEqual({ ana: [], bo: [] });
     await pass();
-    // A clean spell also probes up on this very pass: a row of its own, with an empty window.
     expect(rows.ana.map((r) => [r.trigger, r.windowMs, r.toRung, r.reason])).toEqual([
       ["window", 24_000, null, null],
-      ["rung", 0, "1080p45", "probe"],
+    ]);
+    // The next pass completes a clean spell and probes up past the viewer's 4 Mbps share (the
+    // budget grows for it): a row of its own, ending the 4 s since the last window.
+    await pass();
+    expect(rows.ana.map((r) => [r.trigger, r.windowMs, r.toRung, r.reason])).toEqual([
+      ["window", 24_000, null, null],
+      ["rung", 4_000, "1080p60", "probe"],
     ]);
     expect(rows.ana[0]).toMatchObject({
       peerId: "bo",
@@ -1021,22 +1150,29 @@ describe("Mesh uplink budget (ADR 2)", () => {
    * Ana shares a 1080p60 screen (and, with `withCam`, a 360p15 camera) to `names` (all
    * connected), with `uplink` bits per second to spend.
    */
-  async function crowd(names: string[], uplink?: number, withCam = false) {
+  async function crowd(
+    names: string[],
+    uplink?: number,
+    withCam = false,
+    capture: MediaTrackSettings = { width: 1920, height: 1080, frameRate: 60 },
+    hint = "text",
+    extra: Partial<MeshOptions> = {},
+  ) {
     const network = new Map<string, Mesh>();
-    const ana = page("ana", network, undefined, undefined, uplink);
+    const ana = page("ana", network, undefined, undefined, uplink, extra);
     const viewers = names.map((name) => page(name, network));
     const room = [{ userId: "ana" }, ...names.map((userId) => ({ userId }))];
     for (const mesh of network.values()) mesh.join(room);
     await settle();
-    const screen = trackWith("ana screen", { height: 1080, frameRate: 60 }, "motion");
-    const cam = trackWith("ana cam", { height: 360, frameRate: 15 });
+    const screen = trackWith("ana screen", capture, hint);
+    const cam = trackWith("ana cam", { width: 640, height: 360, frameRate: 15 });
     ana.mesh.setLocalTracks(withCam ? { screen, cam } : { screen });
     await settle();
     connect(ana, ...viewers);
     await settle();
     // Ana's connections are in the order of `names`.
     const senders = ana.pcs.map((pc) => carrying(pc, screen) as FakeTransceiver);
-    return { ana: ana.mesh, anaPage: ana, network, viewers, senders };
+    return { ana: ana.mesh, anaPage: ana, network, viewers, senders, screen };
   }
 
   /**
@@ -1076,26 +1212,24 @@ describe("Mesh uplink budget (ADR 2)", () => {
   const count = (list: (string | undefined)[], rung: string) =>
     list.filter((r) => r === rung).length;
 
-  it("starts many viewers within the budget instead of every one at the top", async () => {
-    // Five viewers at 1080p30 would be 15 Mbps: four get it, the fifth the rung that is left.
+  it("starts many viewers at an equal share of the budget instead of every one at the top", async () => {
+    // Five viewers share 13.5 Mbps: 2.7 each, so 900p30 (2.08) is the step that fits.
     const five = await crowd(["bo", "cy", "di", "ed", "fi"], 13.5 * MBPS);
-    expect(five.ana.uplink()).toEqual({ budget: 13.5 * MBPS, targeted: 13.5 * MBPS });
-    expect(count(labels(five.ana), "1080p30")).toBe(4);
-    expect(count(labels(five.ana), "720p30")).toBe(1);
+    expect(five.ana.uplink()).toEqual({ budget: 13.5 * MBPS, targeted: 10.4 * MBPS });
+    expect(labels(five.ana)).toEqual(Array(5).fill("900p30"));
     five.ana.close();
 
-    // A sixth finds no room, and starts at the lowest rung: the first pass sheds the excess.
-    const six = await crowd(["bo", "cy", "di", "ed", "fi", "gu"], 13.5 * MBPS);
-    expect(six.ana.uplink().targeted).toBeGreaterThan(13.5 * MBPS);
-    expect(count(labels(six.ana), "720p30")).toBe(2);
-    expect((await pass(six.ana, six.senders)).targeted).toBeLessThanOrEqual(13.5 * MBPS);
-    six.ana.close();
+    // A crowd that can't afford even that starts at the lowest step: 1.69 each for eight.
+    const eight = await crowd(["bo", "cy", "di", "ed", "fi", "gu", "hu", "io"], 13.5 * MBPS);
+    expect(labels(eight.ana)).toEqual(Array(8).fill("720p30"));
+    expect((await pass(eight.ana, eight.senders)).targeted).toBeLessThanOrEqual(13.5 * MBPS);
+    eight.ana.close();
 
-    // With the default budget, nine viewers (ADR 2's worst case, 27 Mbps at the top) fit too.
+    // With the default budget, nine viewers (ADR 2's worst case, 27 Mbps at 1080p30) fit too.
     const nine = await crowd(["bo", "cy", "di", "ed", "fi", "gu", "hu", "io", "jo"]);
     const { budget, targeted } = await pass(nine.ana, nine.senders);
     expect(targeted).toBeLessThanOrEqual(budget);
-    expect(labels(nine.ana)).toHaveLength(9);
+    expect(labels(nine.ana)).toEqual(Array(9).fill("900p30"));
     nine.ana.close();
   });
 
@@ -1161,15 +1295,15 @@ describe("Mesh uplink budget (ADR 2)", () => {
     }
     expect(count(labels(ana), "1080p30")).toBe(4);
     // Then one pair probes (the budget grows by that probe only), the others still wait.
-    expect(await pass(ana, senders)).toEqual({ budget: 13.5 * MBPS, targeted: 13.5 * MBPS });
-    expect(count(labels(ana), "1080p45")).toBe(1);
+    expect(await pass(ana, senders)).toEqual({ budget: 15 * MBPS, targeted: 15 * MBPS });
+    expect(count(labels(ana), "1080p60")).toBe(1);
     expect(count(labels(ana), "1080p30")).toBe(3);
     // And so on, never past the budget at any pass.
     for (let i = 0; i < 40; i++) {
       const { budget, targeted } = await pass(ana, senders);
       expect(targeted).toBeLessThanOrEqual(budget);
     }
-    expect(ana.uplink().budget).toBeGreaterThan(13.5 * MBPS);
+    expect(ana.uplink().budget).toBeGreaterThan(15 * MBPS);
     ana.close();
   });
 
@@ -1200,27 +1334,32 @@ describe("Mesh uplink budget (ADR 2)", () => {
   });
 
   it("lets healthy viewers grow the budget past a mediocre one (lossy, but not pressured)", async () => {
-    // Ed's share starts lowest (what was left), and his link loses 2%: not strained, not clean.
-    const { ana, senders } = await crowd(["bo", "cy", "di", "ed"], 11.2 * MBPS);
-    expect(labels(ana)).toEqual(["1080p30", "1080p30", "1080p30", "900p30"]);
+    // Ed's link loses 2%: not strained, not clean. He never probes, and never holds the turn.
+    const { ana, senders } = await crowd(["bo", "cy", "di", "ed"], 12 * MBPS);
+    expect(labels(ana)).toEqual(Array(4).fill("1080p30"));
     const options = { loss: (i: number) => (i === 3 ? 0.02 : 0) };
     for (let i = 0; i < 2 + UP_SAMPLES; i++) await pass(ana, senders, options);
     expect(await pass(ana, senders, options)).toEqual({
-      budget: 12.7 * MBPS,
-      targeted: 12.7 * MBPS,
+      budget: 15 * MBPS,
+      targeted: 15 * MBPS,
     });
-    expect(count(labels(ana), "1080p45")).toBe(1);
-    expect(labels(ana)[3]).toBe("900p30");
+    expect(count(labels(ana), "1080p60")).toBe(1);
+    expect(labels(ana)[3]).toBe("1080p30");
     ana.close();
   });
 
-  it("doesn't wait on a pair that isn't connected to take its turn", async () => {
-    const { ana, anaPage, senders } = await crowd(["bo", "cy", "di", "ed"], 11.2 * MBPS);
-    for (let i = 0; i < 2 + UP_SAMPLES; i++) await pass(ana, senders);
-    // Ed has been clean for a window on the lowest rung, and now his connection drops.
+  it("grows the budget for another pair when the lowest one has dropped off", async () => {
+    const { ana, anaPage, senders } = await crowd(["bo", "cy", "di", "ed"], 12 * MBPS);
+    // Ed's link is lossy for a while, which takes him a step down: he is the lowest rung.
+    for (let i = 0; i < 2; i++) await pass(ana, senders);
+    for (let i = 0; i < 2; i++) await pass(ana, [senders[3] as FakeTransceiver], { loss: 0.1 });
+    expect(labels(ana)[3]).toBe("900p30");
+    // Then his connection drops, so the others take the turn: one probes, the budget grows.
     anaPage.pcs[3]?.setConnectionState("disconnected");
-    expect(await pass(ana, senders)).toEqual({ budget: 12.7 * MBPS, targeted: 12.7 * MBPS });
-    expect(count(labels(ana), "1080p45")).toBe(1);
+    for (let i = 0; i < UP_SAMPLES + 1; i++) await pass(ana, senders.slice(0, 3));
+    expect(count(labels(ana), "1080p60")).toBe(1);
+    expect(labels(ana)[3]).toBe("900p30");
+    expect(ana.uplink().budget).toBeGreaterThan(12 * MBPS);
     ana.close();
   });
 
@@ -1231,14 +1370,14 @@ describe("Mesh uplink budget (ADR 2)", () => {
     bo?.mesh.setVisible("ana", "cam", false);
     await settle();
     expect(ana.uplink().targeted).toBe(10 * MBPS);
-    // Meanwhile a newcomer takes what room there is: a 900p30 share and a 360p15 camera.
+    // Meanwhile a newcomer takes what room there is: a 900p30 share (its fair share) and a 360p15 camera.
     const ed = page("ed", network);
     const room = ["ana", "bo", "cy", "di", "ed"].map((userId) => ({ userId }));
     for (const mesh of network.values()) mesh.join(room);
     await settle();
     connect(anaPage, ed);
     await settle();
-    expect(ana.uplink().targeted).toBe(12.7 * MBPS);
+    expect(ana.uplink().targeted).toBe(12.58 * MBPS);
     expect(ana.quality()[3]).toMatchObject({ screen: { rung: "900p30" }, cam: { rung: "360p15" } });
 
     // Bo shows the camera again: it comes back at the rung that fits, and nobody else moves.
@@ -1250,6 +1389,154 @@ describe("Mesh uplink budget (ADR 2)", () => {
     expect(labels(ana)).toEqual(["1080p30", "1080p30", "1080p30", "900p30"]);
     const { budget, targeted } = ana.uplink();
     expect(targeted).toBeLessThanOrEqual(budget);
+    ana.close();
+  });
+
+  it("gives a link-limited viewer's unused share to the other viewers' probes", async () => {
+    // Three viewers share 14 Mbps (4.67 each). Past 1080p30 (3 Mbps), 1080p60 costs 6 Mbps.
+    const grown = await crowd(["bo", "cy", "di"], 14 * MBPS);
+    for (let i = 0; i < 2 + UP_SAMPLES; i++) await pass(grown.ana, grown.senders);
+    // All clean: the first to probe goes past its share, so the budget has to grow for it.
+    const open = await pass(grown.ana, grown.senders);
+    expect(open.budget).toBeGreaterThan(14 * MBPS);
+    expect(count(labels(grown.ana), "1080p60")).toBe(1);
+    grown.ana.close();
+
+    // Di's link can't carry more than 720p30 (1.33 Mbps): the other two share the other 12.67.
+    const { ana, senders } = await crowd(["bo", "cy", "di"], 14 * MBPS);
+    for (let i = 0; i < 2; i++) await pass(ana, senders);
+    const lossy = { loss: (i: number) => (i === 2 ? 0.1 : 0) };
+    for (let i = 0; i < 4; i++) await pass(ana, senders, lossy);
+    expect(labels(ana)).toEqual(["1080p30", "1080p30", "720p30"]);
+    // Bo and cy are clean for a window: both climb into di's share, with the budget as it was.
+    for (let i = 0; i < UP_SAMPLES - 2; i++) await pass(ana, senders, lossy);
+    const { budget, targeted } = await pass(ana, senders, lossy);
+    expect(budget).toBe(14 * MBPS);
+    expect(labels(ana)).toEqual(["1080p60", "1080p60", "720p30"]);
+    expect(targeted).toBeCloseTo((6 + 6 + 1.33) * MBPS, -4);
+    ana.close();
+  });
+
+  it("gives a viewer that joins late its share: pairs over theirs step down, the budget doesn't grow", async () => {
+    // An ultrawide share to two viewers on 23 Mbps: each is entitled to 11.5, so both climb to
+    // the top step, 2968x1242 at 60 fps (10.67 Mbps), 21.33 in all.
+    const top = "2968×1242@60";
+    const wide = { width: 3440, height: 1440, frameRate: 60 };
+    const { ana, anaPage, network, screen } = await crowd(["bo", "cy"], 23 * MBPS, false, wide);
+    expect(labels(ana)).toEqual([top, top]);
+    // A third viewer joins and finds 1.67 Mbps of room: the floor, 1484x622 at 30 fps (1.34). Its
+    // share is 7.67 Mbps, and its probes within it must go ahead although the other two sit above
+    // theirs: they are the ones to give way, not the budget to grow.
+    const di = page("di", network);
+    const everybody = ["ana", "bo", "cy", "di"].map((userId) => ({ userId }));
+    for (const mesh of network.values()) mesh.join(everybody);
+    await settle();
+    connect(anaPage, di);
+    await settle();
+    expect(labels(ana)).toEqual([top, top, "1484×622@30"]);
+    const senders = anaPage.pcs.map((pc) => carrying(pc, screen) as FakeTransceiver);
+    // Warm-up, then a clean window: it probes up to 2.08 Mbps, which the 21.33 already targeted
+    // leaves no room for.
+    for (let i = 0; i < 2 + UP_SAMPLES + 1; i++) await pass(ana, senders);
+    expect(labels(ana)[2]).toBe("1856×776@30");
+    const { budget, targeted } = ana.uplink();
+    expect(budget).toBe(23 * MBPS);
+    expect(targeted).toBeLessThanOrEqual(budget);
+    // A pair that sat above its share came down for it (the other still sits above its own).
+    expect(count(labels(ana), top)).toBe(1);
+    ana.close();
+  });
+
+  it("keeps the share of a viewer whose screen hasn't started, for the others' probes", async () => {
+    // Di is in the room but never answers: no screen goes to him yet. Bo and cy are entitled to a
+    // third of 12 Mbps each, so they start at 1080p30 (3 Mbps), not 1080p60 (6) as they would
+    // with the room to themselves.
+    const network = new Map<string, Mesh>();
+    const ana = page("ana", network, undefined, undefined, 12 * MBPS);
+    const viewers = ["bo", "cy"].map((name) => page(name, network));
+    const room = ["ana", "bo", "cy", "di"].map((userId) => ({ userId }));
+    for (const mesh of network.values()) mesh.join(room);
+    await settle();
+    const screen = trackWith("ana screen", { width: 1920, height: 1080, frameRate: 60 }, "text");
+    ana.mesh.setLocalTracks({ screen });
+    await settle();
+    connect(ana, ...viewers);
+    await settle();
+    const senders = ana.pcs.slice(0, 2).map((pc) => carrying(pc, screen) as FakeTransceiver);
+    expect(labels(ana.mesh)).toEqual(["1080p30", "1080p30", undefined]);
+    // A clean window later, a probe to 1080p60 takes more than their share: it needs the budget
+    // to grow, since di's share is spoken for, though the budget has 6 Mbps unused.
+    for (let i = 0; i < 2 + UP_SAMPLES + 1; i++) await pass(ana.mesh, senders);
+    expect(ana.mesh.uplink().budget).toBeGreaterThan(12 * MBPS);
+    ana.mesh.close();
+  });
+
+  it("doesn't probe and shed in turns when one of the viewers has failed", async () => {
+    // A motion room, 9 Mbps, three viewers: 3 each, so each starts at 720p60 (2.67). Di's link
+    // fails; his sender keeps its track until a retry, though nothing flows to him. Bo and cy
+    // are then entitled to 4.5 each. Counting di's target in the budget while leaving him out of
+    // the shares let an entitled probe overshoot the budget and be shed in the same pass: the
+    // two went up and down at every window, for ever.
+    const rows: PendingSample[] = [];
+    const wide = { width: 1920, height: 1080, frameRate: 60 };
+    const { ana, anaPage, senders } = await crowd(
+      ["bo", "cy", "di"],
+      9 * MBPS,
+      false,
+      wide,
+      "motion",
+      {
+        onQuality: (row) => rows.push(row),
+        sampleWindowMs: 24_000,
+      },
+    );
+    for (let i = 0; i < 2; i++) {
+      anaPage.pcs[2]?.setConnectionState("failed");
+      await settle();
+    }
+    for (let i = 0; i < 100; i++) await pass(ana, senders);
+    const settled = rows.length;
+    for (let i = 0; i < 100; i++) await pass(ana, senders);
+    const changes = rows.slice(settled).filter((row) => row.trigger === "rung");
+    expect(changes.map((row) => `${row.rung} -> ${row.toRung} (${row.reason})`)).toEqual([]);
+    expect(ana.uplink().targeted).toBeLessThanOrEqual(ana.uplink().budget);
+    ana.close();
+  });
+
+  it("doesn't wait on a pair that has dropped off to take its turn", async () => {
+    // Four viewers on 8 Mbps: 2 each, so all start at 720p30 (1.33), and they climb a step at a
+    // time, the lowest due pair first. Take the moment when only ed is still on 720p30: he is
+    // due to probe, and the others (due for 1080p30, past their share) wait their turn behind him.
+    const { ana, anaPage, senders } = await crowd(["bo", "cy", "di", "ed"], 8 * MBPS);
+    let passes = 0;
+    while (labels(ana).slice(0, 3).includes("720p30") || labels(ana)[3] !== "720p30") {
+      if (++passes > 200) throw new Error(`never reached the state: ${labels(ana).join(" ")}`);
+      await pass(ana, senders);
+    }
+    expect(labels(ana)).toEqual(["900p30", "900p30", "900p30", "720p30"]);
+    // He drops off. A pair that isn't connected never probes, so he must not hold the turn.
+    anaPage.pcs[3]?.setConnectionState("disconnected");
+    for (let i = 0; i < 4 * UP_SAMPLES; i++) await pass(ana, senders.slice(0, 3));
+    expect(labels(ana).slice(0, 3)).toContain("1080p30");
+    ana.close();
+  });
+
+  it("steps a camera down to 180p before it steps any screen down", async () => {
+    // Four viewers, each with a 1080p30 share and a 360p15 camera: 14 Mbps of a 16 Mbps budget.
+    const { ana, senders } = await crowd(["bo", "cy", "di", "ed"], 16 * MBPS, true);
+    expect(ana.uplink()).toEqual({ budget: 16 * MBPS, targeted: 14 * MBPS });
+    for (let i = 0; i < 2; i++) await pass(ana, senders);
+    // Two of the four pairs are strained: the uplink is short, and the budget drops (by 30%).
+    const strained = { loss: (i: number) => (i < 2 ? 0.1 : 0), share: 0.5 };
+    await pass(ana, senders, strained);
+    const { budget, targeted } = await pass(ana, senders, strained);
+    expect(budget).toBeCloseTo(16 * MBPS * UPLINK_DROP_LIMIT, -3);
+    expect(targeted).toBeLessThanOrEqual(budget);
+    // The two strained screens stepped down on their own. The two healthy ones, the heaviest
+    // senders, are still at 1080p30: it was the cameras that gave way.
+    expect(labels(ana)).toEqual(["900p30", "900p30", "1080p30", "1080p30"]);
+    const cameras = ana.quality().map((q) => q.cam?.rung);
+    expect(count(cameras, "180p15")).toBeGreaterThanOrEqual(3);
     ana.close();
   });
 
@@ -1301,7 +1588,7 @@ describe("Mesh uplink budget (ADR 2)", () => {
 
       // A share with another content hint is a real change, made once.
       ana.setLocalTracks({
-        screen: trackWith("ana screen 2", { height: 1080, frameRate: 60 }, "text"),
+        screen: trackWith("ana screen 2", { width: 1920, height: 1080, frameRate: 60 }, "motion"),
       });
       await settle();
       for (let i = 0; i < 4; i++) await pass(ana, senders);
@@ -1331,8 +1618,10 @@ describe("Mesh codec choice (ADR 2)", () => {
     const bo = page("bo", network, undefined, firefox);
     for (const mesh of network.values()) mesh.join(everyone);
     await settle();
-    ana.mesh.setLocalTracks({ screen: trackWith("s", { height: 1080, frameRate: 60 }) });
-    bo.mesh.setLocalTracks({ cam: trackWith("c", { height: 360, frameRate: 15 }) });
+    ana.mesh.setLocalTracks({
+      screen: trackWith("s", { width: 1920, height: 1080, frameRate: 60 }),
+    });
+    bo.mesh.setLocalTracks({ cam: trackWith("c", { width: 640, height: 360, frameRate: 15 }) });
     await settle();
     // Ana (Chromium) leaves AV1 out for Bo (Firefox), who can't decode it.
     expect(sender(ana.pcs[0])?.codecPreferences.map((c) => c.mimeType)).toEqual([

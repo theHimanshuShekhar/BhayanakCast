@@ -1,5 +1,5 @@
 import type { Browser, BrowserContext, Page } from "@playwright/test";
-import { captureCap, SCREEN_DEFAULT_RUNG, SCREEN_LADDER } from "../src/lib/quality";
+import { fitRung, MAX_CAPTURE_PIXELS, screenSteps } from "../src/lib/quality";
 import { MAX_CLIENT_MESSAGE_BYTES } from "../src/lib/realtime";
 import { E2E_ADMIN_DISCORD_ID, signIn } from "./auth";
 import { expect, newPage, test } from "./fixtures";
@@ -60,6 +60,33 @@ async function instrument(context: BrowserContext) {
       const stream = await capture.call(this, options);
       w.__captured.push(...stream.getTracks());
       return stream;
+    };
+  });
+}
+
+/**
+ * In every page of `context`, `getDisplayMedia` shares an animated 3440x1440 canvas: an ultrawide
+ * screen at its native size, which neither browser's fake screen can be (Chromium's is 16:9).
+ * Add it before `instrument`, which wraps `getDisplayMedia` as it finds it.
+ */
+async function ultrawideScreen(context: BrowserContext) {
+  await context.addInitScript(() => {
+    MediaDevices.prototype.getDisplayMedia = async () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 3440;
+      canvas.height = 1440;
+      const g = canvas.getContext("2d");
+      let frame = 0;
+      const draw = () => {
+        if (!g) return;
+        g.fillStyle = `hsl(${(frame++ * 7) % 360} 60% 45%)`;
+        g.fillRect(0, 0, canvas.width, canvas.height);
+        g.fillStyle = "#fff";
+        for (let i = 0; i < 40; i++) g.fillRect((i * 97 + frame * 13) % 3400, i * 35, 40, 8);
+      };
+      draw();
+      setInterval(draw, 66);
+      return canvas.captureStream(60);
     };
   });
 }
@@ -134,24 +161,41 @@ const screenEncodings = (page: Page) =>
   page.evaluate(async () => {
     const w = window as unknown as Instrumented;
     const open = w.__pcs.filter((pc) => pc.connectionState !== "closed");
-    const senders: { maxBitrate?: number; maxFramerate?: number; codec?: string }[] = [];
+    const senders: {
+      maxBitrate?: number;
+      maxFramerate?: number;
+      codec?: string;
+      frameWidth?: number;
+      frameHeight?: number;
+    }[] = [];
     for (const pc of open) {
       for (const sender of pc.getSenders()) {
         const track = sender.track;
         if (track?.kind !== "video" || !w.__captured.includes(track)) continue;
         const { maxBitrate, maxFramerate } = sender.getParameters().encodings[0] ?? {};
         let codec: string | undefined;
+        let frameWidth: number | undefined;
+        let frameHeight: number | undefined;
         const report = await sender.getStats();
-        report.forEach((s: { type: string; codecId?: string }) => {
-          if (s.type === "outbound-rtp" && s.codecId) {
-            codec = (report.get(s.codecId) as { mimeType?: string } | undefined)?.mimeType;
-          }
-        });
-        senders.push({ maxBitrate, maxFramerate, codec });
+        report.forEach(
+          (s: { type: string; codecId?: string; frameWidth?: number; frameHeight?: number }) => {
+            if (s.type !== "outbound-rtp") return;
+            frameWidth = s.frameWidth;
+            frameHeight = s.frameHeight;
+            if (s.codecId) {
+              codec = (report.get(s.codecId) as { mimeType?: string } | undefined)?.mimeType;
+            }
+          },
+        );
+        senders.push({ maxBitrate, maxFramerate, codec, frameWidth, frameHeight });
       }
     }
     const settings = w.__captured.find((track) => track.kind === "video")?.getSettings() ?? {};
-    const capture = { height: settings.height, frameRate: settings.frameRate };
+    const capture = {
+      width: settings.width,
+      height: settings.height,
+      frameRate: settings.frameRate,
+    };
     const offered = (RTCRtpSender.getCapabilities("video")?.codecs ?? []).map((c) =>
       c.mimeType.toLowerCase(),
     );
@@ -218,24 +262,42 @@ test("a share plays with its audio for everyone, and a mod's force-stop removes 
         { maxBitrate: 128_000, fmtp: expect.stringContaining("stereo=1") },
       ]);
 
-    // Each viewer's copy is on the quality ladder, and goes out in the best codec this browser
-    // offers (both ends are the same browser here).
-    // Each starts at 1080p30, or the highest rung its capture feeds if that is lower.
-    const start =
-      SCREEN_LADDER[
-        Math.min(
-          SCREEN_DEFAULT_RUNG,
-          captureCap(SCREEN_LADDER, (await screenEncodings(streamer.page)).capture),
-        )
-      ];
+    // Each viewer's copy is on the steps built from the capture, and goes out in the best codec
+    // this browser offers (both ends are the same browser here). Each starts at the highest step
+    // that fits its share of the 23 Mbps budget (two viewers: 11.5 Mbps each), the top step here,
+    // and a gaming room gives up size before frames.
+    const steps = screenSteps((await screenEncodings(streamer.page)).capture, "size");
+    const start = steps[fitRung(steps, 23_000_000 / 2)];
     const started = async () =>
       (await screenEncodings(streamer.page)).senders.map(
         (s) =>
           s.maxBitrate === start?.maxBitrate && s.maxFramerate === start?.frameRate && !!s.codec,
       );
     await expect.poll(started, { timeout: 15_000 }).toEqual([true, true]);
-    const { senders, best } = await screenEncodings(streamer.page);
+    const { senders, best, capture } = await screenEncodings(streamer.page);
     for (const sender of senders) expect(sender.codec?.toLowerCase()).toBe(best);
+
+    // What goes out keeps the capture's shape, however wide, and stays within the pixel cap.
+    // (The encoder may sit below the step while it adapts, but never above it.) The capture
+    // itself is the size the box asked for; the steps scale it by pixel count, not by width.
+    const captured = (capture.width ?? 0) * (capture.height ?? 0);
+    expect(captured).toBeGreaterThan(0);
+    await expect
+      .poll(
+        async () =>
+          (await screenEncodings(streamer.page)).senders.map((s) => {
+            if (!s.frameWidth || !s.frameHeight) return false;
+            const aspect =
+              s.frameWidth / s.frameHeight / ((capture.width ?? 1) / (capture.height ?? 1));
+            return (
+              Math.abs(aspect - 1) < 0.03 &&
+              s.frameWidth * s.frameHeight <= Math.min(captured, MAX_CAPTURE_PIXELS) * 1.02 &&
+              s.frameHeight <= (start?.height ?? 0) + 2
+            );
+          }),
+        { timeout: 20_000 },
+      )
+      .toEqual([true, true]);
 
     // The viewer hears it, at their own volume for this share. (Headless Firefox runs no
     // AudioContext, so its stand-in share is silent there.)
@@ -272,6 +334,64 @@ test("a share plays with its audio for everyone, and a mod's force-stop removes 
   }
 });
 
+test("an ultrawide share is encoded in its own shape, not pinned to a 720p ceiling", async ({
+  page,
+  context,
+  browser,
+  browserName,
+}) => {
+  test.setTimeout(150_000);
+  await ultrawideScreen(context);
+  await instrument(context);
+  const streamerId = await signIn(context, { username: "share.wide" });
+  // A code room: a step down gives up frames before size.
+  const roomId = await createRoomOnPage(page, {
+    name: uniqueRoomName("share wide"),
+    kind: "coding",
+  });
+  const viewer = await joinAs(browser, "share.wideviewer", roomId);
+  try {
+    await page.getByRole("button", { name: "Share screen" }).click();
+    await expect(page.getByRole("button", { name: "Stop sharing" })).toBeEnabled();
+    await expect.poll(() => screenPlays(viewer.page, streamerId), { timeout: 30_000 }).toBe(true);
+
+    const { capture } = await screenEncodings(page);
+    // 21:9 whatever the browser did to it. Chromium resizes the track to the pixel cap's box
+    // for this shape (`fitScreenCapture`); Firefox is left at the size it was given.
+    expect((capture.width ?? 0) / (capture.height ?? 1)).toBeCloseTo(3440 / 1440, 1);
+    if (browserName === "chromium") {
+      expect((capture.width ?? 0) * (capture.height ?? 0)).toBeLessThanOrEqual(
+        MAX_CAPTURE_PIXELS * 1.01,
+      );
+    } else {
+      expect(capture).toMatchObject({ width: 3440, height: 1440 });
+    }
+    // The steps are the capture's shape, topping out at the pixel cap (about 2968x1242, 10.67
+    // Mbps at 60 fps), and the only viewer is entitled to the whole budget: it starts there, not
+    // at 1280x720 or the 1719x720 that the old ladder pinned this shape to.
+    const steps = screenSteps(capture, "framerate");
+    const top = steps.at(-1);
+    expect(top?.label).toMatch(/^29[67]\d×12[34]\d@60$/);
+    expect(top?.maxBitrate).toBe(10_670_000);
+    await expect
+      .poll(
+        async () => {
+          const [sender] = (await screenEncodings(page)).senders;
+          return {
+            maxBitrate: sender?.maxBitrate,
+            maxFramerate: sender?.maxFramerate,
+            wide: Math.abs((sender?.frameWidth ?? 0) - (top?.width ?? 0)) <= 4,
+            tall: Math.abs((sender?.frameHeight ?? 0) - (top?.height ?? 0)) <= 4,
+          };
+        },
+        { timeout: 30_000 },
+      )
+      .toEqual({ maxBitrate: 10_670_000, maxFramerate: 60, wide: true, tall: true });
+  } finally {
+    await viewer.context.close();
+  }
+});
+
 test("a share in a two-person room records quality samples the admin view shows", async ({
   page,
   context,
@@ -279,6 +399,8 @@ test("a share in a two-person room records quality samples the admin view shows"
   browserName,
 }) => {
   test.setTimeout(150_000);
+  // An ultrawide screen: its steps are labelled by encoded size, which the server takes too.
+  await ultrawideScreen(context);
   const streamerId = await signIn(context, { username: "quality.streamer" });
   const roomName = uniqueRoomName("quality");
   const roomId = await createRoomOnPage(page, { name: roomName, kind: "gaming" });
@@ -314,7 +436,7 @@ test("a share in a two-person room records quality samples the admin view shows"
     // The viewer's browser comes from their own report, and the codec from either end's.
     await expect(row).toContainText(browserName === "chromium" ? "chrome" : "firefox");
     await expect(row).toContainText(/video\/|AV1|VP9|VP8|H264/i);
-    await expect(row).toContainText(/1080p30|720p30|900p30|1080p45|1080p60/);
+    await expect(row).toContainText(/\d{4}×\d{3,4}@(30|60)/);
 
     // And its timeline: the charts are there, with the numbers behind them.
     await row.getByRole("button", { name: /^Timeline / }).click();

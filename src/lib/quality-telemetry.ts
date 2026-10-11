@@ -56,8 +56,8 @@ export type RungReason = (typeof RUNG_REASONS)[number];
 export const BROWSERS = ["chrome", "edge", "firefox", "safari", "opera", "other"] as const;
 export type BrowserName = (typeof BROWSERS)[number];
 
-/** A ladder label like `1080p30`. */
-const rungLabel = z.string().regex(/^[0-9a-z]{1,12}$/);
+/** A ladder label like `1080p30`, or the encoded size of a share that isn't 16:9: `2968×1242@60`. */
+const rungLabel = z.string().regex(/^[0-9a-z]{1,12}$|^[0-9]{1,5}×[0-9]{1,5}@[0-9]{2}$/);
 const CODEC = /^video\/[\w.+-]{1,32}$/;
 const bitrate = z.number().int().min(0).max(1_000_000_000).nullable();
 const count = z.number().int().min(0).max(1_000_000).nullable();
@@ -123,12 +123,29 @@ export const qualitySample = z
   }, "a rung and its change belong to sent rows only");
 export type QualitySample = z.infer<typeof qualitySample>;
 
+/**
+ * A report's rows, each judged on its own: one that is malformed (a label this version doesn't
+ * know, say) is dropped and the rest are kept, where checking the whole array would lose a
+ * page's report for one row. A report with no valid row is refused.
+ */
+const sampleRows = z
+  .array(z.unknown())
+  .min(1)
+  .max(QUALITY_BATCH_MAX)
+  .transform((rows) =>
+    rows.flatMap((row) => {
+      const parsed = qualitySample.safeParse(row);
+      return parsed.success ? [parsed.data] : [];
+    }),
+  )
+  .refine((rows) => rows.length > 0, "no valid row");
+
 /** What a page reports (`reportQualityFn`): its rows, about peers in the room it is in. */
 export const reportQualityInput = z.strictObject({
   roomId: z.string().min(1).max(64),
-  samples: z.array(qualitySample).min(1).max(QUALITY_BATCH_MAX),
+  samples: sampleRows,
 });
-export type ReportQualityInput = z.input<typeof reportQualityInput>;
+export type ReportQualityInput = { roomId: string; samples: z.input<typeof qualitySample>[] };
 
 /** The browser and its major version, from a user agent string (no version for one unknown). */
 export function browserOf(userAgent: string): { name: BrowserName; major: number | null } {

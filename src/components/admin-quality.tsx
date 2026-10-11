@@ -254,7 +254,7 @@ const Starved = ({ pair }: { pair: QualityPair }) =>
     <Chip
       kind="caution"
       className="font-semibold uppercase"
-      title={`target under half the rung's maximum for ${Math.round(pair.starved.share * 100)}% of the time on high rungs (at least ${STARVED_MIN_SECONDS}s)`}
+      title={`target under half the step's maximum for ${Math.round(pair.starved.share * 100)}% of the time on steps at or above the one it started on (at least ${STARVED_MIN_SECONDS}s)`}
     >
       starved at {pair.starved.rung}
     </Chip>
