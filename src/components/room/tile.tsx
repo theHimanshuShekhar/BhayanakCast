@@ -85,6 +85,7 @@ const TileView = ({
   onModerate,
   cantConnect = false,
   onRetry,
+  onQuality,
 }: {
   p: Participant;
   variant: TileVariant;
@@ -115,6 +116,8 @@ const TileView = ({
   cantConnect?: boolean;
   /** Try connecting to them (their user id) again. */
   onRetry?: (userId: string) => void;
+  /** PROTOTYPE (#93): opens the stream's quality modal; only the prototype stage passes it. */
+  onQuality?: (id: string) => void;
 }) => {
   const ref = useRef<HTMLDivElement>(null);
   const fullscreenElement = useFullscreenElement();
@@ -328,6 +331,16 @@ const TileView = ({
               className="w-14 h-[26px] cursor-pointer accent-white"
             />
           </label>
+        )}
+        {p.streaming && onQuality && (
+          <button
+            type="button"
+            className="h-[26px] pointer-coarse:h-8 px-2 inline-flex items-center gap-1 rounded-[var(--radius-sm)] text-[11px] text-white cursor-pointer hover:bg-white/20 transition-colors"
+            aria-label={`Quality: ${p.name}`}
+            onClick={() => onQuality(p.id)}
+          >
+            <Icon.Activity size={12} /> quality
+          </button>
         )}
         {canFullscreen && (
           <button

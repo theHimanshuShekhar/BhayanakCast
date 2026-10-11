@@ -19,6 +19,7 @@ import { LeaveGuard } from "~/components/room/leave-guard";
 import { failureText, Lobby } from "~/components/room/lobby";
 import { PeerAudio } from "~/components/room/peer-audio";
 import { QualityDebug } from "~/components/room/quality-debug";
+import { prototypePeople, useQualityPrototype } from "~/components/room/quality-modal.prototype";
 import { RoomSide } from "~/components/room/side-panel";
 import { isModerator, type ModAction, Tile } from "~/components/room/tile";
 import { Btn, Chip } from "~/components/ui";
@@ -619,6 +620,16 @@ function RoomPage({
     [participants, speaking],
   );
 
+  // PROTOTYPE (#93): with ?variant= (dev builds only) the stage shows stand-in people and its
+  // streams get a "quality" button. A constant per build, so the hook order never changes.
+  // biome-ignore lint/correctness/useHookAtTopLevel: import.meta.env.DEV is fixed at build time
+  const qualityProto = import.meta.env.DEV ? useQualityPrototype() : null;
+  const protoScenario = qualityProto?.scenario;
+  const staged = useMemo(
+    () => (protoScenario ? prototypePeople(people, protoScenario) : people),
+    [people, protoScenario],
+  );
+
   // Floats on the pinned tile, else the first streamer's, else the first on stage, else yours.
   const react = (emoji: ReactionEmoji) => {
     const target =
@@ -666,7 +677,7 @@ function RoomPage({
   // Hiding everyone not sharing leaves the streamers: the others' cameras are paused towards
   // this page (ADR 13 addendum).
   const stage = useMemo(() => {
-    const base = people;
+    const base = staged;
     if (!pinnedId) return base;
     return [
       ...base
@@ -676,7 +687,7 @@ function RoomPage({
         .filter((p) => p.id !== pinnedId)
         .map((p) => (p.size === "l" ? { ...p, size: "m" as const } : p)),
     ];
-  }, [people, pinnedId]);
+  }, [staged, pinnedId]);
 
   const announcement = activity.find((a) => ANNOUNCED.has(a.kind));
   const hostName = participants.find((p) => p.role === "host")?.name ?? detail.host;
@@ -703,6 +714,7 @@ function RoomPage({
     onModerate,
     cantConnect: mesh.states[p.userId] === "failed",
     onRetry: mesh.retry,
+    onQuality: qualityProto?.onQuality,
   });
 
   // The room ended or was hidden from us since the page loaded.
@@ -915,6 +927,7 @@ function RoomPage({
             </p>
           </Sheet>
         )}
+        {qualityProto?.node}
         {import.meta.env.DEV && (
           <QualityDebug
             read={mesh.quality}
