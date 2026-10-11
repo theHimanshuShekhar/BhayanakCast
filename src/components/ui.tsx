@@ -106,6 +106,8 @@ const CHIP_VARIANTS = {
   liveSolid:
     "bg-[color-mix(in_oklch,var(--color-live)_72%,black)] border-transparent text-white font-semibold",
   ok: "bg-[color-mix(in_oklch,var(--color-success)_22%,transparent)] border-[color-mix(in_oklch,var(--color-success)_40%,transparent)] text-success-ink",
+  caution:
+    "bg-[color-mix(in_oklch,var(--color-warning)_22%,transparent)] border-[color-mix(in_oklch,var(--color-warning)_50%,transparent)] text-warning-ink",
 } as const;
 
 export const Chip = ({
@@ -113,11 +115,13 @@ export const Chip = ({
   kind = "",
   dot = false,
   className = "",
+  title,
 }: {
   children: ReactNode;
   kind?: keyof typeof CHIP_VARIANTS;
   dot?: boolean;
   className?: string;
+  title?: string;
 }) => {
   const dotBg =
     kind === "liveSolid"
@@ -127,6 +131,7 @@ export const Chip = ({
         : "bg-current";
   return (
     <span
+      title={title}
       className={`inline-flex items-center gap-1.5 px-2 py-[3px] border rounded-full whitespace-nowrap text-[10.5px] tracking-[0.06em] ${CHIP_VARIANTS[kind]} ${className}`}
     >
       {dot && <span className={`w-1.5 h-1.5 rounded-full ${dotBg}`} />}

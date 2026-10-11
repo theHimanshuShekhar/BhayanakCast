@@ -15,7 +15,7 @@ import { type Db, getDb } from "../db/client.ts";
 import { type Caller, requireSignedIn, type SignedInCaller } from "./caller.ts";
 import { type Clock, systemClock } from "./clock.ts";
 import { env } from "./env.ts";
-import { withinRateLimit } from "./rate-limit.ts";
+import { forgetIdle, withinRateLimit } from "./rate-limit.ts";
 import { createDbRoomStore } from "./room-store.ts";
 
 /** How long minted TURN credentials last. */
@@ -164,10 +164,7 @@ export class IceService {
     requireSignedIn(caller);
     const now = this.#clock.now();
     const { reports, windowMs } = ICE_REPORT_RATE_LIMIT;
-    // Users with nothing left in the window are forgotten.
-    for (const [id, sent] of this.#reports) {
-      if ((sent.at(-1) ?? 0) <= now.getTime() - windowMs) this.#reports.delete(id);
-    }
+    forgetIdle(this.#reports, windowMs, now);
     if (!withinRateLimit(this.#reports, caller.user.id, reports, windowMs, now)) return false;
     this.#log(`[ice] ${JSON.stringify(report)}`);
     return true;

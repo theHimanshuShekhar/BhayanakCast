@@ -86,6 +86,8 @@ import {
   strained,
   UplinkBudget,
 } from "./quality";
+import { QualityCollector, type RungInfo } from "./quality-collector";
+import { type PendingSample, type RungReason, readStream } from "./quality-telemetry";
 import type { MediaSlot, SignalPayload } from "./realtime";
 
 /**
@@ -172,6 +174,13 @@ export interface MeshOptions {
   codecs?: VideoCodecs;
   /** The uplink budget to start from, bits per second. Defaults to `INITIAL_UPLINK`. For tests. */
   uplink?: number;
+  /**
+   * Quality telemetry (ADR 2 addendum): called with a row for each video sender and receiver
+   * every `sampleWindowMs`, and for each rung change. Without it nothing is collected.
+   */
+  onQuality?: (sample: PendingSample) => void;
+  /** How long a telemetry window runs. Defaults to `SAMPLE_WINDOW_MS`. */
+  sampleWindowMs?: number;
   /** For tests. */
   RTCPeerConnection?: typeof RTCPeerConnection;
 }
@@ -191,6 +200,10 @@ const LADDERS: Record<VideoSlot, { rungs: readonly Rung[]; start: number }> = {
 };
 const isVideoSlot = (slot: MediaSlot): slot is VideoSlot => slot in LADDERS;
 const rungOf = (slot: VideoSlot, i: number) => LADDERS[slot].rungs[i] as Rung;
+const rungInfo = (slot: VideoSlot, i: number): RungInfo => {
+  const { label, maxBitrate } = rungOf(slot, i);
+  return { label, maxBitrate };
+};
 
 /** Created with every connection, so a pair connects before anyone unmutes. */
 const EAGER_SLOTS: readonly MediaSlot[] = ["mic"];
@@ -328,6 +341,8 @@ export class Mesh {
   readonly #budget: UplinkBudget;
   /** What `setParameters` last gave each screen sender, for browsers that don't report it. */
   readonly #degradation = new WeakMap<RTCRtpSender, RTCDegradationPreference>();
+  /** Undefined without `onQuality`. */
+  readonly #telemetry: QualityCollector | undefined;
   readonly #links = new Map<string, Link>();
   readonly #listeners = new Set<(event: MeshEvent) => void>();
   readonly #local: Partial<Record<MediaSlot, MediaStreamTrack | null>> = {};
@@ -344,6 +359,12 @@ export class Mesh {
     this.#RTCPeerConnection = options.RTCPeerConnection ?? RTCPeerConnection;
     this.#codecs = options.codecs ?? localVideoCodecs();
     this.#budget = new UplinkBudget(options.uplink ?? INITIAL_UPLINK);
+    if (options.onQuality) {
+      this.#telemetry = new QualityCollector({
+        emit: options.onQuality,
+        windowMs: options.sampleWindowMs,
+      });
+    }
   }
 
   /**
@@ -366,6 +387,7 @@ export class Mesh {
     const link = this.#links.get(userId);
     if (!link) return;
     this.#links.delete(userId);
+    this.#telemetry?.forget(userId);
     this.#shut(link);
     this.#emit({ type: "closed", userId });
   }
@@ -425,7 +447,10 @@ export class Mesh {
       if (track === undefined) continue;
       // A new capture starts at its ladder's default again.
       if (track && track !== this.#local[slot] && isVideoSlot(slot)) {
-        for (const link of this.#links.values()) delete link.quality[slot];
+        for (const link of this.#links.values()) {
+          delete link.quality[slot];
+          this.#telemetry?.reset({ peerId: link.userId, slot, direction: "send" });
+        }
         this.#watchQuality();
       }
       this.#local[slot] = track;
@@ -617,6 +642,8 @@ export class Mesh {
     pc.onconnectionstatechange = () => this.#stateChanged(link);
     this.#emit({ type: "state", userId, state: link.state });
     this.#waitToConnect(link);
+    // What the pair receives is measured too (telemetry), whether or not this page sends.
+    if (this.#telemetry) this.#watchQuality();
     // The impolite side makes the first offer; the polite side starts once it has answered.
     if (!link.polite) this.#start(link);
     else if (greet) {
@@ -676,7 +703,11 @@ export class Mesh {
           const rung = transceiver.sender.track
             ? fitRung(LADDERS[slot].rungs, room, state.rung)
             : state.rung;
+          if (rung !== state.rung) {
+            this.#rungChanged(link, slot, state.rung, rung, "resume");
+          }
           Object.assign(state, freshLadderState(rung), { readings: 0, last: undefined });
+          this.#telemetry?.reset({ peerId: link.userId, slot, direction: "send" });
         }
         this.#tune(link, slot, transceiver.sender);
       })
@@ -818,6 +849,7 @@ export class Mesh {
       }
       if (!heaviest) return;
       const { link, slot, state, sender } = heaviest;
+      this.#rungChanged(link, slot, state.rung, state.rung - 1, "budget");
       Object.assign(state, freshLadderState(state.rung - 1), { backoff: state.backoff });
       this.#tune(link, slot, sender);
     }
@@ -828,12 +860,48 @@ export class Mesh {
   }
 
   async #adjustLink(link: Link): Promise<PairReading | undefined> {
-    if (link.adjusting || !this.#live(link)) return undefined;
+    if (link.adjusting) return undefined;
+    if (!this.#live(link)) {
+      // A window across a reconnect would average the outage in.
+      this.#telemetry?.forget(link.userId);
+      return undefined;
+    }
     link.adjusting = true;
     try {
-      return await this.#adjustSenders(link);
+      const reading = await this.#adjustSenders(link);
+      await this.#readReceivers(link);
+      return reading;
     } finally {
       link.adjusting = false;
+    }
+  }
+
+  /** The row for `slot` to `link`'s peer moving from rung `from` to `to` (telemetry). */
+  #rungChanged(link: Link, slot: VideoSlot, from: number, to: number, reason: RungReason): void {
+    if (from === to) return;
+    this.#telemetry?.rungChanged(
+      { peerId: link.userId, slot, direction: "send" },
+      rungInfo(slot, to),
+      reason,
+    );
+  }
+
+  /** Take telemetry readings of the video `link`'s peer sends this page. */
+  async #readReceivers(link: Link): Promise<void> {
+    if (!this.#telemetry) return;
+    for (const slot of VIDEO_SLOTS) {
+      const track = link.tracks[slot];
+      const receiver = track && link.pc.getReceivers().find((r) => r.track === track);
+      const id = { peerId: link.userId, slot, direction: "recv" } as const;
+      if (!receiver) continue;
+      try {
+        const reading = readStream(await receiver.getStats(), "recv");
+        if (reading && this.#current(link) && link.tracks[slot] === track) {
+          this.#telemetry.observe(id, reading);
+        }
+      } catch (error) {
+        this.#log(`reading ${slot} stats from ${link.userId} failed`, error);
+      }
     }
   }
 
@@ -844,14 +912,24 @@ export class Mesh {
       const track = sender?.track;
       if (!sender || !track) continue;
       const state = this.#adaptation(link, slot, track);
+      let report: RTCStatsReport;
       let sample: StatsSample;
       try {
-        sample = readSample(await sender.getStats(), state.last);
+        report = await sender.getStats();
+        sample = readSample(report, state.last);
       } catch (error) {
         this.#log(`reading ${slot} stats for ${link.userId} failed`, error);
         continue;
       }
       if (!this.#current(link) || sender.track !== track || link.quality[slot] !== state) continue;
+      const stream = this.#telemetry && readStream(report, "send");
+      if (stream) {
+        this.#telemetry?.observe(
+          { peerId: link.userId, slot, direction: "send" },
+          stream,
+          rungInfo(slot, state.rung),
+        );
+      }
       if (sample.codec) state.codec = sample.codec;
       state.last = sample;
       if (state.readings++ >= WARMUP_READINGS) {
@@ -862,6 +940,10 @@ export class Mesh {
         if (next.rung > state.rung && !this.#admit(slot, state, next.rung)) {
           next = step(LADDERS[slot].rungs, state, sample, { ...options, max: state.rung });
         }
+        // Down to the capture's cap when the capture shrank; otherwise the controller's call.
+        const reason: RungReason =
+          next.rung > state.rung ? "probe" : state.rung > options.max ? "capture" : "pressure";
+        this.#rungChanged(link, slot, state.rung, next.rung, reason);
         Object.assign(state, next);
       }
       this.#tune(link, slot, sender);

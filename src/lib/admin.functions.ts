@@ -1,7 +1,7 @@
 /**
  * Admin server functions: thin `createServerFn` wrappers over src/server/admin.ts,
- * src/server/admin-users.ts and src/server/admin-rooms.ts (see rooms.functions.ts for the
- * pattern). Each derives the
+ * src/server/admin-users.ts, src/server/admin-rooms.ts and src/server/admin-quality.ts (see
+ * rooms.functions.ts for the pattern). Each derives the
  * caller from the session; the server half refuses non-admins. Read through admin.queries.ts.
  */
 import { createServerFn } from "@tanstack/react-start";
@@ -15,6 +15,7 @@ import {
   listAdminLiveRooms,
   listAdminRecentRooms,
 } from "~/server/admin";
+import { getPairTimeline, getRoomQuality } from "~/server/admin-quality";
 import { endRoom } from "~/server/admin-rooms";
 import { banUser, listAdminUsers, setUserRole, unbanUser } from "~/server/admin-users";
 import { adminDiscordIds } from "~/server/env";
@@ -30,6 +31,8 @@ import {
   setUserRoleInput,
   unbanUserInput,
 } from "./admin";
+import { pairTimelineInput } from "./quality-admin";
+import { roomIdInput } from "./rooms";
 
 export const getAdminOverviewFn = createServerFn({ method: "GET" }).handler(async () =>
   getAdminOverview(getDb(), await getCaller()),
@@ -46,6 +49,14 @@ export const listAdminLiveRoomsFn = createServerFn({ method: "GET" }).handler(as
 export const listAdminRecentRoomsFn = createServerFn({ method: "GET" })
   .validator(listAdminRecentRoomsInput)
   .handler(async ({ data }) => listAdminRecentRooms(getDb(), await getCaller(), data));
+
+export const getRoomQualityFn = createServerFn({ method: "GET" })
+  .validator(roomIdInput)
+  .handler(async ({ data }) => getRoomQuality(getDb(), await getCaller(), data));
+
+export const getPairTimelineFn = createServerFn({ method: "GET" })
+  .validator(pairTimelineInput)
+  .handler(async ({ data }) => getPairTimeline(getDb(), await getCaller(), data));
 
 export const getAdminLeaderboardsFn = createServerFn({ method: "GET" }).handler(async () =>
   getAdminLeaderboards(getDb(), await getCaller()),

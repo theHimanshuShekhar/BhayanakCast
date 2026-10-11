@@ -6,6 +6,7 @@ import {
   isSameOffer,
   Mesh,
   type MeshEvent,
+  type MeshOptions,
   QUALITY_INTERVAL_MS,
   SHARE_AUDIO_BITRATE,
   withStereoOpus,
@@ -19,6 +20,7 @@ import {
   UPLINK_FLOOR,
   UPLINK_SHARE,
 } from "./quality";
+import type { PendingSample } from "./quality-telemetry";
 import type { SignalPayload } from "./realtime";
 
 // The Mesh's negotiation (#34) against a fake RTCPeerConnection that keeps the signalling state
@@ -39,6 +41,11 @@ class FakeTransceiver {
     sources: [] as unknown[],
     getSynchronizationSources() {
       return this.sources;
+    },
+    /** What `getStats()` answers. */
+    stats: new Map<string, unknown>(),
+    async getStats() {
+      return this.stats;
     },
   };
   /** What `setCodecPreferences` was last given. */
@@ -226,6 +233,7 @@ function page(
   iceServers?: RTCIceServer[],
   codecs?: VideoCodecs,
   uplink?: number,
+  extra: Partial<MeshOptions> = {},
 ) {
   const events: MeshEvent[] = [];
   const pcs: FakePC[] = [];
@@ -243,6 +251,7 @@ function page(
     iceServers,
     codecs,
     uplink,
+    ...extra,
     RTCPeerConnection: class extends FakePC {
       constructor(configuration?: RTCConfiguration) {
         super(configuration);
@@ -673,7 +682,7 @@ const trackWith = (name: string, settings: Partial<MediaTrackSettings> = {}, con
 const senderStats = (
   loss: number,
   codec = "video/VP9",
-  sent?: { bytesSent: number; timestamp: number },
+  sent?: { bytesSent: number; timestamp: number; [counter: string]: number },
   reason?: string,
 ) =>
   new Map<string, unknown>([
@@ -875,6 +884,133 @@ describe("Mesh quality ladder (ADR 2)", () => {
     await ana.mesh.adjust();
     expect(reads).toBe(0);
     ana.mesh.close();
+  });
+});
+
+describe("Mesh quality telemetry (ADR 2 addendum)", () => {
+  /** Ana shares a 1080p60 screen to bo, both reporting rows over 24 s windows, all connected. */
+  async function watched() {
+    const network = new Map<string, Mesh>();
+    const rows = { ana: [] as PendingSample[], bo: [] as PendingSample[] };
+    const options = (who: keyof typeof rows) => ({
+      onQuality: (row: PendingSample) => rows[who].push(row),
+      sampleWindowMs: 24_000,
+    });
+    const ana = page("ana", network, undefined, undefined, undefined, options("ana"));
+    const bo = page("bo", network, undefined, undefined, undefined, options("bo"));
+    for (const mesh of network.values()) mesh.join(everyone);
+    await settle();
+    const screen = trackWith("ana screen", { height: 1080, frameRate: 60 }, "motion");
+    ana.mesh.setLocalTracks({ screen });
+    await settle();
+    connect(ana, bo);
+    await settle();
+    const toBo = carrying(ana.pcs[0], screen) as FakeTransceiver;
+    const shown = bo.mesh.peers()[0]?.tracks.screen;
+    const fromAna = bo.pcs[0]?.getReceivers().find((r) => r.track === shown);
+    if (!fromAna) throw new Error("bo is not receiving ana's screen");
+    let seconds = 0;
+    /** One pass on both pages, `loss` on ana's link, with steady counters (2 Mbps, QP 40). */
+    const pass = async (loss = 0) => {
+      seconds += 4;
+      const frames = seconds * 30;
+      toBo.sender.stats = senderStats(loss, "video/VP9", {
+        bytesSent: seconds * 250_000,
+        timestamp: seconds * 1_000,
+        framesEncoded: frames,
+        qpSum: frames * 40,
+        targetBitrate: 2_400_000,
+      });
+      fromAna.stats = new Map<string, unknown>([
+        [
+          "i",
+          {
+            id: "i",
+            type: "inbound-rtp",
+            kind: "video",
+            timestamp: seconds * 1_000,
+            bytesReceived: seconds * 240_000,
+            framesDecoded: frames,
+            qpSum: frames * 42,
+            freezeCount: seconds / 4,
+            frameWidth: 1920,
+            frameHeight: 1080,
+          },
+        ],
+      ]);
+      await ana.mesh.adjust();
+      await bo.mesh.adjust();
+    };
+    return { ana, bo, rows, pass };
+  }
+
+  it("reports a row for the video it sends and one for what the other end receives, per window", async () => {
+    const { ana, bo, rows, pass } = await watched();
+    for (let i = 0; i < 6; i++) await pass();
+    expect(rows).toEqual({ ana: [], bo: [] });
+    await pass();
+    // A clean spell also probes up on this very pass: a row of its own, with an empty window.
+    expect(rows.ana.map((r) => [r.trigger, r.windowMs, r.toRung, r.reason])).toEqual([
+      ["window", 24_000, null, null],
+      ["rung", 0, "1080p45", "probe"],
+    ]);
+    expect(rows.ana[0]).toMatchObject({
+      peerId: "bo",
+      slot: "screen",
+      direction: "send",
+      trigger: "window",
+      windowMs: 24_000,
+      rung: "1080p30",
+      maxBitrate: 3_000_000,
+      targetBitrate: 2_400_000,
+      bitrate: 2_000_000,
+      qp: 40,
+      codec: "video/VP9",
+    });
+    // What bo receives: no rung (it can't tell), QP and size from its own decoder, and the freezes.
+    expect(rows.bo).toHaveLength(1);
+    expect(rows.bo[0]).toMatchObject({
+      peerId: "ana",
+      slot: "screen",
+      direction: "recv",
+      trigger: "window",
+      windowMs: 24_000,
+      rung: null,
+      maxBitrate: null,
+      targetBitrate: null,
+      bitrate: 1_920_000,
+      qp: 42,
+      frameWidth: 1920,
+      frameHeight: 1080,
+      freezes: 6,
+    });
+    ana.mesh.close();
+    bo.mesh.close();
+  });
+
+  it("reports a rung change at once, ending the window with where from, to and why", async () => {
+    const { ana, bo, rows, pass } = await watched();
+    // The first readings of a sender are warm-up; then two lossy passes in a row step it down.
+    for (let i = 0; i < 3; i++) await pass();
+    await pass(0.1);
+    expect(rows.ana).toEqual([]);
+    await pass(0.1);
+    expect(rows.ana).toHaveLength(1);
+    expect(rows.ana[0]).toMatchObject({
+      trigger: "rung",
+      direction: "send",
+      rung: "1080p30",
+      toRung: "900p30",
+      reason: "pressure",
+      windowMs: 16_000,
+      maxBitrate: 3_000_000,
+    });
+    // bo can't tell the sender changed rung: its windows go on as before.
+    expect(rows.bo).toEqual([]);
+    for (let i = 0; i < 2; i++) await pass();
+    expect(rows.bo.map((r) => [r.trigger, r.windowMs])).toEqual([["window", 24_000]]);
+    ana.mesh.close();
+    bo.mesh.close();
   });
 });
 

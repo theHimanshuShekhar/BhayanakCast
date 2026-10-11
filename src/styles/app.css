@@ -21,6 +21,7 @@
   --color-warning: oklch(0.8 0.17 70);
   --color-live-ink: oklch(0.47 0.19 25);
   --color-success-ink: oklch(0.45 0.13 150);
+  --color-warning-ink: oklch(0.45 0.11 70);
   --color-primary-strong: oklch(0.44 0.2 var(--accent-h));
 
   --color-bg: oklch(0.94 0.01 260);
@@ -37,6 +38,11 @@
   --color-border-subtle: oklch(0 0 0 / 0.08);
   --color-border: oklch(0 0 0 / 0.14);
   --color-border-strong: oklch(0 0 0 / 0.22);
+
+  /* Chart series, in order (the first two of the data-viz palette, run through its validator
+     on each theme's surface). */
+  --color-viz-1: oklch(0.575 0.163 255.5);
+  --color-viz-2: oklch(0.671 0.175 40.6);
 
   --color-highlight: oklch(1 0 0 / 0.7);
   --color-shade: oklch(0 0 0 / 0.08);
@@ -130,6 +136,7 @@
 .dark {
   --color-live-ink: oklch(0.98 0.02 25);
   --color-success-ink: oklch(0.78 0.18 150);
+  --color-warning-ink: oklch(0.86 0.14 70);
   --color-primary-strong: oklch(0.74 0.19 var(--accent-h));
   --color-bg: oklch(0.17 0.025 265);
   --color-canvas: oklch(0.2 0.028 265);
@@ -147,6 +154,8 @@
   --color-border-subtle: oklch(1 0 0 / 0.09);
   --color-border: oklch(1 0 0 / 0.14);
   --color-border-strong: oklch(1 0 0 / 0.21);
+  --color-viz-1: oklch(0.622 0.161 255.1);
+  --color-viz-2: oklch(0.622 0.173 40.1);
 
   --color-highlight: oklch(1 0 0 / 0.05);
   --color-shade: oklch(0 0 0 / 0.35);

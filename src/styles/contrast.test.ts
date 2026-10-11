@@ -241,6 +241,18 @@ pairs.push(
     bg: (p) => over(p.mix("success", 22, "transparent"), p.tok("surface")),
   },
   {
+    label: "text-warning-ink on warning 22% over surface (caution chip)",
+    min: 4.5,
+    fg: (p) => p.tok("warning-ink"),
+    bg: (p) => over(p.mix("warning", 22, "transparent"), p.tok("surface")),
+  },
+  {
+    label: "text-warning-ink on warning 22% over surface-2 (caution chip in a hovered row)",
+    min: 4.5,
+    fg: (p) => p.tok("warning-ink"),
+    bg: (p) => over(p.mix("warning", 22, "transparent"), p.tok("surface-2")),
+  },
+  {
     label: "text-success-ink on success 15% over surface (room capacity)",
     min: 4.5,
     fg: (p) => p.tok("success-ink"),

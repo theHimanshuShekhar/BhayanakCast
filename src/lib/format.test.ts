@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { discordAvatarUrl } from "./format";
+import { discordAvatarUrl, fmtDuration } from "./format";
+
+describe("fmtDuration", () => {
+  it("reads seconds as a time spent", () => {
+    expect(fmtDuration(0)).toBe("0s");
+    expect(fmtDuration(45.4)).toBe("45s");
+    expect(fmtDuration(60)).toBe("1m");
+    expect(fmtDuration(250)).toBe("4m 10s");
+    expect(fmtDuration(3_600)).toBe("1h");
+    expect(fmtDuration(3_900)).toBe("1h 5m");
+    expect(fmtDuration(-5)).toBe("0s");
+  });
+});
 
 describe("discordAvatarUrl", () => {
   const avatar = "https://cdn.discordapp.com/avatars/1234/abcd.png";

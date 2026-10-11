@@ -16,6 +16,7 @@ import {
   SetRoleDialog,
   UnbanUserDialog,
 } from "~/components/admin-dialogs";
+import { RoomQualityPanel } from "~/components/admin-quality";
 import { BarChart, LineChart } from "~/components/charts";
 import { Icon } from "~/components/icons";
 import { SectionHead } from "~/components/section-head";
@@ -173,7 +174,22 @@ const Since = ({ iso, format }: { iso: string; format: (iso: string, now: number
   return now === null ? "—" : format(iso, now);
 };
 
-const LiveRoomsTable = ({ rooms }: { rooms: LiveRoomCard[] }) => {
+/** The room whose video quality is shown below the room tables. */
+type QualityTarget = { id: string; name: string };
+
+const QualityBtn = ({ room, onInspect }: { room: QualityTarget; onInspect: () => void }) => (
+  <Btn size="sm" aria-label={`Quality of ${room.name}`} onClick={onInspect}>
+    quality
+  </Btn>
+);
+
+const LiveRoomsTable = ({
+  rooms,
+  onInspect,
+}: {
+  rooms: LiveRoomCard[];
+  onInspect: (room: QualityTarget) => void;
+}) => {
   const queryClient = useQueryClient();
   const [endTarget, setEndTarget] = useState<RoomDialogTarget | null>(null);
   const end = async (roomId: string) => {
@@ -191,7 +207,7 @@ const LiveRoomsTable = ({ rooms }: { rooms: LiveRoomCard[] }) => {
             <th className={`${th} !text-right`}>people</th>
             <th className={`${th} !text-right`}>streams</th>
             <th className={`${th} !text-right`}>duration</th>
-            <th className={`${th} w-[110px]`}>
+            <th className={`${th} w-[180px]`}>
               <span className="sr-only">actions</span>
             </th>
           </tr>
@@ -218,6 +234,7 @@ const LiveRoomsTable = ({ rooms }: { rooms: LiveRoomCard[] }) => {
               </td>
               <td className={td}>
                 <div className="flex justify-end gap-1.5">
+                  <QualityBtn room={r} onInspect={() => onInspect(r)} />
                   <Link
                     to="/room/$roomId"
                     params={{ roomId: r.id }}
@@ -321,7 +338,7 @@ const Pager = ({
 );
 
 /** Recent rooms, searched and paged server-side; the sort headers order the page shown. */
-const RecentRoomsTable = () => {
+const RecentRoomsTable = ({ onInspect }: { onInspect: (room: QualityTarget) => void }) => {
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState<Sort>({ key: "endedAt", dir: "desc" });
@@ -398,6 +415,9 @@ const RecentRoomsTable = () => {
                 setSort={setSort}
                 align="right"
               />
+              <th className={th}>
+                <span className="sr-only">actions</span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -424,9 +444,14 @@ const RecentRoomsTable = () => {
                 <td className={`${td} text-right !text-subtle`}>
                   {r.endedAt ? <Since iso={r.endedAt} format={fmtAgo} /> : "—"}
                 </td>
+                <td className={td}>
+                  <div className="flex justify-end">
+                    <QualityBtn room={r} onInspect={() => onInspect(r)} />
+                  </div>
+                </td>
               </tr>
             ))}
-            {sorted.length === 0 && <EmptyRow cols={7}>no matches</EmptyRow>}
+            {sorted.length === 0 && <EmptyRow cols={8}>no matches</EmptyRow>}
           </tbody>
         </table>
       </div>
@@ -786,6 +811,7 @@ function AdminPage() {
   const { data: liveRooms } = useSuspenseQuery(adminLiveRoomsQuery());
   const { data: leaderboards } = useSuspenseQuery(adminLeaderboardsQuery());
   const { totals, window: last30 } = overview;
+  const [quality, setQuality] = useState<QualityTarget | null>(null);
   const chartDays = daily.map((d) => ({
     date: d.day.slice(5),
     new_users: d.newUsers,
@@ -890,7 +916,7 @@ function AdminPage() {
           className="mt-6"
         />
         <div className={`${card} overflow-hidden`}>
-          <LiveRoomsTable rooms={liveRooms} />
+          <LiveRoomsTable rooms={liveRooms} onInspect={setQuality} />
         </div>
 
         <SectionHead
@@ -901,8 +927,24 @@ function AdminPage() {
           className="mt-6"
         />
         <div className={`${card} overflow-hidden`}>
-          <RecentRoomsTable />
+          <RecentRoomsTable onInspect={setQuality} />
         </div>
+
+        {quality && (
+          <section aria-label="room quality" className="mt-6">
+            <div className="flex items-start justify-between gap-3">
+              <SectionHead
+                title={`video quality · ${quality.name}`}
+                sub="samples kept 90 days · every 30s per stream and at each rung change"
+                size="sm"
+              />
+              <Btn size="sm" onClick={() => setQuality(null)}>
+                close
+              </Btn>
+            </div>
+            <RoomQualityPanel key={quality.id} roomId={quality.id} />
+          </section>
+        )}
 
         <SectionHead title="users" sub="search · ban and unban" size="sm" className="mt-6" />
         <div className={`${card} overflow-hidden`}>

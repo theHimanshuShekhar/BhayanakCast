@@ -33,3 +33,9 @@ The stats shown include rooms in progress. Every read of the per-user aggregates
 - The daily purge logs and skips a room whose roll-up fails, so one bad room no longer stops the deletes. That room stays un-rolled-up (and so is never deleted) and is retried on the next run.
 - The roll-up upserts take their row locks in a stable order (`user_id`; `user_a, user_b`), so concurrent roll-ups (the boot purge alongside the hub) cannot deadlock. A partial index (`rooms_unrolled_idx`) covers ended rooms awaiting roll-up.
 - The same daily job deletes Better Auth sessions past `expires_at` and logs the count. Sessions are not room-level data; this is housekeeping, not retention.
+
+## Addendum: quality samples, 90 days (2026-10-11)
+Video quality samples (`quality_samples`, ADR 2 addendum on telemetry) are kept for **90 days**, longer than the 30 days of room data, so they have a purge of their own and are not room-level data in this ADR's sense.
+- They reference the room **by id only, with no foreign key**, like the audit log, so the 30-day room purge can't take them and a room's samples outlive its recap. They store the room's kind themselves (it decides how a share is tuned), and both people of each pair by their real user ids (the reporter and the peer, streamer to viewer). Only admins read them; the db already records who was in which room, so this exposes no more than that.
+- The daily maintenance pass (`runMaintenance`) deletes samples older than 90 days (`purgeExpiredQualitySamples`) in a step of its own: a failure there doesn't skip the room or session purges, nor theirs this one.
+- Purged samples can survive for up to 14 more days in the nightly backups (ADR 9 addendum).

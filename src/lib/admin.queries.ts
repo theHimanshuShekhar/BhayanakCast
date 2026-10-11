@@ -8,12 +8,15 @@ import {
   getAdminDailySeriesFn,
   getAdminLeaderboardsFn,
   getAdminOverviewFn,
+  getPairTimelineFn,
+  getRoomQualityFn,
   getTurnUsageFn,
   listAdminLiveRoomsFn,
   listAdminRecentRoomsFn,
   listAdminUsersFn,
 } from "./admin.functions";
 import { STATS_REFRESH_MS } from "./profiles";
+import type { PairTimelineInput } from "./quality-admin";
 import { roomKeys } from "./rooms.queries";
 
 export const adminKeys = {
@@ -31,11 +34,28 @@ export const adminKeys = {
   recent: () => [...adminKeys.all, "recent"] as const,
   recentPage: (input: ListAdminRecentRoomsInput) => [...adminKeys.recent(), input] as const,
   turnUsage: () => [...adminKeys.all, "turn-usage"] as const,
+  roomQuality: (roomId: string) => [...adminKeys.all, "quality", roomId] as const,
+  pairTimeline: (input: PairTimelineInput) =>
+    [...adminKeys.all, "quality", input.roomId, input] as const,
   leaderboards: () => [...adminKeys.all, "leaderboards"] as const,
   /** Every page of the users table: bans and role changes refetch them all. */
   users: () => [...adminKeys.all, "users"] as const,
   usersPage: (input: ListAdminUsersInput) => [...adminKeys.users(), input] as const,
 };
+
+/** A room's video quality pairs (samples are kept 90 days, past the room's own 30). */
+export const roomQualityQuery = (roomId: string) =>
+  queryOptions({
+    queryKey: adminKeys.roomQuality(roomId),
+    queryFn: () => getRoomQualityFn({ data: { roomId } }),
+  });
+
+/** One streamer to viewer pair's session, as series. */
+export const pairTimelineQuery = (input: PairTimelineInput) =>
+  queryOptions({
+    queryKey: adminKeys.pairTimeline(input),
+    queryFn: () => getPairTimelineFn({ data: input }),
+  });
 
 /** All-time totals and the last 30 days against the 30 before. */
 export const adminOverviewQuery = () =>

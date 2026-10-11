@@ -55,7 +55,8 @@ export const CAMERA_LADDER: readonly Rung[] = [
 export const CAMERA_DEFAULT_RUNG = 1;
 
 /** What the encoder says holds it back (`qualityLimitationReason`). */
-export type Limit = "none" | "bandwidth" | "cpu" | "other";
+export const LIMITS = ["none", "bandwidth", "cpu", "other"] as const;
+export type Limit = (typeof LIMITS)[number];
 
 /** One reading of a sender's stats. Unknown values (a browser that lacks them) are absent. */
 export interface StatsSample {
@@ -313,7 +314,7 @@ export function captureCap(
   return cap;
 }
 
-type StatsEntry = {
+export type StatsEntry = {
   id?: string;
   type: string;
   selectedCandidatePairId?: string;
@@ -332,17 +333,27 @@ type StatsEntry = {
 };
 
 /**
+ * The candidate pair a connection uses, among a report's `entries`: the transport's selected
+ * one, or (Firefox has no transport stats) the one flagged `selected`, or a nominated one that
+ * succeeded.
+ */
+export function selectedPairOf(entries: readonly StatsEntry[]): StatsEntry | undefined {
+  const pairId = entries.find((e) => e.type === "transport")?.selectedCandidatePairId;
+  return (
+    entries.find((e) => e.type === "candidate-pair" && pairId !== undefined && e.id === pairId) ??
+    entries.find((e) => e.type === "candidate-pair" && e.selected) ??
+    entries.find((e) => e.type === "candidate-pair" && e.nominated && e.state === "succeeded")
+  );
+}
+
+/**
  * One sample from a video sender's `getStats()` (which also holds the connection's selected
  * candidate pair and the receiver's report on this sender). `previous`, the sample before it,
  * gives the bitrate actually sent in between.
  */
 export function readSample(report: RTCStatsReport, previous?: StatsSample): StatsSample {
   const entries = [...(report as Map<string, StatsEntry>).values()];
-  const pairId = entries.find((e) => e.type === "transport")?.selectedCandidatePairId;
-  const pair =
-    entries.find((e) => e.type === "candidate-pair" && pairId !== undefined && e.id === pairId) ??
-    entries.find((e) => e.type === "candidate-pair" && e.selected) ??
-    entries.find((e) => e.type === "candidate-pair" && e.nominated && e.state === "succeeded");
+  const pair = selectedPairOf(entries);
   const outbound = entries.find((e) => e.type === "outbound-rtp" && e.kind === "video");
   const loss = entries
     .filter((e) => e.type === "remote-inbound-rtp" && e.kind === "video")

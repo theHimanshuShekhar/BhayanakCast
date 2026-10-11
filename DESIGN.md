@@ -187,7 +187,8 @@ The palette is a dark tonal ladder carrying three signal colors, and each signal
 
 ### Tertiary
 - **Signal Green** (`signal-green`): means healthy and present. It appears on "Streaming" status, the online dot, capacity chips and ok chips.
-- **Standby Amber** (`standby-amber`): caution states. Use it sparingly.
+- **Standby Amber** (`standby-amber`): caution states. Use it sparingly. It appears on caution chips (such as the admin's "starved" flag), with `--color-warning-ink` for their text.
+- **Chart series** (`--color-viz-1`, `--color-viz-2`): the first two hues of the data-viz palette, authored in oklch and stepped for each theme (blue and orange, with gray for context lines). They are data colors for charts only (the admin's quality timelines) and carry no signal meaning.
 
 ### Neutral
 - **Midnight Ink** (`midnight-ink`): the page background. It's the darkest layer, apart from screen wells.
@@ -272,7 +273,7 @@ Buttons are tactile and quiet, and they press down on click (`active:translate-y
 
 ### Chips
 - **Style:** full pill, 10.5px at 0.06em, 3px/8px padding, 1px border. An optional 6px dot comes first.
-- **Variants:** default (Lifted Slate), live (22% red wash, 55% red border, red dot with glow and pulse), live solid (the LIVE badge: dark red with a white pulsing dot), accent (solid On-Air Glow, used for role badges like HOST) and ok (22% green wash).
+- **Variants:** default (Lifted Slate), live (22% red wash, 55% red border, red dot with glow and pulse), live solid (the LIVE badge: dark red with a white pulsing dot), accent (solid On-Air Glow, used for role badges like HOST), ok (22% green wash) and caution (22% amber wash, 50% amber border, for states that need a look but aren't wrong).
 
 ### Cards / Containers
 - **Corner Style:** `--radius` (12px).
