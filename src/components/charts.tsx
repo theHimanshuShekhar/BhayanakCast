@@ -10,6 +10,9 @@ const pad = { t: 12, r: 12, b: 24, l: 32 };
 const axisText = { fill: "var(--color-muted)" };
 const gridLine = { stroke: "var(--color-border)" };
 
+/** The frame the other charts share (size, padding and the axis and grid styles). */
+export const chartFrame = { width: W, pad, axisText, gridLine };
+
 const useScale = <K extends string>(
   data: Record<K, number>[],
   series: Series<K>[],

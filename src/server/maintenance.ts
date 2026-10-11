@@ -1,12 +1,13 @@
 /**
- * In-process maintenance scheduler: runs the retention purge (ADR 11) and the
- * expired-session purge once on boot and then every 24 hours. Single app
+ * In-process maintenance scheduler: runs the retention purge (ADR 11), the expired-session
+ * purge and the 90-day quality sample purge once on boot and then every 24 hours. Single app
  * process (ADR 9), so no locking.
  */
 import { lt } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import { session } from "../db/schema/index.ts";
 import { getLiveHub } from "./live-hub.ts";
+import { purgeExpiredQualitySamples } from "./quality.ts";
 import { purgeExpiredRooms } from "./stats.ts";
 
 const INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -27,8 +28,9 @@ export async function purgeExpiredSessions(db: Db, now: Date = new Date()): Prom
 }
 
 /**
- * One maintenance pass. The two purges are independent: a failure in one is logged and doesn't
- * skip the other.
+ * One maintenance pass. The purges are independent: a failure in one is logged and doesn't
+ * skip the others. The quality samples outlive the room purge (90 days to its 30), so theirs is
+ * its own.
  */
 export async function runMaintenance(db: Db, now: Date = new Date()): Promise<void> {
   try {
@@ -45,6 +47,13 @@ export async function runMaintenance(db: Db, now: Date = new Date()): Promise<vo
     );
   } catch (error) {
     console.error("[maintenance] session purge failed", error);
+  }
+  try {
+    console.log(
+      `[maintenance] quality: deleted ${await purgeExpiredQualitySamples(db, now)} expired sample(s)`,
+    );
+  } catch (error) {
+    console.error("[maintenance] quality sample purge failed", error);
   }
 }
 

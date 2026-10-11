@@ -26,6 +26,7 @@ Small-group live screen-sharing hangouts. Anyone signs in with Discord, starts o
 - **Env admin**: an admin listed in `ADMIN_DISCORD_IDS`. They're granted the role at every sign-in and can't be demoted.
 - **Ban**: a site-wide block an admin puts on a user, with a reason and an optional expiry. It signs them out and removes them from any live room at once. Admins can't be banned.
 - **Audit log**: the record of every admin action (who, what, on whom or which room, when). It is kept indefinitely.
+- **Quality sample**: a measurement of how well one person's video reached another (or left them), taken in every room so an admin can tell why one viewer saw a blurry or stuttering share. It names both people and the room, is kept 90 days (longer than the room's own recap), and is shown only to admins.
 
 ## Stack at a glance
 TanStack Start (React 19, Vite) · Tailwind v4 + Base UI · WebSocket signalling in the same Node process · native WebRTC full mesh · STUN + Cloudflare TURN · Better Auth (Discord) · Postgres + Drizzle · Docker Compose on the homelab behind Cloudflare Tunnel · pnpm, Biome, Vitest, Playwright.

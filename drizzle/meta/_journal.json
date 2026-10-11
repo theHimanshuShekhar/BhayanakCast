@@ -57,6 +57,13 @@
       "when": 1790933618346,
       "tag": "0007_wakeful_union_jack",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791720588730,
+      "tag": "0008_colorful_peter_parker",
+      "breakpoints": true
     }
   ]
 }

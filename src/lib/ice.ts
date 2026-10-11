@@ -59,14 +59,19 @@ export function keepIceServersFresh(
   };
 }
 
-const candidateType = z.enum(["host", "srflx", "prflx", "relay"]);
+export const CANDIDATE_TYPES = ["host", "srflx", "prflx", "relay"] as const;
+export type CandidateType = (typeof CANDIDATE_TYPES)[number];
+/** How a relay candidate reaches the TURN server (UDP, TCP, or TLS on 443). */
+export const RELAY_PROTOCOLS = ["udp", "tcp", "tls"] as const;
+export type RelayProtocol = (typeof RELAY_PROTOCOLS)[number];
+
+const candidateType = z.enum(CANDIDATE_TYPES);
 
 /** One ICE candidate, anonymised: its type and transport, never its address. */
 export const iceCandidateInfo = z.object({
   type: candidateType,
   protocol: z.enum(["udp", "tcp"]),
-  /** How a relay candidate reaches the TURN server (UDP, TCP, or TLS on 443). */
-  relayProtocol: z.enum(["udp", "tcp", "tls"]).optional(),
+  relayProtocol: z.enum(RELAY_PROTOCOLS).optional(),
 });
 export type IceCandidateInfo = z.infer<typeof iceCandidateInfo>;
 

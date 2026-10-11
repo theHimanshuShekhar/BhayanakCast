@@ -11,12 +11,15 @@
  * The Mesh starts once the ICE servers (STUN plus TURN, ADR 3) have come from the server (STUN
  * alone if fetching them failed), and gets fresh ones before their credentials expire: TURN
  * arriving late restarts the pairs that failed on STUN. Pairs that relay or fail are reported
- * to the server's log (anonymised candidate types).
+ * to the server's log (anonymised candidate types). Its quality telemetry goes to the server in
+ * batches (./quality-telemetry.ts).
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { keepIceServersFresh } from "./ice";
 import { getIceServersFn, reportIceFn } from "./ice.functions";
 import { Mesh, type PeerQuality, type PeerState } from "./mesh";
+import { QualityReporter, sampleWindowMs } from "./quality-telemetry";
+import { reportQualityFn } from "./quality-telemetry.functions";
 import type { MediaSlot, RoomParticipant } from "./realtime";
 import { getRealtimeClient } from "./realtime-client";
 import { speakingContext, watchSpeaking } from "./speaking";
@@ -82,12 +85,20 @@ export function useRoomMesh(
   useEffect(() => {
     if (!meId || !active || !iceReady) return;
     const client = getRealtimeClient();
+    // Every page measures the video it sends and receives and reports it, in every room (ADR 2
+    // addendum). An e2e build shortens the window.
+    const quality = new QualityReporter({
+      roomId,
+      send: (report) => reportQualityFn({ data: report }),
+    });
     const current = new Mesh({
       selfId: meId,
       // Dropped while the socket reconnects (established pairs keep their media meanwhile); the
       // Mesh keeps the descriptions that were, and sends them again on the room's next snapshot.
       send: (to, payload) => client.send({ type: "signal", to, payload }),
       iceServers: latest.current.iceServers ?? undefined,
+      onQuality: (sample) => quality.add(sample),
+      sampleWindowMs: sampleWindowMs(import.meta.env.VITE_QUALITY_WINDOW_MS),
     });
     mesh.current = current;
     const unsubscribeMesh = current.subscribe((event) => {
@@ -127,6 +138,7 @@ export function useRoomMesh(
       unsubscribeSocket();
       unsubscribeMesh();
       current.close();
+      quality.close();
       mesh.current = null;
       setRemote({});
       setStates({});

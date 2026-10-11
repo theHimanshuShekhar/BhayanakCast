@@ -72,6 +72,16 @@ export const fmtMins = (mins: number) => {
   return r ? `${h}h ${r}m` : `${h}h`;
 };
 
+/** Seconds as "0s", "45s", "4m 10s", "1h 5m" (a time spent, or how far into a session). */
+export const fmtDuration = (seconds: number) => {
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 60) return `${s}s`;
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h) return m ? `${h}h ${m}m` : `${h}h`;
+  return s % 60 ? `${m}m ${s % 60}s` : `${m}m`;
+};
+
 /** "just now", "12m ago", "3h ago", "4d ago" for an ISO timestamp in the past. */
 export const fmtAgo = (iso: string, now: number = Date.now()) => {
   const mins = Math.floor(Math.max(0, now - Date.parse(iso)) / 60_000);

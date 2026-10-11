@@ -1,7 +1,7 @@
 import type { Browser, BrowserContext, Page } from "@playwright/test";
 import { captureCap, SCREEN_DEFAULT_RUNG, SCREEN_LADDER } from "../src/lib/quality";
 import { MAX_CLIENT_MESSAGE_BYTES } from "../src/lib/realtime";
-import { signIn } from "./auth";
+import { E2E_ADMIN_DISCORD_ID, signIn } from "./auth";
 import { expect, newPage, test } from "./fixtures";
 import { createRoomOnPage, enterRoom, uniqueRoomName } from "./rooms";
 
@@ -269,6 +269,66 @@ test("a share plays with its audio for everyone, and a mod's force-stop removes 
     await expect.poll(() => liveCaptures(streamer.page)).toBe(0);
   } finally {
     for (const other of others) await other.context.close();
+  }
+});
+
+test("a share in a two-person room records quality samples the admin view shows", async ({
+  page,
+  context,
+  browser,
+  browserName,
+}) => {
+  test.setTimeout(150_000);
+  const streamerId = await signIn(context, { username: "quality.streamer" });
+  const roomName = uniqueRoomName("quality");
+  const roomId = await createRoomOnPage(page, { name: roomName, kind: "gaming" });
+  const viewer = await joinAs(browser, "quality.viewer", roomId);
+  const adminContext = await browser.newContext();
+  try {
+    await page.getByRole("button", { name: "Share screen" }).click();
+    await expect(page.getByRole("button", { name: "Stop sharing" })).toBeEnabled();
+    await expect.poll(() => screenPlays(viewer.page, streamerId), { timeout: 30_000 }).toBe(true);
+
+    await signIn(adminContext, { discordId: E2E_ADMIN_DISCORD_ID, username: "admin_jpg" });
+    const admin = await newPage(adminContext);
+    // The sender's and the receiver's first windows (8s each in this build) are reported a few
+    // seconds after they close. Open the room's quality from the live rooms table, until the
+    // pair shows up.
+    const pairs = admin.getByRole("table", { name: "quality pairs" });
+    const row = pairs.getByRole("row", { name: /quality\.streamer.*quality\.viewer/ });
+    await expect
+      .poll(
+        async () => {
+          await admin.goto("/admin");
+          await admin
+            .getByRole("button", { name: `Quality of ${roomName}` })
+            .first()
+            .click();
+          await expect(pairs).toBeVisible();
+          return row.count();
+        },
+        { timeout: 90_000, intervals: [3_000] },
+      )
+      .toBe(1);
+    await expect(row.getByRole("cell", { name: "screen", exact: true })).toBeVisible();
+    // The viewer's browser comes from their own report, and the codec from either end's.
+    await expect(row).toContainText(browserName === "chromium" ? "chrome" : "firefox");
+    await expect(row).toContainText(/video\/|AV1|VP9|VP8|H264/i);
+    await expect(row).toContainText(/1080p30|720p30|900p30|1080p45|1080p60/);
+
+    // And its timeline: the charts are there, with the numbers behind them.
+    await row.getByRole("button", { name: /^Timeline / }).click();
+    await expect(admin.getByRole("img", { name: /^Bitrate sent/ })).toBeVisible();
+    await expect(admin.getByRole("img", { name: /^Average QP/ })).toBeVisible();
+    await expect(admin.getByRole("img", { name: /^Packet loss/ })).toBeVisible();
+    await expect(admin.getByRole("img", { name: /^The sender's quality rung/ })).toBeVisible();
+    await admin.getByText("values", { exact: true }).click();
+    await expect(
+      admin.getByRole("table", { name: "timeline values" }).getByRole("row"),
+    ).not.toHaveCount(1);
+  } finally {
+    await adminContext.close();
+    await viewer.context.close();
   }
 });
 
