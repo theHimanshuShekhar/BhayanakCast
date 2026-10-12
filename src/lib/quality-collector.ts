@@ -71,12 +71,18 @@ export interface QualityCollectorOptions {
   windowMs?: number;
   /** Epoch milliseconds, for when a row ended. */
   now?: () => number;
+  /**
+   * When the sender of stream `id` started (epoch milliseconds), if it is known: its rows say how
+   * long after that they ended (`sinceStartMs`). A receiver's stream has none.
+   */
+  startedAt?: (id: StreamId) => number | undefined;
 }
 
 export class QualityCollector {
   readonly #emit: (sample: PendingSample) => void;
   readonly #windowMs: number;
   readonly #now: () => number;
+  readonly #startedAt: (id: StreamId) => number | undefined;
   readonly #streams = new Map<string, Stream>();
   /** Per peer and slot, whether they share it. Everything counts as shared until said. */
   readonly #shares = new Map<string, Map<QualitySlot, Share>>();
@@ -85,6 +91,7 @@ export class QualityCollector {
     this.#emit = options.emit;
     this.#windowMs = options.windowMs ?? SAMPLE_WINDOW_MS;
     this.#now = options.now ?? Date.now;
+    this.#startedAt = options.startedAt ?? (() => undefined);
   }
 
   /** Take `reading` of the stream `id` (a sender's, with the `rung` it is on). */
@@ -177,6 +184,8 @@ export class QualityCollector {
   #close(stream: Stream, change?: { to: string; reason: RungReason }, next?: StreamReading): void {
     const { id } = stream;
     const summary = stream.window.summarise();
+    const startedAt = id.direction === "send" ? this.#startedAt(id) : undefined;
+    const endedAt = this.#now();
     // A receiver that never got anything (a camera never shown, a share not begun: its
     // transceiver exists from the first negotiation) has no traffic to report. One that did and
     // now gets none has stalled, which is a row with a bitrate of 0. A window with no time in it
@@ -192,7 +201,8 @@ export class QualityCollector {
         toRung: change?.to ?? null,
         reason: change?.reason ?? null,
         maxBitrate: stream.rung?.maxBitrate ?? null,
-        endedAt: this.#now(),
+        sinceStartMs: startedAt === undefined ? null : Math.max(0, Math.round(endedAt - startedAt)),
+        endedAt,
       });
     }
     stream.window = new SampleWindow(next ?? stream.window.latest);

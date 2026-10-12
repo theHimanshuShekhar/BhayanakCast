@@ -38,6 +38,12 @@ export const qualitySamples = pgTable(
     at: timestamp("at", { withTimezone: true }).notNull(),
     /** The window's length, milliseconds. */
     windowMs: integer("window_ms").notNull(),
+    /**
+     * A `send` row: how long after its sender started (a new share, or a new viewer of one) the
+     * window ended, in milliseconds. Null for `recv` rows and rows from before it was recorded.
+     * The first stable step's time is read from it (`settledOf`, src/lib/quality-admin.ts).
+     */
+    sinceStartMs: integer("since_start_ms"),
     /** Who measured it, and the other end: for `send` rows the viewer, for `recv` the streamer. */
     reporterUserId: text("reporter_user_id").notNull(),
     peerUserId: text("peer_user_id").notNull(),

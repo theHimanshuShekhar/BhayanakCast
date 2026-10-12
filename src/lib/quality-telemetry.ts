@@ -36,6 +36,8 @@ export function sampleWindowMs(configured: unknown): number {
 
 /** The longest window a row may claim: a background tab's timers are throttled to a crawl. */
 export const MAX_WINDOW_MS = 10 * 60_000;
+/** The longest a share may have run when a row says so: a week, far past any session. */
+export const MAX_SINCE_START_MS = 7 * 24 * 3_600_000;
 /** Rows in one report: a full room's worth of senders and receivers, and some rung changes. */
 export const QUALITY_BATCH_MAX = 64;
 /** The oldest a row may be when it is reported. */
@@ -74,6 +76,12 @@ export const qualitySample = z
     direction: z.enum(QUALITY_DIRECTIONS),
     trigger: z.enum(QUALITY_TRIGGERS),
     windowMs: z.number().int().min(0).max(MAX_WINDOW_MS),
+    /**
+     * A sender's rows: how long after its sender started (a new share, or a new viewer of one)
+     * the window ended, which says how long the pair took to settle (ADR 2 addendum). Null when
+     * unknown, and for receivers; absent from an older page's rows.
+     */
+    sinceStartMs: z.number().int().min(0).max(MAX_SINCE_START_MS).nullable().default(null),
     /** The sender's rung over the window (its rung before the change, for `rung` rows). */
     rung: rungLabel.nullable(),
     toRung: rungLabel.nullable(),
@@ -119,7 +127,13 @@ export const qualitySample = z
         (s.trigger === "rung" ? s.toRung !== null && s.reason !== null : !changed)
       );
     }
-    return s.trigger === "window" && s.rung === null && s.maxBitrate === null && !changed;
+    return (
+      s.trigger === "window" &&
+      s.rung === null &&
+      s.maxBitrate === null &&
+      s.sinceStartMs === null &&
+      !changed
+    );
   }, "a rung and its change belong to sent rows only");
 export type QualitySample = z.infer<typeof qualitySample>;
 

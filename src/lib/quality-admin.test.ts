@@ -15,6 +15,8 @@ const sent = (seconds: number, extra: Partial<QualityRow> = {}): QualityRow => (
   slot: "screen",
   trigger: "window",
   windowMs: 30_000,
+  // The share started at T0, so a row ends as long after its start as it is into the session.
+  sinceStartMs: seconds * 1_000,
   browser: "chrome",
   browserMajor: 139,
   rung: "1080p30",
@@ -45,6 +47,7 @@ const received = (seconds: number, extra: Partial<QualityRow> = {}): QualityRow 
     browserMajor: 142,
     rung: null,
     maxBitrate: null,
+    sinceStartMs: null,
     targetBitrate: null,
     qp: 36,
     loss: 0.03,
@@ -103,6 +106,86 @@ describe("aggregatePairs", () => {
       { rung: "1080p30", seconds: 40 },
     ]);
     expect(pairs[0]?.rungChanges).toBe(1);
+  });
+
+  describe("the time a pair takes to settle", () => {
+    /** A step change at `seconds` into the share, which ended a window of `windowMs`. */
+    const changed = (seconds: number, windowMs: number, to = "900p30") =>
+      sent(seconds, { trigger: "rung", windowMs, toRung: to, rungReason: "pressure" });
+    const settled = (...rows: QualityRow[]) => aggregatePairs(rows)[0]?.settledSeconds;
+
+    it("is 0 for a pair whose first window had no step change: it stayed on the step it started on", () => {
+      expect(settled(sent(28, { windowMs: 28_000 }), sent(56, { windowMs: 28_000 }))).toBe(0);
+    });
+
+    it("is when the last step change before the first window without one happened", () => {
+      // Changes 8 s and 14 s in, then a whole window with none: it settled at 14 s.
+      expect(
+        settled(
+          changed(8, 8_000),
+          changed(14, 6_000, "720p30"),
+          sent(42, { windowMs: 28_000, rung: "720p30" }),
+        ),
+      ).toBe(14);
+    });
+
+    it("is read from the sender's own time since the share started, not from the rows' dates", () => {
+      // The rows reached the server long after the share began (earlier reports were lost):
+      // only what each row says of its time since the start counts.
+      const later = { at: new Date(T0 + 900_000) };
+      expect(
+        settled(
+          sent(0, { ...later, trigger: "rung", windowMs: 10_000, sinceStartMs: 110_000 }),
+          sent(0, { ...later, windowMs: 28_000, sinceStartMs: 138_000 }),
+        ),
+      ).toBe(110);
+    });
+
+    it("is not known until a window without a change has closed", () => {
+      expect(settled(changed(8, 8_000), changed(14, 6_000))).toBeNull();
+      expect(settled(received(30), received(60))).toBeNull();
+    });
+
+    it("is not known for rows that do not say when the share started", () => {
+      expect(settled(sent(28, { windowMs: 28_000, sinceStartMs: null }))).toBeNull();
+      expect(
+        settled(changed(8, 8_000), sent(40, { windowMs: 28_000, sinceStartMs: null })),
+      ).toBeNull();
+    });
+
+    it("skips a window that a codec change cut short: that is not a spell on one step run out", () => {
+      // A 3 s window ends where the codec went from VP9 to AV1 (the next row is AV1's). The pair
+      // had not held its step for a window: it settled where the next, whole window began.
+      expect(
+        settled(
+          changed(9, 9_000),
+          sent(12, { windowMs: 3_000, codec: "video/VP9" }),
+          { ...changed(20, 8_000), codec: "video/AV1" },
+          sent(48, { windowMs: 28_000, codec: "video/AV1" }),
+        ),
+      ).toBe(20);
+      // Without a change of codec after it, the same short window is the stable spell.
+      expect(settled(changed(9, 9_000), sent(12, { windowMs: 3_000, codec: "video/VP9" }))).toBe(9);
+      // A codec the row doesn't name never marks a cut.
+      expect(
+        settled(sent(12, { windowMs: 3_000, codec: null }), sent(40, { codec: "video/AV1" })),
+      ).toBe(0);
+    });
+
+    it("is the first settling only: a later change does not move it", () => {
+      expect(
+        settled(
+          sent(28, { windowMs: 28_000 }),
+          changed(40, 12_000),
+          sent(68, { windowMs: 28_000, rung: "900p30" }),
+        ),
+      ).toBe(0);
+    });
+
+    it("is read from the sender's rows only", () => {
+      expect(settled(sent(28, { windowMs: 28_000 }), received(28, { windowMs: 28_000 }))).toBe(0);
+      expect(settled(received(28, { windowMs: 28_000 }))).toBeNull();
+    });
   });
 
   it("weighs averages by window length, and takes loss from the receiver and QP from the sender", () => {

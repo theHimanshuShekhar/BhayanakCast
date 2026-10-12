@@ -50,6 +50,8 @@ export interface QualityRow {
   slot: QualitySlot;
   trigger: QualityTrigger;
   windowMs: number;
+  /** How long after its sender started the row's window ended; null for a receiver's rows. */
+  sinceStartMs: number | null;
   browser: string;
   browserMajor: number | null;
   rung: string | null;
@@ -107,6 +109,12 @@ export interface QualityPair {
   freezeSeconds: number | null;
   /** Set when the pair was starved (see `STARVED_RATIO`): on which rung, for what share of the time. */
   starved: { rung: string; share: number } | null;
+  /**
+   * Seconds from the sender's start to its first stable step: when its last step change before the
+   * first window without one happened (0 if it never changed before one). Null until such a
+   * window has closed, and for a sender that does not say when it started (see `settledOf`).
+   */
+  settledSeconds: number | null;
   /** Rung changes the sender reported. */
   rungChanges: number;
   /** First and last report, ISO timestamps. */
@@ -200,6 +208,34 @@ function pathOf(rows: readonly QualityRow[]): QualityPath | null {
   };
 }
 
+/**
+ * When a pair settled (ADR 2 addendum): the first window of the sender's with no step change in it
+ * is the first stable spell, and the pair settled where it began, at the time of the last step
+ * change before it, or at its start if there was none. A row's `sinceStartMs` is when it ended,
+ * and a step change ends the window it is in, so no window ever spans one. Null while no such
+ * window has closed (not counting one a codec change cut short: `cutByCodec`), and for rows that
+ * do not say when the sender started. `sent` is in time order. It is the pair's first settling in the room: a share that ended before it settled and
+ * began again leaves its changes in the count, and a pair that reports several shares shows the
+ * first.
+ */
+export function settledOf(sent: readonly QualityRow[]): number | null {
+  let lastChange = 0;
+  for (const [i, row] of sent.entries()) {
+    if (row.sinceStartMs === null) return null;
+    if (row.trigger === "rung") lastChange = row.sinceStartMs;
+    else if (row.windowMs > 0 && !cutByCodec(row, sent[i + 1])) return lastChange / 1_000;
+  }
+  return null;
+}
+
+/**
+ * Whether the window `row` was closed early by a codec change rather than run out: the sender's
+ * next row names another codec. Such a window is no spell on one step (the collector ends a
+ * window where the codec changes, so that its QP is of one codec).
+ */
+const cutByCodec = (row: QualityRow, next: QualityRow | undefined): boolean =>
+  row.codec !== null && next?.codec != null && next.codec !== row.codec;
+
 function starvedOf(sent: readonly QualityRow[]): QualityPair["starved"] {
   // The step it started on: the first one it reported (rows are in time order).
   const started = sent.find((row) => row.rung !== null && row.maxBitrate !== null)?.maxBitrate;
@@ -283,6 +319,7 @@ export function aggregatePairs(rows: readonly QualityRow[]): QualityPair[] {
       freezes: total(received, (r) => r.freezes),
       freezeSeconds: total(received, (r) => r.freezeSeconds),
       starved: starvedOf(sent),
+      settledSeconds: settledOf(sent),
       rungChanges: sent.filter((r) => r.trigger === "rung").length,
       firstAt: first.at.toISOString(),
       lastAt: last.at.toISOString(),

@@ -433,6 +433,26 @@ test("a share in a two-person room records quality samples the admin view shows"
       )
       .toBe(1);
     await expect(row.getByRole("cell", { name: "screen", exact: true })).toBeVisible();
+    // How long the pair took to reach its first stable step: known once the sender's first window
+    // without a step change has closed and been reported ("settled in", ADR 2 addendum).
+    await expect(pairs.getByRole("columnheader", { name: "settled in" })).toBeVisible();
+    await expect
+      .poll(
+        async () => {
+          await admin.goto("/admin");
+          await admin
+            .getByRole("button", { name: `Quality of ${roomName}` })
+            .first()
+            .click();
+          await expect(pairs).toBeVisible();
+          // The cell under the "settled in" header, whichever column that is.
+          const headers = await pairs.getByRole("columnheader").allTextContents();
+          const column = headers.findIndex((header) => header.trim() === "settled in");
+          return column < 0 ? null : await row.getByRole("cell").nth(column).textContent();
+        },
+        { timeout: 90_000, intervals: [3_000] },
+      )
+      .toMatch(/^\d+(s|m)/);
     // The viewer's browser comes from their own report, and the codec from either end's.
     await expect(row).toContainText(browserName === "chromium" ? "chrome" : "firefox");
     await expect(row).toContainText(/video\/|AV1|VP9|VP8|H264/i);
@@ -450,6 +470,80 @@ test("a share in a two-person room records quality samples the admin view shows"
     ).not.toHaveCount(1);
   } finally {
     await adminContext.close();
+    await viewer.context.close();
+  }
+});
+
+/**
+ * In every page of `context`, record the text of each remote description its connections apply,
+ * in `__remoteSdps`, as the browser took it (a description it refused would have thrown).
+ */
+async function recordRemoteDescriptions(context: BrowserContext) {
+  await context.addInitScript(() => {
+    const w = window as unknown as { __remoteSdps: string[] };
+    w.__remoteSdps = [];
+    const set = RTCPeerConnection.prototype.setRemoteDescription as (
+      this: RTCPeerConnection,
+      description?: RTCSessionDescriptionInit,
+    ) => Promise<void>;
+    RTCPeerConnection.prototype.setRemoteDescription = async function (description) {
+      await set.call(this, description);
+      w.__remoteSdps.push(description?.sdp ?? "");
+    };
+  });
+}
+
+// The bandwidth estimate itself is not asserted. On localhost it reaches the share's bitrate in
+// under a second without a seed too, a seeded reading lasts only a few dozen milliseconds, and one
+// taken a moment later can race it (measured by hand in Chromium 153: ADR 2 addendum). What is
+// exact, and what the unit tests can't show, is that the real browser takes the munged
+// description, and which side's description carries the hint.
+test("a viewer joining a live share seeds the sender's bandwidth estimate, only where it can hold", async ({
+  page,
+  context,
+  browser,
+  browserName,
+}) => {
+  test.skip(browserName !== "chromium", "Firefox ignores the start bitrate hint");
+  test.setTimeout(150_000);
+  await instrument(context);
+  await recordRemoteDescriptions(context);
+  const streamerId = await signIn(context, { username: "share.seed" });
+  const roomId = await createRoomOnPage(page, {
+    name: uniqueRoomName("share seed"),
+    kind: "gaming",
+  });
+  // The share is on before anyone else is there, so the viewer's connection starts with it.
+  await page.getByRole("button", { name: "Share screen" }).click();
+  await expect(page.getByRole("button", { name: "Stop sharing" })).toBeEnabled();
+  const viewer = await joinAs(browser, "share.seedviewer", roomId);
+  try {
+    await expect.poll(() => screenPlays(viewer.page, streamerId), { timeout: 30_000 }).toBe(true);
+    // The only viewer is entitled to the whole budget, so the pair starts on the top step.
+    const { capture } = await screenEncodings(page);
+    const top = screenSteps(capture, "size").at(-1);
+    const seed = Math.round(((top?.maxBitrate ?? 0) * 0.9) / 1_000);
+    expect(seed).toBeGreaterThan(1_000);
+    const remote = await page.evaluate(
+      () => (window as unknown as { __remoteSdps: string[] }).__remoteSdps,
+    );
+    const hinted = remote.filter((sdp) => sdp.includes("x-google-start-bitrate="));
+    // The side with the greater id is impolite: it offers first, with its screen in the offer,
+    // and its first remote description is the viewer's answer to it. The polite side answers
+    // first and sends in an offer of its own once ICE is connecting, which a seed would reset
+    // rather than set (`Mesh#forSenders`): it asks for none.
+    if (streamerId > viewer.userId) {
+      expect(hinted).toHaveLength(1);
+      expect(remote.indexOf(hinted[0] as string)).toBe(0);
+      expect(hinted[0]).toContain(`x-google-start-bitrate=${seed}`);
+      // On every video codec of the screen's section, and in no other.
+      expect(hinted[0]?.match(/x-google-start-bitrate=/g)?.length).toBeGreaterThanOrEqual(2);
+      const sections = hinted[0]?.split(/\r\n(?=m=)/) ?? [];
+      expect(sections.filter((m) => m.includes("x-google-start-bitrate="))).toHaveLength(1);
+    } else {
+      expect(hinted).toHaveLength(0);
+    }
+  } finally {
     await viewer.context.close();
   }
 });

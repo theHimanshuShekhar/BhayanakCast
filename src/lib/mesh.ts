@@ -51,7 +51,8 @@
  * A screen share is tuned as its track says (ADR 2 addendum): the sender's degradation
  * preference follows the screen track's `contentHint`, and share audio goes as stereo Opus at
  * `SHARE_AUDIO_BITRATE` (asked for in the Opus parameters of the remote descriptions this side
- * applies, which is where browsers take them from).
+ * applies, which is where browsers take them from). The screen's bandwidth estimate is seeded
+ * the same way, in the first remote description a connection applies (`withStartBitrate`).
  *
  * Video is adaptive and per pair (ADR 2). `adjust` (run every `QUALITY_INTERVAL_MS`) reads each
  * screen and camera sender's stats and moves it along its quality ladder (./quality.ts: a
@@ -77,12 +78,15 @@ import {
   type Claim,
   carryOver,
   DOWN_SAMPLES,
+  FIRST_MINUTE_MS,
   feeds60,
   fitRung,
   freshLadderState,
   heightCap,
   INITIAL_UPLINK,
   type LadderState,
+  type Pace,
+  paceOf,
   pairCeilings,
   probeClaim,
   probeDue,
@@ -90,6 +94,7 @@ import {
   readSample,
   type StatsSample,
   screenSteps,
+  seedBitrate,
   shedFirst,
   step,
   strained,
@@ -169,8 +174,6 @@ export type MeshEvent =
 export const QUALITY_INTERVAL_MS = 4_000;
 /** A reading older than two quality passes no longer says what a sender sends. */
 const STALE_READING_MS = 2 * QUALITY_INTERVAL_MS;
-/** Readings ignored after a sender starts: the bandwidth estimate is still ramping up. */
-const WARMUP_READINGS = 2;
 
 /** What the dev overlay shows of one video sender to one peer. */
 export interface SlotQuality {
@@ -269,6 +272,8 @@ export interface MeshOptions {
   onQuality?: (sample: PendingSample) => void;
   /** How long a telemetry window runs. Defaults to `SAMPLE_WINDOW_MS`. */
   sampleWindowMs?: number;
+  /** How long a sender's first minute lasts (`paceOf`). Defaults to `FIRST_MINUTE_MS`. For tests. */
+  firstMinuteMs?: number;
   /** For tests. */
   RTCPeerConnection?: typeof RTCPeerConnection;
 }
@@ -361,20 +366,36 @@ export function isSameOffer(sdp: string | undefined, previous: string | undefine
 }
 
 /**
- * `sdp` with stereo Opus at `SHARE_AUDIO_BITRATE` in the m-sections whose mid is in `mids`
- * (this side's share audio): a sender encodes what the other side's description asks for.
+ * `sdp` with `edit` applied, in place, to the lines of each m-section whose mid is in `mids`
+ * (the other sections, and the session part, are left as they are).
  */
-export function withStereoOpus(sdp: string, mids: ReadonlySet<string>): string {
+function editSections(
+  sdp: string,
+  mids: ReadonlySet<string>,
+  edit: (lines: string[]) => void,
+): string {
   if (mids.size === 0) return sdp;
   const [session = "", ...media] = sdp.split(/\r\n(?=m=)/);
   const sections = media.map((section) => {
     const lines = section.split("\r\n");
     const mid = lines.find((line) => line.startsWith("a=mid:"))?.slice("a=mid:".length);
     if (mid === undefined || !mids.has(mid)) return section;
+    edit(lines);
+    return lines.join("\r\n");
+  });
+  return [session, ...sections].join("\r\n");
+}
+
+/**
+ * `sdp` with stereo Opus at `SHARE_AUDIO_BITRATE` in the m-sections whose mid is in `mids`
+ * (this side's share audio): a sender encodes what the other side's description asks for.
+ */
+export function withStereoOpus(sdp: string, mids: ReadonlySet<string>): string {
+  return editSections(sdp, mids, (lines) => {
     const opus = lines
       .map((line) => /^a=rtpmap:(\d+) opus\/48000/i.exec(line)?.[1])
       .find((pt) => pt !== undefined);
-    if (opus === undefined) return section;
+    if (opus === undefined) return;
     const wanted = `stereo=1;maxaveragebitrate=${SHARE_AUDIO_BITRATE}`;
     const fmtp = `a=fmtp:${opus} `;
     const at = lines.findIndex((line) => line.startsWith(fmtp));
@@ -391,9 +412,52 @@ export function withStereoOpus(sdp: string, mids: ReadonlySet<string>): string {
         .filter((param) => param && !/^(stereo|maxaveragebitrate)=/.test(param.trim()));
       lines[at] = fmtp + [...kept, wanted].join(";");
     }
-    return lines.join("\r\n");
   });
-  return [session, ...sections].join("\r\n");
+}
+
+/** Video codecs that carry media; the others in a video m-section (rtx, red, ulpfec) repair it. */
+const MEDIA_CODEC = /^a=rtpmap:(\d+) (?:VP8|VP9|AV1|H264|H265)\//i;
+
+/**
+ * `sdp` with Chromium's `x-google-start-bitrate` (`bitrate` bits per second, written in kbps)
+ * on every video codec of the m-sections whose mid is in `mids` (this side's screen): the
+ * sender's bandwidth estimate starts there instead of at 300 kbps. Like `withStereoOpus` it is
+ * for the remote description this side applies, because a sender's encoder and estimate are
+ * configured from what the other side's description asks for. Firefox ignores the parameter.
+ *
+ * The value applies to the whole connection (it feeds the connection's estimate, not one
+ * stream's), and in this mesh a connection is one pair. LiveKit seeds its estimate the same way
+ * (client-sdk-android PR #973, https://github.com/livekit/client-sdk-android/pull/973).
+ *
+ * Existing parameters are kept and the key is never doubled: a codec's old value is replaced.
+ * A codec with no fmtp line gets one (VP8 has none in Chromium, and may be the one in use);
+ * retransmission and redundancy formats are left alone.
+ */
+export function withStartBitrate(sdp: string, mids: ReadonlySet<string>, bitrate: number): string {
+  const kbps = Math.floor(bitrate / 1_000);
+  if (!(kbps > 0)) return sdp;
+  return editSections(sdp, mids, (lines) => {
+    if (!lines[0]?.startsWith("m=video ")) return;
+    const wanted = `x-google-start-bitrate=${kbps}`;
+    const codecs = lines.flatMap((line) => MEDIA_CODEC.exec(line)?.[1] ?? []);
+    for (const pt of codecs) {
+      const fmtp = `a=fmtp:${pt} `;
+      const at = lines.findIndex((line) => line.startsWith(fmtp));
+      if (at === -1) {
+        lines.splice(
+          lines.findIndex((line) => line.startsWith(`a=rtpmap:${pt} `)) + 1,
+          0,
+          fmtp + wanted,
+        );
+      } else {
+        const kept = (lines[at] as string)
+          .slice(fmtp.length)
+          .split(";")
+          .filter((param) => param && !param.trim().startsWith("x-google-start-bitrate="));
+        lines[at] = fmtp + [...kept, wanted].join(";");
+      }
+    }
+  });
 }
 
 const newSession = () => Math.random().toString(36).slice(2, 12);
@@ -415,6 +479,12 @@ interface Adaptation extends LadderState {
   sixty?: boolean;
   /** Readings taken since it started, warm-up included. */
   readings: number;
+  /**
+   * When the sender started (epoch ms): a new share, or a new viewer of one. A first minute from
+   * here paces the controller faster (`paceOf`). Steps built again, a probe or a step down leave
+   * it alone.
+   */
+  startedAt: number;
   /** The latest reading (the next one's `sendBitrate` is measured from it). */
   last?: StatsSample;
   codec?: string;
@@ -479,6 +549,7 @@ export class Mesh {
   readonly #log: (message: string, error?: unknown) => void;
   readonly #RTCPeerConnection: typeof RTCPeerConnection;
   readonly #codecs: VideoCodecs | undefined;
+  readonly #firstMinuteMs: number;
   /** What all the video senders' targets may add up to (their sum is `#committed`). */
   readonly #budget: UplinkBudget;
   /** What `setParameters` last gave each screen sender, for browsers that don't report it. */
@@ -506,11 +577,13 @@ export class Mesh {
     this.#log = options.log ?? ((message, error) => console.warn(`[mesh] ${message}`, error));
     this.#RTCPeerConnection = options.RTCPeerConnection ?? RTCPeerConnection;
     this.#codecs = options.codecs ?? localVideoCodecs();
+    this.#firstMinuteMs = options.firstMinuteMs ?? FIRST_MINUTE_MS;
     this.#budget = new UplinkBudget(options.uplink ?? INITIAL_UPLINK);
     if (options.onQuality) {
       this.#telemetry = new QualityCollector({
         emit: options.onQuality,
         windowMs: options.sampleWindowMs,
+        startedAt: ({ peerId, slot }) => this.#links.get(peerId)?.quality[slot]?.startedAt,
       });
     }
   }
@@ -979,6 +1052,13 @@ export class Mesh {
     if (degradationPreference) this.#degradation.set(sender, degradationPreference);
   }
 
+  /** The step a new or resumed `slot` sender starts on: the highest its allowance and capture leave it. */
+  #startRung(link: Link, slot: VideoSlot, track: MediaStreamTrack, steps: readonly Rung[]): number {
+    const policy = SLOTS[slot];
+    const top = Math.min(policy.start(steps), policy.cap(track, steps));
+    return fitRung(steps, this.#allowance(link, slot), top);
+  }
+
   /**
    * `slot`'s ladder state for `link`. A new sender starts at the highest step that its allowance
    * (its pair's ceiling and the room in the budget) and its capture leave it. A screen whose
@@ -992,9 +1072,13 @@ export class Mesh {
     let state = link.quality[slot];
     const built = policy.steps(track, state?.sixty);
     if (!state) {
-      const top = Math.min(policy.start(built.steps), policy.cap(track, built.steps));
-      const rung = fitRung(built.steps, this.#allowance(link, slot), top);
-      state = { ...freshLadderState(rung), ...built, readings: 0 };
+      const rung = this.#startRung(link, slot, track, built.steps);
+      state = {
+        ...freshLadderState(rung),
+        ...built,
+        readings: 0,
+        startedAt: Date.now(),
+      };
       link.quality[slot] = state;
     } else if (!sameSteps(state.steps, built.steps)) {
       const from = stepOf(state);
@@ -1097,6 +1181,16 @@ export class Mesh {
     return total;
   }
 
+  /**
+   * How patient the controller is with `slot`'s `state` now: faster in a screen's first minute.
+   * A camera keeps the normal pace.
+   */
+  #pace(slot: VideoSlot, state: Adaptation): Pace {
+    return slot === "screen"
+      ? paceOf(Date.now() - state.startedAt, this.#firstMinuteMs)
+      : paceOf(Number.POSITIVE_INFINITY);
+  }
+
   /** The pair's connection is up, so its senders are read (and can probe). */
   #live(link: Link): boolean {
     return link.state === "connected" || link.state === "relayed";
@@ -1114,7 +1208,11 @@ export class Mesh {
       const canProbe = other.state.rung < SLOTS[slot].cap(track, other.state.steps);
       if (
         canProbe &&
-        probeDue(other.state.window, other.state.backoff) &&
+        probeDue(
+          other.state.window,
+          other.state.backoff,
+          this.#pace(slot, other.state).upSamples,
+        ) &&
         other.state.rung < state.rung
       ) {
         return false;
@@ -1317,10 +1415,11 @@ export class Mesh {
       }
       if (sample.codec) state.codec = sample.codec;
       state.last = sample;
-      if (state.readings++ >= WARMUP_READINGS) {
+      const pace = this.#pace(slot, state);
+      if (state.readings++ >= pace.warmup) {
         reading.strained = (reading.strained ?? false) || strained(sample);
         const max = SLOTS[slot].cap(track, state.steps);
-        const options = { max, reserved: this.#reservedFor(link, slot) };
+        const options = { max, reserved: this.#reservedFor(link, slot), upSamples: pace.upSamples };
         let next = step(state.steps, state, sample, options);
         // A probe the budget refuses is no probe: the window carries on as it was.
         if (next.rung > state.rung && !this.#admit(link, slot, state, next.rung)) {
@@ -1573,11 +1672,7 @@ export class Mesh {
     const collision = offer && (link.makingOffer || pc.signalingState !== "stable");
     link.ignoreOffer = !link.polite && collision;
     if (link.ignoreOffer) return;
-    const shareAudio = link.own.get("screenAudio")?.mid;
-    const sdp =
-      description.sdp && shareAudio
-        ? withStereoOpus(description.sdp, new Set([shareAudio]))
-        : description.sdp;
+    const sdp = this.#forSenders(link, description.sdp);
     // A polite side's own pending offer is rolled back implicitly.
     await pc.setRemoteDescription({ type: description.type, sdp });
     link.remoteSdp = description.sdp;
@@ -1593,6 +1688,40 @@ export class Mesh {
       // The polite side's own transceivers: negotiated next, from a stable state.
       this.#start(link);
     }
+  }
+
+  /**
+   * `sdp`, a description this side applies, with what its senders should encode for the other
+   * side's sake (a sender is configured from the remote description): stereo Opus for share
+   * audio, and the bandwidth estimate the screen starts at (`seedBitrate`, from the step the pair
+   * starts on and its ceiling). The camera is left as it is. It only reads: no ladder state is
+   * made or changed here, so applying a description has no side effects of its own.
+   *
+   * The seed goes only into the first remote description a connection applies, which is what
+   * starts its estimate. Measured in Chromium 153 (ADR 2 addendum): there the estimate starts at
+   * the seed and holds. In any later description (a share added to a live pair, or the polite
+   * side's own offer, which follows its answer as ICE connects) it resets an estimate that is
+   * running, which then often collapses to a few hundred kbps and takes tens of seconds to recover,
+   * where without a seed it reaches the bitrate in under a second. So a pair is seeded once, and
+   * only if the screen is in the negotiation that sets it up (the side that offers first, with
+   * the share already on when the viewer arrives), and the value is never changed.
+   */
+  #forSenders(link: Link, sdp: string | undefined): string | undefined {
+    if (!sdp) return sdp;
+    const shareAudio = link.own.get("screenAudio")?.mid;
+    const stereo = shareAudio ? withStereoOpus(sdp, new Set([shareAudio])) : sdp;
+    const screen = link.own.get("screen");
+    const track = screen?.sender.track;
+    if (link.pc.remoteDescription || !screen?.mid || !track) return stereo;
+    // The step this pair starts on (the one it is on, if it has begun), and no more than its
+    // ceiling. Nothing is created or changed here: the ladder state is made when the sender is tuned.
+    const state = link.quality.screen;
+    const { steps } = SLOTS.screen.steps(track, state?.sixty);
+    const start = state
+      ? stepOf(state)
+      : (steps[this.#startRung(link, "screen", track, steps)] as Rung);
+    const seed = seedBitrate(start.maxBitrate, this.#viewerCeilings(link).get(link));
+    return withStartBitrate(stereo, new Set([screen.mid]), seed);
   }
 
   /** Send `link`'s local description; if `send` drops it, it waits for `resend`. */

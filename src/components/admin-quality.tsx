@@ -255,7 +255,7 @@ export const RoomQualityPanel = ({ roomId }: { roomId: string }) => {
         {data.truncated && <MonoCaps>first {MAX_ROOM_SAMPLES} samples only</MonoCaps>}
       </div>
       <div className="overflow-x-auto">
-        <table aria-label="quality pairs" className="w-full min-w-[980px] border-collapse text-xs">
+        <table aria-label="quality pairs" className="w-full min-w-[1060px] border-collapse text-xs">
           <thead>
             <tr>
               <th className={th}>streamer</th>
@@ -265,6 +265,12 @@ export const RoomQualityPanel = ({ roomId }: { roomId: string }) => {
               <th className={th}>codec</th>
               <th className={th}>path</th>
               <th className={th}>time on rung</th>
+              <th
+                className={`${th} !text-right`}
+                title="How long after the share (or the viewer) started the pair reached its first stable step: the time of its last step change before the first window with none. 0s if it stayed on the step it started on; a dash until such a window has closed"
+              >
+                settled in
+              </th>
               <th
                 className={`${th} !text-right`}
                 title="Average QP over the windows on the pair's latest codec only: QP isn't comparable across codecs"
@@ -297,7 +303,7 @@ export const RoomQualityPanel = ({ roomId }: { roomId: string }) => {
             })}
             {data.pairs.length === 0 && (
               <tr>
-                <td colSpan={13} className="text-center p-7 text-subtle text-[11.5px]">
+                <td colSpan={14} className="text-center p-7 text-subtle text-[11.5px]">
                   no samples for this room
                 </td>
               </tr>
@@ -337,6 +343,9 @@ const PairRows = ({
       <td className={td}>
         <RungTimes pair={pair} />
       </td>
+      <td className={`${td} text-right whitespace-nowrap`}>
+        {pair.settledSeconds === null ? dash : fmtDuration(pair.settledSeconds)}
+      </td>
       <td className={`${td} text-right`}>{pair.qp === null ? dash : pair.qp.toFixed(1)}</td>
       <td className={`${td} text-right`}>{pair.loss === null ? dash : fmtPercent(pair.loss)}</td>
       <td className={`${td} text-right whitespace-nowrap`}>
@@ -358,7 +367,7 @@ const PairRows = ({
     </tr>
     {open && (
       <tr>
-        <td colSpan={13} className="px-3.5 py-3 border-b border-border-subtle bg-canvas">
+        <td colSpan={14} className="px-3.5 py-3 border-b border-border-subtle bg-canvas">
           <PairCharts roomId={roomId} pair={pair} />
         </td>
       </tr>

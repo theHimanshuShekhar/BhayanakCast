@@ -63,6 +63,7 @@ const sample = (peerId: string, extra: Partial<QualitySample> = {}): QualitySamp
   direction: "send",
   trigger: "window",
   windowMs: 30_000,
+  sinceStartMs: null,
   rung: "1080p30",
   toRung: null,
   reason: null,
@@ -129,6 +130,16 @@ describe("reporting quality samples", () => {
       remoteCandidate: "srflx",
     });
     expect(row?.at).toEqual(new Date(T0.getTime() - 4_000));
+  });
+
+  it("stores how long after its sender started a row ended, and null for a page that didn't say", async () => {
+    const { sinceStartMs: _, ...older } = sample("bo");
+    await service.record(
+      asUser("ana"),
+      report([sample("bo", { sinceStartMs: 12_500 }), older as QualitySample]),
+      CHROME,
+    );
+    expect((await stored()).map((row) => row.sinceStartMs).sort()).toEqual([12_500, null]);
   });
 
   it("keeps a stat a browser lacked null, not 0", async () => {

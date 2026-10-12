@@ -377,6 +377,7 @@ const row = (extra: Partial<QualitySample> = {}): QualitySample => ({
   direction: "send",
   trigger: "window",
   windowMs: 30_000,
+  sinceStartMs: null,
   rung: "1080p30",
   toRung: null,
   reason: null,
@@ -456,6 +457,27 @@ describe("the report schema", () => {
     expect(accepts(row({ toRung: "900p30", reason: "pressure" }))).toBe(false);
     expect(accepts(row({ rung: null }))).toBe(false);
     expect(accepts(row({ direction: "recv" }))).toBe(false);
+  });
+
+  it("takes the time since the sender started on a sent row, and none on a received one", () => {
+    expect(accepts(row({ sinceStartMs: 0 }))).toBe(true);
+    expect(
+      accepts(row({ sinceStartMs: 12_000, trigger: "rung", toRung: "900p30", reason: "probe" })),
+    ).toBe(true);
+    expect(accepts(row({ sinceStartMs: null }))).toBe(true);
+    expect(
+      accepts(row({ direction: "recv", rung: null, maxBitrate: null, sinceStartMs: 5_000 })),
+    ).toBe(false);
+    for (const bad of [-1, 1.5, 8 * 24 * 3_600_000]) {
+      expect(accepts(row({ sinceStartMs: bad })), String(bad)).toBe(false);
+    }
+  });
+
+  it("still takes a row from a page that predates the field, as if it said nothing", () => {
+    const { sinceStartMs: _, ...old } = row();
+    const parsed = reportQualityInput.safeParse(input([old]));
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.samples[0]?.sinceStartMs).toBeNull();
   });
 
   it("bounds every field", () => {
@@ -560,6 +582,53 @@ describe("QualityCollector", () => {
       maxBitrate: 2_200_000,
       windowMs: 28_000,
     });
+  });
+
+  it("says on a sender's rows how long after its sender started each window ended", () => {
+    const rows: PendingSample[] = [];
+    let now = 100_000;
+    // The sender started at 100 s; the first reading comes a pass later.
+    const c = new QualityCollector({
+      emit: (row) => rows.push(row),
+      windowMs: 30_000,
+      now: () => now,
+      startedAt: (id) => (id.direction === "send" ? 100_000 : undefined),
+    });
+    for (let s = 4; s <= 20; s += 4) {
+      now = 100_000 + s * 1_000;
+      c.observe(sender, reading(s), rung);
+    }
+    c.rungChanged(sender, { label: "900p30", maxBitrate: 2_200_000 }, "pressure");
+    for (let s = 24; s <= 56; s += 4) {
+      now = 100_000 + s * 1_000;
+      c.observe(sender, reading(s), { label: "900p30", maxBitrate: 2_200_000 });
+    }
+    expect(rows.map((r) => [r.trigger, r.sinceStartMs])).toEqual([
+      ["rung", 20_000],
+      ["window", 48_000],
+    ]);
+  });
+
+  it("leaves the time since the start null for a receiver, and for a sender it doesn't know the start of", () => {
+    const rows: PendingSample[] = [];
+    const c = new QualityCollector({
+      emit: (row) => rows.push(row),
+      windowMs: 30_000,
+      now: () => 0,
+      startedAt: () => undefined,
+    });
+    for (let s = 0; s <= 28; s += 4) {
+      c.observe(sender, reading(s), rung);
+      c.observe(receiver, reading(s));
+    }
+    expect(rows.map((r) => [r.direction, r.sinceStartMs])).toEqual([
+      ["send", null],
+      ["recv", null],
+    ]);
+    // Without the option at all, the collector says nothing of it either.
+    const bare = collector();
+    for (let s = 0; s <= 28; s += 4) bare.read(sender, s, rung);
+    expect(bare.rows[0]?.sinceStartMs).toBeNull();
   });
 
   it("has no row for a rung change of a stream not read yet", () => {
