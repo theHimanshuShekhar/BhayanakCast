@@ -10,9 +10,11 @@ import {
   type MeshOptions,
   QUALITY_INTERVAL_MS,
   SHARE_AUDIO_BITRATE,
+  withStartBitrate,
   withStereoOpus,
 } from "./mesh";
 import {
+  FIRST_MINUTE_MS,
   INITIAL_UPLINK,
   UP_SAMPLES,
   UPLINK_DROP_LIMIT,
@@ -107,6 +109,8 @@ class FakePC {
   stats = new Map<string, unknown>();
   /** How many times `restartIce()` was called. */
   iceRestarts = 0;
+  /** The text of every remote description it was given, as the Mesh gave it. */
+  readonly remoteSdps: string[] = [];
   /** Own transceivers given a mid by the pending local offer (unset again on rollback). */
   #offered: FakeTransceiver[] = [];
   #needed = false;
@@ -147,6 +151,7 @@ class FakePC {
   }
 
   async setRemoteDescription(description: RTCSessionDescriptionInit) {
+    this.remoteSdps.push(description.sdp ?? "");
     await Promise.resolve();
     if (description.type === "answer") {
       if (this.signalingState !== "have-local-offer") throw new Error("answer while not offering");
@@ -250,6 +255,9 @@ function page(
     iceServers,
     codecs,
     uplink,
+    // The tests of the controller run in no time at all: unless one says otherwise, no sender is
+    // in its first minute (`paceOf`).
+    firstMinuteMs: 0,
     ...extra,
     RTCPeerConnection: class extends FakePC {
       constructor(configuration?: RTCConfiguration) {
@@ -2080,6 +2088,438 @@ describe("withStereoOpus", () => {
     );
     expect(withStereoOpus(sdp, new Set())).toBe(sdp);
     expect(withStereoOpus(sdp, new Set(["1"]))).toBe(sdp);
+  });
+});
+
+describe("withStartBitrate", () => {
+  /** A Chromium-like description: share audio (mid 0), the screen (mid 1), a camera (mid 2). */
+  const video = (mid: string) => [
+    "m=video 9 UDP/TLS/RTP/SAVPF 96 97 98 99 100 101 102 103 104 105",
+    `a=mid:${mid}`,
+    "a=rtpmap:96 VP8/90000",
+    "a=rtcp-fb:96 goog-remb",
+    "a=rtpmap:97 rtx/90000",
+    "a=fmtp:97 apt=96",
+    "a=rtpmap:98 VP9/90000",
+    "a=fmtp:98 profile-id=0",
+    "a=rtpmap:99 rtx/90000",
+    "a=fmtp:99 apt=98",
+    "a=rtpmap:100 AV1/90000",
+    "a=fmtp:100 level-idx=5;profile=0;tier=0",
+    "a=rtpmap:101 rtx/90000",
+    "a=fmtp:101 apt=100",
+    "a=rtpmap:102 H264/90000",
+    "a=fmtp:102 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f",
+    "a=rtpmap:103 rtx/90000",
+    "a=fmtp:103 apt=102",
+    "a=rtpmap:104 red/90000",
+    "a=rtpmap:105 ulpfec/90000",
+  ];
+  const sdp = [
+    "v=0",
+    "o=- 1 2 IN IP4 127.0.0.1",
+    "m=audio 9 UDP/TLS/RTP/SAVPF 111",
+    "a=mid:0",
+    "a=rtpmap:111 opus/48000/2",
+    "a=fmtp:111 minptime=10;useinbandfec=1",
+    ...video("1"),
+    ...video("2"),
+    "",
+  ].join("\r\n");
+  const screen = new Set(["1"]);
+  const section = (text: string, mid: string) =>
+    text.split(/\r\n(?=m=)/).find((s) => s.includes(`a=mid:${mid}\r\n`)) as string;
+
+  it("asks for the start bitrate, in kbps, on each video codec of the screen's m-section", () => {
+    const out = section(withStartBitrate(sdp, screen, 5_400_000), "1");
+    expect(out).toContain("a=fmtp:98 profile-id=0;x-google-start-bitrate=5400\r\n");
+    expect(out).toContain(
+      "a=fmtp:100 level-idx=5;profile=0;tier=0;x-google-start-bitrate=5400\r\n",
+    );
+    expect(out).toContain(
+      "a=fmtp:102 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f;x-google-start-bitrate=5400\r\n",
+    );
+  });
+
+  it("gives a codec without an fmtp line one, so VP8 carries the hint too", () => {
+    expect(section(withStartBitrate(sdp, screen, 2_700_000), "1")).toContain(
+      "a=rtpmap:96 VP8/90000\r\na=fmtp:96 x-google-start-bitrate=2700\r\na=rtcp-fb:96 goog-remb\r\n",
+    );
+  });
+
+  it("leaves retransmission and redundancy formats alone", () => {
+    const out = section(withStartBitrate(sdp, screen, 5_400_000), "1");
+    for (const pt of [97, 99, 101, 103]) {
+      expect(out).toContain(`a=fmtp:${pt} apt=${pt === 97 ? 96 : pt - 1}\r\n`);
+    }
+    expect(out).not.toContain("a=fmtp:104");
+    expect(out).not.toContain("a=fmtp:105");
+    expect(out.match(/x-google-start-bitrate/g)).toHaveLength(4);
+  });
+
+  it("changes nothing outside the screen's m-section", () => {
+    const out = withStartBitrate(sdp, screen, 5_400_000);
+    expect(section(out, "0")).toBe(section(sdp, "0"));
+    expect(section(out, "2")).toBe(section(sdp, "2"));
+    expect(out.split("\r\n")[0]).toBe("v=0");
+  });
+
+  it("seeds again with a new value, never twice, and keeps every other parameter", () => {
+    const once = withStartBitrate(sdp, screen, 5_400_000);
+    const again = withStartBitrate(once, screen, 2_700_000);
+    const out = section(again, "1");
+    expect(out.match(/x-google-start-bitrate/g)).toHaveLength(4);
+    expect(out).not.toContain("5400");
+    expect(out).toContain(
+      "a=fmtp:100 level-idx=5;profile=0;tier=0;x-google-start-bitrate=2700\r\n",
+    );
+    expect(out).toContain("a=fmtp:96 x-google-start-bitrate=2700\r\n");
+    // The same value again is the same text.
+    expect(withStartBitrate(once, screen, 5_400_000)).toBe(once);
+    // A description that came with its own hint (a peer's) has it replaced, not doubled.
+    const theirs = sdp.replace(
+      "a=fmtp:98 profile-id=0",
+      "a=fmtp:98 x-google-start-bitrate=800;profile-id=0",
+    );
+    expect(section(withStartBitrate(theirs, screen, 5_400_000), "1")).toContain(
+      "a=fmtp:98 profile-id=0;x-google-start-bitrate=5400\r\n",
+    );
+  });
+
+  it("does nothing without a screen m-section or a positive value, and ignores non-video ones", () => {
+    expect(withStartBitrate(sdp, new Set(), 5_400_000)).toBe(sdp);
+    expect(withStartBitrate(sdp, new Set(["9"]), 5_400_000)).toBe(sdp);
+    expect(withStartBitrate(sdp, screen, 0)).toBe(sdp);
+    expect(withStartBitrate(sdp, screen, Number.NaN)).toBe(sdp);
+    // Opus in an audio m-section is not a video codec, whatever mid was asked for.
+    expect(withStartBitrate(sdp, new Set(["0"]), 5_400_000)).toBe(sdp);
+  });
+
+  it("rounds down to whole kbps", () => {
+    expect(section(withStartBitrate(sdp, screen, 2_700_900), "1")).toContain(
+      "x-google-start-bitrate=2700\r\n",
+    );
+  });
+});
+
+describe("Mesh: the seeded estimate and a share's first minute (ADR 2 addendum)", () => {
+  const MBPS = 1_000_000;
+  const START_AT = 1_000_000;
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** The video section of a description, the way Chromium writes it: VP8 has no fmtp line. */
+  const chromium = (mid: string) =>
+    [
+      "v=0",
+      "o=- 1 2 IN IP4 127.0.0.1",
+      "m=video 9 UDP/TLS/RTP/SAVPF 96 97 98",
+      `a=mid:${mid}`,
+      "a=rtpmap:96 VP8/90000",
+      "a=rtpmap:97 rtx/90000",
+      "a=fmtp:97 apt=96",
+      "a=rtpmap:98 VP9/90000",
+      "a=fmtp:98 profile-id=0",
+      "",
+    ].join("\r\n");
+
+  /**
+   * Ana shares `capture` to `names`, with `uplink` to spend. The fake browser writes no video
+   * m-sections, so the answers that reach ana are rewritten to carry one for her screen, and
+   * her connections record what they were given (`remoteSdps`). Ana's connections are in the
+   * order of `names`. The clock is fake (the date only) so that the minute can pass. Ana is
+   * `polite` (she answers first, and sends in her own offer) or not (she offers first, with her
+   * screen in it, when it is on already): the user ids decide.
+   */
+  async function share(
+    names: string[],
+    uplink?: number,
+    capture: MediaTrackSettings = { width: 1920, height: 1080, frameRate: 60 },
+    {
+      firstMinuteMs = FIRST_MINUTE_MS,
+      mic = false,
+      early = true,
+      polite = false,
+      withCam = false,
+    } = {},
+  ) {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(START_AT);
+    const network = new Map<string, Mesh>();
+    // A side is polite to those with a greater id.
+    const self = polite ? "ana" : "zoe";
+    const ana = page(self, network, undefined, undefined, uplink, { firstMinuteMs });
+    const viewers = names.map((name) => page(name, network));
+    const screen = trackWith("ana screen", capture, "text");
+    const cam = trackWith("ana cam", { width: 640, height: 360, frameRate: 15 });
+    const receive = ana.mesh.receive.bind(ana.mesh);
+    ana.mesh.receive = (from, payload) => {
+      // Her screen sender, whichever capture it carries now.
+      const mid = ana.pcs[names.indexOf(from)]?.transceivers.find((t) =>
+        /^ana (screen|window)/.test((t.sender.track as MediaStreamTrack | null)?.id ?? ""),
+      )?.mid;
+      const answer = payload.kind === "description" && payload.description.type === "answer";
+      if (!answer || !mid) return receive(from, payload);
+      receive(from, { ...payload, description: { type: "answer", sdp: chromium(mid) } });
+    };
+    const room = [{ userId: self }, ...names.map((userId) => ({ userId }))];
+    if (mic) ana.mesh.setLocalTracks({ mic: track("ana mic") });
+    // `early`: the share is already on when the viewers arrive; otherwise it starts on live pairs.
+    const tracks = withCam ? { screen, cam } : { screen };
+    if (early) ana.mesh.setLocalTracks(tracks);
+    for (const mesh of network.values()) mesh.join(room);
+    await settle();
+    if (!early) ana.mesh.setLocalTracks(tracks);
+    await settle();
+    connect(ana, ...viewers);
+    await settle();
+    const senders = ana.pcs.map((pc) => carrying(pc, screen) as FakeTransceiver);
+    return { ana, viewers, network, screen, cam, senders, self };
+  }
+
+  /** The start bitrates (kbps) in every remote description each of `ana`'s connections applied. */
+  const seeds = (ana: { pcs: FakePC[] }) =>
+    ana.pcs.map((pc) =>
+      pc.remoteSdps.flatMap((sdp) =>
+        [...sdp.matchAll(/x-google-start-bitrate=(\d+)/g)].map((m) => Number(m[1])),
+      ),
+    );
+  /** The first remote description each of `ana`'s connections applied, with its video section. */
+  const firstSdp = (ana: { pcs: FakePC[] }, i = 0) =>
+    ana.pcs[i]?.remoteSdps.find((sdp) => sdp.includes("m=video")) ?? "";
+
+  describe("the seed", () => {
+    it("is 90% of the start step's bitrate, on every video codec of the screen the sender applies", async () => {
+      const { ana, viewers } = await share(["bo", "cy"], 8 * MBPS);
+      // Each viewer is entitled to 4 Mbps and starts at 1080p30 (3 Mbps): 2700 kbps, on VP8 (a
+      // new fmtp line) and on VP9, not on the retransmission format.
+      expect(seeds(ana)).toEqual([
+        [2700, 2700],
+        [2700, 2700],
+      ]);
+      expect(firstSdp(ana)).toContain("a=fmtp:98 profile-id=0;x-google-start-bitrate=2700\r\n");
+      expect(firstSdp(ana)).toContain("a=fmtp:97 apt=96\r\n");
+      // A side that sends no screen asks for nothing.
+      for (const viewer of viewers) {
+        expect(viewer.pcs.flatMap((pc) => pc.remoteSdps).join("")).not.toContain("x-google");
+      }
+      ana.mesh.close();
+    });
+
+    it("follows the step the pair starts on: 1080p60, 1080p30, and 2968x1242 at 60 fps", async () => {
+      const full = await share(["bo"]);
+      expect(full.ana.mesh.quality().map((q) => q.screen?.rung)).toEqual(["1080p60"]);
+      expect(seeds(full.ana)).toEqual([[5400, 5400]]);
+      full.ana.mesh.close();
+
+      const half = await share(["bo", "cy"], 8 * MBPS);
+      expect(half.ana.mesh.quality().map((q) => q.screen?.rung)).toEqual(["1080p30", "1080p30"]);
+      expect(seeds(half.ana)[0]).toEqual([2700, 2700]);
+      half.ana.mesh.close();
+
+      const wide = await share(["bo"], undefined, { width: 3440, height: 1440, frameRate: 60 });
+      expect(wide.ana.mesh.quality().map((q) => q.screen?.rung)).toEqual(["2968×1242@60"]);
+      expect(seeds(wide.ana)).toEqual([[9603, 9603]]);
+      wide.ana.mesh.close();
+    });
+
+    it("never passes the pair's ceiling", async () => {
+      // A budget of 1 Mbps for one viewer: the lowest step (720p30, 1.33 Mbps) is the start, and
+      // 90% of it (1197 kbps) is over the ceiling, which is what the seed is held to.
+      const { ana } = await share(["bo"], 1 * MBPS);
+      expect(ana.mesh.quality().map((q) => q.screen?.rung)).toEqual(["720p30"]);
+      expect(seeds(ana)).toEqual([[1000, 1000]]);
+      ana.mesh.close();
+    });
+
+    it("is set once: not again when the connection is renegotiated or the share replaced", async () => {
+      const { ana } = await share(["bo"]);
+      expect(seeds(ana)).toEqual([[5400, 5400]]);
+      const descriptions = ana.pcs[0]?.remoteSdps.length ?? 0;
+      // A different value in a later description would reset the running estimate in Chromium,
+      // and none is needed: it keeps the one it has. Neither a renegotiation...
+      ana.pcs[0]?.restartIce();
+      await settle();
+      expect(ana.pcs[0]?.remoteSdps.length).toBeGreaterThan(descriptions);
+      expect(seeds(ana)).toEqual([[5400, 5400]]);
+      // ...nor a smaller window with a start step of its own (720p30) asks for another.
+      ana.mesh.setLocalTracks({
+        screen: trackWith("ana window", { width: 1280, height: 720, frameRate: 30 }, "text"),
+      });
+      await settle();
+      ana.pcs[0]?.restartIce();
+      await settle();
+      expect(seeds(ana)).toEqual([[5400, 5400]]);
+      ana.mesh.close();
+    });
+
+    it("is set for a new viewer of a share, whose first negotiation carries the mic and the screen", async () => {
+      const { ana } = await share(["bo"], undefined, undefined, { mic: true });
+      expect(seeds(ana)).toEqual([[5400, 5400]]);
+      ana.mesh.close();
+    });
+
+    it("is not set for a share added to a pair that is up: it would reset a running estimate", async () => {
+      // Measured in Chromium 153: the estimate of a live connection, reset to a seed, often falls
+      // to 300 kbps and then takes tens of seconds to climb, where it would reach the bitrate in
+      // under a second without. The mic playing or not makes no difference.
+      for (const mic of [false, true]) {
+        const { ana } = await share(["bo"], undefined, undefined, { mic, early: false });
+        expect(ana.mesh.quality().map((q) => q.screen?.rung)).toEqual(["1080p60"]);
+        expect(seeds(ana)).toEqual([[]]);
+        ana.mesh.close();
+      }
+    });
+
+    it("is not set when the streamer is the polite side: its screen comes after the first answer", async () => {
+      // It answers the viewer's offer first and offers its own senders next; seeded then it
+      // collapsed as often as not in Chromium 153, where in the first negotiation it never did.
+      const { ana } = await share(["bo"], undefined, undefined, { polite: true });
+      expect(ana.mesh.quality().map((q) => q.screen?.rung)).toEqual(["1080p60"]);
+      expect(seeds(ana)).toEqual([[]]);
+      ana.mesh.close();
+    });
+  });
+
+  describe("the first minute", () => {
+    /** Lossy for `passes` passes: how many it took for bo's pair to step down, or undefined. */
+    async function passesToStepDown(ana: Mesh, to: FakeTransceiver, loss = 0.1, limit = 6) {
+      to.sender.stats = senderStats(loss);
+      for (let i = 1; i <= limit; i++) {
+        await ana.adjust();
+        await settle();
+        if (ana.quality()[0]?.screen?.rung !== "1080p60") return i;
+      }
+      return undefined;
+    }
+
+    it("ignores 1 warm-up reading instead of 2, so pressure steps a new share down a pass sooner", async () => {
+      const { ana, senders } = await share(["bo"]);
+      expect(await passesToStepDown(ana.mesh, senders[0] as FakeTransceiver)).toBe(3);
+      ana.mesh.close();
+    });
+
+    it("probes up after 2 clean samples instead of 5, and then waits as usual", async () => {
+      const { ana, senders } = await share(["bo"]);
+      const to = senders[0] as FakeTransceiver;
+      await passesToStepDown(ana.mesh, to);
+      const rung = () => ana.mesh.quality()[0]?.screen?.rung;
+      expect(rung()).toBe("1080p30");
+      to.sender.stats = senderStats(0);
+      await ana.mesh.adjust();
+      await settle();
+      expect(rung()).toBe("1080p30");
+      await ana.mesh.adjust();
+      await settle();
+      expect(rung()).toBe("1080p60");
+      ana.mesh.close();
+    });
+
+    it("goes back to the normal windows at 60 s", async () => {
+      const { ana, senders } = await share(["bo"]);
+      const to = senders[0] as FakeTransceiver;
+      to.sender.stats = senderStats(0.1);
+      const rung = () => ana.mesh.quality()[0]?.screen?.rung;
+      // The first reading is ignored in the first minute...
+      await ana.mesh.adjust();
+      // ...and the minute ends: from here the normal pace, which ignores 2 readings in all.
+      vi.setSystemTime(START_AT + FIRST_MINUTE_MS);
+      await ana.mesh.adjust();
+      await ana.mesh.adjust();
+      await settle();
+      expect(rung()).toBe("1080p60");
+      await ana.mesh.adjust();
+      await settle();
+      expect(rung()).toBe("1080p30");
+      // A probe up now takes the full window.
+      to.sender.stats = senderStats(0);
+      for (let i = 0; i < UP_SAMPLES - 1; i++) await ana.mesh.adjust();
+      await settle();
+      expect(rung()).toBe("1080p30");
+      await ana.mesh.adjust();
+      await settle();
+      expect(rung()).toBe("1080p60");
+      ana.mesh.close();
+    });
+
+    it("starts again for a new viewer on a share that is minutes old, and not for the others", async () => {
+      const { ana, viewers, network, screen, senders, self } = await share(["bo"]);
+      vi.setSystemTime(START_AT + 5 * FIRST_MINUTE_MS);
+      const cy = page("cy", network);
+      const everybody = [self, "bo", "cy"].map((userId) => ({ userId }));
+      for (const mesh of network.values()) mesh.join(everybody);
+      await settle();
+      connect(ana, ...viewers, cy);
+      await settle();
+      const toCy = carrying(ana.pcs[1], screen) as FakeTransceiver;
+      const rungs = () => ana.mesh.quality().map((q) => q.screen?.rung);
+      expect(rungs()).toEqual(["1080p60", "1080p60"]);
+      // Both links are lossy. Cy is new, so ignores one reading and steps down on the third
+      // pass; bo's share is minutes old and has the normal two, so he is still where he was.
+      (senders[0] as FakeTransceiver).sender.stats = senderStats(0.1);
+      toCy.sender.stats = senderStats(0.1);
+      for (let i = 0; i < 3; i++) await ana.mesh.adjust();
+      await settle();
+      expect(rungs()).toEqual(["1080p60", "1080p30"]);
+      ana.mesh.close();
+    });
+
+    it("starts again for a new capture of a share that is minutes old", async () => {
+      const { ana, senders } = await share(["bo"]);
+      const rung = () => ana.mesh.quality()[0]?.screen?.rung;
+      vi.setSystemTime(START_AT + 5 * FIRST_MINUTE_MS);
+      // The same share, five minutes in, has the normal two warm-up readings: 2 + 2 passes.
+      expect(await passesToStepDown(ana.mesh, senders[0] as FakeTransceiver)).toBe(4);
+      // A new capture (a window picked instead, say) is a share of its own, with a minute of its own.
+      const next = trackWith("ana screen 2", { width: 1920, height: 1080, frameRate: 60 }, "text");
+      ana.mesh.setLocalTracks({ screen: next });
+      await settle();
+      expect(rung()).toBe("1080p60");
+      const to = carrying(ana.pcs[0], next) as FakeTransceiver;
+      expect(await passesToStepDown(ana.mesh, to)).toBe(3);
+      ana.mesh.close();
+    });
+
+    it("leaves a camera at the normal pace inside the minute: 2 warm-up readings, 5 clean samples", async () => {
+      // The real first minute, and a camera that starts at 360p15 on a lossy link.
+      const { ana, cam } = await share(["bo"], undefined, undefined, { withCam: true });
+      const to = carrying(ana.pcs[0], cam) as FakeTransceiver;
+      const rung = () => ana.mesh.quality()[0]?.cam?.rung;
+      const pass = async () => {
+        await ana.mesh.adjust();
+        await settle();
+      };
+      expect(rung()).toBe("360p15");
+      to.sender.stats = senderStats(0.1);
+      // A screen would step down on the third pass; a camera ignores two readings, and needs
+      // two lossy ones after them.
+      for (let i = 0; i < 3; i++) await pass();
+      expect(rung()).toBe("360p15");
+      await pass();
+      expect(rung()).toBe("180p15");
+      // And a probe up takes the full window of 5, where a screen's takes 2.
+      to.sender.stats = senderStats(0);
+      for (let i = 0; i < UP_SAMPLES - 1; i++) await pass();
+      expect(rung()).toBe("180p15");
+      await pass();
+      expect(rung()).toBe("360p15");
+      ana.mesh.close();
+    });
+
+    it("doesn't start again when a hidden screen comes back: it is the same share and viewer", async () => {
+      const { ana, viewers, senders, self } = await share(["bo"]);
+      vi.setSystemTime(START_AT + 5 * FIRST_MINUTE_MS);
+      const bo = viewers[0] as ReturnType<typeof page>;
+      bo.mesh.setVisible(self, "screen", false);
+      await settle();
+      bo.mesh.setVisible(self, "screen", true);
+      await settle();
+      // Its readings start over (warm-up of 2 again), but the minute doesn't: 2 + 2 passes.
+      expect(await passesToStepDown(ana.mesh, senders[0] as FakeTransceiver)).toBe(4);
+      ana.mesh.close();
+    });
   });
 });
 

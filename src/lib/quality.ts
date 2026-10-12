@@ -221,6 +221,50 @@ export const RTT_UP_MS = 300;
 /** A bandwidth limit is pressure when the estimate is below this share of what is sent. */
 export const ESTIMATE_SHORT = 0.8;
 
+/** Readings ignored after a sender starts: the bandwidth estimate is still ramping up. */
+export const WARMUP_READINGS = 2;
+
+/**
+ * A share's first minute (ADR 2 addendum), counted from when its sender started: of a new share,
+ * or of a new viewer on one (a screen that is hidden and shown again is neither). The picture is
+ * soft until the controller has found where the pair settles, so it waits less: it ignores 1
+ * reading instead of 2, and a probe up needs 2 clean samples instead of 5. Stepping down is not
+ * sped up, and after the minute the normal windows apply.
+ */
+export const FIRST_MINUTE_MS = 60_000;
+export const FIRST_MINUTE_WARMUP_READINGS = 1;
+export const FIRST_MINUTE_UP_SAMPLES = 2;
+
+/** How patient the controller is with one sender: readings ignored, and samples a probe needs. */
+export interface Pace {
+  warmup: number;
+  upSamples: number;
+}
+
+/**
+ * The pace of a sender that started `sinceStartMs` ago, with a first minute of `firstMinuteMs`
+ * (a parameter so that tests of the Mesh can do without it). A clock that went back (a negative
+ * time) is no first minute.
+ */
+export function paceOf(sinceStartMs: number, firstMinuteMs = FIRST_MINUTE_MS): Pace {
+  return sinceStartMs >= 0 && sinceStartMs < firstMinuteMs
+    ? { warmup: FIRST_MINUTE_WARMUP_READINGS, upSamples: FIRST_MINUTE_UP_SAMPLES }
+    : { warmup: WARMUP_READINGS, upSamples: UP_SAMPLES };
+}
+
+/** Share of a step's `maxBitrate` that a pair's bandwidth estimate is seeded at. */
+export const START_BITRATE_SHARE = 0.9;
+
+/**
+ * The bandwidth estimate to seed a screen pair at, in bits per second: `START_BITRATE_SHARE` of
+ * the `maxBitrate` of the step it starts on, and never above the pair's `ceiling`. It goes into
+ * the SDP as Chromium's `x-google-start-bitrate` (`withStartBitrate` in mesh.ts), instead of the
+ * 300 kbps that every new connection starts its estimate at.
+ */
+export function seedBitrate(maxBitrate: number, ceiling = Number.POSITIVE_INFINITY): number {
+  return Math.min(Math.round(maxBitrate * START_BITRATE_SHARE), ceiling);
+}
+
 export interface RungOptions {
   /** Lowest and highest rung allowed (indexes). Default: the whole ladder. */
   min?: number;
@@ -229,6 +273,8 @@ export interface RungOptions {
   reserved?: number;
   /** Failed probes in a row: each doubles the clean window a probe needs. */
   backoff?: number;
+  /** Clean samples a probe needs before any backoff. Default `UP_SAMPLES` (see `paceOf`). */
+  upSamples?: number;
 }
 
 /** The network shows strain: loss, a long round trip, or a bandwidth limit the estimate backs. */
@@ -247,8 +293,12 @@ const clean = (sample: StatsSample): boolean =>
   !pressured(sample) && sample.loss < LOSS_UP && (sample.rttMs ?? 0) < RTT_UP_MS;
 
 /** Whether `window` holds the clean spell a probe up needs after `backoff` failed ones. */
-export function probeDue(window: readonly StatsSample[], backoff = 0): boolean {
-  const needed = UP_SAMPLES * 2 ** Math.min(backoff, MAX_BACKOFF);
+export function probeDue(
+  window: readonly StatsSample[],
+  backoff = 0,
+  upSamples = UP_SAMPLES,
+): boolean {
+  const needed = upSamples * 2 ** Math.min(backoff, MAX_BACKOFF);
   return window.length >= needed && window.slice(-needed).every(clean);
 }
 
@@ -264,7 +314,7 @@ export function nextRung(
   ladder: readonly Rung[],
   window: readonly StatsSample[],
   current: number,
-  { min = 0, max = ladder.length - 1, reserved = 0, backoff = 0 }: RungOptions = {},
+  { min = 0, max = ladder.length - 1, reserved = 0, backoff = 0, upSamples }: RungOptions = {},
 ): number {
   const top = Math.max(min, Math.min(max, ladder.length - 1));
   if (current > top) return top;
@@ -281,7 +331,7 @@ export function nextRung(
     return target;
   }
 
-  return current < top && probeDue(window, backoff) ? current + 1 : current;
+  return current < top && probeDue(window, backoff, upSamples) ? current + 1 : current;
 }
 
 /** One video sender's place on its ladder, and what the controller remembers of its probes. */
@@ -317,6 +367,7 @@ export function step(
 ): LadderState {
   const window = [...state.window, sample].slice(-WINDOW_SAMPLES);
   const rung = nextRung(ladder, window, state.rung, { ...options, backoff: state.backoff });
+  const upSamples = options.upSamples ?? UP_SAMPLES;
   if (rung > state.rung) return { ...state, rung, window: [], probing: true };
   if (rung < state.rung) {
     const failedProbe = state.probing;
@@ -329,7 +380,7 @@ export function step(
     };
   }
   // A probe that has been clean for a window has held.
-  if (state.probing && window.length >= UP_SAMPLES) {
+  if (state.probing && window.length >= upSamples) {
     return { ...state, window, backoff: 0, probing: false, limited: false };
   }
   return { ...state, window };

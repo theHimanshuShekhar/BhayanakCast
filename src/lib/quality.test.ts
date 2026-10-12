@@ -9,6 +9,9 @@ import {
   carryOver,
   ceilingOf,
   DOWN_SAMPLES,
+  FIRST_MINUTE_MS,
+  FIRST_MINUTE_UP_SAMPLES,
+  FIRST_MINUTE_WARMUP_READINGS,
   feeds60,
   fitCapture,
   fitRung,
@@ -18,13 +21,16 @@ import {
   MAX_BACKOFF,
   MAX_CAPTURE_PIXELS,
   nextRung,
+  paceOf,
   pairCeilings,
   probeClaim,
   probeDue,
   type Rung,
   readSample,
+  START_BITRATE_SHARE,
   type StatsSample,
   screenSteps,
+  seedBitrate,
   shedFirst,
   step,
   strained,
@@ -33,6 +39,7 @@ import {
   UPLINK_FLOOR,
   UPLINK_SHARE,
   UplinkBudget,
+  WARMUP_READINGS,
 } from "./quality";
 
 /** A 1080p60 screen in a text-like room: 720p30, 900p30, 1080p30, 1080p60. */
@@ -771,5 +778,101 @@ describe("readSample", () => {
       loss: 0,
       limit: "none",
     });
+  });
+});
+
+describe("seedBitrate (ADR 2 addendum: the seeded estimate)", () => {
+  it("is 90% of the start step's maxBitrate", () => {
+    expect(START_BITRATE_SHARE).toBe(0.9);
+    // Worked by hand: 90% of 6 Mbps, of 3 Mbps, and of the 2968x1242@60 step's 10.67 Mbps.
+    expect(seedBitrate(6_000_000)).toBe(5_400_000);
+    expect(seedBitrate(3_000_000)).toBe(2_700_000);
+    const ultrawide = screenSteps({ width: 3440, height: 1440, frameRate: 60 }, "size");
+    const top = ultrawide[ultrawide.length - 1] as Rung;
+    expect(top.label).toBe("2968×1242@60");
+    expect(top.maxBitrate).toBe(10_670_000);
+    expect(seedBitrate(top.maxBitrate)).toBe(9_603_000);
+  });
+
+  it("never passes the pair's ceiling", () => {
+    expect(seedBitrate(6_000_000, 4_000_000)).toBe(4_000_000);
+    expect(seedBitrate(6_000_000, 5_400_000)).toBe(5_400_000);
+    expect(seedBitrate(6_000_000, 20_000_000)).toBe(5_400_000);
+  });
+});
+
+describe("paceOf (ADR 2 addendum: a share's first minute)", () => {
+  it("ignores 1 warm-up reading and probes after 2 clean samples for the first 60 s", () => {
+    expect(FIRST_MINUTE_MS).toBe(60_000);
+    expect(paceOf(0)).toEqual({ warmup: 1, upSamples: 2 });
+    expect(paceOf(59_999)).toEqual({ warmup: FIRST_MINUTE_WARMUP_READINGS, upSamples: 2 });
+    expect(FIRST_MINUTE_UP_SAMPLES).toBe(2);
+  });
+
+  it("goes back to the normal windows at 60 s", () => {
+    expect(paceOf(60_000)).toEqual({ warmup: 2, upSamples: 5 });
+    expect(paceOf(10 * 60_000)).toEqual({ warmup: WARMUP_READINGS, upSamples: UP_SAMPLES });
+  });
+
+  it("takes a clock that went back for no first minute at all", () => {
+    expect(paceOf(-1)).toEqual({ warmup: WARMUP_READINGS, upSamples: UP_SAMPLES });
+  });
+});
+
+describe("a probe up in the first minute", () => {
+  const FAST = { max: TOP, upSamples: FIRST_MINUTE_UP_SAMPLES };
+
+  it("needs 2 clean samples where the normal pace needs 5", () => {
+    expect(probeDue(times(2, GOOD), 0, FIRST_MINUTE_UP_SAMPLES)).toBe(true);
+    expect(probeDue(times(1, GOOD), 0, FIRST_MINUTE_UP_SAMPLES)).toBe(false);
+    expect(probeDue(times(2, GOOD))).toBe(false);
+    expect(probeDue(times(UP_SAMPLES, GOOD))).toBe(true);
+  });
+
+  it("waits twice as long after each failed probe, as the normal pace does", () => {
+    expect(probeDue(times(3, GOOD), 1, FIRST_MINUTE_UP_SAMPLES)).toBe(false);
+    expect(probeDue(times(4, GOOD), 1, FIRST_MINUTE_UP_SAMPLES)).toBe(true);
+  });
+
+  it("moves a sender up after 2 clean samples, and still not after 1", () => {
+    expect(nextRung(SCREEN_LADDER, times(1, GOOD), 1, FAST)).toBe(1);
+    expect(nextRung(SCREEN_LADDER, times(2, GOOD), 1, FAST)).toBe(2);
+    expect(nextRung(SCREEN_LADDER, times(2, GOOD), 1, { max: TOP })).toBe(1);
+  });
+
+  it("steps down as it always did: 2 pressured samples in a row", () => {
+    expect(nextRung(SCREEN_LADDER, times(1, LOSSY), 2, FAST)).toBe(2);
+    expect(nextRung(SCREEN_LADDER, times(DOWN_SAMPLES, LOSSY), 2, FAST)).toBeLessThan(2);
+    // One clean sample between pressured ones breaks the run, as at the normal pace.
+    expect(nextRung(SCREEN_LADDER, [LOSSY, GOOD, LOSSY], 2, FAST)).toBe(2);
+  });
+
+  it("goes the same way through `step`: up after 2 clean samples, and the probe is on", () => {
+    let state = freshLadderState(1);
+    state = step(SCREEN_LADDER, state, GOOD, FAST);
+    expect(state.rung).toBe(1);
+    state = step(SCREEN_LADDER, state, GOOD, FAST);
+    expect(state).toMatchObject({ rung: 2, probing: true, window: [] });
+  });
+
+  it("counts a probe as held after the same 2 clean samples, and as failed on pressure", () => {
+    let state = step(
+      SCREEN_LADDER,
+      step(SCREEN_LADDER, freshLadderState(1), GOOD, FAST),
+      GOOD,
+      FAST,
+    );
+    expect(state).toMatchObject({ rung: 2, probing: true });
+    // Clean again for the pace's window: it held, and the wait is back to the shortest.
+    const held = step(SCREEN_LADDER, step(SCREEN_LADDER, state, GOOD, { ...FAST, max: 2 }), GOOD, {
+      ...FAST,
+      max: 2,
+    });
+    expect(held).toMatchObject({ rung: 2, probing: false, backoff: 0 });
+    // Pressure on the probe brings it back and doubles the wait: 4 clean samples, not 2.
+    for (let i = 0; i < DOWN_SAMPLES; i++) state = step(SCREEN_LADDER, state, LOSSY, FAST);
+    expect(state).toMatchObject({ rung: 1, probing: false, backoff: 1 });
+    expect(probeDue(times(3, GOOD), state.backoff, FIRST_MINUTE_UP_SAMPLES)).toBe(false);
+    expect(probeDue(times(4, GOOD), state.backoff, FIRST_MINUTE_UP_SAMPLES)).toBe(true);
   });
 });

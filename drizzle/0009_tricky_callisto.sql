@@ -1,0 +1,1 @@
+ALTER TABLE "quality_samples" ADD COLUMN "since_start_ms" integer;
