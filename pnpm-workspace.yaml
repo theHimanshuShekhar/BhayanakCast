@@ -5,3 +5,6 @@ overrides:
   # GHSA-px8p-9vwx-vf98: satori pins fflate 0.7.3 exactly (still in satori 0.35). Only its
   # inflateSync (WOFF fonts) is used, not the affected unzipSync, but 0.7.5 is the same API.
   fflate@<0.7.5: 0.7.5
+  # GHSA source-map-js (indexed source-map section offsets, event-loop DoS): only build and test
+  # tools use it (Tailwind, PostCSS, jsdom's css-tree); 1.2.2 is a patch release with the same API.
+  source-map-js@<1.2.2: 1.2.2
