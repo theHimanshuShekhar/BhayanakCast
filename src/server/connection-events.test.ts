@@ -20,6 +20,7 @@ import { type Caller, type SignedInCaller, SignInRequiredError } from "./caller.
 import { FakeClock } from "./clock.ts";
 import {
   BEACON_MAX_BYTES,
+  beaconResponse,
   CONNECTION_BATCH_RATE_LIMIT,
   CONNECTION_EVENT_CAP,
   ConnectionEventService,
@@ -63,7 +64,14 @@ beforeEach(async () => {
   await db.insert(presenceIntervals).values([
     { roomId: "r1", userId: "ana", startedAt: T0, lastSeenAt: T0 },
     { roomId: "r1", userId: "bo", startedAt: T0, lastSeenAt: T0 },
-    { roomId: "r1", userId: "cy", startedAt: T0, endedAt: T0, lastSeenAt: T0 },
+    // Left ten minutes ago: long past the time a last batch from a leaver is still taken.
+    {
+      roomId: "r1",
+      userId: "cy",
+      startedAt: new Date(T0.getTime() - 3_600_000),
+      endedAt: new Date(T0.getTime() - 10 * 60_000),
+      lastSeenAt: new Date(T0.getTime() - 10 * 60_000),
+    },
     { roomId: "r2", userId: "ana", startedAt: T0, endedAt: T0, lastSeenAt: T0 },
   ]);
 });
@@ -222,6 +230,75 @@ describe("who may report", () => {
   });
 });
 
+describe("events from someone who has just left", () => {
+  /** "dee" was in "r1" until `secondsAgo` seconds before T0 (then Leave, or a kick, closed it). */
+  const leftAgo = async (who: string, secondsAgo: number) => {
+    await db.insert(presenceIntervals).values({
+      roomId: "r1",
+      userId: who,
+      startedAt: new Date(T0.getTime() - 3_600_000),
+      endedAt: new Date(T0.getTime() - secondsAgo * 1_000),
+      lastSeenAt: T0,
+    });
+  };
+
+  it("takes the last batch of a reporter who left, for what happened before they did", async () => {
+    await leftAgo("dee", 10);
+    // Their browser held these 3 s and sent them as they went: 12 s and 8 s old, the second
+    // after the leave by 2 s, within the grace.
+    const result = await service.record(
+      asUser("dee"),
+      report([pair("bo", 12_000), pair("bo", 8_000)]),
+    );
+    expect(result.stored).toBe(2);
+    expect((await stored()).map((r) => [r.actorUserId, r.targetUserId])).toEqual([
+      ["dee", "bo"],
+      ["dee", "bo"],
+    ]);
+  });
+
+  it("refuses what is stamped well after they left", async () => {
+    await leftAgo("dee", 10);
+    // Ten seconds after leaving, and now.
+    const result = await service.record(
+      asUser("dee"),
+      report([pair("bo", 0), pair("bo", 1_000), pair("bo", 12_000)]),
+    );
+    expect(result.stored).toBe(1);
+    expect((await stored()).map((r) => r.at)).toEqual([new Date(T0.getTime() - 12_000)]);
+    expect(logs.all("connection_event.dropped").map((l) => [l.reason, l.events])).toEqual([
+      ["not_in_room", 2],
+    ]);
+  });
+
+  it("takes events about a peer who has just left, up to when they did", async () => {
+    await leftAgo("dee", 10);
+    expect((await service.record(asUser("ana"), report([pair("dee", 15_000)]))).stored).toBe(1);
+    expect((await service.record(asUser("ana"), report([pair("dee", 2_000)]))).stored).toBe(0);
+    expect(logs.all("connection_event.dropped").map((l) => l.reason)).toEqual(["peer_not_in_room"]);
+  });
+
+  it("forgets a leaver after two minutes", async () => {
+    await leftAgo("dee", 150);
+    expect((await service.record(asUser("dee"), report([pair("bo", 155_000)]))).stored).toBe(0);
+  });
+
+  it("doesn't take the events of someone who never was in the room", async () => {
+    expect((await service.record(asUser("dee"), report([pair("bo", 5_000)]))).stored).toBe(0);
+  });
+
+  it("is not fooled by a past stay: someone back in the room is in it for events since", async () => {
+    await leftAgo("dee", 90);
+    await db.insert(presenceIntervals).values({
+      roomId: "r1",
+      userId: "dee",
+      startedAt: new Date(T0.getTime() - 60_000),
+      lastSeenAt: T0,
+    });
+    expect((await service.record(asUser("dee"), report([pair("bo", 1_000)]))).stored).toBe(1);
+  });
+});
+
 describe("bounds", () => {
   it("refuses a report over the batch size, or with nothing valid in it, storing nothing", async () => {
     const many = Array.from({ length: CONNECTION_BATCH_MAX + 1 }, () => pair("bo"));
@@ -376,6 +453,21 @@ describe("logging", () => {
     ).toHaveLength(1);
   });
 
+  it("logs a failed insert, and gives the allowance back", async () => {
+    const failing = vi.spyOn(db, "insert").mockImplementationOnce(() => {
+      throw new Error("db down");
+    });
+    await expect(service.record(asUser("ana"), report([pair("bo")]))).rejects.toThrow("db down");
+    failing.mockRestore();
+    expect(logs.find("timeline.write_failed")).toMatchObject({
+      level: "error",
+      msg: "storing connection events failed",
+      userId: "ana",
+      roomId: "r1",
+      events: 1,
+    });
+  });
+
   it("logs each stored event as a timeline event, with the reporter and the peer", async () => {
     await service.record(asUser("ana"), report([pair("bo")]));
     expect(logs.find("timeline.pair_state")).toMatchObject({
@@ -419,5 +511,42 @@ describe("reading a beacon", () => {
     const read = await readBeacon(post(JSON.stringify(report([pair("bo")]))));
     if (!read.ok) throw new Error(read.error);
     expect(await service.record(asUser("ana"), read.input)).toEqual({ stored: 1, dropped: 0 });
+  });
+});
+
+// The route behind it (`/api/connection-events`): who may post, from where.
+describe("the beacon route", () => {
+  const post = (
+    headers: Record<string, string> = {},
+    body = JSON.stringify(report([pair("bo")])),
+  ) => new Request("http://localhost/api/connection-events", { method: "POST", body, headers });
+  const answer = (request: Request, caller: Caller) =>
+    beaconResponse(request, { caller: async () => caller, service });
+
+  it("refuses a foreign Origin with 403, before it reads or records anything", async () => {
+    const response = await answer(post({ origin: "https://evil.example" }), asUser("ana"));
+    expect(response.status).toBe(403);
+    expect(await stored()).toEqual([]);
+    // The page's own origin, as sendBeacon sends it, is fine.
+    expect((await answer(post({ origin: "http://localhost" }), asUser("ana"))).status).toBe(200);
+  });
+
+  it("refuses a signed-out caller with 401", async () => {
+    const response = await answer(post(), visitor);
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "Sign in to do that" });
+    expect(await stored()).toEqual([]);
+  });
+
+  it("records a signed-in caller's report, and refuses one that isn't a report with 400", async () => {
+    const ok = await answer(post(), asUser("ana"));
+    expect(await ok.json()).toEqual({ stored: 1, dropped: 0 });
+    const bad = await answer(post({}, "{"), asUser("ana"));
+    expect(bad.status).toBe(400);
+    expect(logs.all("connection_event.dropped").at(-1)).toMatchObject({
+      reason: "invalid",
+      userId: "ana",
+      via: "beacon",
+    });
   });
 });

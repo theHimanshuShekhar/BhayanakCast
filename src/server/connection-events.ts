@@ -6,7 +6,10 @@
  *
  * A report is taken from a signed-in caller, and each event is judged on its own:
  * - An event about a pair (anything with a `peerId`) needs the caller in the live room and the
- *   peer in it too; a peer who left since, or the caller themselves, is dropped.
+ *   peer in it too, when it happened; the caller themselves, or a peer who wasn't, is dropped.
+ *   "In it" includes the moments before someone left or was kicked (`RECENTLY_LEFT_MS`,
+ *   `LEAVE_GRACE_MS`): a browser sends its last batch as it goes, and it arrives after the server
+ *   closed their presence.
  * - A device error (`device_error`) needs the caller in the live room, or, for the pre-join, to
  *   be allowed to enter it (`mayEnterRoom`, the rule the realtime server applies on a join).
  * Events are dated by this server's clock (ADR 12) from the age the page gave, clamped to
@@ -20,7 +23,7 @@
  * visible. The marker is written once the run of drops has gone quiet (`DROP_MARKER_DELAY_MS`),
  * so it holds the final count; one waiting when the server stops is lost.
  */
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, or } from "drizzle-orm";
 import { type Db, getDb } from "../db/client.ts";
 import { presenceIntervals, rooms, roomTimelineEvents } from "../db/schema/index.ts";
 import {
@@ -30,12 +33,22 @@ import {
   reportConnectionEventsInput,
 } from "../lib/connection-events.ts";
 import { boundDetails, type TimelineEventRow } from "../lib/room-timeline.ts";
-import { type Caller, requireSignedIn, type SignedInCaller } from "./caller.ts";
+import {
+  type Caller,
+  requireSignedIn,
+  type SignedInCaller,
+  SignInRequiredError,
+} from "./caller.ts";
 import { type Clock, systemClock, type Timer } from "./clock.ts";
 import { mayEnterRoom } from "./ice.ts";
-import { logReportDropped, logTimelineEvent, logTimelineWriteFailed } from "./log-events.ts";
+import {
+  logReportDropped,
+  logTimelineRow,
+  logTimelineWriteFailed,
+  timedWrite,
+} from "./log-events.ts";
 import { forgetIdle, withinRateLimit } from "./rate-limit.ts";
-import { readBodyCapped } from "./thumbnails.ts";
+import { isSameOrigin, readBodyCapped } from "./thumbnails.ts";
 
 /**
  * Events stored per person in any `windowMs`. A pair that flaps is a few events a second, so a
@@ -47,6 +60,13 @@ export const CONNECTION_EVENT_CAP = { events: 120, windowMs: 10 * 60_000 } as co
  * seconds at the very most, and events only come in bursts.
  */
 export const CONNECTION_BATCH_RATE_LIMIT = { batches: 100, windowMs: 10 * 60_000 } as const;
+/**
+ * Someone who left the room this recently still has events to report: their browser's last batch
+ * (about 3 s of events) is sent as they leave, after the server has closed their presence.
+ */
+export const RECENTLY_LEFT_MS = 2 * 60_000;
+/** An event is accepted if it happened (by the server's dating) no later than this after leaving. */
+export const LEAVE_GRACE_MS = 5_000;
 /** A run of capped drops is written as one marker once none has come for this long. */
 export const DROP_MARKER_DELAY_MS = 60_000;
 
@@ -127,49 +147,52 @@ export class ConnectionEventService {
     const peers = new Set(
       events.flatMap((e) => ("peerId" in e && e.peerId !== reporter ? [e.peerId] : [])),
     );
-    // Who is in the live room now, among the reporter and the peers named.
+    // Who is in the live room, or was lately, among the reporter and the peers named: until when
+    // (Infinity while they are still in it).
     const present = await this.#db
-      .select({ userId: presenceIntervals.userId })
+      .select({ userId: presenceIntervals.userId, endedAt: presenceIntervals.endedAt })
       .from(presenceIntervals)
       .innerJoin(rooms, eq(rooms.id, presenceIntervals.roomId))
       .where(
         and(
           eq(presenceIntervals.roomId, roomId),
-          isNull(presenceIntervals.endedAt),
+          or(
+            isNull(presenceIntervals.endedAt),
+            gte(presenceIntervals.endedAt, new Date(now.getTime() - RECENTLY_LEFT_MS)),
+          ),
           isNull(rooms.endedAt),
           inArray(presenceIntervals.userId, [reporter, ...peers]),
         ),
       );
-    const inRoom = new Set(present.map((p) => p.userId));
-    const inside = inRoom.has(reporter);
+    const until = new Map<string, number>();
+    for (const { userId, endedAt } of present) {
+      until.set(
+        userId,
+        Math.max(until.get(userId) ?? 0, endedAt?.getTime() ?? Number.POSITIVE_INFINITY),
+      );
+    }
+    // Whether `userId` was in the room when the event happened, as the server dates it: still in
+    // it, or it happened up to `LEAVE_GRACE_MS` after they left. A browser's last batch is sent
+    // as it leaves (or is kicked), and arrives after that.
+    const wasIn = (userId: string, at: number) =>
+      at <= (until.get(userId) ?? Number.NEGATIVE_INFINITY) + LEAVE_GRACE_MS;
+    const happened = (e: ConnectionEventInput) =>
+      now.getTime() - Math.min(Math.max(e.ageMs, 0), MAX_EVENT_AGE_MS);
     // The pre-join is the one place a device can fail before the caller is in the room.
-    const mayEnter =
-      !inside && events.some((e) => e.kind === "device_error")
-        ? await this.#mayEnter(caller, roomId)
-        : inside;
-    const allowed = events.filter((e) =>
-      "peerId" in e ? inside && e.peerId !== reporter && inRoom.has(e.peerId) : mayEnter,
-    );
-    if (allowed.length < events.length) {
-      // Not theirs to report: they aren't in the room (or may not enter it), or the event names
-      // a peer who left since, or themselves.
-      const peerGone = events.filter(
-        (e) => "peerId" in e && inside && (e.peerId === reporter || !inRoom.has(e.peerId)),
-      ).length;
-      const refused = events.length - allowed.length;
-      if (refused > peerGone) {
-        logReportDropped("connection_event", "not_in_room", {
-          userId: reporter,
-          roomId,
-          events: refused - peerGone,
-        });
-      }
-      if (peerGone > 0) {
-        logReportDropped("connection_event", "peer_not_in_room", {
-          userId: reporter,
-          roomId,
-          events: peerGone,
-        });
+    const lobby = events.some((e) => !("peerId" in e) && !wasIn(reporter, happened(e)));
+    const mayEnter = lobby ? await this.#mayEnter(caller, roomId) : false;
+    const verdict = (e: ConnectionEventInput): "ok" | "not_in_room" | "peer_not_in_room" => {
+      const at = happened(e);
+      if (!("peerId" in e)) return wasIn(reporter, at) || mayEnter ? "ok" : "not_in_room";
+      if (!wasIn(reporter, at)) return "not_in_room";
+      return e.peerId !== reporter && wasIn(e.peerId, at) ? "ok" : "peer_not_in_room";
+    };
+    const verdicts = events.map(verdict);
+    const allowed = events.filter((_, i) => verdicts[i] === "ok");
+    for (const reason of ["not_in_room", "peer_not_in_room"] as const) {
+      const count = verdicts.filter((v) => v === reason).length;
+      if (count > 0) {
+        logReportDropped("connection_event", reason, { userId: reporter, roomId, events: count });
       }
     }
     if (allowed.length === 0) return { stored: 0, dropped: 0 };
@@ -198,13 +221,22 @@ export class ConnectionEventService {
 
     const rows = kept.map((e) => rowOf(roomId, reporter, e, now));
     try {
-      await this.#db.insert(roomTimelineEvents).values(rows);
+      await timedWrite(
+        "connection_events.insert",
+        () => this.#db.insert(roomTimelineEvents).values(rows),
+        { userId: reporter, roomId, events: rows.length },
+      );
     } catch (error) {
       // The allowance is for events that were stored: give it back so a retry can have it.
       this.#refund(recent, now.getTime(), kept.length);
+      logTimelineWriteFailed(
+        error,
+        { userId: reporter, roomId, events: rows.length },
+        "storing connection events failed",
+      );
       throw error;
     }
-    for (const row of rows) logStored(row);
+    for (const row of rows) logTimelineRow(row);
     return { stored: kept.length, dropped };
   }
 
@@ -250,7 +282,7 @@ export class ConnectionEventService {
     const write = Promise.resolve()
       .then(() => this.#db.insert(roomTimelineEvents).values(row))
       .then(
-        () => logStored(row),
+        () => logTimelineRow(row),
         (error: unknown) =>
           logTimelineWriteFailed(
             error,
@@ -270,22 +302,6 @@ export class ConnectionEventService {
         left--;
       }
     }
-  }
-}
-
-/** A stored row also goes to the server log, as the recorder does for the hub's events. */
-function logStored(row: TimelineEventRow): void {
-  try {
-    logTimelineEvent({
-      kind: row.kind,
-      roomId: row.roomId,
-      userId: row.actorUserId ?? undefined,
-      targetUserId: row.targetUserId ?? undefined,
-      at: row.at.toISOString(),
-      details: row.details,
-    });
-  } catch {
-    // The log is down; the timeline row is not affected.
   }
 }
 
@@ -334,6 +350,41 @@ export async function readBeacon(request: Request): Promise<BeaconRead> {
   return parsed.success
     ? { ok: true, input: parsed.data }
     : { ok: false, status: 400, error: "Not a report" };
+}
+
+const fail = (status: number, error: string) => Response.json({ error }, { status });
+
+/** What `beaconResponse` needs from the server (tests pass their own). */
+export interface BeaconDeps {
+  /** Who sent `request`, from its session cookie. */
+  caller: (request: Request) => Promise<Caller>;
+  service: Pick<ConnectionEventService, "record">;
+}
+
+/**
+ * The answer to a beacon POST (`/api/connection-events`, src/routes/api/connection-events.ts): the
+ * same report as `reportConnectionFn`, from a page that is closing. A foreign `Origin` is refused
+ * with 403 before anything is read, a visitor with 401, a body past `BEACON_MAX_BYTES` with 413 and
+ * one that isn't a report with 400; otherwise it is recorded like any other report.
+ */
+export async function beaconResponse(request: Request, deps: BeaconDeps): Promise<Response> {
+  if (!isSameOrigin(request)) return fail(403, "Forbidden");
+  const caller = await deps.caller(request);
+  try {
+    requireSignedIn(caller);
+  } catch (error) {
+    if (error instanceof SignInRequiredError) return fail(401, error.message);
+    throw error;
+  }
+  const read = await readBeacon(request);
+  if (!read.ok) {
+    logReportDropped("connection_event", read.status === 413 ? "too_large" : "invalid", {
+      userId: caller.user.id,
+      via: "beacon",
+    });
+    return fail(read.status, read.error);
+  }
+  return Response.json(await deps.service.record(caller, read.input));
 }
 
 let service: ConnectionEventService | undefined;

@@ -3,6 +3,7 @@
  * slow database writes, dropped reports and the room timeline. Everything else logs through
  * ./logger.ts at its own call site.
  */
+import type { TimelineEventRow } from "../lib/room-timeline.ts";
 import { type LogFields, log } from "./logger.ts";
 
 /**
@@ -86,6 +87,26 @@ export function logReportDropped(report: DroppedReport, reason: string, fields: 
 export function logTimelineEvent(event: { kind: string; roomId: string } & LogFields): void {
   const { kind, ...fields } = event;
   log.info(`timeline.${kind}`, `timeline: ${kind}`, fields);
+}
+
+/**
+ * `logTimelineEvent` for a stored row, for whoever records one (the hub's recorder, and the
+ * connection events a browser reports). Never throws: the log being down is no reason to fail the
+ * write it describes.
+ */
+export function logTimelineRow(row: TimelineEventRow): void {
+  try {
+    logTimelineEvent({
+      kind: row.kind,
+      roomId: row.roomId,
+      userId: row.actorUserId ?? undefined,
+      targetUserId: row.targetUserId ?? undefined,
+      at: row.at.toISOString(),
+      details: row.details,
+    });
+  } catch {
+    // The log is down; the timeline row is not affected.
+  }
 }
 
 /**

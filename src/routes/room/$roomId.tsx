@@ -172,7 +172,12 @@ function RoomVisit({ room, admin }: { room: LiveRoomCard; admin: boolean }) {
   useEffect(() => {
     const reporter = getConnectionReporter();
     reporter.setRoom(room.id);
-    return () => reporter.setRoom(null);
+    return () => {
+      // Leaving: what is queued goes now, not in 3 s. The server takes what happened before the
+      // leave from someone who has just left (src/server/connection-events.ts).
+      void reporter.flush();
+      reporter.setRoom(null);
+    };
   }, [room.id]);
   if (!entered) {
     return (

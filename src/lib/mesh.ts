@@ -550,6 +550,10 @@ interface Link {
   pathKey?: string;
   /** The connection state last reported, so none is reported twice running. */
   stateReported?: string;
+  /** A refused candidate was reported since the last description was applied. */
+  candidateFailed?: boolean;
+  /** A path read for the room timeline is under way (`#checkPath`). */
+  pathReading?: boolean;
   /** The video codecs the peer can decode, once it has said. */
   remoteCodecs?: string[];
   /** Where each of this side's video senders is on its ladder. */
@@ -1325,9 +1329,11 @@ export class Mesh {
     }
     link.adjusting = true;
     try {
-      await this.#checkPath(link);
       const reading = await this.#adjustSenders(link);
       await this.#readReceivers(link);
+      // After the pass's own work, and not waited for: a slow or hung read of the connection's
+      // stats must never hold up the adjustment (ADR 2: the pass costs what its sender reads do).
+      this.#checkPath(link);
       return reading;
     } finally {
       link.adjusting = false;
@@ -1696,7 +1702,12 @@ export class Mesh {
       } catch (error) {
         // Candidates for an offer this side ignored fail, as they should.
         if (!link.ignoreOffer) {
-          this.#negotiationFailed(link, "candidate", error);
+          // Once until a description is applied: a refused description is followed by every
+          // candidate trickled after it, and each would be the same news.
+          if (!link.candidateFailed) {
+            link.candidateFailed = true;
+            this.#negotiationFailed(link, "candidate", error);
+          }
           throw error;
         }
       }
@@ -1719,6 +1730,7 @@ export class Mesh {
       throw error;
     }
     link.remoteSdp = description.sdp;
+    link.candidateFailed = false;
     // Encoding parameters can only be set once there is something negotiated to set them on.
     for (const slot of VIDEO_SLOTS) {
       const sender = link.own.get(slot)?.sender;
@@ -1952,7 +1964,12 @@ export class Mesh {
   // The room timeline's reports (ADR 3 addendum). A pair is reported to `onReport` as it goes.
 
   #report(event: ConnectionEvent | undefined): void {
-    if (event && !this.#closed) this.#onReport?.(event);
+    if (!event || this.#closed) return;
+    try {
+      this.#onReport?.(event);
+    } catch {
+      // Reporting is best-effort: a listener that throws must never break a connection.
+    }
   }
 
   /** A restart or start-over of `link` began; the next time it connects, or gives up, is its end. */
@@ -1993,11 +2010,21 @@ export class Mesh {
     if (this.#current(link)) this.#report(negotiationEvent(link.userId, step, error));
   }
 
-  /** On a quality pass, see whether a connected pair has moved to another path. */
-  async #checkPath(link: Link): Promise<void> {
-    if (!this.#onReport || link.pathKey === undefined) return;
-    const ice = await this.#icePath(link);
-    if (ice && this.#live(link)) this.#reportPath(link, ice, "change");
+  /**
+   * On a quality pass, see whether a connected pair has moved to another path, and report it.
+   * Runs on its own (the pass doesn't wait for it), one read per pair at a time: a read that
+   * hangs holds its pair's next checks off, and nothing else.
+   */
+  #checkPath(link: Link): void {
+    if (!this.#onReport || link.pathKey === undefined || link.pathReading) return;
+    link.pathReading = true;
+    void this.#icePath(link)
+      .then((ice) => {
+        if (ice && this.#live(link)) this.#reportPath(link, ice, "change");
+      })
+      .finally(() => {
+        link.pathReading = false;
+      });
   }
 
   /** Give `link` the current ICE servers (used from its next ICE restart). */

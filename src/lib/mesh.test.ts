@@ -2144,17 +2144,65 @@ describe("Mesh ICE (ADR 3)", () => {
       anaPc.setConnectionState("connected");
       await tick();
       await ana.mesh.adjust();
+      await tick();
       expect(of(ana.reports, "pair_path")).toHaveLength(1);
 
       // The pair in use moves to a relay.
       anaPc.stats = relayStats();
       await ana.mesh.adjust();
+      await tick();
       expect(of(ana.reports, "pair_path").at(-1)).toMatchObject({
         change: "change",
         path: "relay",
       });
       await ana.mesh.adjust();
+      await tick();
       expect(of(ana.reports, "pair_path")).toHaveLength(2);
+    });
+
+    it("never lets a slow or hung path read hold up the quality pass", async () => {
+      const { ana, anaPc } = await reported();
+      anaPc.stats = directStats();
+      anaPc.setConnectionState("connected");
+      await tick();
+      // The connection's stats never come back. The pass still ends (it would hang on the read
+      // if it waited), and asks only once while that read is out.
+      let reads = 0;
+      anaPc.getStats = () => {
+        reads++;
+        return new Promise(() => {});
+      };
+      await ana.mesh.adjust();
+      await ana.mesh.adjust();
+      await ana.mesh.adjust();
+      expect(reads).toBe(1);
+      expect(of(ana.reports, "pair_path")).toHaveLength(1);
+    });
+
+    it("adjusts the senders before it reads the path, and not after waiting for it", async () => {
+      const { ana, anaPc } = await reported();
+      anaPc.stats = directStats();
+      anaPc.setConnectionState("connected");
+      await tick();
+      const order: string[] = [];
+      anaPc.getStats = async () => {
+        order.push("path");
+        return anaPc.stats;
+      };
+      const cam = track("ana cam");
+      ana.mesh.setLocalTracks({ cam });
+      await tick();
+      const sender = anaPc.transceivers.find((t) => t.sender.track === cam)?.sender;
+      if (!sender) throw new Error("the camera is not being sent");
+      sender.getStats = async () => {
+        order.push("sender");
+        return sender.stats;
+      };
+      order.length = 0;
+      await ana.mesh.adjust();
+      await tick();
+      // The pass's own read first; the path read after it (and not waited for).
+      expect(order).toEqual(["sender", "path"]);
     });
 
     it("reports an ICE restart and that it recovered", async () => {
@@ -2328,6 +2376,51 @@ describe("Mesh ICE (ADR 3)", () => {
         message: "Failed to parse SessionDescription at [ip]",
       });
       expect(log).toHaveBeenCalled();
+    });
+
+    it("reports a refused candidate once, not for every one trickled after a bad description", async () => {
+      const log = vi.fn();
+      const { ana, bo, anaPc } = await reported({ log });
+      const session = bo.sent[0]?.session as string;
+      anaPc.addIceCandidate = async () => {
+        throw Object.assign(new Error("bad candidate"), { name: "OperationError" });
+      };
+      const trickle = () =>
+        ana.mesh.receive("bo", {
+          kind: "candidate",
+          session,
+          candidate: { candidate: "candidate:1 1 udp 1 1.1.1.1 1 typ host" },
+        } as SignalPayload);
+      for (let i = 0; i < 25; i++) trickle();
+      await tick();
+      expect(of(ana.reports, "negotiation_error")).toMatchObject([
+        { step: "candidate", name: "OperationError" },
+      ]);
+
+      // A description that is applied starts it afresh: the next refused candidate is news again.
+      bo.mesh.setLocalTracks({ cam: track("bo cam") });
+      await tick();
+      trickle();
+      trickle();
+      await tick();
+      expect(of(ana.reports, "negotiation_error")).toHaveLength(2);
+    });
+
+    it("is not broken by a listener that throws", async () => {
+      vi.useFakeTimers();
+      const network = new Map<string, Mesh>();
+      const ana = reporting("ana", network, {
+        onReport: () => {
+          throw new Error("reporter down");
+        },
+      });
+      const bo = reporting("bo", network);
+      ana.mesh.join(everyone);
+      bo.mesh.join(everyone);
+      await tick();
+      (ana.pcs[0] as FakePC).setConnectionState("connected");
+      await tick();
+      expect(ana.mesh.peers()).toMatchObject([{ userId: "bo", state: "connected" }]);
     });
 
     it("stops reporting once closed", async () => {
