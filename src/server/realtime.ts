@@ -25,6 +25,7 @@ import { registerLiveHub } from "./live-hub.ts";
 import { onRoomAnnouncement } from "./room-announcements.ts";
 import { type Connection, RoomHub } from "./room-hub.ts";
 import { createDbRoomStore } from "./room-store.ts";
+import { createTimelineRecorder } from "./room-timeline.ts";
 import { type Authenticated, authenticatedFromSession, getSessionFromRequest } from "./session.ts";
 
 export interface RealtimeOptions {
@@ -76,11 +77,15 @@ const authenticateFromSession = async (request: IncomingMessage): Promise<Authen
   authenticatedFromSession(await getSessionFromRequest(request));
 
 export function attachRealtime(server: Server, options: RealtimeOptions = {}): RealtimeServer {
+  // A hub made here records its room timeline here: written out on `close`. A hub passed in
+  // brings its own timeline, which is its owner's to close.
+  const timeline = options.hub ? undefined : createTimelineRecorder(getDb(), systemClock);
   const hub =
     options.hub ??
     new RoomHub({
       clock: systemClock,
       store: createDbRoomStore(getDb()),
+      timeline,
       emptyRoomTimeoutMs: env.REALTIME_EMPTY_ROOM_TIMEOUT_MS,
     });
   const authenticate = options.authenticate ?? authenticateFromSession;
@@ -113,7 +118,10 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
       {
         send: (message) => {
           if (ws.readyState !== ws.OPEN) return;
-          if (ws.bufferedAmount > maxBufferedBytes) return dropSlowClient(ws, caller);
+          if (ws.bufferedAmount > maxBufferedBytes) {
+            if (connection) hub.slowClientDropped(connection, ws.bufferedAmount);
+            return dropSlowClient(ws, caller);
+          }
           ws.send(JSON.stringify(message));
         },
         close: (code, reason) => ws.close(code, reason),
@@ -224,6 +232,8 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
       for (const ws of wss.clients) ws.terminate();
       await new Promise<void>((resolve) => wss.close(() => resolve()));
       await hub.idle();
+      // Its last events, before the pool closes (it gives up if the database is stuck).
+      await timeline?.close();
     },
   };
 }

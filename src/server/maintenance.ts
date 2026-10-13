@@ -1,13 +1,14 @@
 /**
  * In-process maintenance scheduler: runs the retention purge (ADR 11), the expired-session
- * purge and the 90-day quality sample purge once on boot and then every 24 hours. Single app
- * process (ADR 9), so no locking.
+ * purge, the 90-day quality sample purge and the 90-day room timeline purge once on boot and
+ * then every 24 hours. Single app process (ADR 9), so no locking.
  */
 import { lt } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import { session } from "../db/schema/index.ts";
 import { getLiveHub } from "./live-hub.ts";
 import { purgeExpiredQualitySamples } from "./quality.ts";
+import { purgeExpiredTimelineEvents } from "./room-timeline.ts";
 import { purgeExpiredRooms } from "./stats.ts";
 
 const INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -29,8 +30,8 @@ export async function purgeExpiredSessions(db: Db, now: Date = new Date()): Prom
 
 /**
  * One maintenance pass. The purges are independent: a failure in one is logged and doesn't
- * skip the others. The quality samples outlive the room purge (90 days to its 30), so theirs is
- * its own.
+ * skip the others. The quality samples and the room timeline outlive the room purge (90 days to
+ * its 30), so each has a purge of its own.
  */
 export async function runMaintenance(db: Db, now: Date = new Date()): Promise<void> {
   try {
@@ -54,6 +55,13 @@ export async function runMaintenance(db: Db, now: Date = new Date()): Promise<vo
     );
   } catch (error) {
     console.error("[maintenance] quality sample purge failed", error);
+  }
+  try {
+    console.log(
+      `[maintenance] timeline: deleted ${await purgeExpiredTimelineEvents(db, now)} expired event(s)`,
+    );
+  } catch (error) {
+    console.error("[maintenance] timeline purge failed", error);
   }
 }
 

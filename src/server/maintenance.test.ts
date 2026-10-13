@@ -1,11 +1,12 @@
 import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Db } from "../db/client.ts";
-import { qualitySamples, session, user } from "../db/schema/index.ts";
+import { qualitySamples, roomTimelineEvents, session, user } from "../db/schema/index.ts";
 import { createTestDb } from "../db/test-db.ts";
 import { registerLiveHub } from "./live-hub.ts";
 import { purgeExpiredSessions, runMaintenance } from "./maintenance.ts";
 import type { RoomHub } from "./room-hub.ts";
+import { purgeExpiredTimelineEvents } from "./room-timeline.ts";
 
 const NOW = new Date("2026-10-02T12:00:00Z");
 const HOUR = 60 * 60 * 1000;
@@ -145,6 +146,72 @@ describe("runMaintenance", () => {
           expect.anything(),
         );
         expect(log).toHaveBeenCalledWith(expect.stringContaining("[maintenance] purge:"));
+      } finally {
+        log.mockRestore();
+        error.mockRestore();
+      }
+    });
+  });
+  describe("room timeline events (90 days, past the 30 of room data)", () => {
+    const eventAt = (roomId: string, daysOld: number) => ({
+      roomId,
+      at: new Date(NOW.getTime() - daysOld * 24 * HOUR),
+      kind: "join" as const,
+      actorUserId: "a",
+    });
+    const eventRooms = async () =>
+      (await db.select({ roomId: roomTimelineEvents.roomId }).from(roomTimelineEvents))
+        .map((e) => e.roomId)
+        .sort();
+
+    it("purges them in the daily job, on their own cutoff", async () => {
+      await db
+        .insert(roomTimelineEvents)
+        .values([eventAt("old", 91), eventAt("past-30", 45), eventAt("fresh", 1)]);
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      try {
+        await runMaintenance(db, NOW);
+        expect(await eventRooms()).toEqual(["fresh", "past-30"]);
+        expect(log).toHaveBeenCalledWith("[maintenance] timeline: deleted 1 expired event(s)");
+      } finally {
+        log.mockRestore();
+      }
+    });
+
+    it("leaves a day-89 event and takes a day-91 one, at the 90-day line", async () => {
+      await db.insert(roomTimelineEvents).values([eventAt("d89", 89), eventAt("d91", 91)]);
+      expect(await purgeExpiredTimelineEvents(db, NOW)).toBe(1);
+      expect(await eventRooms()).toEqual(["d89"]);
+    });
+
+    it("still purges them when the room, session and quality purges throw", async () => {
+      await db.insert(roomTimelineEvents).values(eventAt("old", 91));
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        await db.execute(sql`drop table rooms cascade`);
+        await db.execute(sql`drop table session cascade`);
+        await db.execute(sql`drop table quality_samples`);
+        await runMaintenance(db, NOW);
+        expect(await eventRooms()).toEqual([]);
+      } finally {
+        log.mockRestore();
+        error.mockRestore();
+      }
+    });
+
+    it("don't hold up the other purges when theirs throws", async () => {
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        await db.execute(sql`drop table room_timeline_events`);
+        await runMaintenance(db, NOW);
+        expect(await sessionIds()).toEqual(["live"]);
+        expect(error).toHaveBeenCalledWith(
+          "[maintenance] timeline purge failed",
+          expect.anything(),
+        );
+        expect(log).toHaveBeenCalledWith(expect.stringContaining("[maintenance] quality:"));
       } finally {
         log.mockRestore();
         error.mockRestore();

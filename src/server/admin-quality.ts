@@ -102,7 +102,7 @@ export async function getPairTimeline(
   return { ...timelineOf(truncated ? rows.slice(0, limit) : rows), truncated };
 }
 
-async function peopleByIds(db: Db, ids: string[]): Promise<Map<string, RoomPerson>> {
+export async function peopleByIds(db: Db, ids: string[]): Promise<Map<string, RoomPerson>> {
   const unique = [...new Set(ids)];
   if (unique.length === 0) return new Map();
   const rows = await db
