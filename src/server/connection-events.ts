@@ -33,6 +33,7 @@ import { boundDetails, type TimelineEventRow } from "../lib/room-timeline.ts";
 import { type Caller, requireSignedIn, type SignedInCaller } from "./caller.ts";
 import { type Clock, systemClock, type Timer } from "./clock.ts";
 import { mayEnterRoom } from "./ice.ts";
+import { logReportDropped, logTimelineEvent, logTimelineWriteFailed } from "./log-events.ts";
 import { forgetIdle, withinRateLimit } from "./rate-limit.ts";
 import { readBodyCapped } from "./thumbnails.ts";
 
@@ -62,8 +63,6 @@ export interface ConnectionEventServiceOptions {
   clock?: Clock;
   /** Whether a signed-in caller may enter the live room (`mayEnterRoom`). */
   mayEnter?: (caller: SignedInCaller, roomId: string) => Promise<boolean>;
-  /** Where a failed marker write is noted. Defaults to `console.error`. */
-  log?: (message: string, error: unknown) => void;
 }
 
 /** One person's drops that no marker has recorded yet. */
@@ -79,7 +78,6 @@ export class ConnectionEventService {
   readonly #db: Db;
   readonly #clock: Clock;
   readonly #mayEnter: NonNullable<ConnectionEventServiceOptions["mayEnter"]>;
-  readonly #log: NonNullable<ConnectionEventServiceOptions["log"]>;
   /** When each person's reports arrived (epoch ms, oldest first). */
   readonly #batches = new Map<string, number[]>();
   /** When each person's stored events were reported (epoch ms, oldest first, one per event). */
@@ -92,8 +90,6 @@ export class ConnectionEventService {
     this.#clock = options.clock ?? systemClock;
     this.#mayEnter =
       options.mayEnter ?? ((caller, roomId) => mayEnterRoom(this.#db, caller, roomId));
-    this.#log =
-      options.log ?? ((message, error) => console.error(`[connection] ${message}`, error));
   }
 
   /**
@@ -105,12 +101,26 @@ export class ConnectionEventService {
     input: ReportConnectionEventsInput,
   ): Promise<ConnectionReportResult> {
     requireSignedIn(caller);
-    const { roomId, events } = reportConnectionEventsInput.parse(input);
     const reporter = caller.user.id;
+    const parsed = reportConnectionEventsInput.safeParse(input);
+    if (!parsed.success) {
+      const named = (input as { roomId?: unknown } | null)?.roomId;
+      logReportDropped("connection_event", "invalid", {
+        userId: reporter,
+        roomId: typeof named === "string" ? named : undefined,
+      });
+      throw parsed.error;
+    }
+    const { roomId, events } = parsed.data;
     const now = this.#clock.now();
     const batches = CONNECTION_BATCH_RATE_LIMIT;
     forgetIdle(this.#batches, batches.windowMs, now);
     if (!withinRateLimit(this.#batches, reporter, batches.batches, batches.windowMs, now)) {
+      logReportDropped("connection_event", "over_limit", {
+        userId: reporter,
+        roomId,
+        events: events.length,
+      });
       return { stored: 0, dropped: 0 };
     }
 
@@ -140,6 +150,28 @@ export class ConnectionEventService {
     const allowed = events.filter((e) =>
       "peerId" in e ? inside && e.peerId !== reporter && inRoom.has(e.peerId) : mayEnter,
     );
+    if (allowed.length < events.length) {
+      // Not theirs to report: they aren't in the room (or may not enter it), or the event names
+      // a peer who left since, or themselves.
+      const peerGone = events.filter(
+        (e) => "peerId" in e && inside && (e.peerId === reporter || !inRoom.has(e.peerId)),
+      ).length;
+      const refused = events.length - allowed.length;
+      if (refused > peerGone) {
+        logReportDropped("connection_event", "not_in_room", {
+          userId: reporter,
+          roomId,
+          events: refused - peerGone,
+        });
+      }
+      if (peerGone > 0) {
+        logReportDropped("connection_event", "peer_not_in_room", {
+          userId: reporter,
+          roomId,
+          events: peerGone,
+        });
+      }
+    }
     if (allowed.length === 0) return { stored: 0, dropped: 0 };
 
     // The cap: the first events that fit are kept, the rest dropped.
@@ -154,18 +186,25 @@ export class ConnectionEventService {
     const dropped = allowed.length - kept.length;
     recent.length = 0;
     recent.push(...live, ...kept.map(() => now.getTime()));
-    if (dropped > 0) this.#drop(reporter, roomId, dropped, now);
+    if (dropped > 0) {
+      logReportDropped("connection_event", "over_cap", {
+        userId: reporter,
+        roomId,
+        events: dropped,
+      });
+      this.#drop(reporter, roomId, dropped, now);
+    }
     if (kept.length === 0) return { stored: 0, dropped };
 
+    const rows = kept.map((e) => rowOf(roomId, reporter, e, now));
     try {
-      await this.#db
-        .insert(roomTimelineEvents)
-        .values(kept.map((e) => rowOf(roomId, reporter, e, now)));
+      await this.#db.insert(roomTimelineEvents).values(rows);
     } catch (error) {
       // The allowance is for events that were stored: give it back so a retry can have it.
       this.#refund(recent, now.getTime(), kept.length);
       throw error;
     }
+    for (const row of rows) logStored(row);
     return { stored: kept.length, dropped };
   }
 
@@ -211,8 +250,13 @@ export class ConnectionEventService {
     const write = Promise.resolve()
       .then(() => this.#db.insert(roomTimelineEvents).values(row))
       .then(
-        () => undefined,
-        (error: unknown) => this.#log("writing an events-dropped marker failed", error),
+        () => logStored(row),
+        (error: unknown) =>
+          logTimelineWriteFailed(
+            error,
+            { roomId: row.roomId, userId: reporter },
+            "writing an events-dropped marker failed",
+          ),
       )
       .finally(() => this.#writes.delete(write));
     this.#writes.add(write);
@@ -226,6 +270,22 @@ export class ConnectionEventService {
         left--;
       }
     }
+  }
+}
+
+/** A stored row also goes to the server log, as the recorder does for the hub's events. */
+function logStored(row: TimelineEventRow): void {
+  try {
+    logTimelineEvent({
+      kind: row.kind,
+      roomId: row.roomId,
+      userId: row.actorUserId ?? undefined,
+      targetUserId: row.targetUserId ?? undefined,
+      at: row.at.toISOString(),
+      details: row.details,
+    });
+  } catch {
+    // The log is down; the timeline row is not affected.
   }
 }
 

@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { requireSignedIn, SignInRequiredError } from "~/server/caller";
 import { getConnectionEventService, readBeacon } from "~/server/connection-events";
+import { logReportDropped } from "~/server/log-events";
 import { callerFromSession, getSessionFromRequest } from "~/server/session";
 import { isSameOrigin } from "~/server/thumbnails";
 
@@ -19,7 +20,13 @@ export const Route = createFileRoute("/api/connection-events")({
           const caller = callerFromSession(await getSessionFromRequest(request));
           requireSignedIn(caller);
           const read = await readBeacon(request);
-          if (!read.ok) return fail(read.status, read.error);
+          if (!read.ok) {
+            logReportDropped("connection_event", read.status === 413 ? "too_large" : "invalid", {
+              userId: caller.user.id,
+              via: "beacon",
+            });
+            return fail(read.status, read.error);
+          }
           return Response.json(await getConnectionEventService().record(caller, read.input));
         } catch (error) {
           if (error instanceof SignInRequiredError) return fail(401, error.message);

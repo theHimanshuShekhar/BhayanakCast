@@ -1,50 +1,49 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { getDb } from "~/db/client";
 import { THUMBNAIL_MAX_BYTES } from "~/lib/thumbnails";
-import { requireSignedIn, SignInRequiredError } from "~/server/caller";
+import { requireSignedIn } from "~/server/caller";
 import { announceRoom } from "~/server/room-announcements";
 import { callerFromSession, getSessionFromRequest } from "~/server/session";
 import {
-  InvalidThumbnailError,
   isSameOrigin,
   mayUpload,
-  NotStreamingError,
   readBodyCapped,
+  refuseUpload,
+  uploadFailureResponse,
   uploadThumbnail,
 } from "~/server/thumbnails";
 
-const fail = (status: number, error: string) => Response.json({ error }, { status });
-
-// A streamer uploads the raw image of their own screen for this room (ADR 10).
+// A streamer uploads the raw image of their own screen for this room (ADR 10). Every refusal and
+// failure is logged (`thumbnail.upload_refused` / `thumbnail.upload_failed`): the page doesn't
+// show a failed upload, so the log is where it shows.
 export const Route = createFileRoute("/api/thumbnails/$roomId/")({
   server: {
     handlers: {
       POST: async ({ request, params }) => {
-        if (!isSameOrigin(request)) return fail(403, "Forbidden");
+        const { roomId } = params;
+        if (!isSameOrigin(request)) return refuseUpload(403, "Forbidden", { roomId });
+        let userId: string | undefined;
         try {
           const caller = callerFromSession(await getSessionFromRequest(request));
           requireSignedIn(caller);
-          if (!mayUpload(caller.user.id)) return fail(429, "Too many thumbnails, slow down");
+          userId = caller.user.id;
+          const who = { roomId, userId };
+          if (!mayUpload(userId)) return refuseUpload(429, "Too many thumbnails, slow down", who);
           if (Number(request.headers.get("content-length")) > THUMBNAIL_MAX_BYTES) {
-            return fail(413, "Thumbnail too large");
+            return refuseUpload(413, "Thumbnail too large", who);
           }
           const bytes = await readBodyCapped(request, THUMBNAIL_MAX_BYTES);
-          if (!bytes) return fail(413, "Thumbnail too large");
+          if (!bytes) return refuseUpload(413, "Thumbnail too large", who);
           const stored = await uploadThumbnail(getDb(), caller, {
-            roomId: params.roomId,
+            roomId,
             contentType: request.headers.get("content-type"),
             bytes,
           });
           // After the commit, so lists refetched on the lobby's word carry the new image.
-          announceRoom({ kind: "thumbnail", roomId: params.roomId });
+          announceRoom({ kind: "thumbnail", roomId });
           return Response.json(stored);
         } catch (error) {
-          if (error instanceof SignInRequiredError) return fail(401, error.message);
-          if (error instanceof NotStreamingError) return fail(403, error.message);
-          if (error instanceof InvalidThumbnailError) {
-            return fail(error.reason === "size" ? 413 : 415, error.message);
-          }
-          throw error;
+          return uploadFailureResponse(error, { roomId, userId });
         }
       },
     },

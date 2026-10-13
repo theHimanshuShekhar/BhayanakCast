@@ -13,6 +13,13 @@ import {
   TURN_REFRESH_MARGIN_S,
   type TurnProvider,
 } from "./ice.ts";
+import { type CapturedLogs, captureLogs } from "./test-logs.ts";
+
+let logs: CapturedLogs;
+beforeEach(() => {
+  logs = captureLogs();
+});
+afterEach(() => logs.restore());
 
 const visitor: Caller = { user: null, role: "visitor" };
 const asUser = (id: string): Caller => ({ user: { id, username: id, image: null }, role: "user" });
@@ -40,14 +47,8 @@ function setup(
     roomId === "r1" || roomId === "r2",
 ) {
   const clock = new FakeClock();
-  const lines: { line: string; error?: unknown }[] = [];
-  const service = new IceService({
-    turn,
-    mayEnter,
-    clock,
-    log: (line, error) => lines.push({ line, error }),
-  });
-  return { clock, lines, service };
+  const service = new IceService({ turn, mayEnter, clock });
+  return { clock, service };
 }
 
 const username = (servers: RTCIceServer[]) => servers.find((s) => s.username)?.username;
@@ -93,17 +94,19 @@ describe("ICE servers", () => {
   it("fall back to STUN, logged, when minting fails, and try again next time", async () => {
     const turn = fakeTurn();
     turn.failing = true;
-    const { lines, service } = setup(turn);
+    const { service } = setup(turn);
     expect(await service.serversFor(asUser("ana"), "r1")).toEqual({
       iceServers: STUN_SERVERS,
       refreshInSeconds: 60,
     });
-    expect(lines).toEqual([
-      {
-        line: expect.stringContaining("minting TURN credentials failed"),
-        error: expect.any(Error),
-      },
-    ]);
+    expect(logs.entries).toHaveLength(1);
+    expect(logs.entries[0]).toMatchObject({
+      level: "warn",
+      event: "ice.mint_failed",
+      userId: "ana",
+      roomId: "r1",
+      err: { message: "cloudflare down" },
+    });
     turn.failing = false;
     expect(username((await service.serversFor(asUser("ana"), "r1")).iceServers)).toBe("u2");
   });

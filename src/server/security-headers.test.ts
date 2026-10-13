@@ -3,14 +3,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ServerMiddleware, ServerRequest } from "srvx";
 import { staticMiddleware } from "srvx/static";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CSP_NONCE_KEY } from "../lib/csp-nonce.ts";
+import { bindLogUser, withRequestLog } from "./logger.ts";
 import {
   contentSecurityPolicy,
   hashedAssetCaching,
   securityHeaders,
   withPrivateCaching,
 } from "./security-headers.ts";
+import { captureLogs } from "./test-logs.ts";
 
 // The server as server.prod.ts wires it: the same middleware around a stand-in for the app.
 let clientDir: string;
@@ -190,7 +192,7 @@ describe("a static asset", () => {
 
 describe("an unhandled error in the app", () => {
   it("is answered as a 500 that still has the security headers, and is logged", async () => {
-    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const logs = captureLogs();
     try {
       const response = await get("/boom");
       expect(response.status).toBe(500);
@@ -199,9 +201,32 @@ describe("an unhandled error in the app", () => {
       expect(response.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
       expect(response.headers.get("x-content-type-options")).toBe("nosniff");
       expect(response.headers.get("referrer-policy")).toBe("strict-origin-when-cross-origin");
-      expect(log).toHaveBeenCalledOnce();
+      expect(logs.entries).toHaveLength(1);
+      expect(logs.entries[0]).toMatchObject({
+        level: "error",
+        event: "http.unhandled",
+        route: "/boom",
+        err: { message: "the app fell over" },
+      });
     } finally {
-      log.mockRestore();
+      logs.restore();
+    }
+  });
+
+  it("names the request and the signed-in user, when the request found out who it was", async () => {
+    const logs = captureLogs();
+    try {
+      await withRequestLog({ requestId: "req-5", route: "/boom" }, async () => {
+        bindLogUser("user-7");
+        return get("/boom");
+      });
+      expect(logs.find("http.unhandled")).toMatchObject({
+        requestId: "req-5",
+        userId: "user-7",
+        route: "/boom",
+      });
+    } finally {
+      logs.restore();
     }
   });
 });

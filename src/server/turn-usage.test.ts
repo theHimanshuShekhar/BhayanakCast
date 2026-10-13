@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AdminRequiredError, type Caller } from "./caller.ts";
 import { FakeClock } from "./clock.ts";
+import { type CapturedLogs, captureLogs } from "./test-logs.ts";
 import {
   cloudflareTurnAnalytics,
   TURN_USAGE_CACHE_MS,
@@ -8,6 +9,12 @@ import {
   type TurnEgressDay,
   TurnUsageService,
 } from "./turn-usage.ts";
+
+let logs: CapturedLogs;
+beforeEach(() => {
+  logs = captureLogs();
+});
+afterEach(() => logs.restore());
 
 const visitor: Caller = { user: null, role: "visitor" };
 const plainUser: Caller = { user: { id: "a", username: "a", image: null }, role: "user" };
@@ -32,9 +39,8 @@ function fakeAnalytics(rows: TurnEgressDay[] = []) {
 
 function setup(analytics: TurnAnalytics | null, start = "2026-09-03T12:00:00Z") {
   const clock = new FakeClock(start);
-  const logs: string[] = [];
-  const service = new TurnUsageService({ analytics, clock, log: (line) => logs.push(line) });
-  return { clock, logs, service };
+  const service = new TurnUsageService({ analytics, clock });
+  return { clock, service };
 }
 
 describe("TurnUsageService", () => {
@@ -97,9 +103,15 @@ describe("TurnUsageService", () => {
   it("reports unavailable when Cloudflare fails, logs it, and tries again next time", async () => {
     const analytics = fakeAnalytics([{ day: "2026-09-01", bytes: GB }]);
     analytics.fail = true;
-    const { service, logs } = setup(analytics);
+    const { service } = setup(analytics);
     await expect(service.usage(admin)).resolves.toEqual({ status: "unavailable" });
-    expect(logs).toEqual(["[turn-usage] Cloudflare analytics failed"]);
+    expect(logs.entries).toHaveLength(1);
+    expect(logs.entries[0]).toMatchObject({
+      level: "warn",
+      event: "turn_usage.failed",
+      msg: "Cloudflare analytics failed",
+      err: { message: "boom" },
+    });
     analytics.fail = false;
     await expect(service.usage(admin)).resolves.toMatchObject({ status: "ok", totalGb: 1 });
     expect(analytics.calls).toHaveLength(2);

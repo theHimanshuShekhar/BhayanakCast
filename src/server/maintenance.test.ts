@@ -7,14 +7,17 @@ import { registerLiveHub } from "./live-hub.ts";
 import { purgeExpiredSessions, runMaintenance } from "./maintenance.ts";
 import type { RoomHub } from "./room-hub.ts";
 import { purgeExpiredTimelineEvents } from "./room-timeline.ts";
+import { type CapturedLogs, captureLogs } from "./test-logs.ts";
 
 const NOW = new Date("2026-10-02T12:00:00Z");
 const HOUR = 60 * 60 * 1000;
 
 let db: Db;
 let close: () => Promise<void>;
+let logs: CapturedLogs;
 
 beforeEach(async () => {
+  logs = captureLogs();
   ({ db, close } = await createTestDb());
   await db.insert(user).values({ id: "a", name: "a", email: "a@discord.invalid" });
   await db.insert(session).values([
@@ -24,6 +27,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  logs.restore();
   await close();
 });
 
@@ -60,28 +64,23 @@ describe("purgeExpiredSessions", () => {
 
 describe("runMaintenance", () => {
   it("purges expired sessions in the daily job and logs the count", async () => {
-    const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    try {
-      await runMaintenance(db, NOW);
-      expect(await sessionIds()).toEqual(["live"]);
-      expect(log).toHaveBeenCalledWith("[maintenance] sessions: deleted 1 expired session(s)");
-    } finally {
-      log.mockRestore();
-    }
+    await runMaintenance(db, NOW);
+    expect(await sessionIds()).toEqual(["live"]);
+    expect(logs.find("maintenance.sessions")).toMatchObject({
+      level: "info",
+      msg: "sessions: deleted 1 expired session(s)",
+      deleted: 1,
+    });
   });
 
   it("still purges sessions when the room purge throws", async () => {
-    const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      await db.execute(sql`drop table rooms cascade`);
-      await runMaintenance(db, NOW);
-      expect(await sessionIds()).toEqual(["live"]);
-      expect(error).toHaveBeenCalledWith("[maintenance] purge failed", expect.anything());
-    } finally {
-      log.mockRestore();
-      error.mockRestore();
-    }
+    await db.execute(sql`drop table rooms cascade`);
+    await runMaintenance(db, NOW);
+    expect(await sessionIds()).toEqual(["live"]);
+    expect(logs.find("maintenance.purge_failed")).toMatchObject({
+      level: "error",
+      err: expect.anything(),
+    });
   });
 
   describe("quality samples (90 days, past the 30 of room data)", () => {
@@ -107,49 +106,31 @@ describe("runMaintenance", () => {
       await db
         .insert(qualitySamples)
         .values([sampleAt("old", 91), sampleAt("past-30", 45), sampleAt("fresh", 1)]);
-      const log = vi.spyOn(console, "log").mockImplementation(() => {});
-      try {
-        await runMaintenance(db, NOW);
-        expect(await sampleRooms()).toEqual(["fresh", "past-30"]);
-        expect(log).toHaveBeenCalledWith("[maintenance] quality: deleted 1 expired sample(s)");
-      } finally {
-        log.mockRestore();
-      }
+      await runMaintenance(db, NOW);
+      expect(await sampleRooms()).toEqual(["fresh", "past-30"]);
+      expect(logs.find("maintenance.quality")).toMatchObject({
+        level: "info",
+        msg: "quality: deleted 1 expired sample(s)",
+        deleted: 1,
+      });
     });
 
     it("still purges them when the room and session purges throw", async () => {
       await db.insert(qualitySamples).values(sampleAt("old", 91));
-      const log = vi.spyOn(console, "log").mockImplementation(() => {});
-      const error = vi.spyOn(console, "error").mockImplementation(() => {});
-      try {
-        await db.execute(sql`drop table rooms cascade`);
-        await db.execute(sql`drop table session cascade`);
-        await runMaintenance(db, NOW);
-        expect(await sampleRooms()).toEqual([]);
-        expect(error).toHaveBeenCalledWith("[maintenance] purge failed", expect.anything());
-        expect(error).toHaveBeenCalledWith("[maintenance] session purge failed", expect.anything());
-      } finally {
-        log.mockRestore();
-        error.mockRestore();
-      }
+      await db.execute(sql`drop table rooms cascade`);
+      await db.execute(sql`drop table session cascade`);
+      await runMaintenance(db, NOW);
+      expect(await sampleRooms()).toEqual([]);
+      expect(logs.find("maintenance.purge_failed")).toMatchObject({ level: "error" });
+      expect(logs.find("maintenance.sessions_failed")).toMatchObject({ level: "error" });
     });
 
     it("don't hold up the room and session purges when theirs throws", async () => {
-      const log = vi.spyOn(console, "log").mockImplementation(() => {});
-      const error = vi.spyOn(console, "error").mockImplementation(() => {});
-      try {
-        await db.execute(sql`drop table quality_samples`);
-        await runMaintenance(db, NOW);
-        expect(await sessionIds()).toEqual(["live"]);
-        expect(error).toHaveBeenCalledWith(
-          "[maintenance] quality sample purge failed",
-          expect.anything(),
-        );
-        expect(log).toHaveBeenCalledWith(expect.stringContaining("[maintenance] purge:"));
-      } finally {
-        log.mockRestore();
-        error.mockRestore();
-      }
+      await db.execute(sql`drop table quality_samples`);
+      await runMaintenance(db, NOW);
+      expect(await sessionIds()).toEqual(["live"]);
+      expect(logs.find("maintenance.quality_failed")).toMatchObject({ level: "error" });
+      expect(logs.find("maintenance.purge")).toMatchObject({ level: "info" });
     });
   });
   describe("room timeline events (90 days, past the 30 of room data)", () => {
@@ -168,14 +149,13 @@ describe("runMaintenance", () => {
       await db
         .insert(roomTimelineEvents)
         .values([eventAt("old", 91), eventAt("past-30", 45), eventAt("fresh", 1)]);
-      const log = vi.spyOn(console, "log").mockImplementation(() => {});
-      try {
-        await runMaintenance(db, NOW);
-        expect(await eventRooms()).toEqual(["fresh", "past-30"]);
-        expect(log).toHaveBeenCalledWith("[maintenance] timeline: deleted 1 expired event(s)");
-      } finally {
-        log.mockRestore();
-      }
+      await runMaintenance(db, NOW);
+      expect(await eventRooms()).toEqual(["fresh", "past-30"]);
+      expect(logs.find("maintenance.timeline")).toMatchObject({
+        level: "info",
+        msg: "timeline: deleted 1 expired event(s)",
+        deleted: 1,
+      });
     });
 
     it("leaves a day-89 event and takes a day-91 one, at the 90-day line", async () => {
@@ -186,36 +166,19 @@ describe("runMaintenance", () => {
 
     it("still purges them when the room, session and quality purges throw", async () => {
       await db.insert(roomTimelineEvents).values(eventAt("old", 91));
-      const log = vi.spyOn(console, "log").mockImplementation(() => {});
-      const error = vi.spyOn(console, "error").mockImplementation(() => {});
-      try {
-        await db.execute(sql`drop table rooms cascade`);
-        await db.execute(sql`drop table session cascade`);
-        await db.execute(sql`drop table quality_samples`);
-        await runMaintenance(db, NOW);
-        expect(await eventRooms()).toEqual([]);
-      } finally {
-        log.mockRestore();
-        error.mockRestore();
-      }
+      await db.execute(sql`drop table rooms cascade`);
+      await db.execute(sql`drop table session cascade`);
+      await db.execute(sql`drop table quality_samples`);
+      await runMaintenance(db, NOW);
+      expect(await eventRooms()).toEqual([]);
     });
 
     it("don't hold up the other purges when theirs throws", async () => {
-      const log = vi.spyOn(console, "log").mockImplementation(() => {});
-      const error = vi.spyOn(console, "error").mockImplementation(() => {});
-      try {
-        await db.execute(sql`drop table room_timeline_events`);
-        await runMaintenance(db, NOW);
-        expect(await sessionIds()).toEqual(["live"]);
-        expect(error).toHaveBeenCalledWith(
-          "[maintenance] timeline purge failed",
-          expect.anything(),
-        );
-        expect(log).toHaveBeenCalledWith(expect.stringContaining("[maintenance] quality:"));
-      } finally {
-        log.mockRestore();
-        error.mockRestore();
-      }
+      await db.execute(sql`drop table room_timeline_events`);
+      await runMaintenance(db, NOW);
+      expect(await sessionIds()).toEqual(["live"]);
+      expect(logs.find("maintenance.timeline_failed")).toMatchObject({ level: "error" });
+      expect(logs.find("maintenance.quality")).toMatchObject({ level: "info" });
     });
   });
 });

@@ -43,12 +43,15 @@ function writeMigrations(migrations: { tag: string; when: number; sql: string }[
   return folder;
 }
 
-/** Run `node src/db/migrate.ts` the way the container does (`env` adds to Vitest's NODE_ENV=test). */
+/**
+ * Run `node src/db/migrate.ts` the way the container does (`env` adds to Vitest's NODE_ENV=test).
+ * `LOG_LEVEL=info` because the logger is silent inside Vitest, whose `VITEST` the child inherits.
+ */
 async function runMigrateScript(databaseUrl: string, env: Record<string, string> = {}) {
   try {
     const { stdout, stderr } = await promisify(execFile)(process.execPath, ["src/db/migrate.ts"], {
       cwd: repoRoot,
-      env: { ...process.env, DATABASE_URL: databaseUrl, ...env },
+      env: { ...process.env, DATABASE_URL: databaseUrl, LOG_LEVEL: "info", ...env },
     });
     return { code: 0, stdout, stderr };
   } catch (err) {
@@ -158,7 +161,7 @@ describe("migration order", () => {
     expect(await lockIsFree()).toBe(true);
   });
 
-  it("is exited non-zero by the startup script with the reason on stderr", async () => {
+  it("is exited non-zero by the startup script, with the reason logged at error", async () => {
     // Applied: the real migrations, plus one dated far in the future so every real one is "older".
     await applyMigrations(client, realMigrations);
     await client`insert into drizzle.__drizzle_migrations (hash, created_at)
@@ -168,7 +171,9 @@ describe("migration order", () => {
 
     const run = await runMigrateScript(dbUrl);
     expect(run.code).toBe(1);
-    expect(run.stderr).toMatch(/Refusing to migrate: 0000_/);
+    const line = JSON.parse(run.stdout.trim().split("\n").at(-1) ?? "");
+    expect(line).toMatchObject({ level: "error", event: "migrate.refused" });
+    expect(line.msg).toMatch(/Refusing to migrate: 0000_/);
     expect(run.stdout).not.toContain("Migrations applied");
   });
 });
@@ -212,6 +217,7 @@ describe.skipIf(!fs.existsSync(path.join(repoRoot, "dist/server/server.js")))(
         env: {
           ...process.env,
           NODE_ENV: "production",
+          LOG_LEVEL: "info",
           PORT: String(freePort),
           DATABASE_URL: dbUrl,
           BETTER_AUTH_URL: "http://localhost:3000",
@@ -233,7 +239,7 @@ describe.skipIf(!fs.existsSync(path.join(repoRoot, "dist/server/server.js")))(
       );
       try {
         // The pool is open by then: the maintenance pass queries the database on boot.
-        await vi.waitFor(() => expect(output).toMatch(/\[maintenance\] sessions/), {
+        await vi.waitFor(() => expect(output).toContain('"event":"maintenance.sessions"'), {
           timeout: 30_000,
         });
         const sent = Date.now();

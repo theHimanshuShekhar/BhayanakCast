@@ -26,6 +26,7 @@ import {
   DROP_MARKER_DELAY_MS,
   readBeacon,
 } from "./connection-events.ts";
+import { type CapturedLogs, captureLogs } from "./test-logs.ts";
 
 // What a page may tell the room timeline about its connections (#116): only from a signed-in
 // caller in the live room (or, for a device error in the pre-join, one who may enter it), about
@@ -40,15 +41,15 @@ let db: Db;
 let close: () => Promise<void>;
 let clock: FakeClock;
 let mayEnter: Mock<(caller: SignedInCaller, roomId: string) => Promise<boolean>>;
-let log: Mock<(message: string, error: unknown) => void>;
+let logs: CapturedLogs;
 let service: ConnectionEventService;
 
 beforeEach(async () => {
+  logs = captureLogs();
   ({ db, close } = await createTestDb());
   clock = new FakeClock(T0);
   mayEnter = vi.fn(async () => false);
-  log = vi.fn();
-  service = new ConnectionEventService({ db, clock, mayEnter, log });
+  service = new ConnectionEventService({ db, clock, mayEnter });
   await db
     .insert(user)
     .values(
@@ -68,6 +69,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  logs.restore();
   await close();
 });
 
@@ -329,7 +331,60 @@ describe("the cap on a person's events", () => {
     clock.advance(DROP_MARKER_DELAY_MS);
     await service.settled();
     failing.mockRestore();
-    expect(log).toHaveBeenCalledWith(expect.stringContaining("marker"), expect.any(Error));
+    expect(logs.find("timeline.write_failed")).toMatchObject({
+      level: "error",
+      msg: expect.stringContaining("marker"),
+      roomId: "r1",
+      userId: "ana",
+    });
+  });
+});
+
+// Every report the server throws away is logged as `connection_event.dropped` with why (#119), so
+// a missing event can be told from one that was never sent; what is stored is logged like the
+// hub's own timeline events.
+describe("logging", () => {
+  const drops = () =>
+    logs.all("connection_event.dropped").map((l) => [l.reason, l.userId, l.events]);
+
+  it("logs why a report or some of its events were dropped", async () => {
+    // Not in the room.
+    await service.record(asUser("dee"), report([pair("bo")]));
+    // A peer who left since, and the reporter themselves, alongside one that is kept.
+    await service.record(asUser("ana"), report([pair("cy"), pair("ana"), pair("bo")]));
+    // Invalid.
+    await expect(service.record(asUser("ana"), report([{} as never]))).rejects.toThrow();
+    expect(drops()).toEqual([
+      ["not_in_room", "dee", 1],
+      ["peer_not_in_room", "ana", 2],
+      ["invalid", "ana", undefined],
+    ]);
+  });
+
+  it("logs a report over the rate limit, and events over the cap", async () => {
+    const { batches } = CONNECTION_BATCH_RATE_LIMIT;
+    for (let i = 0; i < batches; i++) await service.record(asUser("bo"), report([pair("ana")]));
+    await service.record(asUser("bo"), report([pair("ana")]));
+    expect(drops().at(-1)).toEqual(["over_limit", "bo", 1]);
+
+    const events = Array.from({ length: CONNECTION_EVENT_CAP.events + 5 }, () => pair("bo"));
+    for (let i = 0; i < events.length; i += CONNECTION_BATCH_MAX) {
+      await service.record(asUser("ana"), report(events.slice(i, i + CONNECTION_BATCH_MAX)));
+    }
+    expect(
+      logs.all("connection_event.dropped").filter((l) => l.reason === "over_cap"),
+    ).toHaveLength(1);
+  });
+
+  it("logs each stored event as a timeline event, with the reporter and the peer", async () => {
+    await service.record(asUser("ana"), report([pair("bo")]));
+    expect(logs.find("timeline.pair_state")).toMatchObject({
+      level: "info",
+      roomId: "r1",
+      userId: "ana",
+      targetUserId: "bo",
+      details: { state: "connected" },
+    });
   });
 });
 

@@ -1,12 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createShutdown } from "./shutdown.ts";
+import { type CapturedLogs, captureLogs } from "./test-logs.ts";
+
+let logs: CapturedLogs;
 
 beforeEach(() => {
-  vi.spyOn(console, "log").mockImplementation(() => {});
-  vi.spyOn(console, "error").mockImplementation(() => {});
+  logs = captureLogs();
 });
 
 afterEach(() => {
+  logs.restore();
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
@@ -27,7 +30,16 @@ describe("createShutdown", () => {
     expect(exit).toHaveBeenCalledExactlyOnceWith(0);
   });
 
-  it("keeps going past a failing step, and exits 1", async () => {
+  it("logs the reason it is shutting down for", async () => {
+    const shutdown = createShutdown([], { exit: vi.fn() });
+    await shutdown("SIGTERM");
+    expect(logs.find("server.shutdown")).toMatchObject({
+      level: "info",
+      reason: "SIGTERM",
+    });
+  });
+
+  it("keeps going past a failing step, logs it, and exits 1", async () => {
     const after = vi.fn();
     const exit = vi.fn();
     const shutdown = createShutdown(
@@ -45,6 +57,19 @@ describe("createShutdown", () => {
     await shutdown("SIGTERM");
     expect(after).toHaveBeenCalled();
     expect(exit).toHaveBeenCalledExactlyOnceWith(1);
+    expect(logs.find("server.shutdown_step_failed")).toMatchObject({
+      level: "error",
+      step: "broken",
+      err: { message: "boom" },
+    });
+  });
+
+  it("exits with the code it was given (a crash), even when every step works", async () => {
+    const exit = vi.fn();
+    const shutdown = createShutdown([{ name: "ok", run: () => {} }], { exit });
+    await shutdown("uncaughtException", 1);
+    expect(exit).toHaveBeenCalledExactlyOnceWith(1);
+    expect(logs.find("server.shutdown")).toMatchObject({ reason: "uncaughtException" });
   });
 
   it("does nothing the second time it is called", async () => {
@@ -54,6 +79,16 @@ describe("createShutdown", () => {
     await shutdown("SIGTERM");
     await shutdown("SIGINT");
     expect(run).toHaveBeenCalledTimes(1);
+    expect(exit).toHaveBeenCalledTimes(1);
+  });
+
+  it("writes out the held-back log counts before it exits", async () => {
+    const flush = vi.fn();
+    const exit = vi.fn(() => {
+      expect(flush).toHaveBeenCalledWith(true);
+    });
+    const shutdown = createShutdown([], { exit, flushLogs: flush });
+    await shutdown("SIGTERM");
     expect(exit).toHaveBeenCalledTimes(1);
   });
 
@@ -69,6 +104,10 @@ describe("createShutdown", () => {
     expect(exit).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     expect(exit).toHaveBeenCalledExactlyOnceWith(1);
-    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("stuck"));
+    expect(logs.find("server.shutdown_timeout")).toMatchObject({
+      level: "error",
+      step: "stuck",
+      timeoutMs: 8_000,
+    });
   });
 });

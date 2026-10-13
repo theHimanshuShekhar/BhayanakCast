@@ -1,15 +1,26 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { Db } from "../db/client.ts";
 import {
   MAX_REFUSAL_KEYS,
   MAX_TIMELINE_DETAILS_BYTES,
   type TimelineEventRow,
 } from "../lib/room-timeline.ts";
 import { FakeClock } from "./clock.ts";
+import { SLOW_WRITE_MS } from "./log-events.ts";
+import { LOG_SAMPLE_LIMIT, redirectProcessLog } from "./logger.ts";
 import {
+  createTimelineRecorder,
   TIMELINE_CLOSE_TIMEOUT_MS,
   TimelineRecorder,
   type TimelineRecorderTuning,
 } from "./room-timeline.ts";
+import { type CapturedLogs, captureLogs } from "./test-logs.ts";
+
+let logs: CapturedLogs;
+beforeEach(() => {
+  logs = captureLogs();
+});
+afterEach(() => logs.restore());
 
 // The queue behind the room timeline (#115): events are batched and written off the caller's
 // path, a write that is slow or fails never reaches the caller, and the queue is bounded.
@@ -20,21 +31,18 @@ const MINUTE = 60_000;
 function setup(options: TimelineRecorderTuning = {}) {
   const clock = new FakeClock();
   const written: TimelineEventRow[][] = [];
-  const log = vi.fn();
   let write: (rows: TimelineEventRow[]) => Promise<unknown> = async (rows) => {
     written.push(rows);
   };
   const recorder = new TimelineRecorder({
     clock,
     write: (rows) => write(rows),
-    log,
     options: { flushDelayMs: FLUSH_MS, ...options },
   });
   return {
     clock,
     recorder,
     written,
-    log,
     rows: () => written.flat(),
     setWrite: (next: typeof write) => {
       write = next;
@@ -96,7 +104,7 @@ describe("TimelineRecorder queue", () => {
   });
 
   it("logs a failed write, keeps its events and writes them, in order, once the database is back", async () => {
-    const { recorder, clock, setWrite, log, rows } = setup();
+    const { recorder, clock, setWrite, rows } = setup();
     let healthy = false;
     const landed: TimelineEventRow[] = [];
     setWrite(async (batch) => {
@@ -107,7 +115,13 @@ describe("TimelineRecorder queue", () => {
     recorder.record(event(1));
     clock.advance(FLUSH_MS);
     await recorder.flush();
-    expect(log).toHaveBeenCalledWith(expect.stringContaining("room timeline"), expect.any(Error));
+    expect(logs.find("timeline.write_failed")).toMatchObject({
+      level: "error",
+      msg: expect.stringContaining("writing room timeline events failed"),
+      tries: 1,
+      kept: 2,
+      err: { message: "db is down" },
+    });
     expect(landed).toEqual([]);
     expect(recorder.queued).toBe(2);
 
@@ -139,7 +153,7 @@ describe("TimelineRecorder queue", () => {
 
   it("starts no second write while one hangs, holds its bound, and writes again once the db is back", async () => {
     // The write timeout is real time (how long the database took), here a fraction of a second.
-    const { recorder, clock, setWrite, log } = setup({ maxQueued: 50, writeTimeoutMs: 200 });
+    const { recorder, clock, setWrite } = setup({ maxQueued: 50, writeTimeoutMs: 200 });
     let calls = 0;
     setWrite(() => {
       calls++;
@@ -168,10 +182,10 @@ describe("TimelineRecorder queue", () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 300));
     await recorder.flush();
-    expect(log).toHaveBeenCalledWith(
-      expect.stringContaining("failed"),
-      expect.objectContaining({ message: expect.stringContaining("timed out") }),
-    );
+    expect(logs.find("timeline.write_failed")).toMatchObject({
+      level: "error",
+      err: { message: expect.stringContaining("timed out") },
+    });
     expect(landed.length).toBeGreaterThan(0);
     expect(landed.length).toBeLessThanOrEqual(50);
     expect(landed.at(-1)?.actorUserId).toBe("u200");
@@ -200,16 +214,17 @@ describe("TimelineRecorder queue", () => {
   });
 
   it("drops the oldest events past its bound, counts them and logs it", async () => {
-    const { recorder, clock, log, rows } = setup({ maxQueued: 3 });
+    const { recorder, clock, rows } = setup({ maxQueued: 3 });
     for (let n = 0; n < 5; n++) recorder.record(event(n));
     expect(recorder.queued).toBe(3);
     expect(recorder.dropped).toBe(2);
     // Logged when it starts, not once per dropped event.
-    expect(log).toHaveBeenCalledTimes(1);
-    expect(log).toHaveBeenCalledWith(
-      expect.stringContaining("queue is full"),
-      expect.objectContaining({ max: 3 }),
-    );
+    expect(logs.all("timeline.dropped")).toHaveLength(1);
+    expect(logs.find("timeline.dropped")).toMatchObject({
+      level: "warn",
+      msg: expect.stringContaining("queue is full"),
+      max: 3,
+    });
 
     clock.advance(FLUSH_MS);
     await recorder.flush();
@@ -217,7 +232,7 @@ describe("TimelineRecorder queue", () => {
   });
 
   it("holds to its bound while the database is down, dropping the oldest", async () => {
-    const { recorder, clock, setWrite, log } = setup({ maxQueued: 4, batchSize: 4 });
+    const { recorder, clock, setWrite } = setup({ maxQueued: 4, batchSize: 4 });
     setWrite(async () => {
       throw new Error("db is down");
     });
@@ -229,10 +244,7 @@ describe("TimelineRecorder queue", () => {
     recorder.record(event(5));
     expect(recorder.queued).toBe(4);
     expect(recorder.dropped).toBe(2);
-    expect(log).toHaveBeenCalledWith(
-      expect.stringContaining("queue is full"),
-      expect.objectContaining({ max: 4 }),
-    );
+    expect(logs.find("timeline.dropped")).toMatchObject({ max: 4 });
   });
 
   it("never throws into the caller, whatever the write does", async () => {
@@ -273,13 +285,100 @@ describe("TimelineRecorder queue", () => {
   });
 
   it("gives up on a write that never ends once closing has waited long enough", async () => {
-    const { recorder, clock, setWrite, log } = setup();
+    const { recorder, clock, setWrite } = setup();
     setWrite(() => new Promise(() => {}));
     recorder.record(event(0));
     const closing = recorder.close();
     clock.advance(TIMELINE_CLOSE_TIMEOUT_MS);
     await closing;
-    expect(log).toHaveBeenCalledWith(expect.stringContaining("timed out"), expect.anything());
+    expect(logs.find("timeline.write_failed")).toMatchObject({
+      level: "error",
+      msg: expect.stringContaining("timed out"),
+    });
+  });
+});
+
+describe("TimelineRecorder log lines (the server log, src/server/logger.ts)", () => {
+  it("logs each recorded event at info as timeline.<kind>, with the room, the people and its details", () => {
+    const { recorder } = setup();
+    recorder.record(
+      event(1, {
+        kind: "kick",
+        actorUserId: "host-1",
+        targetUserId: "guest-2",
+        details: { reason: "spam", by: "host" },
+      }),
+    );
+    expect(logs.entries).toHaveLength(1);
+    expect(logs.entries[0]).toMatchObject({
+      level: "info",
+      event: "timeline.kick",
+      roomId: "r1",
+      userId: "host-1",
+      targetUserId: "guest-2",
+      details: { reason: "spam", by: "host" },
+      at: "2026-09-01T12:00:00.001Z",
+    });
+  });
+
+  it("logs the event as stored: bounded, and without chat or addresses even if a caller slipped", () => {
+    const { recorder } = setup();
+    recorder.record(
+      event(1, {
+        details: { text: "a private sentence", ip: "203.0.113.5", note: "from 198.51.100.7" },
+      }),
+    );
+    const text = logs.lines.join("");
+    expect(text).not.toContain("a private sentence");
+    expect(text).not.toContain("203.0.113.5");
+    expect(text).not.toContain("198.51.100.7");
+  });
+
+  it("logs nothing for the refusal summaries, which socket.refused already covers", async () => {
+    const { recorder, clock } = setup();
+    recorder.refused("r1", "u1", "chat.send", "rate_limited", new Date());
+    clock.advance(2 * MINUTE);
+    await recorder.flush();
+    expect(logs.all("timeline.refusals")).toEqual([]);
+  });
+
+  it("never throws into the caller when the log itself fails", () => {
+    const { recorder } = setup();
+    logs.restore();
+    const restore = redirectProcessLog(() => {
+      throw new Error("stdout is gone");
+    });
+    try {
+      expect(() => recorder.record(event(1))).not.toThrow();
+      expect(recorder.queued).toBe(1);
+    } finally {
+      restore();
+    }
+  });
+
+  it("warns about a batch the database takes SLOW_WRITE_MS or longer to write", async () => {
+    const slowDb = {
+      insert: () => ({
+        values: () => new Promise((resolve) => setTimeout(resolve, SLOW_WRITE_MS + 50)),
+      }),
+    } as unknown as Db;
+    const recorder = createTimelineRecorder(slowDb, new FakeClock());
+    recorder.record(event(1));
+    recorder.record(event(2));
+    await recorder.flush();
+    expect(logs.find("db.slow_write")).toMatchObject({
+      level: "warn",
+      operation: "timeline.insert",
+      rows: 2,
+    });
+  });
+
+  it("is sampled per person, so one user can't flood the log", () => {
+    const { recorder } = setup();
+    for (let n = 0; n < 30; n++) recorder.record(event(n, { actorUserId: "same" }));
+    expect(logs.all("timeline.join")).toHaveLength(LOG_SAMPLE_LIMIT);
+    recorder.record(event(99, { actorUserId: "other" }));
+    expect(logs.all("timeline.join")).toHaveLength(LOG_SAMPLE_LIMIT + 1);
   });
 });
 

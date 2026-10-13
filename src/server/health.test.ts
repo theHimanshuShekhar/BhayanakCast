@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "../db/client.ts";
 import { createTestDb } from "../db/test-db.ts";
+import { shortCommit, startedAt } from "./build-info.ts";
 import { databaseReachable, healthResponse } from "./health.ts";
 
 let db: Db;
@@ -22,8 +23,21 @@ describe("GET /api/health", () => {
     expect(await databaseReachable(db)).toBe(true);
     const response = await healthResponse(db);
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true });
+    expect(await response.json()).toEqual({
+      ok: true,
+      commit: shortCommit(),
+      startedAt: startedAt(),
+    });
     expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("names the running commit in 7 characters (or unknown) and when the server started", async () => {
+    const body = (await (await healthResponse(db)).json()) as {
+      commit: string;
+      startedAt: string;
+    };
+    expect(body.commit).toMatch(/^(?:[0-9a-f]{7}|unknown)$/);
+    expect(new Date(body.startedAt).toISOString()).toBe(body.startedAt);
   });
 
   it("is unhealthy, without leaking the error, when the query fails", async () => {
@@ -31,7 +45,13 @@ describe("GET /api/health", () => {
       brokenDb(() => Promise.reject(new Error("password authentication failed"))),
     );
     expect(response.status).toBe(503);
-    expect(await response.text()).toBe('{"ok":false}');
+    const text = await response.text();
+    expect(JSON.parse(text)).toEqual({
+      ok: false,
+      commit: shortCommit(),
+      startedAt: startedAt(),
+    });
+    expect(text).not.toContain("password");
   });
 
   it("is unhealthy when the database doesn't answer within the timeout", async () => {

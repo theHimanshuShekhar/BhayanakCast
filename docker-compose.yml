@@ -2,6 +2,8 @@
 # The homelab's shared cloudflared publishes https://cast.bhayanak.net -> http://${HOST_BIND}:${HOST_PORT},
 # so this stack has no tunnel of its own. Setup, env vars and checklist: docs/deploy.md.
 #   docker compose up -d --build
+# Logs: `app` writes JSON lines to stdout, `vector` ships them to `victorialogs`, which keeps them
+# 90 days behind a password on the LAN IP (ADR 9 addendum, docs/deploy.md "Logs").
 
 services:
   app:
@@ -31,6 +33,9 @@ services:
       REALTIME_SOCKETS_PER_USER: ${REALTIME_SOCKETS_PER_USER:-}
       PUBLIC_READ_LIMIT_SCALE: ${PUBLIC_READ_LIMIT_SCALE:-}
       REALTIME_EMPTY_ROOM_TIMEOUT_MS: ${REALTIME_EMPTY_ROOM_TIMEOUT_MS:-}
+    # How `vector` finds this container whatever the stack is called (vector/vector.yaml).
+    labels:
+      net.bhayanak.cast.logs: app
     # Validate the environment and apply pending migrations (src/db/migrate.ts does both, in that
     # order), then start the server. The image's default command too: keep them the same.
     command: ["sh", "-c", "node src/db/migrate.ts && exec node server.prod.ts"]
@@ -119,9 +124,65 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # Searchable logs, kept 90 days (ADR 9 addendum, docs/deploy.md "Logs"). Diagnostic only: its
+  # volume is not backed up, and a deploy that recreates `vector` loses the seconds it is down.
+  # Image pinned by digest (the tag stays for readers); Dependabot opens PRs for it.
+  victorialogs:
+    image: victoriametrics/victoria-logs:v1.53.0@sha256:251121fa882af99b95ba0c230a4a2f412ea602d2698c64a96c58dc9842bb755d
+    command:
+      - -storageDataPath=/victoria-logs-data
+      - -retentionPeriod=90d
+      # Basic auth on the viewer and the API, inserts included (so `vector` gets the same pair).
+      # Required (`:?`): with either empty VictoriaLogs would start with no login, so the deploy
+      # fails instead. `/health` stays open.
+      - -httpAuth.username=${LOGS_VIEWER_USER:?set LOGS_VIEWER_USER, the log viewer needs a login (docs/deploy.md section 6)}
+      - -httpAuth.password=${LOGS_VIEWER_PASSWORD:?set LOGS_VIEWER_PASSWORD, the log viewer needs a login (docs/deploy.md section 6)}
+    volumes:
+      - vlogs:/victoria-logs-data
+    ports:
+      # The viewer is http://${HOST_BIND}:9428/select/vmui/. LAN only, like the app: it is not on the
+      # tunnel, and mustn't be without a Cloudflare Access application in front (docs/deploy.md).
+      - "${HOST_BIND:-10.1.1.160}:9428:9428"
+    # Measured: 114 MiB for 500,000 lines at a steady pace, but a bulk burst under 256 MiB was
+    # OOM-killed, so not less than 512.
+    mem_limit: 768m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Reads the app's stdout through the Docker socket and sends it to `victorialogs`, with a disk
+  # buffer for when that is down. Built from vector/ (pinned base, the config baked in).
+  vector:
+    build: ./vector
+    environment:
+      # Vector expands ${...} in its config only when told to; vector.yaml uses these two.
+      VECTOR_DANGEROUSLY_ALLOW_ENV_VAR_INTERPOLATION: "true"
+      LOGS_VIEWER_USER: ${LOGS_VIEWER_USER:?set LOGS_VIEWER_USER, the log viewer needs a login (docs/deploy.md section 6)}
+      LOGS_VIEWER_PASSWORD: ${LOGS_VIEWER_PASSWORD:?set LOGS_VIEWER_PASSWORD, the log viewer needs a login (docs/deploy.md section 6)}
+    volumes:
+      # Root-equivalent on the host (a read-only mount doesn't limit the Docker API); the trade-off is
+      # accepted (docs/deploy.md, "Logs").
+      - /var/run/docker.sock:/var/run/docker.sock
+      - vectordata:/var/lib/vector
+    depends_on:
+      - victorialogs
+    mem_limit: 256m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   pgdata:
   backups:
+  # Logs and Vector's disk buffer: local volumes, not on the NAS and not in the backups.
+  vlogs:
+  vectordata:
   # The NAS directory for dumps, mounted by Docker whenever `backup` starts, so it needs no host
   # mount and survives reboots. If the share is unreachable, `backup` doesn't start rather than
   # writing to local disk. Root-only, as the dumps hold user data and session tokens. Docker fixes

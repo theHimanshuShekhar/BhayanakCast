@@ -15,6 +15,7 @@ import { type Db, getDb } from "../db/client.ts";
 import { type Caller, requireSignedIn, type SignedInCaller } from "./caller.ts";
 import { type Clock, systemClock } from "./clock.ts";
 import { env } from "./env.ts";
+import { log } from "./logger.ts";
 import { createDbRoomStore } from "./room-store.ts";
 
 /** How long minted TURN credentials last. */
@@ -102,23 +103,18 @@ export interface IceServiceOptions {
   /** Whether a signed-in caller may enter the room they ask about (`mayEnterRoom`). */
   mayEnter: (caller: SignedInCaller, roomId: string) => Promise<boolean>;
   clock?: Clock;
-  /** Where minting failures and ICE reports go. Defaults to the console. */
-  log?: (line: string, error?: unknown) => void;
 }
 
 export class IceService {
   readonly #turn: TurnProvider | null;
   readonly #mayEnter: IceServiceOptions["mayEnter"];
   readonly #clock: Clock;
-  readonly #log: (line: string, error?: unknown) => void;
   readonly #cache = new Map<string, CachedCredentials>();
 
   constructor(options: IceServiceOptions) {
     this.#turn = options.turn;
     this.#mayEnter = options.mayEnter;
     this.#clock = options.clock ?? systemClock;
-    this.#log =
-      options.log ?? ((line, error) => (error ? console.error(line, error) : console.info(line)));
   }
 
   /**
@@ -150,7 +146,11 @@ export class IceService {
     } catch (error) {
       // Not cached: the next request tries again.
       if (this.#cache.get(userId) === cached) this.#cache.delete(userId);
-      this.#log("[ice] minting TURN credentials failed; STUN only", error);
+      log.warn("ice.mint_failed", "minting TURN credentials failed; STUN only", {
+        userId,
+        roomId,
+        err: error,
+      });
       return { iceServers: STUN_SERVERS, refreshInSeconds: MINT_FAILED_REFRESH_S };
     }
   }

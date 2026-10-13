@@ -14,8 +14,10 @@ import {
   THUMBNAIL_MIME_TYPES,
   type ThumbnailMime,
 } from "../lib/thumbnails.ts";
-import { type Caller, requireSignedIn } from "./caller.ts";
+import { type Caller, requireSignedIn, SignInRequiredError } from "./caller.ts";
 import { declaredImageSize } from "./image-size.ts";
+import { timedWrite } from "./log-events.ts";
+import { log } from "./logger.ts";
 import { withinRateLimit } from "./rate-limit.ts";
 import { endedWithinRetention } from "./rooms.ts";
 import { roomVisibleTo } from "./visibility.ts";
@@ -94,16 +96,21 @@ export async function uploadThumbnail(
       "size",
     );
   }
-  await db.transaction(async (tx) => {
-    await tx
-      .insert(thumbnails)
-      .values({ roomId: input.roomId, userId, capturedAt: now, image: input.bytes, mime })
-      .onConflictDoUpdate({
-        target: [thumbnails.roomId, thumbnails.userId],
-        set: { capturedAt: now, image: input.bytes, mime },
-      });
-    await tx.update(rooms).set({ lastThumbnailAt: now }).where(eq(rooms.id, input.roomId));
-  });
+  await timedWrite(
+    "thumbnail.upload",
+    () =>
+      db.transaction(async (tx) => {
+        await tx
+          .insert(thumbnails)
+          .values({ roomId: input.roomId, userId, capturedAt: now, image: input.bytes, mime })
+          .onConflictDoUpdate({
+            target: [thumbnails.roomId, thumbnails.userId],
+            set: { capturedAt: now, image: input.bytes, mime },
+          });
+        await tx.update(rooms).set({ lastThumbnailAt: now }).where(eq(rooms.id, input.roomId));
+      }),
+    { roomId: input.roomId, userId },
+  );
   return { capturedAt: now.toISOString() };
 }
 
@@ -133,6 +140,41 @@ export async function getThumbnail(
       ),
     );
   return row ?? null;
+}
+
+/**
+ * The route's answer to an upload it refuses (`{error}` with `status`), logged at warn as
+ * `thumbnail.upload_refused`: the page doesn't surface a failed upload, so this is where it shows.
+ */
+export function refuseUpload(
+  status: number,
+  error: string,
+  who: { roomId: string; userId?: string },
+): Response {
+  log.warn("thumbnail.upload_refused", `thumbnail upload refused: ${error}`, {
+    ...who,
+    status,
+    reason: error,
+  });
+  return Response.json({ error }, { status });
+}
+
+/**
+ * The route's answer to an error thrown while handling an upload: the refusals `uploadThumbnail`
+ * throws on purpose become their status (via `refuseUpload`). Anything else is logged at error
+ * and thrown on, to the server's 500.
+ */
+export function uploadFailureResponse(
+  error: unknown,
+  who: { roomId: string; userId?: string },
+): Response {
+  if (error instanceof SignInRequiredError) return refuseUpload(401, error.message, who);
+  if (error instanceof NotStreamingError) return refuseUpload(403, error.message, who);
+  if (error instanceof InvalidThumbnailError) {
+    return refuseUpload(error.reason === "size" ? 413 : 415, error.message, who);
+  }
+  log.error("thumbnail.upload_failed", "storing a thumbnail failed", { ...who, err: error });
+  throw error;
 }
 
 /** The entity tag of a thumbnail: its capture time, which changes with every upload. */

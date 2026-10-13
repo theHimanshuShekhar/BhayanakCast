@@ -15,6 +15,9 @@
  * - `rate_limited` and `bad_request` refusals are tallied in memory and written as one `refusals`
  *   row per person, room and minute, once the minute is over.
  * - Chat content is never recorded: callers pass kinds, ids and small details only.
+ * - Each event `record` takes is also logged at info as `timeline.<kind>` (./log-events.ts), so the
+ *   server log can be searched across rooms and users. The log never throws into the caller, and
+ *   write failures, timeouts and drops are logged too (`timeline.write_failed`, `timeline.dropped`).
  *
  * Read side: ./admin-timeline.ts. Retention: `purgeExpiredTimelineEvents`, a daily step of its own.
  */
@@ -29,6 +32,8 @@ import {
   type TimelineEventRow,
 } from "../lib/room-timeline.ts";
 import { type Clock, systemClock, type Timer } from "./clock.ts";
+import { logTimelineEvent, logTimelineWriteFailed, timedWrite } from "./log-events.ts";
+import { log } from "./logger.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MINUTE_MS = 60_000;
@@ -91,8 +96,6 @@ export interface TimelineRecorderDeps {
   clock?: Clock;
   /** Write one batch; a rejection (or throw) is a failed write. */
   write: (rows: TimelineEventRow[]) => Promise<unknown>;
-  /** Where write failures and drops are reported. Defaults to `console.error`. */
-  log?: (message: string, detail: unknown) => void;
   options?: TimelineRecorderTuning;
 }
 
@@ -108,7 +111,6 @@ interface Tally {
 export class TimelineRecorder implements TimelineSink {
   readonly #clock: Clock;
   readonly #write: TimelineRecorderDeps["write"];
-  readonly #log: (message: string, detail: unknown) => void;
   readonly #flushDelayMs: number;
   readonly #batchSize: number;
   readonly #maxQueued: number;
@@ -133,7 +135,6 @@ export class TimelineRecorder implements TimelineSink {
   constructor(deps: TimelineRecorderDeps) {
     this.#clock = deps.clock ?? systemClock;
     this.#write = deps.write;
-    this.#log = deps.log ?? ((message, detail) => console.error(`[timeline] ${message}`, detail));
     this.#flushDelayMs = deps.options?.flushDelayMs ?? TIMELINE_FLUSH_DELAY_MS;
     this.#batchSize = deps.options?.batchSize ?? TIMELINE_BATCH_SIZE;
     this.#maxQueued = deps.options?.maxQueued ?? TIMELINE_MAX_QUEUED;
@@ -151,8 +152,22 @@ export class TimelineRecorder implements TimelineSink {
   }
 
   record(event: TimelineEventRow): void {
-    this.#push({ ...event, details: boundDetails(event.details) });
+    const row = { ...event, details: boundDetails(event.details) };
+    this.#push(row);
     this.#schedule();
+    // After the event is safely queued, and never a reason for the caller to hear of a failure.
+    try {
+      logTimelineEvent({
+        kind: row.kind,
+        roomId: row.roomId,
+        userId: row.actorUserId ?? undefined,
+        targetUserId: row.targetUserId ?? undefined,
+        at: row.at.toISOString(),
+        details: row.details,
+      });
+    } catch {
+      // The log is down; the timeline row is not affected.
+    }
   }
 
   refused(
@@ -197,9 +212,11 @@ export class TimelineRecorder implements TimelineSink {
     const written = this.#run(true);
     await new Promise<void>((resolve) => {
       const giveUp = this.#clock.setTimer(TIMELINE_CLOSE_TIMEOUT_MS, () => {
-        this.#log("closing the room timeline timed out; events still queued are lost", {
-          queued: this.#queue.length,
-        });
+        logTimelineWriteFailed(
+          undefined,
+          { queued: this.#queue.length },
+          "closing the room timeline timed out; events still queued are lost",
+        );
         resolve();
       });
       void written.then(() => {
@@ -251,7 +268,7 @@ export class TimelineRecorder implements TimelineSink {
     const now = this.#clock.now().getTime();
     if (now - this.#lastDropLog < DROP_LOG_EVERY_MS) return;
     this.#lastDropLog = now;
-    this.#log("room timeline queue is full: dropping the oldest events", {
+    log.warn("timeline.dropped", "room timeline queue is full: dropping the oldest events", {
       dropped: this.#dropped,
       max: this.#maxQueued,
     });
@@ -309,9 +326,10 @@ export class TimelineRecorder implements TimelineSink {
         this.#failures = 0;
       } catch (error) {
         this.#failures++;
-        this.#log(
-          `writing room timeline events failed (try ${this.#failures}); ${batch.length} kept`,
+        logTimelineWriteFailed(
           error,
+          { tries: this.#failures, kept: batch.length },
+          `writing room timeline events failed (try ${this.#failures}); ${batch.length} kept`,
         );
         // Back at the front, ahead of anything recorded meanwhile.
         this.#queue.unshift(...batch);
@@ -349,7 +367,10 @@ export class TimelineRecorder implements TimelineSink {
 export function createTimelineRecorder(db: Db, clock: Clock = systemClock): TimelineRecorder {
   return new TimelineRecorder({
     clock,
-    write: (rows) => db.insert(roomTimelineEvents).values(rows),
+    write: (rows) =>
+      timedWrite("timeline.insert", () => db.insert(roomTimelineEvents).values(rows), {
+        rows: rows.length,
+      }),
   });
 }
 

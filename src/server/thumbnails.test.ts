@@ -7,9 +7,11 @@ import { THUMBNAIL_HEIGHT, THUMBNAIL_MAX_BYTES, THUMBNAIL_WIDTH } from "../lib/t
 import type { Caller } from "./caller.ts";
 import { SignInRequiredError } from "./caller.ts";
 import { ascii } from "./image-size.ts";
+import { SLOW_WRITE_MS } from "./log-events.ts";
 import { getRecap } from "./recaps.ts";
 import { listLiveRooms, listPastRooms } from "./rooms.ts";
 import { jpegHeader, webpHeader } from "./test-images.ts";
+import { captureLogs } from "./test-logs.ts";
 import {
   getThumbnail,
   InvalidThumbnailError,
@@ -17,8 +19,10 @@ import {
   mayUpload,
   NotStreamingError,
   readBodyCapped,
+  refuseUpload,
   thumbnailEtag,
   thumbnailResponse,
+  uploadFailureResponse,
   uploadThumbnail,
 } from "./thumbnails.ts";
 
@@ -185,6 +189,35 @@ describe("uploadThumbnail", () => {
     expect(room?.lastThumbnailAt).toEqual(new Date(T0.getTime() + 3 * MIN));
   });
 
+  it("warns about a write slower than the threshold, naming the room and the streamer", async () => {
+    const logs = captureLogs();
+    try {
+      const slowDb = new Proxy(db, {
+        get: (target, key, receiver) =>
+          key === "transaction"
+            ? async (run: Parameters<Db["transaction"]>[0]) => {
+                await new Promise((resolve) => setTimeout(resolve, SLOW_WRITE_MS + 100));
+                return target.transaction(run);
+              }
+            : Reflect.get(target, key, receiver),
+      });
+      await uploadThumbnail(
+        slowDb,
+        asUser("a"),
+        { roomId: "r1", contentType: "image/webp", bytes: webp() },
+        T0,
+      );
+      expect(logs.find("db.slow_write")).toMatchObject({
+        level: "warn",
+        operation: "thumbnail.upload",
+        roomId: "r1",
+        userId: "a",
+      });
+    } finally {
+      logs.restore();
+    }
+  });
+
   it("gives each streamer their own thumbnail", async () => {
     await db.insert(streamIntervals).values({
       roomId: "r1",
@@ -331,6 +364,62 @@ describe("upload rate limit", () => {
     expect(burst("b", later)).toBe(20);
     // The window slides on.
     expect(mayUpload("a", new Date(later.getTime() + 11 * MIN), uploads)).toBe(true);
+  });
+});
+
+describe("an upload that fails (the route's answers, and what is logged)", () => {
+  const who = { roomId: "r1", userId: "a" };
+
+  it("answers a refusal with its status and logs it at warn, with why", async () => {
+    const logs = captureLogs();
+    try {
+      const response = refuseUpload(429, "Too many thumbnails, slow down", who);
+      expect(response.status).toBe(429);
+      expect(await response.json()).toEqual({ error: "Too many thumbnails, slow down" });
+      expect(logs.entries).toHaveLength(1);
+      expect(logs.entries[0]).toMatchObject({
+        level: "warn",
+        event: "thumbnail.upload_refused",
+        status: 429,
+        reason: "Too many thumbnails, slow down",
+        roomId: "r1",
+        userId: "a",
+      });
+    } finally {
+      logs.restore();
+    }
+  });
+
+  it("maps what the upload throws on purpose to the same refusals as before", async () => {
+    const logs = captureLogs();
+    try {
+      const status = (error: unknown) => uploadFailureResponse(error, who).status;
+      expect(status(new SignInRequiredError())).toBe(401);
+      expect(status(new NotStreamingError())).toBe(403);
+      expect(status(new InvalidThumbnailError("big", "size"))).toBe(413);
+      expect(status(new InvalidThumbnailError("type", "type"))).toBe(415);
+      expect(logs.all("thumbnail.upload_refused").map((line) => line.status)).toEqual([
+        401, 403, 413, 415,
+      ]);
+    } finally {
+      logs.restore();
+    }
+  });
+
+  it("logs anything else at error with the room and streamer, and throws it on", () => {
+    const logs = captureLogs();
+    try {
+      const boom = new Error("connection terminated");
+      expect(() => uploadFailureResponse(boom, who)).toThrow(boom);
+      expect(logs.find("thumbnail.upload_failed")).toMatchObject({
+        level: "error",
+        roomId: "r1",
+        userId: "a",
+        err: { message: "connection terminated" },
+      });
+    } finally {
+      logs.restore();
+    }
   });
 });
 

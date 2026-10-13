@@ -22,6 +22,8 @@ import { CLIENT_IP_HEADER, createClientIpResolver } from "./client-ip.ts";
 import { systemClock } from "./clock.ts";
 import { env } from "./env.ts";
 import { registerLiveHub } from "./live-hub.ts";
+import { logUntrustedProxy, withSlowWriteLog } from "./log-events.ts";
+import { log } from "./logger.ts";
 import { onRoomAnnouncement } from "./room-announcements.ts";
 import { type Connection, RoomHub } from "./room-hub.ts";
 import { createDbRoomStore } from "./room-store.ts";
@@ -73,6 +75,15 @@ export interface RealtimeServer {
   close(): Promise<void>;
 }
 
+/** The `RoomStore` methods that only read; every other one writes, so is timed (`db.slow_write`). */
+const STORE_READS: ReadonlySet<string> = new Set([
+  "findRoomFor",
+  "loadLiveRooms",
+  "isKicked",
+  "findInvitedRoom",
+]);
+const isStoreWrite = (name: string) => !STORE_READS.has(name);
+
 const authenticateFromSession = async (request: IncomingMessage): Promise<Authenticated> =>
   authenticatedFromSession(await getSessionFromRequest(request));
 
@@ -84,7 +95,7 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
     options.hub ??
     new RoomHub({
       clock: systemClock,
-      store: createDbRoomStore(getDb()),
+      store: withSlowWriteLog(createDbRoomStore(getDb()), isStoreWrite),
       timeline,
       emptyRoomTimeoutMs: env.REALTIME_EMPTY_ROOM_TIMEOUT_MS,
     });
@@ -93,7 +104,7 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
   const userLimit = options.socketsPerUser ?? env.REALTIME_SOCKETS_PER_USER;
   const maxBufferedBytes = options.maxBufferedBytes ?? MAX_BUFFERED_BYTES;
   const clientIp = createClientIpResolver(options.trustedProxies ?? env.TRUSTED_PROXY_IPS, {
-    warn: (message) => console.warn(`[realtime] ${message}`),
+    warn: logUntrustedProxy,
   });
   /** Open anonymous sockets (and upgrades in progress) by client IP. */
   const anonymousByIp = new Map<string, number>();
@@ -110,10 +121,24 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
     // Listeners first, so a close is never missed (`terminate` after a later throw fires it);
     // `connection` is set once the hub has registered the socket.
     let connection: Connection | undefined;
-    ws.on("close", () => {
-      if (connection) void hub.disconnect(connection);
+    const openedAt = Date.now();
+    const userId = caller.user?.id;
+    ws.on("close", (code) => {
+      if (connection) {
+        void hub.disconnect(connection);
+        // The close reason is the peer's own text, so it isn't logged.
+        log.info("socket.close", "socket closed", {
+          userId,
+          socketId: connection.id,
+          code,
+          openMs: Date.now() - openedAt,
+        });
+      }
     });
-    ws.on("error", (error) => console.error("[realtime] socket error", error));
+    // A peer's protocol violation (an oversized or malformed frame): the socket is dropped.
+    ws.on("error", (error) =>
+      log.warn("socket.error", "socket error", { userId, socketId: connection?.id, err: error }),
+    );
     const registered = hub.connect(
       {
         send: (message) => {
@@ -130,6 +155,11 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
       sessionId,
     );
     connection = registered;
+    log.info("socket.open", "socket opened", {
+      userId,
+      socketId: registered.id,
+      ...(userId ? {} : { anonymous: true }),
+    });
     ws.on("message", (data, isBinary) => {
       void hub.handle(registered, isBinary ? null : data.toString());
     });
@@ -141,21 +171,29 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
    * buffer, for `ws`'s close timeout). `close` fires as for any drop and tells the hub.
    */
   function dropSlowClient(ws: WebSocket, caller: Caller): void {
-    console.warn(
-      `[realtime] dropping ${caller.user ? `user ${caller.user.id}` : "an anonymous socket"}: ` +
-        `${ws.bufferedAmount} bytes unsent (limit ${maxBufferedBytes})`,
-    );
+    log.warn("socket.slow_client_dropped", "dropping a socket that stopped reading", {
+      userId: caller.user?.id,
+      bufferedBytes: ws.bufferedAmount,
+      limitBytes: maxBufferedBytes,
+    });
     ws.terminate();
   }
 
   async function upgrade(request: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
     socket.on("error", () => socket.destroy());
-    if (!isSameOrigin(request)) return refuse(socket, 403, "Forbidden");
+    if (!isSameOrigin(request)) {
+      // Not the Origin itself: it can be an address, and it is the other site's to name.
+      log.warn("socket.upgrade_refused", "refused a socket upgrade from another origin", {
+        status: 403,
+        reason: "wrong_origin",
+      });
+      return refuse(socket, 403, "Forbidden");
+    }
     let authenticated: Authenticated;
     try {
       authenticated = await authenticate(request);
     } catch (error) {
-      console.error("[realtime] authenticating an upgrade failed", error);
+      log.error("socket.upgrade_failed", "authenticating an upgrade failed", { err: error });
       return refuse(socket, 500, "Internal Server Error");
     }
     // The client left while we were authenticating: `close` has already fired, so a count
@@ -165,11 +203,32 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
     // Held until the TCP socket closes, whether the handshake completes or not.
     if (caller.user) {
       if (!takeSlot(socketsByUser, caller.user.id, userLimit, socket)) {
+        log.warn(
+          "socket.upgrade_refused",
+          "refused a socket upgrade: too many sockets for a user",
+          {
+            status: 429,
+            reason: "too_many_sockets",
+            userId: caller.user.id,
+            limit: userLimit,
+          },
+        );
         return refuse(socket, 429, "Too Many Requests");
       }
     } else {
       const ip = clientIp(request.socket.remoteAddress, request.headers[CLIENT_IP_HEADER]);
       if (!takeSlot(anonymousByIp, ip, anonymousLimit, socket)) {
+        // The address only keys the sampling here (the logger never writes it).
+        log.warn(
+          "socket.upgrade_refused",
+          "refused a socket upgrade: too many signed-out sockets from one address",
+          {
+            status: 429,
+            reason: "too_many_anonymous_sockets",
+            limit: anonymousLimit,
+            sampleKey: ip,
+          },
+        );
         return refuse(socket, 429, "Too Many Requests");
       }
     }
@@ -179,7 +238,10 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
       try {
         serve(ws, authenticated);
       } catch (error) {
-        console.error("[realtime] serving a new socket failed", error);
+        log.error("socket.serve_failed", "serving a new socket failed", {
+          userId: authenticated.caller.user?.id,
+          err: error,
+        });
         ws.terminate();
       }
     });
@@ -187,7 +249,7 @@ export function attachRealtime(server: Server, options: RealtimeOptions = {}): R
 
   /** Log an unexpected throw from the upgrade path and drop the request; the server keeps going. */
   function failUpgrade(socket: Duplex, error: unknown): void {
-    console.error("[realtime] handling an upgrade failed", error);
+    log.error("socket.upgrade_failed", "handling an upgrade failed", { err: error });
     if (socket.writable) refuse(socket, 500, "Internal Server Error");
     else socket.destroy();
   }

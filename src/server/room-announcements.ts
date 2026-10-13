@@ -8,6 +8,8 @@
  * in production (server.prod.ts) and in dev (Vite's SSR module graph) alike.
  */
 
+import { log } from "./logger.ts";
+
 export type RoomAnnouncement =
   | {
       kind: "created";
@@ -36,7 +38,10 @@ export function announceRoom(announcement: RoomAnnouncement): void {
     try {
       listener(announcement);
     } catch (error) {
-      console.error("[realtime] a room announcement listener failed", error);
+      log.error("realtime.announcement_failed", "a room announcement listener failed", {
+        roomId: announcement.roomId,
+        err: error,
+      });
     }
   }
 }

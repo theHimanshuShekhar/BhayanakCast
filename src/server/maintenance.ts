@@ -7,6 +7,7 @@ import { lt } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import { session } from "../db/schema/index.ts";
 import { getLiveHub } from "./live-hub.ts";
+import { log } from "./logger.ts";
 import { purgeExpiredQualitySamples } from "./quality.ts";
 import { purgeExpiredTimelineEvents } from "./room-timeline.ts";
 import { purgeExpiredRooms } from "./stats.ts";
@@ -36,32 +37,33 @@ export async function purgeExpiredSessions(db: Db, now: Date = new Date()): Prom
 export async function runMaintenance(db: Db, now: Date = new Date()): Promise<void> {
   try {
     const result = await purgeExpiredRooms(db, now);
-    console.log(
-      `[maintenance] purge: rolled up ${result.rolledUp} room(s), deleted ${result.purged} expired room(s)`,
+    log.info(
+      "maintenance.purge",
+      `purge: rolled up ${result.rolledUp} room(s), deleted ${result.purged} expired room(s)`,
+      { rolledUp: result.rolledUp, deleted: result.purged },
     );
   } catch (error) {
-    console.error("[maintenance] purge failed", error);
+    log.error("maintenance.purge_failed", "purge failed", { err: error });
   }
   try {
-    console.log(
-      `[maintenance] sessions: deleted ${await purgeExpiredSessions(db, now)} expired session(s)`,
-    );
+    const deleted = await purgeExpiredSessions(db, now);
+    log.info("maintenance.sessions", `sessions: deleted ${deleted} expired session(s)`, {
+      deleted,
+    });
   } catch (error) {
-    console.error("[maintenance] session purge failed", error);
+    log.error("maintenance.sessions_failed", "session purge failed", { err: error });
   }
   try {
-    console.log(
-      `[maintenance] quality: deleted ${await purgeExpiredQualitySamples(db, now)} expired sample(s)`,
-    );
+    const deleted = await purgeExpiredQualitySamples(db, now);
+    log.info("maintenance.quality", `quality: deleted ${deleted} expired sample(s)`, { deleted });
   } catch (error) {
-    console.error("[maintenance] quality sample purge failed", error);
+    log.error("maintenance.quality_failed", "quality sample purge failed", { err: error });
   }
   try {
-    console.log(
-      `[maintenance] timeline: deleted ${await purgeExpiredTimelineEvents(db, now)} expired event(s)`,
-    );
+    const deleted = await purgeExpiredTimelineEvents(db, now);
+    log.info("maintenance.timeline", `timeline: deleted ${deleted} expired event(s)`, { deleted });
   } catch (error) {
-    console.error("[maintenance] timeline purge failed", error);
+    log.error("maintenance.timeline_failed", "timeline purge failed", { err: error });
   }
 }
 

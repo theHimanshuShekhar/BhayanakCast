@@ -6,12 +6,14 @@ import { createTestDb } from "../db/test-db.ts";
 import { QUALITY_BATCH_MAX, type QualitySample } from "../lib/quality-telemetry.ts";
 import { type Caller, SignInRequiredError } from "./caller.ts";
 import { FakeClock } from "./clock.ts";
+import { SLOW_WRITE_MS } from "./log-events.ts";
 import {
   purgeExpiredQualitySamples,
   QUALITY_RETENTION_DAYS,
   QUALITY_ROW_RATE_LIMIT,
   QualityService,
 } from "./quality.ts";
+import { type CapturedLogs, captureLogs } from "./test-logs.ts";
 
 // What a page may report of its video quality (#94): only from a signed-in caller in the live
 // room, about peers in it, dated by the server, bounded and rate-limited; and the 90-day purge.
@@ -311,6 +313,110 @@ describe("the rows allowance", () => {
     });
     // cy used their allowance on a room they weren't in, too.
     expect(await service.record(asUser("cy"), batch("bo", 64), CHROME)).toEqual({ stored: 0 });
+  });
+});
+
+describe("what is logged about a report", () => {
+  let logs: CapturedLogs;
+  beforeEach(() => {
+    logs = captureLogs();
+  });
+  afterEach(() => logs.restore());
+
+  /** `db` with `insert` replaced; everything else is the real database. */
+  const withInsert = (insert: () => unknown) =>
+    new QualityService({
+      db: new Proxy(db, {
+        get: (target, key, receiver) =>
+          key === "insert" ? insert : Reflect.get(target, key, receiver),
+      }),
+      clock,
+    });
+
+  it("says nothing about a report that is stored", async () => {
+    await service.record(asUser("ana"), report([sample("bo")]), CHROME);
+    expect(logs.entries).toEqual([]);
+  });
+
+  it("warns, with why, about a report from someone who isn't in the room", async () => {
+    await service.record(asUser("cy"), report([sample("bo")]), CHROME);
+    expect(logs.find("quality.dropped")).toMatchObject({
+      level: "warn",
+      reason: "not_in_room",
+      userId: "cy",
+      roomId: "r1",
+      rows: 1,
+    });
+  });
+
+  it("warns about a report over the allowance", async () => {
+    const full = Array.from({ length: QUALITY_BATCH_MAX }, () => sample("bo"));
+    const batches = Math.floor(QUALITY_ROW_RATE_LIMIT.rows / QUALITY_BATCH_MAX);
+    for (let i = 0; i < batches; i++) await service.record(asUser("ana"), report(full), CHROME);
+    expect(logs.entries).toEqual([]);
+    await service.record(asUser("ana"), report(full), CHROME);
+    expect(logs.find("quality.dropped")).toMatchObject({
+      level: "warn",
+      reason: "over_limit",
+      userId: "ana",
+      roomId: "r1",
+      rows: QUALITY_BATCH_MAX,
+    });
+  });
+
+  it("warns about an invalid report, which still throws", async () => {
+    await expect(service.record(asUser("ana"), report([]), CHROME)).rejects.toThrow();
+    expect(logs.find("quality.dropped")).toMatchObject({
+      level: "warn",
+      reason: "invalid",
+      userId: "ana",
+      roomId: "r1",
+    });
+  });
+
+  it("warns about the rows dropped for peers who aren't in the room, and counts them", async () => {
+    await service.record(
+      asUser("ana"),
+      report([sample("cy"), sample("dee"), sample("ana"), sample("bo")]),
+      CHROME,
+    );
+    expect(logs.find("quality.dropped")).toMatchObject({
+      level: "warn",
+      reason: "peer_not_in_room",
+      userId: "ana",
+      roomId: "r1",
+      rows: 3,
+    });
+  });
+
+  it("logs a failed write at error with the room and user, and still throws", async () => {
+    const failing = withInsert(() => ({
+      values: () => Promise.reject(new Error("disk full")),
+    }));
+    await expect(failing.record(asUser("ana"), report([sample("bo")]), CHROME)).rejects.toThrow(
+      "disk full",
+    );
+    expect(logs.find("quality.write_failed")).toMatchObject({
+      level: "error",
+      roomId: "r1",
+      userId: "ana",
+      rows: 1,
+      err: { message: "disk full" },
+    });
+  });
+
+  it("warns about a write slower than the threshold", async () => {
+    const slow = withInsert(() => ({
+      values: () => new Promise((resolve) => setTimeout(resolve, SLOW_WRITE_MS + 100)),
+    }));
+    await slow.record(asUser("ana"), report([sample("bo")]), CHROME);
+    expect(logs.find("db.slow_write")).toMatchObject({
+      level: "warn",
+      operation: "quality.insert",
+      roomId: "r1",
+      userId: "ana",
+      thresholdMs: SLOW_WRITE_MS,
+    });
   });
 });
 
