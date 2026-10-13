@@ -4,3 +4,4 @@ export * from "./favorites.ts";
 export * from "./quality.ts";
 export * from "./rooms.ts";
 export * from "./stats.ts";
+export * from "./timeline.ts";

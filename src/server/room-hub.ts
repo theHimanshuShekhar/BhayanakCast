@@ -27,6 +27,10 @@
  * room stays ended here, and restart recovery retries until it succeeds (ADR 4 addendum).
  * `stop()` ends the retries on shutdown.
  *
+ * What happens in a room is also reported to the room timeline (./room-timeline.ts) through
+ * `#note`, and refusals through `#refuse`: queued and written off this path, so a slow or failing
+ * database never delays or breaks the room (ADR 4 addendum).
+ *
  * Adding a client message: add it to the protocol (src/lib/realtime.ts) and a handler to
  * `#handlers` below (the type checker insists). Refusals go through `#refuse(conn, code, …)`.
  */
@@ -44,6 +48,7 @@ import {
   type ClientMessageType,
   CONNECTION_MESSAGE_BUDGET,
   CONNECTION_RATE_LIMITS,
+  clientMessage,
   type ErrorCode,
   FEED_HISTORY_SIZE,
   type FeedEntry,
@@ -68,6 +73,11 @@ import {
   SIGN_IN_FIRST,
   SIGNAL_RATE_LIMIT,
 } from "../lib/realtime.ts";
+import type {
+  SummarisedRefusal,
+  TimelineDetails,
+  TimelineEventKind,
+} from "../lib/room-timeline.ts";
 import { createRoomInput, ROOM_NAME_MAX } from "../lib/rooms.ts";
 import type { Caller, SignedInCaller } from "./caller.ts";
 import type { Clock, Timer } from "./clock.ts";
@@ -75,6 +85,7 @@ import { type LogFields, log } from "./logger.ts";
 import { withinRateLimit, withinWindow } from "./rate-limit.ts";
 import type { RoomAnnouncement } from "./room-announcements.ts";
 import type { PresenceSeen, RoomStore, StoredRoom } from "./room-store.ts";
+import { noTimeline, type TimelineSink } from "./room-timeline.ts";
 
 /**
  * How long a participant whose socket closed stays in the room before it counts as leaving
@@ -141,6 +152,8 @@ export interface RoomHubDeps {
   log?: (message: string, error: unknown, fields?: LogFields) => void;
   /** Defaults to `EMPTY_ROOM_TIMEOUT_MS`. */
   emptyRoomTimeoutMs?: number;
+  /** Where the room timeline is recorded. Defaults to recording nothing. */
+  timeline?: TimelineSink;
 }
 
 class HubConnection implements Connection {
@@ -263,6 +276,16 @@ type NewFeedEntry = FeedEntry extends infer E
 /** Someone named in a room event or feed entry. */
 type FeedPerson = { userId: string; username: string };
 
+/** What `#removeParticipant` is told besides who and when. */
+interface Removal {
+  /** They were kicked by this person, and everyone hears that instead of a leave. */
+  kickedBy?: FeedPerson;
+  /** How they came to go, for the room timeline (`#noteDeparture`). Defaults to `left`. */
+  reason?: "left" | "grace_expired" | "taken_over" | "joined_elsewhere" | "banned";
+  /** When the timeline says it happened, if not `at` (a grace expiry: when it ran out). */
+  eventAt?: Date;
+}
+
 /** What a moderator can do in a room (ADR 15); `admit` decides knocks (ADR 16). */
 type ModPower = "kick" | "stopShare" | "setRole" | "rename" | "admit";
 
@@ -285,6 +308,11 @@ const ANONYMOUS_MESSAGES: ReadonlySet<ClientMessageType> = new Set<ClientMessage
   "ping",
 ]);
 
+/** Every message type a client may send (`ClientMessageType`). */
+const CLIENT_MESSAGE_TYPES: ReadonlySet<string> = new Set(
+  clientMessage.options.map((option) => option.shape.type.value),
+);
+
 /** `CONNECTION_RATE_LIMITS`, looked up by any message type. */
 const LIMITS_BY_TYPE: Partial<Record<ClientMessageType, RateLimit>> = CONNECTION_RATE_LIMITS;
 
@@ -298,6 +326,7 @@ export class RoomHub {
   readonly #store: RoomStore;
   readonly #log: (message: string, error: unknown, fields?: LogFields) => void;
   readonly #emptyRoomTimeoutMs: number;
+  readonly #timeline: TimelineSink;
   readonly #connections = new Set<HubConnection>();
   readonly #rooms = new Map<string, LiveRoom>();
   /** Open sockets per signed-in user id: the online users (ADR 20). */
@@ -350,6 +379,7 @@ export class RoomHub {
       deps.log ??
       ((message, error, fields) => log.error("realtime.error", message, { ...fields, err: error }));
     this.#emptyRoomTimeoutMs = deps.emptyRoomTimeoutMs ?? EMPTY_ROOM_TIMEOUT_MS;
+    this.#timeline = deps.timeline ?? noTimeline;
     // Restart recovery: the first thing on the queue, so joins wait for it.
     void this.#enqueue(() => this.#recover(0));
     this.#scheduleCheckpoint();
@@ -481,12 +511,17 @@ export class RoomHub {
       return this.#closeFlooder(conn, "too many messages");
     }
     if (first) this.#refuse(conn, "rate_limited", "Too many messages; wait a moment");
+    // Told once per window, but every dropped frame counts on the room timeline.
+    else this.#noteRefusal(conn, "rate_limited");
     return Promise.resolve();
   }
 
   /** `conn` is flooding: tell it why, close it and skip what's queued for it. */
   #closeFlooder(conn: HubConnection, reason: string): Promise<void> {
     conn.flooded = true;
+    if (conn.roomId && conn.caller.user) {
+      this.#note(conn.roomId, "flood_close", { actor: conn.caller.user.id, details: { reason } });
+    }
     this.#refuse(conn, "rate_limited", "Too many messages; closing the connection");
     try {
       conn.transport.close(FLOOD_CLOSE_CODE, reason);
@@ -527,7 +562,10 @@ export class RoomHub {
         }
         participant.connection.roomId = null;
         // Someone in their reconnect grace was last here when their socket closed.
-        await this.#removeParticipant(room, participant, participant.grace?.since ?? at);
+        await this.#removeParticipant(room, participant, participant.grace?.since ?? at, {
+          reason: "banned",
+          eventAt: at,
+        });
       }
       const banned = [...this.#connections].filter((conn) => conn.caller.user?.id === userId);
       for (const conn of banned) {
@@ -629,6 +667,7 @@ export class RoomHub {
         // timer ended.
         if (this.#endings.has(roomId)) return;
         ended = await this.#endStoredRoom(roomId, at);
+        if (ended) this.#note(roomId, "room_end", { at, details: { by: "admin" } });
         return;
       }
       this.#broadcast(room, { kind: "ended", reason: "admin" }, at);
@@ -643,7 +682,7 @@ export class RoomHub {
       }
       if (away.size) this.#noteEndedWhileAway(room.id, away);
       room.participants.clear();
-      ended = await this.#endRoom(room, at);
+      ended = await this.#endRoom(room, at, "admin");
     });
     return ended;
   }
@@ -665,6 +704,18 @@ export class RoomHub {
     }
     for (const timer of this.#endings.values()) timer.cancel();
     this.#endings.clear();
+  }
+
+  /**
+   * The adapter dropped `connection`'s socket because it stopped reading (`bufferedBytes` unsent).
+   * Only recorded; the socket's close reaches the hub the usual way.
+   */
+  slowClientDropped(connection: Connection, bufferedBytes: number): void {
+    const conn = this.#own(connection);
+    const userId = conn.caller.user?.id;
+    if (conn.roomId && userId) {
+      this.#note(conn.roomId, "slow_client", { actor: userId, details: { bufferedBytes } });
+    }
   }
 
   /** Operations waiting on the queue or running (messages, disconnects, timers). */
@@ -794,6 +845,12 @@ export class RoomHub {
         // socket's close, or a return within the reconnect grace): the new socket takes over
         // the presence and its open interval, with no leave/join churn (takeover, ADR 21).
         if (existing.connection !== conn) this.#tellTakenOver(existing.connection);
+        if (existing.grace) {
+          const awayMs = this.#clock.now().getTime() - existing.grace.since.getTime();
+          this.#note(roomId, "grace_resume", { actor: user.id, details: { awayMs } });
+        } else if (existing.connection !== conn) {
+          this.#note(roomId, "takeover", { actor: user.id, details: { sameRoom: true } });
+        }
         // Its share carries on only if the new socket re-announces it (#announceMedia).
         existing.resumedAt = existing.grace?.since ?? this.#clock.now();
         this.#cancelGrace(existing);
@@ -837,6 +894,7 @@ export class RoomHub {
       room.occupied = true;
       room.participants.set(user.id, participant);
       conn.roomId = roomId;
+      this.#note(roomId, "join", { at: joinedAt, actor: user.id });
       let back = false;
       let newHost = false;
       // The joiner is in the room now, so a failed host write mustn't abandon the join: nothing
@@ -959,12 +1017,13 @@ export class RoomHub {
    * `participant` left `room` at `at` (now for an explicit leave; when their socket closed for
    * an expired reconnect grace): tell everyone and close the presence interval at `at`. With
    * `kickedBy`, they didn't leave but were kicked (`mod.kick`), and everyone hears that instead.
+   * `reason` and `eventAt` are what the room timeline records (`Removal`).
    */
   async #removeParticipant(
     room: LiveRoom,
     participant: LiveParticipant,
     at: Date,
-    kickedBy?: FeedPerson,
+    { kickedBy, reason = "left", eventAt = at }: Removal = {},
   ): Promise<void> {
     this.#cancelGrace(participant);
     room.participants.delete(participant.userId);
@@ -984,6 +1043,8 @@ export class RoomHub {
     // else would start the host grace or the empty-room timer. An interval left open here is
     // closed at its last checkpoint by the room's end, the user's next join or a restart (ADR 12).
     await this.#closeIntervals(room.id, participant, at);
+    // After a share's end (`#closeIntervals`), so the timeline reads stop sharing, then leave.
+    this.#noteDeparture(room.id, participant.userId, eventAt, kickedBy, reason);
     if (!room.lastLeftAt || at > room.lastLeftAt) room.lastLeftAt = at;
     if (participant.userId === room.hostUserId) this.#hostGone(room);
     this.#updateKnockers(room);
@@ -1020,7 +1081,7 @@ export class RoomHub {
     const timer = this.#setTimer(waitMs, async () => {
       if (room.empty?.timer !== timer || this.#rooms.get(room.id) !== room) return;
       if (room.participants.size > 0) return;
-      await this.#endRoom(room, since);
+      await this.#endRoom(room, since, "empty");
     });
     room.empty = { since, timer };
   }
@@ -1043,8 +1104,10 @@ export class RoomHub {
    * roll up (ADR 11), and its chat and feed go with it (memory only, ADR 4 addendum). True if
    * this ended it (it was still live in the database), or will once the database takes the
    * end: a write that fails is logged and retried (`#retryEnd`), and the room stays ended here.
+   * `by` is what the room timeline records: the admin, or the empty-room timer.
    */
-  async #endRoom(room: LiveRoom, endedAt: Date): Promise<boolean> {
+  async #endRoom(room: LiveRoom, endedAt: Date, by: "admin" | "empty"): Promise<boolean> {
+    this.#note(room.id, "room_end", { at: endedAt, details: { by } });
     this.#cancelEmpty(room);
     this.#cancelHostGrace(room);
     this.#rooms.delete(room.id);
@@ -1144,6 +1207,7 @@ export class RoomHub {
       fields,
     );
     if (who.media.share) {
+      this.#note(roomId, "share_stop", { at, actor: who.userId });
       await this.#bestEffort(
         "closing a stream interval",
         () => this.#store.closeStream(roomId, who.userId, at),
@@ -1181,6 +1245,7 @@ export class RoomHub {
     const participant = room && userId ? room.participants.get(userId) : undefined;
     if (!room || !participant || participant.connection !== conn) return;
     const since = this.#clock.now();
+    this.#note(room.id, "disconnect", { at: since, actor: participant.userId });
     this.#startGrace(room, participant, since);
     if (participant.userId === room.hostUserId) this.#hostGone(room);
     // An approver in their reconnect grace can't answer knocks.
@@ -1199,12 +1264,21 @@ export class RoomHub {
   /** Keep `participant` in `room` for the reconnect grace, as gone since `since`. */
   #startGrace(room: LiveRoom, participant: LiveParticipant, since: Date): void {
     this.#cancelGrace(participant);
-    const timer = this.#setTimer(RECONNECT_GRACE_MS, async () => {
+    const timer = this.#setTimer(RECONNECT_GRACE_MS, async (firedAt) => {
       if (participant.grace?.timer !== timer) return;
       if (this.#rooms.get(room.id)?.participants.get(participant.userId) !== participant) return;
-      await this.#removeParticipant(room, participant, since);
+      this.#note(room.id, "grace_expire", { at: firedAt, actor: participant.userId });
+      await this.#removeParticipant(room, participant, since, {
+        reason: "grace_expired",
+        eventAt: firedAt,
+      });
     });
     participant.grace = { since, timer };
+    this.#note(room.id, "grace_start", {
+      at: since,
+      actor: participant.userId,
+      details: { graceMs: RECONNECT_GRACE_MS },
+    });
   }
 
   #cancelGrace(participant: LiveParticipant): void {
@@ -1217,8 +1291,12 @@ export class RoomHub {
     for (const room of this.#rooms.values()) {
       if (room.id === roomId) continue;
       const participant = room.participants.get(userId);
-      if (participant?.grace)
-        await this.#removeParticipant(room, participant, participant.grace.since);
+      if (participant?.grace) {
+        await this.#removeParticipant(room, participant, participant.grace.since, {
+          reason: "joined_elsewhere",
+          eventAt: this.#clock.now(),
+        });
+      }
     }
   }
 
@@ -1244,6 +1322,9 @@ export class RoomHub {
     room.roles.set(userId, "host");
     room.hostUserId = userId;
     room.hostRecorded = true;
+    if (previous !== userId) {
+      this.#note(room.id, "host_change", { at, target: userId, details: { from: previous } });
+    }
     // Room cards show the host.
     if (previous !== userId && !room.isPrivate) {
       this.#lobbyChanged({
@@ -1409,7 +1490,10 @@ export class RoomHub {
       const participant = room.participants.get(userId);
       if (!participant || participant.grace) continue;
       this.#tellTakenOver(participant.connection);
-      await this.#removeParticipant(room, participant, this.#clock.now());
+      this.#note(room.id, "takeover", { actor: userId, details: { toRoom: roomId } });
+      await this.#removeParticipant(room, participant, this.#clock.now(), {
+        reason: "taken_over",
+      });
     }
   }
 
@@ -1815,6 +1899,7 @@ export class RoomHub {
       await this.#store.closeStream(room.id, participant.userId, shareEndedAt ?? at);
     }
     participant.media = { ...next };
+    this.#noteMedia(room.id, participant.userId, was, next, at, shareEndedAt, by);
     this.#broadcast(
       room,
       {
@@ -1975,7 +2060,10 @@ export class RoomHub {
     if (theirs.roomId === room.id) theirs.roomId = null;
     this.#refuse(theirs, "kicked", "You were removed from this room");
     // Someone in their reconnect grace was last here when their socket closed.
-    await this.#removeParticipant(room, target, target.grace?.since ?? at, person(actor));
+    await this.#removeParticipant(room, target, target.grace?.since ?? at, {
+      kickedBy: person(actor),
+      eventAt: at,
+    });
   }
 
   /** `mod.stopShare`: their share ends now, and every client stops showing it. */
@@ -1989,6 +2077,7 @@ export class RoomHub {
       return this.#refuse(conn, "bad_request", "They aren't sharing", message.type);
     }
     await this.#setMedia(room, target, { ...target.media, share: false }, undefined, person(actor));
+    this.#note(room.id, "stop_share", { actor: actor.userId, target: target.userId });
   }
 
   /** `mod.setRole`: promote to mod or demote to member. */
@@ -2011,6 +2100,12 @@ export class RoomHub {
     if (message.role === "mod") room.roles.set(target.userId, "mod");
     else room.roles.delete(target.userId);
     const at = this.#clock.now();
+    this.#note(room.id, "role_change", {
+      at,
+      actor: actor.userId,
+      target: target.userId,
+      details: { role: message.role },
+    });
     this.#broadcast(room, { kind: "roleChanged", userId: target.userId, role: message.role }, at);
     this.#sendPendingKnocks(room, target);
     // A promoted mod can answer knocks now; a demoted one may have been the last who could.
@@ -2040,6 +2135,10 @@ export class RoomHub {
     const name = parsed.data;
     if (name === room.name) return;
     await this.#store.renameRoom(room.id, name);
+    this.#note(room.id, "rename", {
+      actor: actor.userId,
+      details: { from: room.name, to: name },
+    });
     room.name = name;
     this.#broadcast(room, { kind: "renamed", name, by: person(actor) }, this.#clock.now());
     // Room cards show the name.
@@ -2127,12 +2226,13 @@ export class RoomHub {
         status: "waiting",
         expiry: this.#setTimer(KNOCK_EXPIRY_MS, () => {
           if (this.#rooms.get(room.id) === room && room.knocks.get(userId) === fresh) {
-            this.#endKnock(room, fresh, "expired");
+            this.#endKnock(room, fresh, { status: "expired", cancelled: "expired" });
           }
         }),
       };
       knock = fresh;
       room.knocks.set(userId, knock);
+      this.#note(room.id, "knock_request", { actor: userId });
     }
     knock.status = this.#knockerStatus(room);
     this.#send(conn, { type: "knock.status", roomId: room.id, status: knock.status });
@@ -2146,7 +2246,7 @@ export class RoomHub {
   async #decideKnock(conn: HubConnection, message: ClientMessageOf<"knock.decide">) {
     const mod = this.#moderator(conn, "admit", message.type);
     if (!mod) return;
-    const { room } = mod;
+    const { room, actor } = mod;
     const knock = room.knocks.get(message.userId);
     if (!knock) {
       return this.#refuse(conn, "not_found", "Nobody is knocking by that name", message.type);
@@ -2158,14 +2258,32 @@ export class RoomHub {
       // Approved all the same: they get in once a spot frees (ADR 21's cap holds).
       status = room.participants.size >= ROOM_CAPACITY ? "room_full" : "approved";
     }
-    this.#endKnock(room, knock, status);
+    this.#note(room.id, message.admit ? "knock_approve" : "knock_deny", {
+      actor: actor.userId,
+      target: knock.userId,
+      ...(status === "room_full" ? { details: { roomFull: true } } : {}),
+    });
+    this.#endKnock(room, knock, { status });
   }
 
   /**
    * `knock` is over: tell its knocker `status` (nothing if they withdrew it), and every approver
-   * present that it's gone.
+   * present that it's gone. `cancelled` is why it ended without anyone deciding it, for the room
+   * timeline (a decision is recorded where it's made).
    */
-  #endKnock(room: LiveRoom, knock: PendingKnock, status?: KnockStatus): void {
+  #endKnock(
+    room: LiveRoom,
+    knock: PendingKnock,
+    {
+      status,
+      cancelled,
+    }: {
+      status?: KnockStatus;
+      cancelled?: "withdrawn" | "disconnected" | "expired" | "invalidated";
+    } = {},
+  ): void {
+    if (cancelled)
+      this.#note(room.id, "knock_cancel", { actor: knock.userId, details: { why: cancelled } });
     knock.expiry.cancel();
     knock.grace?.cancel();
     room.knocks.delete(knock.userId);
@@ -2176,7 +2294,7 @@ export class RoomHub {
   /** `room`'s invite link opens nothing now: every pending knock ends, refused as invalid. */
   #invalidateKnocks(room: LiveRoom): void {
     for (const knock of [...room.knocks.values()]) {
-      this.#endKnock(room, knock);
+      this.#endKnock(room, knock, { cancelled: "invalidated" });
       this.#refuse(knock.connection, "not_found", INVALID_INVITE, "knock.request");
     }
   }
@@ -2193,7 +2311,9 @@ export class RoomHub {
 
   /** `knock.cancel`: withdraw the knocks pending from `conn` now. */
   #withdrawKnocks(conn: HubConnection): void {
-    for (const [room, knock] of this.#knocksOf(conn)) this.#endKnock(room, knock);
+    for (const [room, knock] of this.#knocksOf(conn)) {
+      this.#endKnock(room, knock, { cancelled: "withdrawn" });
+    }
   }
 
   /**
@@ -2204,7 +2324,7 @@ export class RoomHub {
     for (const [room, knock] of this.#knocksOf(conn)) {
       const timer = this.#setTimer(RECONNECT_GRACE_MS, () => {
         if (knock.grace === timer && room.knocks.get(knock.userId) === knock) {
-          this.#endKnock(room, knock);
+          this.#endKnock(room, knock, { cancelled: "disconnected" });
         }
       });
       knock.grace = timer;
@@ -2321,8 +2441,94 @@ export class RoomHub {
         roomId: conn.roomId ?? undefined,
         socketId: conn.id,
       });
+      this.#noteRefusal(conn, code, re);
     }
     this.#send(conn, { type: "error", code, message, ...(re ? { re } : {}) });
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // Room timeline (ADR 4 addendum): reported to the sink, which queues and writes it elsewhere
+
+  /**
+   * Report something that happened in `roomId` to the room timeline, now unless `at` says when.
+   * Never waits for the database and never throws: the sink only queues.
+   */
+  #note(
+    roomId: string,
+    kind: TimelineEventKind,
+    event: {
+      at?: Date;
+      actor?: string;
+      target?: string;
+      details?: TimelineDetails;
+    } = {},
+  ): void {
+    try {
+      this.#timeline.record({
+        roomId,
+        at: event.at ?? this.#clock.now(),
+        kind,
+        actorUserId: event.actor ?? null,
+        targetUserId: event.target ?? null,
+        details: event.details ?? {},
+      });
+    } catch (error) {
+      this.#log("recording a room timeline event failed", error, { roomId });
+    }
+  }
+
+  /**
+   * A `rate_limited` or `bad_request` refusal of `conn`'s message type `re`, counted per person and
+   * minute by the sink. Only for a signed-in user in a room: there is no timeline to put it on.
+   */
+  #noteRefusal(conn: HubConnection, code: SummarisedRefusal, re?: string): void {
+    const userId = conn.caller.user?.id;
+    if (!conn.roomId || !userId) return;
+    try {
+      // `re` of a malformed frame is whatever the client wrote: only real types are stored.
+      const type = re && CLIENT_MESSAGE_TYPES.has(re) ? re : "unknown";
+      this.#timeline.refused(conn.roomId, userId, type, code, this.#clock.now());
+    } catch (error) {
+      this.#log("recording a refusal on the room timeline failed", error, {
+        roomId: conn.roomId,
+        userId,
+      });
+    }
+  }
+
+  /** `userId` left `roomId` at `at`: a kick, a ban or a leave and how it came about. */
+  #noteDeparture(
+    roomId: string,
+    userId: string,
+    at: Date,
+    kickedBy: FeedPerson | undefined,
+    reason: NonNullable<Removal["reason"]>,
+  ): void {
+    if (kickedBy) this.#note(roomId, "kick", { at, actor: kickedBy.userId, target: userId });
+    else if (reason === "banned") this.#note(roomId, "ban", { at, target: userId });
+    else this.#note(roomId, "leave", { at, actor: userId, details: { reason } });
+  }
+
+  /** Mic, camera and share going on or off between `was` and `next`; `by` forced a share off. */
+  #noteMedia(
+    roomId: string,
+    userId: string,
+    was: MediaState,
+    next: MediaState,
+    at: Date,
+    shareEndedAt?: Date,
+    by?: FeedPerson,
+  ): void {
+    const actor = userId;
+    if (was.mic !== next.mic) this.#note(roomId, next.mic ? "mic_on" : "mic_off", { at, actor });
+    if (was.cam !== next.cam) this.#note(roomId, next.cam ? "cam_on" : "cam_off", { at, actor });
+    if (was.share !== next.share) {
+      this.#note(roomId, next.share ? "share_start" : "share_stop", {
+        at: next.share ? at : (shareEndedAt ?? at),
+        actor,
+        ...(by ? { details: { by: by.userId } } : {}),
+      });
+    }
   }
 }
 

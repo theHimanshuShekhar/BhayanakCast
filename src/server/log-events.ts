@@ -79,21 +79,25 @@ export function logReportDropped(report: DroppedReport, reason: string, fields: 
 }
 
 /**
- * The room timeline records an event (ticket #115): also logged at info as `timeline.<kind>`, so
- * the log viewer can follow a user or a room across rooms. Call it where the event is recorded,
- * with whatever the timeline row carries except chat content.
+ * The room timeline recorded an event: also logged at info as `timeline.<kind>`, so the log
+ * viewer can follow a user or a room across rooms. Called by the recorder
+ * (src/server/room-timeline.ts) with what the row carries; chat content is never in it.
  */
 export function logTimelineEvent(event: { kind: string; roomId: string } & LogFields): void {
   const { kind, ...fields } = event;
   log.info(`timeline.${kind}`, `timeline: ${kind}`, fields);
 }
 
-/** Recording a timeline event failed (ticket #115); the room carries on without it. */
-export function logTimelineWriteFailed(error: unknown, fields: LogFields = {}): void {
-  log.error("timeline.write_failed", "recording a timeline event failed", {
-    ...fields,
-    err: error,
-  });
+/**
+ * Recording timeline events failed: a write that threw or timed out, or events lost at shutdown
+ * (src/server/room-timeline.ts). The room carries on without them.
+ */
+export function logTimelineWriteFailed(
+  error: unknown,
+  fields: LogFields = {},
+  msg = "recording a timeline event failed",
+): void {
+  log.error("timeline.write_failed", msg, { ...fields, err: error });
 }
 
 /**

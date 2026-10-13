@@ -254,16 +254,18 @@ What the app logs (successful requests and server-function calls are not logged)
 | `socket.slow_client_dropped`, `socket.error` | warn | A socket that stopped reading, or broke the protocol. |
 | `quality.dropped` | warn | A quality report the server threw away, with the `reason`: `not_in_room`, `over_limit`, `invalid`, `peer_not_in_room`. |
 | `quality.write_failed`, `thumbnail.upload_failed`, `realtime.error`, `maintenance.*_failed` | error | A write or step that failed. |
+| `timeline.<kind>` | info | Every room timeline event as it is recorded (`timeline.join`, `timeline.kick`, ...), with `roomId`, `userId` (the actor), `targetUserId`, `at` and the event's `details`: follow a user or a room across rooms. Never chat. The per-minute `refusals` summaries aren't repeated here (`socket.refused` has each one). |
+| `timeline.write_failed` (error), `timeline.dropped` (warn) | | A timeline write that failed or timed out (its events stay queued and are retried), and events dropped from a full queue while the database is down. |
 | `thumbnail.upload_refused` | warn | An upload answered 403, 413, 415, 429 or 401, with the `status` and `reason`. |
 | `og.card_failed` (error), `og.avatar_failed`, `og.backdrop_failed` (warn) | | A link card that couldn't be drawn, or drawn without the host's picture or the thumbnail behind it. |
 | `read.rate_limited` | warn | A public read (`kind`: profile, search, home, card) refused with 429. |
 | `server_fn.failed`, `http.unhandled` | error | A server function, route or page threw, with `route` and `userId`. `server_fn.refused` (warn) is a refusal the app throws on purpose: not signed in, not an admin, an invalid input. |
 | `auth.log`, `auth.api_refused`, `auth.api_error` | error, warn | Better Auth's own errors, such as a Discord callback that didn't validate or a banned user turned away. |
-| `db.slow_write` | warn | A write that took 500 ms or more (`SLOW_WRITE_MS`, `src/server/log-events.ts`): the realtime store's writes, the quality insert and the thumbnail upload, with the `operation` and `ms`. Half a second is slow for these, and the realtime server runs them on one queue. |
+| `db.slow_write` | warn | A write that took 500 ms or more (`SLOW_WRITE_MS`, `src/server/log-events.ts`): the realtime store's writes, the timeline batch insert, the quality insert and the thumbnail upload, with the `operation` and `ms`. Half a second is slow for these, and the realtime server runs them on one queue. |
 | `ice.report`, `ice.mint_failed`, `turn_usage.failed` | info, warn | Relayed or failed ICE pairs (candidate types only), failed TURN minting, failed Cloudflare analytics. |
 | `maintenance.*`, `migrate.*` | info, error | The daily purge, and the migration run at start. |
 
-Not written yet: the room timeline's events (`timeline.<kind>`, info) and the dropped connection-event and problem reports (`connection_event.dropped`, `problem.dropped`, warn). `logTimelineEvent`, `logTimelineWriteFailed` and `logReportDropped` in `src/server/log-events.ts` are the hooks for the tickets that add them.
+Not written yet: the dropped connection-event and problem reports (`connection_event.dropped`, `problem.dropped`, warn). `logReportDropped` in `src/server/log-events.ts` is the hook for the tickets that add those reports.
 
 **Noise.** The same event from the same user (or socket) is written in full for its first 10 lines in
 a minute; after that one line a minute carries `suppressed: N`. Errors are counted by their message

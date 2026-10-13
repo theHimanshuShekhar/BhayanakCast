@@ -13,6 +13,7 @@
  *   await h.advance(30_000);                            // fire due hub timers, then settle
  *   await h.settled();                                  // closes seen by server + hub idle
  *   await h.restart();                                  // crash + new hub on the same DB
+ *   const events = await h.timelineEvents(roomId);      // the room timeline's rows (flushed first)
  *
  * Like the browser client, every welcomed client heartbeats: `advance` moves the clock in
  * steps of at most `PING_INTERVAL_MS` and has each one `ping` (and swallows the `pong`) before
@@ -26,8 +27,10 @@
  */
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
+import { asc, eq } from "drizzle-orm";
 import WebSocket from "ws";
 import type { Db } from "../db/client.ts";
+import { roomTimelineEvents } from "../db/schema/index.ts";
 import { createTestDb } from "../db/test-db.ts";
 import { createAuth } from "../lib/auth.ts";
 import {
@@ -41,11 +44,13 @@ import {
   type ServerMessageOf,
   type ServerMessageType,
 } from "../lib/realtime.ts";
+import type { TimelineEventRow } from "../lib/room-timeline.ts";
 import type { CreateRoomInput } from "../lib/rooms.ts";
 import { type Clock, FakeClock } from "./clock.ts";
 import { attachRealtime, type RealtimeServer } from "./realtime.ts";
 import { RoomHub } from "./room-hub.ts";
 import { createDbRoomStore, type RoomStore } from "./room-store.ts";
+import { TimelineRecorder } from "./room-timeline.ts";
 import { createRoom } from "./rooms.ts";
 import { authenticatedFromSession, resolveSession, toHeaders } from "./session.ts";
 
@@ -134,6 +139,13 @@ export interface RealtimeHarness {
   clock: FakeClock;
   /** The current hub (a new one after `restart`). */
   readonly hub: RoomHub;
+  /** The room timeline's recorder, which outlives restarts. Its writes go to `db`. */
+  readonly timeline: TimelineRecorder;
+  /**
+   * The room timeline's stored events, oldest first, for `roomId` (any room if omitted), after
+   * writing whatever the recorder has queued.
+   */
+  timelineEvents(roomId?: string): Promise<TimelineEventRow[]>;
   /** `ws://127.0.0.1:<port>/ws` */
   url: string;
   /** A signed-in user with a real session, via the test-only sign-in. */
@@ -174,7 +186,12 @@ export interface RealtimeHarnessOptions {
   beforeAuthenticate?: (request: IncomingMessage) => Promise<void>;
   /** Wraps the hub's store, to count or hold its calls. */
   wrapStore?: (store: RoomStore) => RoomStore;
+  /** Wraps the room timeline's database write, to fail or stall it. */
+  wrapTimelineWrite?: (write: TimelineWrite) => TimelineWrite;
 }
+
+/** The room timeline recorder's database write: one batch of rows. */
+export type TimelineWrite = (rows: TimelineEventRow[]) => Promise<unknown>;
 
 export async function startRealtimeHarness(
   options: RealtimeHarnessOptions = {},
@@ -183,6 +200,11 @@ export async function startRealtimeHarness(
   const adminDiscordIds = new Set<string>();
   const auth = createAuth(db, { env: testEnv, adminDiscordIds });
   const clock = new FakeClock();
+  const insertTimeline: TimelineWrite = (rows) => db.insert(roomTimelineEvents).values(rows);
+  const timeline = new TimelineRecorder({
+    clock,
+    write: options.wrapTimelineWrite?.(insertTimeline) ?? insertTimeline,
+  });
 
   const server = createServer((_request, response) => {
     response.statusCode = 404;
@@ -192,7 +214,7 @@ export async function startRealtimeHarness(
   function boot() {
     const store = createDbRoomStore(db);
     const mortal = mortalDeps(clock, options.wrapStore?.(store) ?? store);
-    const hub = new RoomHub({ clock: mortal.clock, store: mortal.store });
+    const hub = new RoomHub({ clock: mortal.clock, store: mortal.store, timeline });
     const realtime: RealtimeServer = attachRealtime(server, {
       hub,
       authenticate: async (request) => {
@@ -279,6 +301,17 @@ export async function startRealtimeHarness(
     get hub() {
       return running.hub;
     },
+    timeline,
+    async timelineEvents(roomId) {
+      await running.hub.idle();
+      await timeline.flush();
+      const rows = await db
+        .select()
+        .from(roomTimelineEvents)
+        .where(roomId ? eq(roomTimelineEvents.roomId, roomId) : undefined)
+        .orderBy(asc(roomTimelineEvents.id));
+      return rows.map(({ id: _id, ...row }) => row);
+    },
     url,
     createUser,
     signInAgain: (user) => signIn(user.discordId, user.username),
@@ -340,6 +373,7 @@ export async function startRealtimeHarness(
     async close() {
       await Promise.all([...clients].map((client) => client.close()));
       await running.realtime.close();
+      await timeline.close();
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await closeDb();
     },
