@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installCrashHandlers } from "./crash-handlers.ts";
+import { redirectProcessLog } from "./logger.ts";
 import { type CapturedLogs, captureLogs } from "./test-logs.ts";
 
 let logs: CapturedLogs;
@@ -98,6 +99,42 @@ describe("uncaughtException", () => {
     installCrashHandlers({ shutdown, proc, exit });
     proc.emit("uncaughtException", new Error("first"), "uncaughtException");
     expect(exit).toHaveBeenCalledExactlyOnceWith(1);
+  });
+});
+
+describe("a log line that can't be written", () => {
+  it("doesn't keep an uncaught exception from shutting the server down", () => {
+    const proc = fakeProcess();
+    const shutdown = vi.fn(() => Promise.resolve());
+    installCrashHandlers({ shutdown, proc });
+    logs.restore();
+    const restore = redirectProcessLog(() => {
+      throw new Error("stdout is gone");
+    });
+    try {
+      expect(() =>
+        proc.emit("uncaughtException", new Error("first"), "uncaughtException"),
+      ).not.toThrow();
+      expect(shutdown).toHaveBeenCalledExactlyOnceWith("uncaughtException", 1);
+    } finally {
+      restore();
+    }
+  });
+
+  it("doesn't make an unhandled rejection fatal", () => {
+    const proc = fakeProcess();
+    installCrashHandlers({ shutdown: vi.fn(), proc });
+    logs.restore();
+    const restore = redirectProcessLog(() => {
+      throw new Error("stdout is gone");
+    });
+    try {
+      expect(() =>
+        proc.emit("unhandledRejection", new Error("late"), Promise.resolve()),
+      ).not.toThrow();
+    } finally {
+      restore();
+    }
   });
 });
 

@@ -96,7 +96,7 @@ as an empty string, and the app treats that as unset. See `.env.example` for a t
 | `REALTIME_SOCKETS_PER_USER` | no | Open realtime sockets (tabs and devices) per signed-in user; more are refused with 429. Default `10` (ADR 4 addendum). |
 | `PUBLIC_READ_LIMIT_SCALE` | no | Multiplies the per-IP budgets of public reads (profile 60, search 30, home 120 a minute). Default `1`; only e2e raises it (ADR 20 addendum). |
 | `REALTIME_EMPTY_ROOM_TIMEOUT_MS` | no | How long an empty room waits before it ends. Default `300000` (5 minutes, ADR 14). Leave it unset in production. |
-| `LOGS_VIEWER_USER`, `LOGS_VIEWER_PASSWORD` | yes, for the log viewer | The login for the log viewer (section 6, Logs), and the pair `vector` sends its inserts with. Choose both: `openssl rand -hex 16` makes a good password. Use letters and numbers only: compose puts the password in VictoriaLogs' flags (where `$` has a meaning), and Vector's config is YAML. If either is empty the viewer has no login (it is still LAN-only). |
+| `LOGS_VIEWER_USER`, `LOGS_VIEWER_PASSWORD` | yes | The login for the log viewer (section 6, Logs), and the pair `vector` sends its inserts with. Choose both: `openssl rand -hex 16` makes a good password. Use letters and numbers only: compose puts the password in VictoriaLogs' flags (where `$` has a meaning), and Vector's config is YAML. Both are required: `docker-compose.yml` uses `${VAR:?}` for them, so a stack without either fails to deploy instead of starting a viewer with no login. |
 | `BACKUP_NAS_SHARE` | no | The NAS CIFS directory where dumps go, as `//host/share/path`. Default `//10.1.1.195/weyland/Services/backups/bhayanakcast`. It must exist and hold the `.bhayanakcast-backups` marker file. See section 5 (Backups to the NAS). |
 | `BACKUP_NAS_USERNAME`, `BACKUP_NAS_PASSWORD` | yes, for backups | The NAS account that can write to `BACKUP_NAS_SHARE`. The password can't contain `,` or `$` (it goes into the mount options and through compose interpolation). Without them `backup` can't start; the app is unaffected. |
 | `BACKUP_SCHEDULE` | no | Cron expression (5 fields) for the backup. Default `0 3 * * *`, nightly at 03:00. |
@@ -118,7 +118,7 @@ set `E2E_AUTH`: compose doesn't pass it through, and the app refuses to start if
 Known Dockhand quirks reported upstream, worth checking after the first deploy:
 
 - Stack variables marked as secrets have been injected literally as `***` in some versions.
-- Required-variable syntax (`${VAR:?}`) has blocked stop and redeploy. This compose file doesn't use it; the app validates its env itself.
+- Required-variable syntax (`${VAR:?}`) has blocked stop and redeploy. This compose file uses it only for `LOGS_VIEWER_USER` and `LOGS_VIEWER_PASSWORD`, so that the log viewer can never start without a login; the app validates its own env itself. Every compose command needs both variables set, `down` and `stop` included. If Dockhand can't stop or redeploy the stack, check they are set first.
 - Variables that share a name with Dockhand's own container env have picked up Dockhand's values.
 
 Check what the container actually got with `docker inspect <app container> --format '{{json .Config.Env}}'`. Treat the output as secret.
@@ -272,8 +272,9 @@ a minute; after that one line a minute carries `suppressed: N`. Errors are count
 too, so a new error is always written.
 
 **Never logged:** IP addresses, chat content, tokens and session ids. The logger replaces fields
-with such names and scrubs addresses and credentials out of messages and errors, and a test guards
-it (`src/server/logger.test.ts`). The viewer holds real user and room ids for 90 days, longer than
+with such names and scrubs addresses, credentials, OAuth `code` and `state` values, invite tokens
+and the parameters of a failed database query (`params: ...`, which hold session and OAuth tokens)
+out of messages, errors and their `cause` chains, and tests guard it (`src/server/logger.test.ts`). The viewer holds real user and room ids for 90 days, longer than
 the 30 days rooms are kept: that is by design, and admin-only.
 
 **The commit.** Every line has a `commit` field, and `GET /api/health` returns
@@ -302,8 +303,12 @@ previous commit's number: the same code, one commit behind.
   the NAS, and a failed disk takes the logs with it.
 - The log stack has no healthcheck yet, and nothing alerts if it stops. A line missing from the
   viewer is checked by `docker logs <app container>`.
-- Server functions and pages that throw also leave TanStack Start's own `Server Fn Error!` line in
-  the output, which isn't JSON: `vector` keeps it as plain text.
+- Query parameters, tokens and invite links are redacted by the app's logger, and `console.*`
+  output (TanStack Start prints a failed server function's whole error, parameters and `cause`
+  included) goes through it too (`src/server/console-capture.ts`). Under that, `vector` drops a
+  line that isn't JSON and shows `params:`, and masks credential-like values, bearer tokens and
+  invite tokens in the rest (`vector/vector.yaml`, tested by `vector/vector.test.yaml`). It is a
+  net, not a filter to rely on.
 
 How `vector` authenticates: its `http` sink sends HTTP basic auth with the same
 `LOGS_VIEWER_USER` / `LOGS_VIEWER_PASSWORD` the viewer uses, taken from its own environment. Vector
@@ -361,7 +366,7 @@ file or mount on the host, which this git-backed stack avoids (ADR 9 addendum). 
 - [ ] "Sign in with Discord" completes and returns to home. Your account has admin (`/admin` opens).
 - [ ] The realtime socket connects through the tunnel: the lobby's online count updates, and a room opens.
 - [ ] The app log has no `http.untrusted_proxy` warning ("Ignoring cf-connecting-ip …"). If it does, fix `TRUSTED_PROXY_IPS` (step 2).
-- [ ] The log viewer works (section 6, Logs): `LOGS_VIEWER_USER` and `LOGS_VIEWER_PASSWORD` are set, `http://10.1.1.160:9428/select/vmui/` asks for them, and `roomId:="<a room id>"` finds the room's lines after you open it. `victorialogs` and `vector` are running.
+- [ ] The log viewer works (section 6, Logs): `LOGS_VIEWER_USER` and `LOGS_VIEWER_PASSWORD` are set (the deploy fails without them), `http://10.1.1.160:9428/select/vmui/` asks for them, and `roomId:="<a room id>"` finds the room's lines after you open it. `victorialogs` and `vector` are running.
 - [ ] A two-person room works across two different networks (one on mobile data, if possible).
 - [ ] Link previews work through the tunnel (ADR 22): paste `https://cast.bhayanak.net` and a public live room's link into a Discord channel, and check both unfurl with the image and the accent colour bar. Then run the room link through the Facebook Sharing Debugger and the X card preview, or check `curl -sA Discordbot https://cast.bhayanak.net/ -L | grep og:` from outside the LAN. A private room's link must show only "A private room on BhayanakCast" (or "This room isn't available").
 - [ ] If you set the TURN usage variables: the dashboard's TURN usage panel was built from Cloudflare's docs and never run against the real API, so check the query once by hand. Run `curl -s https://api.cloudflare.com/client/v4/graphql -H "Authorization: Bearer $CLOUDFLARE_ANALYTICS_API_TOKEN" -H "Content-Type: application/json" --data '{"query":"query { viewer { accounts(filter: {accountTag: \"<account id>\"}) { callsTurnUsageAdaptiveGroups(limit: 10000, filter: {date_geq: \"<YYYY-MM-01>\", date_leq: \"<today>\"}) { dimensions { datetimeHour } sum { egressBytes } } } } }"}'` (query text: `TURN_EGRESS_QUERY` in `src/server/turn-usage.ts`). It should return `data` with no `errors`. Then open `/admin`: the panel shows a number, not "usage unavailable" (the app log says `turn_usage.failed`, "Cloudflare analytics failed", with the reason).

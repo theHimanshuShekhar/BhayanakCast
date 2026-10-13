@@ -34,6 +34,10 @@ const MAX_MESSAGE_CHARS = 1_000;
 const MAX_ERROR_MESSAGE_CHARS = 2_000;
 const MAX_STACK_CHARS = 8_000;
 const MAX_DEPTH = 4;
+/** Links of an error's cause chain that are written. */
+const MAX_CAUSE_DEPTH = 3;
+/** Characters of an error's message that tell one problem from another when sampling. */
+const SAMPLE_KEY_MESSAGE_CHARS = 200;
 const MAX_KEYS = 50;
 
 export interface LogFields {
@@ -125,6 +129,9 @@ const BLOCKED_KEYS = new Set([
   "chat",
   "chattext",
   "body",
+  // The values bound to a database query (a driver error's own `params` property).
+  "params",
+  "parameters",
 ]);
 const BLOCKED_KEY_PATTERN = /token|secret|password|passwd|cookie|authorization|apikey|credential/;
 const REDACTED = "[redacted]";
@@ -142,13 +149,32 @@ const IPV6 = new RegExp(
 );
 const BEARER = /\bBearer\s+\S+/gi;
 const CREDENTIAL_PAIR =
-  /\b([\w.-]*(?:token|secret|password|passwd|cookie|authorization|apikey|sessionid|session_id)[\w.-]*)\s*[=:]\s*[^\s,;&)"']+/gi;
+  /\b([\w.-]*(?:token|secret|password|passwd|cookie|authorization|apikey|sessionid|session_id)[\w.-]*)(["']?\s*[=:]\s*["']?)[^\s,;&)"'}\]]+/gi;
+/**
+ * What Drizzle appends to a failed query's message (and so to its stack): `params: ` and every
+ * value bound to the query, which is where session tokens and OAuth tokens go. Everything after it
+ * goes; in a stack, up to the first frame.
+ */
+const QUERY_PARAMS = /\bparams:[\s\S]*?(?=\n\s+at\s|$)/gi;
+/** `Key (token)=(abc) already exists`: Postgres names the value that clashed. */
+const POSTGRES_KEY = /\bKey \(([^)]*)\)=\([^)]*\)/g;
+/** An invite link's path: the token in it is a bearer secret (`/join/<token>`). */
+const INVITE_PATH = /\/join\/[^\s/?#"'`)]+/g;
+/** The values of an OAuth callback's query (`?code=...&state=...`) and the tokens it yields. */
+const OAUTH_VALUE = /\b(code|state|id_token|access_token|refresh_token)=[^\s&"')]{6,}/gi;
 
-/** `text` without IP addresses, bearer tokens or `token=...` style pairs. */
+/**
+ * `text` without query parameters, invite tokens, OAuth values, IP addresses, bearer tokens or
+ * `token=...` style pairs.
+ */
 function scrubText(text: string): string {
   return text
+    .replace(QUERY_PARAMS, `params: ${REDACTED}`)
+    .replace(POSTGRES_KEY, `Key ($1)=(${REDACTED})`)
+    .replace(INVITE_PATH, "/join/:token")
+    .replace(OAUTH_VALUE, `$1=${REDACTED}`)
     .replace(BEARER, `Bearer ${REDACTED}`)
-    .replace(CREDENTIAL_PAIR, `$1=${REDACTED}`)
+    .replace(CREDENTIAL_PAIR, `$1$2${REDACTED}`)
     .replace(IPV4, "[ip]")
     .replace(IPV6, "[ip]");
 }
@@ -180,19 +206,29 @@ export interface ErrorInfo {
   name: string;
   message: string;
   stack?: string;
+  /** What this error wrapped (a driver error under Drizzle's), as far as `MAX_CAUSE_DEPTH`. */
+  cause?: ErrorInfo;
 }
 
-/** A thrown value as `{name, message, stack}`, scrubbed and with the stack as one string. */
-export function describeError(error: unknown): ErrorInfo {
-  if (error instanceof Error) {
-    const info: ErrorInfo = {
-      name: error.name,
-      message: clip(scrubText(error.message), MAX_ERROR_MESSAGE_CHARS),
-    };
-    if (error.stack) info.stack = clip(scrubText(error.stack), MAX_STACK_CHARS);
-    return info;
+/**
+ * A thrown value as `{name, message, stack, cause}`, scrubbed and with the stack as one string.
+ * The cause chain is written too (the driver's own error is what says why a query failed), each
+ * link scrubbed the same way, and cut at a loop or `MAX_CAUSE_DEPTH` links.
+ */
+export function describeError(error: unknown, seen: ReadonlySet<unknown> = new Set()): ErrorInfo {
+  if (!(error instanceof Error)) {
+    return { name: "NonError", message: clip(scrubText(String(error)), MAX_ERROR_MESSAGE_CHARS) };
   }
-  return { name: "NonError", message: clip(scrubText(String(error)), MAX_ERROR_MESSAGE_CHARS) };
+  const info: ErrorInfo = {
+    name: error.name,
+    message: clip(scrubText(error.message), MAX_ERROR_MESSAGE_CHARS),
+  };
+  if (error.stack) info.stack = clip(scrubText(error.stack), MAX_STACK_CHARS);
+  const links = new Set(seen).add(error);
+  if (error.cause !== undefined && !links.has(error.cause) && links.size <= MAX_CAUSE_DEPTH) {
+    info.cause = describeError(error.cause, links);
+  }
+  return info;
 }
 
 // -------------------------------------------------------------------------------------------
@@ -336,7 +372,8 @@ export function createLogger(options: LoggerOptions): Logger {
     // A different error is a different problem: it gets its own count.
     if (level === "error") {
       const message = fields.err instanceof Error ? fields.err.message : (fields.err ?? msg);
-      key += `|${String(message)}`;
+      // Clipped: a driver's message can carry kilobytes (a query, an image), and this is a map key.
+      key += `|${String(message).slice(0, SAMPLE_KEY_MESSAGE_CHARS)}`;
     }
     return key;
   }
@@ -413,6 +450,9 @@ export const log: Logger = (() => {
     level: () => shared.level ?? resolveLogLevel(process.env),
   });
   shared.logger = logger;
+  // `console` ignores a broken stdout (a closed pipe); a direct write doesn't: its EPIPE would be
+  // an 'error' event with no listener, an uncaught exception, and a shutdown over a lost log line.
+  process.stdout.on("error", () => {});
   setInterval(() => logger.flush(), FLUSH_EVERY_MS).unref();
   return logger;
 })();

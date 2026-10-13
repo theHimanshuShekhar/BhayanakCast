@@ -83,6 +83,34 @@ test("an invite page sends no referrer, and auth responses are private, no-store
   expect(violations).toEqual([]);
 });
 
+// Server functions are same-origin RPC. Having src/start.ts (which logs their errors, #119) means
+// Start's own default CSRF check is gone unless that file adds it: this pins that it still does.
+test("a cross-site POST to a server function is refused with 403, a same-origin one is not", async ({
+  request,
+}) => {
+  const post = (site: string) =>
+    request.post("/_serverFn/not-a-real-function", {
+      headers: { "sec-fetch-site": site, "content-type": "application/json" },
+      data: {},
+    });
+  for (const site of ["cross-site", "same-site"]) {
+    const refused = await post(site);
+    expect(refused.status(), `sec-fetch-site: ${site}`).toBe(403);
+  }
+  // Past the check it reaches the router, which has no such function (not a 403).
+  expect((await post("same-origin")).status()).not.toBe(403);
+});
+
+test("a cross-origin POST to a server function without fetch metadata is refused with 403", async ({
+  request,
+}) => {
+  const refused = await request.post("/_serverFn/not-a-real-function", {
+    headers: { origin: "https://evil.example", "content-type": "application/json" },
+    data: {},
+  });
+  expect(refused.status()).toBe(403);
+});
+
 test("hashed assets keep a long cache and are not no-store", async ({ page }) => {
   const assets: Response[] = [];
   page.on("response", (r) => {

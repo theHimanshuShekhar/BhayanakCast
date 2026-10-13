@@ -1,0 +1,61 @@
+# Unit tests for the `parse` transform in vector.yaml, run with both files:
+#   vector test vector.yaml vector.test.yaml
+# (CI does: .github/workflows/ci.yml, "Compose file and log shipper config".) Not part of the
+# image: only vector.yaml is copied into it.
+tests:
+  - name: the logger's JSON line becomes fields, with its time and message
+    inputs:
+      - insert_at: parse
+        type: log
+        log_fields:
+          message: '{"time":"2026-10-14T00:00:00.000Z","level":"warn","event":"socket.refused","msg":"Too many requests","roomId":"r1","userId":"u1","commit":"abc1234"}'
+          timestamp: "2026-10-14T00:00:01Z"
+    outputs:
+      - extract_from: parse
+        conditions:
+          - type: vrl
+            source: |
+              .roomId == "r1" && .userId == "u1" && .level == "warn" && .event == "socket.refused" && .msg == "Too many requests" && .time == "2026-10-14T00:00:00.000Z" && !exists(.message)
+
+  - name: a plain line is kept as text and gets the container's time
+    inputs:
+      - insert_at: parse
+        type: log
+        log_fields:
+          message: "Listening on http://0.0.0.0:3000"
+          timestamp: "2026-10-14T00:00:01Z"
+    outputs:
+      - extract_from: parse
+        conditions:
+          - type: vrl
+            source: |
+              .msg == "Listening on http://0.0.0.0:3000" && exists(.time) && !exists(.message)
+
+  - name: a line that shows a query's parameters is dropped
+    inputs:
+      - insert_at: parse
+        type: log
+        log_fields:
+          message: "params: acc-1,discordAccess_aaaabbbbccccdddd,sessTok_9f8e7d6c5b4a"
+          timestamp: "2026-10-14T00:00:01Z"
+      - insert_at: parse
+        type: log
+        log_fields:
+          message: "  params: [ 'sessTok_9f8e7d6c5b4a', 'x' ],"
+          timestamp: "2026-10-14T00:00:01Z"
+    no_outputs_from:
+      - parse
+
+  - name: credential-like values, bearer tokens and invite tokens are masked in a plain line
+    inputs:
+      - insert_at: parse
+        type: log
+        log_fields:
+          message: 'failed: accessToken=abc123secretvalue, Bearer eyJhbGciOi.payload.sig, GET /join/inv9f8e7d6c5b4a?x=1 {"refresh_token":"r3fr3sh"} code=oauthCode123 state=oauthState456'
+          timestamp: "2026-10-14T00:00:01Z"
+    outputs:
+      - extract_from: parse
+        conditions:
+          - type: vrl
+            source: |
+              !contains(string!(.msg), "abc123secretvalue") && !contains(string!(.msg), "eyJhbGciOi") && !contains(string!(.msg), "inv9f8e7d6c5b4a") && !contains(string!(.msg), "r3fr3sh") && !contains(string!(.msg), "oauthCode123") && !contains(string!(.msg), "oauthState456") && contains(string!(.msg), "/join/:token") && contains(string!(.msg), "[redacted]")

@@ -30,15 +30,23 @@ export function installCrashHandlers({
   let crashing = false;
 
   const onRejection = (reason: unknown) => {
-    log.error("process.unhandled_rejection", "an unhandled promise rejection; still running", {
-      err: reason,
-    });
+    try {
+      log.error("process.unhandled_rejection", "an unhandled promise rejection; still running", {
+        err: reason,
+      });
+    } catch {
+      // A log line that can't be written is no reason to stop a server that is running.
+    }
   };
 
   const onException = (error: unknown) => {
-    log.error("process.uncaught_exception", "an uncaught exception; shutting down", {
-      err: error,
-    });
+    try {
+      log.error("process.uncaught_exception", "an uncaught exception; shutting down", {
+        err: error,
+      });
+    } catch {
+      // The shutdown below matters more than the line about it.
+    }
     if (crashing) return;
     crashing = true;
     try {

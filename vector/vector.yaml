@@ -20,7 +20,19 @@ transforms:
       if err == null && is_object(parsed) {
         . = merge(., object!(parsed))
       } else {
-        .msg = .message
+        # Not the logger's JSON: a library's own print, or a crash before the logger started. The
+        # app routes console output through its logger (redacted), so little should land here, but
+        # what does is shipped as it is, so this is the net under it: a line that shows a query's
+        # parameters is dropped (session and OAuth tokens are among them), and credential-like
+        # values, invite tokens and bearer tokens are masked. Tested in vector.test.yaml.
+        text = string!(.message)
+        if match(text, r'(?i)\bparams\s*[:=]') {
+          abort
+        }
+        text = replace(text, r'(?i)(token|secret|password|passwd|cookie|authorization|apikey|session_?id|code|state)([\x22\x27]?\s*[=:]\s*[\x22\x27]?)[^\s,;&)\x22\x27}\]]+', "$$1$$2[redacted]")
+        text = replace(text, r'(?i)\bBearer\s+\S+', "Bearer [redacted]")
+        text = replace(text, r'/join/[^\s/?#\x22\x27)]+', "/join/:token")
+        .msg = text
       }
       del(.message)
       del(.label)

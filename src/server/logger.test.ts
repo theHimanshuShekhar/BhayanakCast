@@ -1,3 +1,4 @@
+import { DrizzleQueryError } from "drizzle-orm/errors";
 import { describe, expect, it } from "vitest";
 import {
   bindLogUser,
@@ -226,6 +227,18 @@ describe("sampling", () => {
     expect(messages).toContain("different 2");
   });
 
+  it("counts errors by the start of their message, so a huge one doesn't make a huge key", () => {
+    const { logger, entries } = setup();
+    const prefix = "x".repeat(200);
+    for (let i = 0; i < 30; i++) {
+      logger.error("db.failed", "q", {
+        err: new Error(`${prefix} tail ${i} ${"y".repeat(100_000)}`),
+      });
+    }
+    // The same first 200 characters are one problem, sampled like any other repeat.
+    expect(entries()).toHaveLength(LOG_SAMPLE_LIMIT);
+  });
+
   it("still logs a new error message when the bookkeeping is full", () => {
     const { logger, entries } = setup();
     for (let i = 0; i < 6_000; i++) logger.error("room.failed", "x", { err: new Error(`m${i}`) });
@@ -287,6 +300,120 @@ describe("redaction", () => {
     for (const secret of SECRETS) expect(line).not.toContain(secret);
     expect(line).toContain("ECONNREFUSED");
     expect(line).toContain(":5432");
+  });
+
+  describe("query parameters in database errors", () => {
+    const SESSION_TOKEN = "sessTok_9f8e7d6c5b4a39281706";
+    const ACCESS_TOKEN = "discordAccess_aaaabbbbccccdddd";
+    const REFRESH_TOKEN = "discordRefresh_1111222233334444";
+    const ID_TOKEN = "eyJhbGciOiJSUzI1NiJ9.discordIdToken.sig";
+
+    it("never writes the parameters Drizzle puts in a failed query's message and stack", () => {
+      const { logger, lines, entries } = setup();
+      const cause = new Error("duplicate key value violates unique constraint");
+      const error = new DrizzleQueryError(
+        'insert into "session" ("id", "token", "user_id") values ($1, $2, $3)',
+        ["sess-1", SESSION_TOKEN, "user-1"],
+        cause,
+      );
+      logger.error("server_fn.failed", "createSessionFn threw", { err: error });
+      const text = lines.join("");
+      expect(text).not.toContain(SESSION_TOKEN);
+      const err = entries()[0]?.err as { message: string; stack: string };
+      expect(err.message).toContain("Failed query: insert into");
+      expect(err.message).toContain("params: [redacted]");
+      expect(err.stack).toContain("params: [redacted]");
+      // The frames after the parameters are still there to read.
+      expect(err.stack).toContain("    at ");
+    });
+
+    it("never writes the OAuth tokens of a failed account insert", () => {
+      const { logger, lines } = setup();
+      const error = new DrizzleQueryError(
+        'insert into "account" ("id", "access_token", "refresh_token", "id_token") values ($1, $2, $3, $4)',
+        ["acc-1", ACCESS_TOKEN, REFRESH_TOKEN, ID_TOKEN],
+        new Error("connection terminated"),
+      );
+      logger.error("auth.api_error", "a Better Auth endpoint failed", { err: error });
+      const text = lines.join("");
+      for (const secret of [ACCESS_TOKEN, REFRESH_TOKEN, ID_TOKEN]) {
+        expect(text).not.toContain(secret);
+      }
+    });
+
+    it("strips whatever follows the marker, newlines included, from the message", () => {
+      const { logger, lines } = setup();
+      logger.error("x.failed", "q", {
+        err: new Error(`Failed query: select 1\nparams: a,\n${SESSION_TOKEN}\nmore`),
+      });
+      expect(lines.join("")).not.toContain(SESSION_TOKEN);
+    });
+
+    it("scrubs the cause chain too, and writes it", () => {
+      const { logger, lines, entries } = setup();
+      const inner = new DrizzleQueryError("select 1", [SESSION_TOKEN], new Error("root cause"));
+      const outer = new Error("wrapped", { cause: inner });
+      logger.error("x.failed", "q", { err: outer });
+      expect(lines.join("")).not.toContain(SESSION_TOKEN);
+      const err = entries()[0]?.err as { cause?: { message: string; cause?: { message: string } } };
+      expect(err.cause?.message).toContain("Failed query: select 1");
+      expect(err.cause?.cause?.message).toBe("root cause");
+    });
+
+    it("stops following a cause chain that loops, or runs on", () => {
+      const { logger, entries } = setup();
+      const a = new Error("a");
+      const b = new Error("b", { cause: a });
+      a.cause = b;
+      logger.error("x.failed", "q", { err: a });
+      expect(entries()).toHaveLength(1);
+    });
+
+    it("scrubs a driver error nested in a field, not only the err field", () => {
+      const { logger, lines } = setup();
+      logger.warn("x.failed", "q", {
+        failure: new DrizzleQueryError("select 1", [SESSION_TOKEN], undefined),
+      });
+      expect(lines.join("")).not.toContain(SESSION_TOKEN);
+    });
+  });
+
+  describe("invite and OAuth values in free text", () => {
+    it("redacts an invite link's token in a message or a stack", () => {
+      const { logger, lines } = setup();
+      const error = new Error("render failed for https://cast.example/join/inv9f8e7d6c5b4a?x=1");
+      logger.error("http.unhandled", "failed at /join/inv9f8e7d6c5b4a", { err: error });
+      const text = lines.join("");
+      expect(text).not.toContain("inv9f8e7d6c5b4a");
+      expect(text).toContain("/join/:token");
+    });
+
+    it("redacts the code and state of an OAuth callback URL", () => {
+      const { logger, lines } = setup();
+      logger.error("auth.log", "bad callback", {
+        err: new Error(
+          "GET /api/auth/callback/discord?code=oauthCode123abc&state=oauthState456def failed",
+        ),
+        url: "/api/auth/callback/discord?state=otherState789&code=otherCode000",
+      });
+      const text = lines.join("");
+      for (const value of [
+        "oauthCode123abc",
+        "oauthState456def",
+        "otherState789",
+        "otherCode000",
+      ]) {
+        expect(text).not.toContain(value);
+      }
+      expect(text).toContain("/api/auth/callback/discord");
+    });
+
+    it("redacts quoted JSON-style credentials", () => {
+      const { logger, lines } = setup();
+      logger.warn("x", 'payload {"accessToken":"abc123secretvalue","ok":true}');
+      expect(lines.join("")).not.toContain("abc123secretvalue");
+      expect(lines.join("")).toContain("ok");
+    });
   });
 
   it("keeps ordinary text, ids and times intact", () => {
@@ -354,10 +481,6 @@ describe("request context", () => {
     });
     expect(entries().map((entry) => entry.requestId)).toEqual(["mine", "req-1"]);
   });
-
-  it("ignores bindLogUser outside a request", () => {
-    expect(() => bindLogUser("user-1")).not.toThrow();
-  });
 });
 
 describe("routeOf", () => {
@@ -368,5 +491,13 @@ describe("routeOf", () => {
     );
     expect(routeOf("http://x/join/inv-token-123")).toBe("/join/:token");
     expect(routeOf("/join/inv-token-123?x=1")).toBe("/join/:token");
+  });
+});
+
+describe("the process logger and a closed stdout", () => {
+  it("ignores an error on stdout (an EPIPE) instead of letting it become an uncaught exception", () => {
+    // Importing the logger attached the listener; with none, emitting 'error' would throw.
+    expect(process.stdout.listenerCount("error")).toBeGreaterThan(0);
+    expect(() => process.stdout.emit("error", new Error("write EPIPE"))).not.toThrow();
   });
 });

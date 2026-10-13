@@ -133,9 +133,10 @@ services:
       - -storageDataPath=/victoria-logs-data
       - -retentionPeriod=90d
       # Basic auth on the viewer and the API, inserts included (so `vector` gets the same pair).
-      # Both empty means no login: set them. `/health` stays open either way.
-      - -httpAuth.username=${LOGS_VIEWER_USER:-}
-      - -httpAuth.password=${LOGS_VIEWER_PASSWORD:-}
+      # Required (`:?`): with either empty VictoriaLogs would start with no login, so the deploy
+      # fails instead. `/health` stays open.
+      - -httpAuth.username=${LOGS_VIEWER_USER:?set LOGS_VIEWER_USER, the log viewer needs a login (docs/deploy.md section 6)}
+      - -httpAuth.password=${LOGS_VIEWER_PASSWORD:?set LOGS_VIEWER_PASSWORD, the log viewer needs a login (docs/deploy.md section 6)}
     volumes:
       - vlogs:/victoria-logs-data
     ports:
@@ -159,8 +160,8 @@ services:
     environment:
       # Vector expands ${...} in its config only when told to; vector.yaml uses these two.
       VECTOR_DANGEROUSLY_ALLOW_ENV_VAR_INTERPOLATION: "true"
-      LOGS_VIEWER_USER: ${LOGS_VIEWER_USER:-}
-      LOGS_VIEWER_PASSWORD: ${LOGS_VIEWER_PASSWORD:-}
+      LOGS_VIEWER_USER: ${LOGS_VIEWER_USER:?set LOGS_VIEWER_USER, the log viewer needs a login (docs/deploy.md section 6)}
+      LOGS_VIEWER_PASSWORD: ${LOGS_VIEWER_PASSWORD:?set LOGS_VIEWER_PASSWORD, the log viewer needs a login (docs/deploy.md section 6)}
     volumes:
       # Root-equivalent on the host (a read-only mount doesn't limit the Docker API); the trade-off is
       # accepted (docs/deploy.md, "Logs").

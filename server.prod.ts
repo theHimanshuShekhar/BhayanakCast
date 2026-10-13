@@ -9,12 +9,18 @@
 import { fileURLToPath } from "node:url";
 import { closeDb, getDb } from "./src/db/client.ts";
 import { getCommit, startedAt } from "./src/server/build-info.ts";
+import { captureConsole } from "./src/server/console-capture.ts";
 import { installCrashHandlers } from "./src/server/crash-handlers.ts";
 import { env } from "./src/server/env.ts";
 import { log } from "./src/server/logger.ts";
 import { startMaintenance } from "./src/server/maintenance.ts";
 import { createProdServer } from "./src/server/prod-server.ts";
 import { createShutdown } from "./src/server/shutdown.ts";
+
+// Before anything else prints: what TanStack Start and libraries write with console.* (Start prints
+// a failed server function's whole error) goes through the logger and its redaction, not to stdout
+// as it is, where it would reach the log store unredacted (src/server/console-capture.ts).
+captureConsole();
 
 type ServerEntry = { fetch(request: Request): Response | Promise<Response> };
 
