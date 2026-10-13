@@ -19,6 +19,7 @@
     "test:migrate": "vitest run -c vitest.migrate.config.ts",
     "test:e2e": "playwright test",
     "og:image": "node scripts/og-assets.ts",
+    "proto:timeline": "node scripts/proto-timeline-dev.ts",
     "db:generate": "drizzle-kit generate && biome format --write drizzle",
     "db:migrate": "node src/db/migrate.ts",
     "db:studio": "drizzle-kit studio",

@@ -6,7 +6,7 @@ import {
   useSuspenseQuery,
 } from "@tanstack/react-query";
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
-import { type ReactNode, useState } from "react";
+import { lazy, type ReactNode, Suspense, useState } from "react";
 import {
   BanUserDialog,
   type DialogTarget,
@@ -68,6 +68,15 @@ export const Route = createFileRoute("/admin")({
   },
   component: AdminPage,
 });
+
+// PROTOTYPE (#114): the room-timeline variants, in dev builds only.
+const RoomTimelinePrototype = import.meta.env.DEV
+  ? lazy(() =>
+      import("~/components/room-timeline.prototype").then((m) => ({
+        default: m.RoomTimelinePrototype,
+      })),
+    )
+  : null;
 
 /** The users table as the page opens: no search, everyone, page 1. */
 const FIRST_USERS_PAGE = { q: "", banned: false, page: 1 };
@@ -838,6 +847,14 @@ function AdminPage() {
             <span>admin access</span>
           </div>
         </div>
+
+        {/* PROTOTYPE (#114): with ?variant=A|B|C, dev builds only. The import is dynamic so a
+            production build, where DEV is false, drops it with the rest of the prototype. */}
+        {RoomTimelinePrototype && (
+          <Suspense fallback={null}>
+            <RoomTimelinePrototype />
+          </Suspense>
+        )}
 
         <SectionHead title="platform stats" sub="all-time" size="sm" />
         <div className="grid grid-cols-2 min-[720px]:grid-cols-3 min-[1100px]:grid-cols-5 gap-2.5">
