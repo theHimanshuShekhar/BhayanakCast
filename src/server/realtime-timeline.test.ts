@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { rooms } from "../db/schema/index.ts";
 import {
   CHAT_RATE_LIMIT,
@@ -16,6 +16,7 @@ import {
   type TestUser,
 } from "./realtime-harness.ts";
 import { EMPTY_ROOM_TIMEOUT_MS, HOST_GRACE_MS, RECONNECT_GRACE_MS } from "./room-hub.ts";
+import { type CapturedLogs, captureLogs } from "./test-logs.ts";
 
 // The room timeline's events (#115): the hub reports what happens in a room, and the recorder
 // writes it behind the hub's back. These drive the real protocol and read the stored rows.
@@ -68,6 +69,28 @@ async function twoInRoom() {
   await a.waitForEvent("joined");
   return { a, b };
 }
+
+describe("the server log", () => {
+  it("also gets each recorded event at info, by kind, with the room and people but no chat", async () => {
+    const logs = captureLogs();
+    try {
+      const { a, b } = await twoInRoom();
+      b.send({ type: "chat.send", text: "a private sentence" });
+      await a.waitFor("chat.message");
+      b.send({ type: "room.leave" });
+      await a.waitForEvent("left");
+      await h.timeline.flush();
+
+      expect(logs.all("timeline.join").map((l) => l.userId)).toEqual([ana.id, bo.id]);
+      expect(logs.find("timeline.join")).toMatchObject({ level: "info", roomId });
+      expect(logs.find("timeline.leave")).toMatchObject({ level: "info", userId: bo.id, roomId });
+      expect(logs.lines.join("\n")).not.toContain("a private sentence");
+      expect(logs.lines.join("\n")).not.toMatch(/\b\d{1,3}(?:\.\d{1,3}){3}\b/);
+    } finally {
+      logs.restore();
+    }
+  });
+});
 
 describe("presence", () => {
   it("records joins and leaves, the leave with how it came about", async () => {
@@ -613,7 +636,7 @@ describe("chat", () => {
 });
 
 describe("writes off the hub's path", () => {
-  let error: MockInstance<typeof console.error>;
+  let logs: CapturedLogs;
   /** While true, a timeline write fails. */
   let down: boolean;
   /** While set, a timeline write waits for it. */
@@ -625,7 +648,8 @@ describe("writes off the hub's path", () => {
     down = false;
     gate = null;
     release = () => {};
-    error = vi.spyOn(console, "error").mockImplementation(() => {});
+    logs?.restore();
+    logs = captureLogs();
     await start({
       wrapTimelineWrite: (write) => async (rows) => {
         await gate;
@@ -635,7 +659,10 @@ describe("writes off the hub's path", () => {
     });
   }
 
-  afterEach(() => release());
+  afterEach(() => {
+    release();
+    logs?.restore();
+  });
 
   it("keeps the room working while the timeline can't be written, logs it, and catches up", async () => {
     await restartWithFlakyWrites();
@@ -645,10 +672,11 @@ describe("writes off the hub's path", () => {
     expect((await a.waitFor("chat.message")).message.text).toBe("still talking");
     await h.advance(5 * SECOND);
     await h.timeline.flush();
-    expect(error).toHaveBeenCalledWith(
-      expect.stringContaining("writing room timeline events failed"),
-      expect.any(Error),
-    );
+    expect(logs.find("timeline.write_failed")).toMatchObject({
+      level: "error",
+      msg: expect.stringContaining("writing room timeline events failed"),
+      err: { message: "timeline db is down" },
+    });
     expect(h.timeline.queued).toBeGreaterThanOrEqual(2);
     // The room goes on: a leave is told to the others, and the hub's queue is idle.
     b.send({ type: "room.leave" });

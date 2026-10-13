@@ -35,6 +35,14 @@ COPY --from=build /app/dist ./dist
 COPY package.json server.prod.ts ./
 COPY src ./src
 COPY drizzle ./drizzle
+# The commit this image is built from, for every log line and /api/health (src/server/build-info.ts).
+# Dockhand copies the repo without .git, so a build can't see its own commit: this asks GitHub for
+# main's latest instead (scripts/fetch-commit.ts), and writes `unknown` if it can't (offline, rate
+# limited, an outage), so a failed lookup never fails the build. Docker caches this layer while
+# everything above it is unchanged, so a commit that only touches docs, tests or the other
+# services keeps the previous commit's hash: the same code, one commit behind.
+RUN --mount=type=bind,source=scripts/fetch-commit.ts,target=/tmp/fetch-commit.ts \
+    node /tmp/fetch-commit.ts > COMMIT || echo unknown > COMMIT
 USER node
 EXPOSE 3000
 CMD ["sh", "-c", "node src/db/migrate.ts && exec node server.prod.ts"]

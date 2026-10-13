@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { and, eq, isNull, sql } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "../db/client.ts";
 import {
   dailyPlatformStats,
@@ -25,6 +25,7 @@ import {
   userCotimeNow,
   userStatsNow,
 } from "./stats.ts";
+import { captureLogs } from "./test-logs.ts";
 
 const T0 = new Date("2026-09-01T12:00:00Z");
 const MIN = 60_000;
@@ -823,14 +824,18 @@ describe("purgeExpiredRooms", () => {
     // Already rolled up and expired: the purge must still delete it.
     await seedRoom("expired", { createdBy: "b", presence: [["b", 0, 60]] });
     expect(await rollupEndedRoom(db, "expired", at(61))).toBe(true);
-    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const logs = captureLogs();
 
     try {
       expect(await purgeExpiredRooms(db, now)).toEqual({ rolledUp: 1, purged: 2 });
-      expect(logged).toHaveBeenCalledOnce();
-      expect(String(logged.mock.calls[0]?.[0])).toContain("bad");
+      expect(logs.entries).toHaveLength(1);
+      expect(logs.entries[0]).toMatchObject({
+        level: "error",
+        event: "maintenance.rollup_failed",
+        roomId: "bad",
+      });
     } finally {
-      logged.mockRestore();
+      logs.restore();
     }
 
     // The failed room rolled back whole: not rolled up, not deleted, ready for a retry.

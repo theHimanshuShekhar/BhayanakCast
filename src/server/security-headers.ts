@@ -13,6 +13,7 @@
 import { randomBytes } from "node:crypto";
 import type { ServerMiddleware } from "srvx";
 import { CSP_NONCE_KEY } from "../lib/csp-nonce.ts";
+import { logRouteError } from "./request-errors.ts";
 
 /** Discord serves avatars from here (ADR 7); the UI loads pictures only from it. */
 const DISCORD_CDN = "https://cdn.discordapp.com";
@@ -61,7 +62,9 @@ function setHeaders(response: Response, headers: Record<string, string>): Respon
 
 /**
  * srvx middleware: a nonce for the app, then the security headers on whatever answers, a 500
- * for an unhandled error included (so it is answered here, not left to srvx's bare one).
+ * for an unhandled error included (so it is answered here, not left to srvx's bare one). That
+ * error is logged (`http.unhandled`) with the route, and the user if the request got as far as
+ * finding out who it was (src/server/request-log.ts).
  */
 export const securityHeaders: ServerMiddleware = async (request, next) => {
   const nonce = randomBytes(16).toString("base64");
@@ -70,7 +73,7 @@ export const securityHeaders: ServerMiddleware = async (request, next) => {
   try {
     response = await next();
   } catch (error) {
-    console.error("[http] unhandled error", error);
+    logRouteError(error, request.url);
     response = new Response("Internal Server Error", {
       status: 500,
       headers: { "content-type": "text/plain", "cache-control": "private, no-store" },

@@ -11,6 +11,7 @@ import { tanstackStartCookies } from "better-auth/tanstack-start";
 import { eq } from "drizzle-orm";
 import { type Db, getDb } from "../db/client.ts";
 import * as schema from "../db/schema/index.ts";
+import { logAuthApiError, logAuthMessage } from "../server/auth-log.ts";
 import { CLIENT_IP_HEADER } from "../server/client-ip.ts";
 import { adminDiscordIds, type Env, env, isTestSignInEnabled } from "../server/env.ts";
 import { getLiveHub } from "../server/live-hub.ts";
@@ -107,6 +108,14 @@ export function createAuth(db: Db, config: AuthConfig) {
       window: 60,
       max: 100,
     },
+    // Its errors and warnings, and sign-in failures among them, go to the server's log
+    // (src/server/auth-log.ts) instead of its own console format.
+    logger: {
+      level: "warn",
+      disableColors: true,
+      log: (level, message, ...args) => logAuthMessage(level, message, args),
+    },
+    onAPIError: { onError: (error) => logAuthApiError(error) },
     advanced: {
       // Better Auth only sees headers, not the socket. The production server (server.prod.ts)
       // rewrites this header to the resolved client IP before any handler runs, so it's only

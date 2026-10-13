@@ -24,6 +24,7 @@ import type { Db } from "../db/client.ts";
 import { dailyPlatformStats, rooms } from "../db/schema/index.ts";
 import type { Caller } from "./caller.ts";
 import { inRoom, mergedIntervals, roomTimes, seconds } from "./intervals.ts";
+import { log } from "./logger.ts";
 
 export const RETENTION_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -367,7 +368,10 @@ export async function purgeExpiredRooms(db: Db, now: Date = new Date()): Promise
     try {
       if (await rollupEndedRoom(db, id, now)) rolledUp++;
     } catch (error) {
-      console.error(`[maintenance] roll-up of room ${id} failed, skipping`, error);
+      log.error("maintenance.rollup_failed", `roll-up of room ${id} failed, skipping`, {
+        roomId: id,
+        err: error,
+      });
     }
   }
 

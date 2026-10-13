@@ -8,6 +8,7 @@ import { toAdminRole } from "../lib/admin.ts";
 import { type AuthSession, auth } from "../lib/auth.ts";
 import { isBanActive } from "../lib/ban.ts";
 import type { Caller } from "./caller.ts";
+import { bindLogUser } from "./logger.ts";
 
 type HeaderSource = Request | IncomingMessage | IncomingHttpHeaders | Headers;
 
@@ -47,8 +48,11 @@ export async function resolveSession(
 }
 
 /** Returns the signed-in user's session, or null if absent, expired, or the user is banned. */
-export function getSessionFromRequest(source: HeaderSource): Promise<AuthSession | null> {
-  return resolveSession(auth, toHeaders(source));
+export async function getSessionFromRequest(source: HeaderSource): Promise<AuthSession | null> {
+  const session = await resolveSession(auth, toHeaders(source));
+  // Lines the rest of this request writes (an error, a refused read) name the user.
+  bindLogUser(session?.user.id);
+  return session;
 }
 
 /** Who opened a socket, and with which session (null for a visitor). */

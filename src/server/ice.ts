@@ -7,7 +7,7 @@
  * failing, it's STUN only.
  *
  * Pages report pairs that relay or fail (`IceReport`: candidate types only, no addresses or
- * user ids), which are logged as `[ice] {…}` lines so double-NAT frequency can be measured.
+ * user ids), which are logged as `ice.report` lines so double-NAT frequency can be measured.
  */
 import { z } from "zod";
 import { type IceReport, type IceServersGrant, STUN_SERVERS } from "~/lib/ice";
@@ -15,6 +15,7 @@ import { type Db, getDb } from "../db/client.ts";
 import { type Caller, requireSignedIn, type SignedInCaller } from "./caller.ts";
 import { type Clock, systemClock } from "./clock.ts";
 import { env } from "./env.ts";
+import { log } from "./logger.ts";
 import { forgetIdle, withinRateLimit } from "./rate-limit.ts";
 import { createDbRoomStore } from "./room-store.ts";
 
@@ -105,15 +106,12 @@ export interface IceServiceOptions {
   /** Whether a signed-in caller may enter the room they ask about (`mayEnterRoom`). */
   mayEnter: (caller: SignedInCaller, roomId: string) => Promise<boolean>;
   clock?: Clock;
-  /** Where minting failures and ICE reports go. Defaults to the console. */
-  log?: (line: string, error?: unknown) => void;
 }
 
 export class IceService {
   readonly #turn: TurnProvider | null;
   readonly #mayEnter: IceServiceOptions["mayEnter"];
   readonly #clock: Clock;
-  readonly #log: (line: string, error?: unknown) => void;
   readonly #cache = new Map<string, CachedCredentials>();
   readonly #reports = new Map<string, number[]>();
 
@@ -121,8 +119,6 @@ export class IceService {
     this.#turn = options.turn;
     this.#mayEnter = options.mayEnter;
     this.#clock = options.clock ?? systemClock;
-    this.#log =
-      options.log ?? ((line, error) => (error ? console.error(line, error) : console.info(line)));
   }
 
   /**
@@ -154,7 +150,11 @@ export class IceService {
     } catch (error) {
       // Not cached: the next request tries again.
       if (this.#cache.get(userId) === cached) this.#cache.delete(userId);
-      this.#log("[ice] minting TURN credentials failed; STUN only", error);
+      log.warn("ice.mint_failed", "minting TURN credentials failed; STUN only", {
+        userId,
+        roomId,
+        err: error,
+      });
       return { iceServers: STUN_SERVERS, refreshInSeconds: MINT_FAILED_REFRESH_S };
     }
   }
@@ -166,7 +166,12 @@ export class IceService {
     const { reports, windowMs } = ICE_REPORT_RATE_LIMIT;
     forgetIdle(this.#reports, windowMs, now);
     if (!withinRateLimit(this.#reports, caller.user.id, reports, windowMs, now)) return false;
-    this.#log(`[ice] ${JSON.stringify(report)}`);
+    // No user id on the line (the report is anonymous); the user only keys the sampling.
+    log.info("ice.report", `ICE ${report.outcome}`, {
+      outcome: report.outcome,
+      path: report.path,
+      sampleKey: caller.user.id,
+    });
     return true;
   }
 }

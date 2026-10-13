@@ -8,13 +8,15 @@ BhayanakCast runs on the homelab as a **git-backed Dockhand stack** built from t
 browser ──https/wss──▶ Cloudflare ──tunnel──▶ shared cloudflared ──http──▶ 10.1.1.160:3000 (app) ──▶ db
 ```
 
-The stack has three services:
+The stack has five services:
 
 | Service | What it does |
 |---|---|
 | `app` | Built from the `Dockerfile` (Node 26, pnpm via corepack; the base image, corepack and pnpm are pinned, see Pinned images). On start it validates the environment and applies pending Drizzle migrations (`node src/db/migrate.ts`; a bad environment stops it before the schema changes), then serves pages, `/api/*` and the realtime socket `/ws` from one port (`node server.prod.ts`). Published only on `${HOST_BIND}:${HOST_PORT}` (default `10.1.1.160:3000`). Healthcheck: `GET /api/health`, healthy only while Postgres answers `select 1`. |
 | `db` | `postgres:17-alpine`, pinned by digest, with a named local Docker volume (`pgdata`). Never put it on the NAS CIFS share (ADR 9 addendum). Not published on any host port. Healthcheck: `pg_isready`. |
 | `backup` | Built from `backup/` (`postgres:17-alpine`, pinned by digest, plus pinned `rsync` and `supercronic`). Once at start, and then on `BACKUP_SCHEDULE` (nightly by default), it writes a compressed `pg_dump` to its `backups` volume, rsyncs it to the NAS share and prunes old dumps (section 5, Backups to the NAS). Healthcheck: the last run succeeded, recently. |
+| `victorialogs` | VictoriaLogs, pinned by digest. Keeps the app's logs 90 days in the local `vlogs` volume and serves the log viewer on `${HOST_BIND}:9428`, behind a password (section 6, Logs). Not backed up. |
+| `vector` | Built from `vector/` (Vector, pinned by digest, plus its config). Reads the app container's output through the Docker socket and sends it to `victorialogs` (section 6, Logs). |
 
 All services use `restart: unless-stopped` and json-file log rotation (3 files of 10 MB each).
 
@@ -65,9 +67,10 @@ Set `TRUSTED_PROXY_IPS` to the address the app sees cloudflared connecting from:
 - **cloudflared in a container on the dockhand LXC:** the container's Docker network address, which
   is not the LAN IP. A range such as `172.16.0.0/12` covers Docker's default networks.
 
-If the value is wrong, the app logs `Ignoring cf-connecting-ip from <address>, which isn't in
-TRUSTED_PROXY_IPS` once per peer. Add that address and redeploy. Until you do, every visitor shares
-one rate-limit bucket.
+If the value is wrong, the app logs a warning `http.untrusted_proxy` ("Ignoring cf-connecting-ip
+from a peer that isn't in TRUSTED_PROXY_IPS") once per peer. Logs never hold IP addresses, so the
+line doesn't name the peer: use the address cloudflared connects from, as above. Add it and
+redeploy. Until you do, every visitor shares one rate-limit bucket.
 
 ## 3. Collect the environment variables
 
@@ -88,10 +91,12 @@ as an empty string, and the app treats that as unset. See `.env.example` for a t
 | `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_ANALYTICS_API_TOKEN` | no | For the admin dashboard's account-wide TURN usage panel (ADR 3 addendum). Account ID: Cloudflare dashboard → your account → **Copy account ID**. Token: **My Profile → API Tokens → Create Token**, custom, with only **Account → Account Analytics → Read** (not the TURN API token). Without them the panel says "not configured". |
 | `HOST_BIND` | no | Host address the app is published on. Default `10.1.1.160` (the dockhand LXC's LAN IP). |
 | `HOST_PORT` | no | Host port. Default `3000`. The tunnel's service URL must match it. |
+| `LOG_LEVEL` | no | Not passed through by compose; for a local `pnpm dev` or `pnpm start`. `debug`, `info`, `warn` or `error`. Debug lines are off in production whatever this says. |
 | `REALTIME_ANONYMOUS_SOCKETS_PER_IP` | no | Open signed-out (lobby) sockets per client IP. Default `20` (ADR 20). |
 | `REALTIME_SOCKETS_PER_USER` | no | Open realtime sockets (tabs and devices) per signed-in user; more are refused with 429. Default `10` (ADR 4 addendum). |
 | `PUBLIC_READ_LIMIT_SCALE` | no | Multiplies the per-IP budgets of public reads (profile 60, search 30, home 120 a minute). Default `1`; only e2e raises it (ADR 20 addendum). |
 | `REALTIME_EMPTY_ROOM_TIMEOUT_MS` | no | How long an empty room waits before it ends. Default `300000` (5 minutes, ADR 14). Leave it unset in production. |
+| `LOGS_VIEWER_USER`, `LOGS_VIEWER_PASSWORD` | yes | The login for the log viewer (section 6, Logs), and the pair `vector` sends its inserts with. Choose both: `openssl rand -hex 16` makes a good password. Use letters and numbers only: compose puts the password in VictoriaLogs' flags (where `$` has a meaning), and Vector's config is YAML. Both are required: `docker-compose.yml` uses `${VAR:?}` for them, so a stack without either fails to deploy instead of starting a viewer with no login. |
 | `BACKUP_NAS_SHARE` | no | The NAS CIFS directory where dumps go, as `//host/share/path`. Default `//10.1.1.195/weyland/Services/backups/bhayanakcast`. It must exist and hold the `.bhayanakcast-backups` marker file. See section 5 (Backups to the NAS). |
 | `BACKUP_NAS_USERNAME`, `BACKUP_NAS_PASSWORD` | yes, for backups | The NAS account that can write to `BACKUP_NAS_SHARE`. The password can't contain `,` or `$` (it goes into the mount options and through compose interpolation). Without them `backup` can't start; the app is unaffected. |
 | `BACKUP_SCHEDULE` | no | Cron expression (5 fields) for the backup. Default `0 3 * * *`, nightly at 03:00. |
@@ -113,7 +118,7 @@ set `E2E_AUTH`: compose doesn't pass it through, and the app refuses to start if
 Known Dockhand quirks reported upstream, worth checking after the first deploy:
 
 - Stack variables marked as secrets have been injected literally as `***` in some versions.
-- Required-variable syntax (`${VAR:?}`) has blocked stop and redeploy. This compose file doesn't use it; the app validates its env itself.
+- Required-variable syntax (`${VAR:?}`) has blocked stop and redeploy. This compose file uses it only for `LOGS_VIEWER_USER` and `LOGS_VIEWER_PASSWORD`, so that the log viewer can never start without a login; the app validates its own env itself. Every compose command needs both variables set, `down` and `stop` included. If Dockhand can't stop or redeploy the stack, check they are set first.
 - Variables that share a name with Dockhand's own container env have picked up Dockhand's values.
 
 Check what the container actually got with `docker inspect <app container> --format '{{json .Config.Env}}'`. Treat the output as secret.
@@ -208,6 +213,111 @@ To make the restored copy live, stop `app`, then drop the live database and rena
 `ALTER DATABASE bhayanakcast_restore RENAME TO bhayanakcast` (connect to the `postgres` database to
 do this). Then start `app` again.
 
+## 6. Logs
+
+The app writes **one JSON object per line to stdout**, through one logger (`src/server/logger.ts`).
+`vector` ships those lines to VictoriaLogs, which keeps them for 90 days in the `vlogs` volume, so
+they survive redeploys. Docker's own `docker logs` still works, but is rotated at 3 × 10 MB and
+deleted when the container is recreated.
+
+**The viewer** is `http://<HOST_BIND>:9428/select/vmui/` (for example `http://10.1.1.160:9428/select/vmui/`),
+with basic auth `LOGS_VIEWER_USER` / `LOGS_VIEWER_PASSWORD`. It is published on the LAN IP only, like
+the app, and is **not** on the Cloudflare tunnel. Don't add a public hostname for it unless a
+Cloudflare Access application is in front first: without one, a tunnel hostname is open to the
+internet. `/health` stays open without a login (a probe can use it); everything else, inserts
+included, needs the login.
+
+Fields on every line: `time` (UTC, ms), `level`, `event` (a dotted name such as `socket.open`),
+`msg`, `commit`, and when there is one `roomId`, `userId`, `requestId`, and `err`
+(`{name, message, stack}`). Some events add flat fields (`type`, `reason`, `status`, ...). Levels:
+`error` needs fixing; `warn` is something refused, dropped or degraded; `info` is the socket and
+room lifecycle; `debug` is never written in production. Queries (LogsQL, in the viewer's box):
+
+```
+roomId:="<room id>" _time:1h                       everything about a room in the last hour
+userId:="<user id>" level:="warn" _time:7d         what was refused for a user this week
+level:="error" _time:1d | stats by (event) count() n
+event:="socket.refused" type:="chat.send" _time:1d
+commit:="<7 chars>" level:="error"                 errors since a deploy
+```
+
+What the app logs (successful requests and server-function calls are not logged):
+
+| Event | Level | When |
+|---|---|---|
+| `server.boot`, `server.shutdown` | info | Start (commit, boot time, Node version) and stop (the `reason`: `SIGTERM`, `uncaughtException`). `server.shutdown_step_failed`, `server.shutdown_timeout`: error. |
+| `process.unhandled_rejection` | error | A promise nobody handled. Logged, and the server keeps running. |
+| `process.uncaught_exception` | error | Logged, then the server shuts down cleanly through its shutdown path and exits 1; Docker restarts it. |
+| `socket.open`, `socket.close` | info | Every realtime socket (user id or `anonymous`, close code, how long it was open). |
+| `socket.upgrade_refused` | warn | 403 (wrong origin) and 429 (too many sockets) at the WebSocket upgrade. |
+| `socket.refused` | warn | Every `rate_limited` and `bad_request` answer, with the message `type`. |
+| `socket.slow_client_dropped`, `socket.error` | warn | A socket that stopped reading, or broke the protocol. |
+| `quality.dropped` | warn | A quality report the server threw away, with the `reason`: `not_in_room`, `over_limit`, `invalid`, `peer_not_in_room`. |
+| `quality.write_failed`, `thumbnail.upload_failed`, `realtime.error`, `maintenance.*_failed` | error | A write or step that failed. |
+| `timeline.<kind>` | info | Every room timeline event as it is recorded (`timeline.join`, `timeline.kick`, ...), with `roomId`, `userId` (the actor), `targetUserId`, `at` and the event's `details`: follow a user or a room across rooms. Never chat. The per-minute `refusals` summaries aren't repeated here (`socket.refused` has each one). |
+| `timeline.write_failed` (error), `timeline.dropped` (warn) | | A timeline write that failed or timed out (its events stay queued and are retried), and events dropped from a full queue while the database is down. |
+| `thumbnail.upload_refused` | warn | An upload answered 403, 413, 415, 429 or 401, with the `status` and `reason`. |
+| `og.card_failed` (error), `og.avatar_failed`, `og.backdrop_failed` (warn) | | A link card that couldn't be drawn, or drawn without the host's picture or the thumbnail behind it. |
+| `read.rate_limited` | warn | A public read (`kind`: profile, search, home, card) refused with 429. |
+| `server_fn.failed`, `http.unhandled` | error | A server function, route or page threw, with `route` and `userId`. `server_fn.refused` (warn) is a refusal the app throws on purpose: not signed in, not an admin, an invalid input. |
+| `auth.log`, `auth.api_refused`, `auth.api_error` | error, warn | Better Auth's own errors, such as a Discord callback that didn't validate or a banned user turned away. |
+| `db.slow_write` | warn | A write that took 500 ms or more (`SLOW_WRITE_MS`, `src/server/log-events.ts`): the realtime store's writes, the timeline batch insert, the quality insert and the thumbnail upload, with the `operation` and `ms`. Half a second is slow for these, and the realtime server runs them on one queue. |
+| `ice.report`, `ice.mint_failed`, `turn_usage.failed` | info, warn | Relayed or failed ICE pairs (candidate types only), failed TURN minting, failed Cloudflare analytics. |
+| `maintenance.*`, `migrate.*` | info, error | The daily purge, and the migration run at start. |
+
+Not written yet: the dropped connection-event and problem reports (`connection_event.dropped`, `problem.dropped`, warn). `logReportDropped` in `src/server/log-events.ts` is the hook for the tickets that add those reports.
+
+**Noise.** The same event from the same user (or socket) is written in full for its first 10 lines in
+a minute; after that one line a minute carries `suppressed: N`. Errors are counted by their message
+too, so a new error is always written.
+
+**Never logged:** IP addresses, chat content, tokens and session ids. The logger replaces fields
+with such names and scrubs addresses, credentials, OAuth `code` and `state` values, invite tokens
+and the parameters of a failed database query (`params: ...`, which hold session and OAuth tokens)
+out of messages, errors and their `cause` chains, and tests guard it (`src/server/logger.test.ts`). The viewer holds real user and room ids for 90 days, longer than
+the 30 days rooms are kept: that is by design, and admin-only.
+
+**The commit.** Every line has a `commit` field, and `GET /api/health` returns
+`{"ok":true,"commit":"<7 chars>","startedAt":"<UTC>"}`: `curl http://<HOST_BIND>:<HOST_PORT>/api/health`
+confirms what is deployed. Dockhand copies the repo without `.git`, so the image build asks GitHub
+for it (`scripts/fetch-commit.ts`: `GET https://api.github.com/repos/theHimanshuShekhar/BhayanakCast/commits/main`,
+10 s timeout) and writes it to `COMMIT` in the image. If the request fails (offline, rate limited,
+GitHub down), the commit is `unknown` and the build carries on. The commit is `main`'s newest when
+the build asks, so it can be wrong if a push lands in the seconds between Dockhand's clone and the
+build, or on a build from another branch. Docker caches that layer while the files above it are
+unchanged, so a commit that touches only `docs/`, `e2e/` or the other services' files reuses the
+previous commit's number: the same code, one commit behind.
+
+**Trade-offs, accepted (ADR 9 addendum):**
+
+- `vector` reads the Docker socket, which is root-equivalent on the host (like any container that
+  mounts it; a read-only mount doesn't limit the API).
+- Lines written while `vector` is down, or before it first attaches, are lost: a deploy that
+  recreates it loses the seconds it was down. `docker logs` still has them for a while. While
+  VictoriaLogs is down, `vector` retries and buffers on disk (the `vectordata` volume, up to
+  256 MiB); a lost buffer is lost lines.
+- VictoriaLogs needs headroom: its container is capped at 768 MiB, and **not lower than 512 MiB**
+  (a burst under 256 MiB was OOM-killed in testing). Its data is small: 500,000 synthetic lines
+  took 4 MB.
+- The logs are **not backed up**. `backup` dumps Postgres only; `vlogs` is a local volume, not on
+  the NAS, and a failed disk takes the logs with it.
+- The log stack has no healthcheck yet, and nothing alerts if it stops. A line missing from the
+  viewer is checked by `docker logs <app container>`.
+- Query parameters, tokens and invite links are redacted by the app's logger, and `console.*`
+  output (TanStack Start prints a failed server function's whole error, parameters and `cause`
+  included) goes through it too (`src/server/console-capture.ts`). Under that, `vector` drops a
+  line that isn't JSON and shows `params:`, and masks credential-like values, bearer tokens and
+  invite tokens in the rest (`vector/vector.yaml`, tested by `vector/vector.test.yaml`). It is a
+  net, not a filter to rely on.
+
+How `vector` authenticates: its `http` sink sends HTTP basic auth with the same
+`LOGS_VIEWER_USER` / `LOGS_VIEWER_PASSWORD` the viewer uses, taken from its own environment. Vector
+0.57+ expands `${VAR}` in its config only with `VECTOR_DANGEROUSLY_ALLOW_ENV_VAR_INTERPOLATION=true`,
+which compose sets on that one service (it holds nothing else).
+
+After a deploy, check: `curl -u viewer:<password> http://<HOST_BIND>:9428/select/logsql/query -d 'query=event:="server.boot" _time:10m'`
+returns a line with the new commit, and `curl http://<HOST_BIND>:9428/health` answers `OK` without a login.
+
 ## Production guards
 
 - `NODE_ENV=production` is set by both the image and compose. If it's ever missing the app still validates as production (only an explicit `development` or `test` relaxes the checks), so it fails to start rather than booting with development defaults.
@@ -250,15 +360,16 @@ file or mount on the host, which this git-backed stack avoids (ADR 9 addendum). 
 - [ ] The Discord app has both redirect URIs (step 1).
 - [ ] The tunnel's public hostname `cast.bhayanak.net` → `HTTP 10.1.1.160:3000`, with no Host header override (step 2).
 - [ ] All required variables are set in Dockhand: `POSTGRES_PASSWORD`, `BETTER_AUTH_SECRET`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` and `TRUSTED_PROXY_IPS`. `ADMIN_DISCORD_IDS` contains your own ID.
-- [ ] The stack deploys, and all three containers (`app`, `db`, `backup`) show **healthy**. The app log shows `Migrations applied`.
-- [ ] From the LAN, `curl http://10.1.1.160:3000/api/health` returns `{"ok":true}` (the database answered), and `curl http://10.1.1.160:3000/api/auth/ok` returns `{"ok":true}` too.
+- [ ] The stack deploys, and all three containers (`app`, `db`, `backup`) show **healthy**. The app log shows a `migrate.applied` line ("Migrations applied") and then `server.boot`.
+- [ ] From the LAN, `curl http://10.1.1.160:3000/api/health` returns `{"ok":true,"commit":"…","startedAt":"…"}` (the database answered, and `commit` is the deployed commit's first 7 characters), and `curl http://10.1.1.160:3000/api/auth/ok` returns `{"ok":true}` too.
 - [ ] `https://cast.bhayanak.net/api/auth/ok` returns `{"ok":true}`, and `https://cast.bhayanak.net` loads the home page.
 - [ ] "Sign in with Discord" completes and returns to home. Your account has admin (`/admin` opens).
 - [ ] The realtime socket connects through the tunnel: the lobby's online count updates, and a room opens.
-- [ ] The app log has no `Ignoring cf-connecting-ip from …` warning. If it does, fix `TRUSTED_PROXY_IPS` (step 2).
+- [ ] The app log has no `http.untrusted_proxy` warning ("Ignoring cf-connecting-ip …"). If it does, fix `TRUSTED_PROXY_IPS` (step 2).
+- [ ] The log viewer works (section 6, Logs): `LOGS_VIEWER_USER` and `LOGS_VIEWER_PASSWORD` are set (the deploy fails without them), `http://10.1.1.160:9428/select/vmui/` asks for them, and `roomId:="<a room id>"` finds the room's lines after you open it. `victorialogs` and `vector` are running.
 - [ ] A two-person room works across two different networks (one on mobile data, if possible).
 - [ ] Link previews work through the tunnel (ADR 22): paste `https://cast.bhayanak.net` and a public live room's link into a Discord channel, and check both unfurl with the image and the accent colour bar. Then run the room link through the Facebook Sharing Debugger and the X card preview, or check `curl -sA Discordbot https://cast.bhayanak.net/ -L | grep og:` from outside the LAN. A private room's link must show only "A private room on BhayanakCast" (or "This room isn't available").
-- [ ] If you set the TURN usage variables: the dashboard's TURN usage panel was built from Cloudflare's docs and never run against the real API, so check the query once by hand. Run `curl -s https://api.cloudflare.com/client/v4/graphql -H "Authorization: Bearer $CLOUDFLARE_ANALYTICS_API_TOKEN" -H "Content-Type: application/json" --data '{"query":"query { viewer { accounts(filter: {accountTag: \"<account id>\"}) { callsTurnUsageAdaptiveGroups(limit: 10000, filter: {date_geq: \"<YYYY-MM-01>\", date_leq: \"<today>\"}) { dimensions { datetimeHour } sum { egressBytes } } } } }"}'` (query text: `TURN_EGRESS_QUERY` in `src/server/turn-usage.ts`). It should return `data` with no `errors`. Then open `/admin`: the panel shows a number, not "usage unavailable" (the app log says `[turn-usage] Cloudflare analytics failed` with the reason).
+- [ ] If you set the TURN usage variables: the dashboard's TURN usage panel was built from Cloudflare's docs and never run against the real API, so check the query once by hand. Run `curl -s https://api.cloudflare.com/client/v4/graphql -H "Authorization: Bearer $CLOUDFLARE_ANALYTICS_API_TOKEN" -H "Content-Type: application/json" --data '{"query":"query { viewer { accounts(filter: {accountTag: \"<account id>\"}) { callsTurnUsageAdaptiveGroups(limit: 10000, filter: {date_geq: \"<YYYY-MM-01>\", date_leq: \"<today>\"}) { dimensions { datetimeHour } sum { egressBytes } } } } }"}'` (query text: `TURN_EGRESS_QUERY` in `src/server/turn-usage.ts`). It should return `data` with no `errors`. Then open `/admin`: the panel shows a number, not "usage unavailable" (the app log says `turn_usage.failed`, "Cloudflare analytics failed", with the reason).
 - [ ] The `backup` container is **healthy**, and today's `bhayanakcast-YYYY-MM-DD.sql.gz` is on the NAS share: `docker exec <backup container> ls -l /nas` (section 5, Backups to the NAS).
 - [ ] The latest dump restores into a scratch database, and its table counts match the live database (section 5, Restore).
 
@@ -270,7 +381,7 @@ file or mount on the host, which this git-backed stack avoids (ADR 9 addendum). 
   `Refusing to migrate`, a migration was added with a timestamp older than one already applied,
   which Drizzle would skip for good: regenerate it with a newer one (ADR 8).
 - **Pinned images:** see below.
-- **Logs:** Dockhand's container logs, or `docker logs <container>`. They're rotated at 3 × 10 MB.
+- **Logs:** the viewer (section 6, Logs), searchable for 90 days. `docker logs <container>` still works, rotated at 3 × 10 MB.
 - **Restarts** keep live rooms: the app reloads them, their roles and who was inside from Postgres,
   and clients reconnect on their own. Anyone back within 30 s continues as if nothing happened;
   the rest leave at their last checkpoint (up to a minute before the restart). Chat, the feed,
@@ -280,11 +391,11 @@ file or mount on the host, which this git-backed stack avoids (ADR 9 addendum). 
   addendum).
 - **TURN and NAT (ADR 3):** each signed-in user gets TURN credentials that last 4 hours. They're
   cached per user and minted again 30 minutes before they expire. If minting fails, the app logs
-  `[ice] minting TURN credentials failed; STUN only` and pages get STUN only until the next try.
-  A peer pair that relays through TURN, or fails even after an ICE restart, is logged as
-  `[ice] {"outcome":"relayed"|"failed",…}`. The line has candidate types and transports only, with
-  no addresses or user IDs. `docker logs <app container> 2>&1 | grep '\[ice\]'` shows how often
-  double NAT bites.
+  `ice.mint_failed` ("minting TURN credentials failed; STUN only") and pages get STUN only until
+  the next try. A peer pair that relays through TURN, or fails even after an ICE restart, is logged
+  as `ice.report` with `outcome` `relayed` or `failed`. The line has candidate types and transports
+  only, with no addresses or user IDs. In the viewer, `event:="ice.report" _time:30d | stats by
+  (outcome) count() n` shows how often double NAT bites.
 - **Data** lives in the `pgdata` volume. Don't delete the stack's volumes when removing or re-creating it.
   Nightly dumps are on the NAS share (section 5, Backups to the NAS).
 
@@ -296,10 +407,13 @@ pnpm is the exact version in `package.json` `packageManager`. `backup/Dockerfile
 in `docker-compose.yml` pin `postgres:17-alpine` by digest, and the backup image pins `rsync` and
 `supercronic` to the versions that digest's Alpine ships.
 
+`docker-compose.yml` pins `victoriametrics/victoria-logs`, and `vector/Dockerfile` pins `timberio/vector`
+(its `-alpine` tag), the same way. Both are the index digest, which covers every platform.
+
 To bump:
 
 - **Digests:** `.github/dependabot.yml` opens weekly PRs for the Dockerfiles and the compose file (and for npm packages and GitHub Actions, which aren't pinned images). By hand,
-  `docker buildx imagetools inspect node:26-alpine` (or `postgres:17-alpine`) prints the index digest;
+  `docker buildx imagetools inspect node:26-alpine` (or `postgres:17-alpine`, `victoriametrics/victoria-logs:<tag>`, `timberio/vector:<tag>-alpine`) prints the index digest;
   put it after the tag as `@sha256:...`. The `node` digest appears twice in `Dockerfile` (`base` and
   `runtime`); the `postgres` digest appears in `backup/Dockerfile` and `docker-compose.yml`. Keep each pair identical.
 - **Major versions:** Dependabot ignores them. The `postgres` major must stay 17 on both `db` and

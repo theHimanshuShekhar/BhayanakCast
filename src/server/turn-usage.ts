@@ -15,6 +15,7 @@ import {
 import { type Caller, requireAdmin } from "./caller.ts";
 import { type Clock, systemClock } from "./clock.ts";
 import { env } from "./env.ts";
+import { log } from "./logger.ts";
 
 /** How long Cloudflare's answer is reused. */
 export const TURN_USAGE_CACHE_MS = 15 * 60_000;
@@ -126,20 +127,16 @@ export interface TurnUsageServiceOptions {
   /** Null: no analytics configured. */
   analytics: TurnAnalytics | null;
   clock?: Clock;
-  /** Where failures go. Defaults to the console. */
-  log?: (line: string, error?: unknown) => void;
 }
 
 export class TurnUsageService {
   readonly #analytics: TurnAnalytics | null;
   readonly #clock: Clock;
-  readonly #log: (line: string, error?: unknown) => void;
   #cached: { month: string; expiresAt: number; usage: Promise<TurnUsage> } | undefined;
 
   constructor(options: TurnUsageServiceOptions) {
     this.#analytics = options.analytics;
     this.#clock = options.clock ?? systemClock;
-    this.#log = options.log ?? ((line, error) => console.error(line, error));
   }
 
   /** This month's TURN usage, from the cache when under 15 minutes old. Never throws for API failures. */
@@ -161,7 +158,7 @@ export class TurnUsageService {
         .egressByDay(`${month}-01`, today)
         .then((rows) => summariseTurnUsage(rows, today))
         .catch((error): TurnUsage => {
-          this.#log("[turn-usage] Cloudflare analytics failed", error);
+          log.warn("turn_usage.failed", "Cloudflare analytics failed", { err: error });
           return { status: "unavailable" };
         }),
     };

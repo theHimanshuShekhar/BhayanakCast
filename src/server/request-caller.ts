@@ -11,8 +11,10 @@ import {
 import type { Caller } from "./caller.ts";
 import { CLIENT_IP_HEADER } from "./client-ip.ts";
 import { env } from "./env.ts";
+import { log } from "./logger.ts";
 import {
   createReadLimiter,
+  PUBLIC_READ_LIMITS,
   PUBLIC_READ_WINDOW_MS,
   type PublicRead,
   ReadRateLimitedError,
@@ -47,5 +49,14 @@ export function allowPublicRead(request: Request, kind: PublicRead): boolean {
 }
 
 function allowRead(kind: PublicRead, clientIp: string | null | undefined): boolean {
-  return readLimiter.allow(kind, clientIp?.trim() || "unknown", new Date());
+  const ip = clientIp?.trim() || "unknown";
+  if (readLimiter.allow(kind, ip, new Date())) return true;
+  // The address only keys the sampling here (the logger never writes it), so a client hammering
+  // a read writes ten lines a minute and a count, and others' refusals still show.
+  log.warn("read.rate_limited", `a ${kind} read was refused: over the limit for one client`, {
+    kind,
+    limit: PUBLIC_READ_LIMITS[kind],
+    sampleKey: ip,
+  });
+  return false;
 }

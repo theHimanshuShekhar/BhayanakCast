@@ -93,6 +93,32 @@ jobs:
           DISCORD_CLIENT_SECRET: ci-discord-client-secret
           TRUSTED_PROXY_IPS: 127.0.0.1
 
+      # The compose file parses, and Vector accepts its config (vector/vector.yaml): a broken log
+      # shipper config would otherwise show only as a restart loop after a deploy (#119). The
+      # variables stand in for the stack variables.
+      - name: Compose file and log shipper config
+        env:
+          LOGS_VIEWER_USER: viewer
+          LOGS_VIEWER_PASSWORD: secret
+        run: |
+          docker compose config --quiet
+          # The viewer's login is required: without it the file must not even resolve.
+          if env -u LOGS_VIEWER_PASSWORD docker compose config --quiet 2>/dev/null; then
+            echo "::error::docker-compose.yml resolves without LOGS_VIEWER_PASSWORD"
+            exit 1
+          fi
+          docker build --quiet --tag vector-config-check vector
+          docker run --rm \
+            --env VECTOR_DANGEROUSLY_ALLOW_ENV_VAR_INTERPOLATION=true \
+            --env LOGS_VIEWER_USER --env LOGS_VIEWER_PASSWORD \
+            vector-config-check validate --no-environment /etc/vector/vector.yaml
+          # The redaction net for lines that aren't JSON (vector/vector.test.yaml).
+          docker run --rm \
+            --env VECTOR_DANGEROUSLY_ALLOW_ENV_VAR_INTERPOLATION=true \
+            --env LOGS_VIEWER_USER --env LOGS_VIEWER_PASSWORD \
+            --volume "$PWD/vector/vector.test.yaml:/tests/vector.test.yaml:ro" \
+            vector-config-check test /etc/vector/vector.yaml /tests/vector.test.yaml
+
       # backup.sh declares its shell (busybox ash) in a `shellcheck shell=` directive.
       - name: Shellcheck (backup sidecar)
         run: docker run --rm -v "$PWD/backup:/mnt:ro" koalaman/shellcheck:v0.11.0 /mnt/backup.sh /mnt/entrypoint.sh /mnt/healthcheck.sh

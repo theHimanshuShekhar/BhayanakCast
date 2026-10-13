@@ -7,7 +7,9 @@ import { Server as HttpServer, type IncomingMessage } from "node:http";
 import { serve } from "srvx";
 import { staticMiddleware } from "srvx/static";
 import { CLIENT_IP_HEADER, createClientIpResolver, rewriteClientIpHeader } from "./client-ip.ts";
+import { logUntrustedProxy } from "./log-events.ts";
 import { attachRealtime, type RealtimeOptions, type RealtimeServer } from "./realtime.ts";
+import { requestLogging } from "./request-log.ts";
 import { hashedAssetCaching, securityHeaders, withPrivateCaching } from "./security-headers.ts";
 
 /** How long `stop` lets requests in flight finish before closing their connections. */
@@ -29,8 +31,14 @@ export interface ProdServerOptions {
 export function createProdServer(options: ProdServerOptions) {
   const server = serve({
     fetch: withPrivateCaching((request) => options.app.fetch(request)),
-    // Security headers wrap everything, so they come first (ADR 9 addendum).
-    middleware: [securityHeaders, hashedAssetCaching, staticMiddleware({ dir: options.clientDir })],
+    // Security headers wrap everything, so they come first (ADR 9 addendum), inside the request's
+    // log context (id and route), which is first so even their error line has it.
+    middleware: [
+      requestLogging,
+      securityHeaders,
+      hashedAssetCaching,
+      staticMiddleware({ dir: options.clientDir }),
+    ],
     port: options.port,
     hostname: options.hostname,
     manual: true,
@@ -47,7 +55,7 @@ export function createProdServer(options: ProdServerOptions) {
   // with the resolved client IP: Cloudflare's value only from a trusted proxy, else the socket
   // address (ADR 9: the app also listens on the LAN, where anyone could send the header).
   const resolveClientIp = createClientIpResolver(options.trustedProxies, {
-    warn: (message) => console.warn(`[http] ${message}`),
+    warn: logUntrustedProxy,
   });
   httpServer.prependListener("request", (request: IncomingMessage) => {
     rewriteClientIpHeader(

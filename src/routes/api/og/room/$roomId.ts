@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { getDb } from "~/db/client";
 import { roomIdInput } from "~/lib/rooms";
+import { log } from "~/server/logger";
 import { cardResponse, siteImageResponse } from "~/server/og-response";
 import { allowPublicRead } from "~/server/request-caller";
 
@@ -24,7 +25,11 @@ export const Route = createFileRoute("/api/og/room/$roomId")({
           const png = await roomCardPng(getDb(), id.data.roomId);
           return png ? cardResponse(png) : siteImageResponse();
         } catch (error) {
-          console.error("[og] room card failed", error);
+          // The unfurler gets the site image instead, so this line is the only sign of it.
+          log.error("og.card_failed", "drawing a room's link card failed", {
+            roomId: id.data.roomId,
+            err: error,
+          });
           return siteImageResponse();
         }
       },

@@ -5,6 +5,7 @@
  */
 import { sql } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
+import { shortCommit, startedAt } from "./build-info.ts";
 
 /** Longer than a healthy `select 1`, and well under the compose healthcheck's 10 s timeout. */
 export const HEALTH_DB_TIMEOUT_MS = 3_000;
@@ -31,11 +32,15 @@ export async function databaseReachable(
   }
 }
 
-/** 200 `{"ok":true}` while the database answers, else 503 `{"ok":false}`. Never cached. */
+/**
+ * 200 `{ok: true, commit, startedAt}` while the database answers, else 503 with `ok: false`.
+ * `commit` is the running build's first 7 characters (`unknown` if the image couldn't fetch it)
+ * and `startedAt` when the process started, so one curl confirms a deploy. Never cached.
+ */
 export async function healthResponse(db: Db, timeoutMs?: number): Promise<Response> {
   const ok = await databaseReachable(db, timeoutMs);
   return Response.json(
-    { ok },
+    { ok, commit: shortCommit(), startedAt: startedAt() },
     { status: ok ? 200 : 503, headers: { "cache-control": "no-store" } },
   );
 }

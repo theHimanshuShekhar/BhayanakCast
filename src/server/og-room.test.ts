@@ -12,6 +12,7 @@ import { createTestDb } from "../db/test-db.ts";
 import { CARD_CACHE_CONTROL, cardResponse, siteImageResponse } from "./og-response.ts";
 import { CardCache, fetchAvatar, roomCardPng } from "./og-room.ts";
 import { pngSize, WEBP_64X36 } from "./test-images.ts";
+import { type CapturedLogs, captureLogs } from "./test-logs.ts";
 
 const T0 = new Date("2026-10-03T12:00:00Z");
 const noAvatar = async () => null;
@@ -229,6 +230,51 @@ describe("fetchAvatar", () => {
     expect(await fetchAvatar(url)).toBeNull();
     fetched.mockRejectedValueOnce(new Error("offline"));
     expect(await fetchAvatar(url)).toBeNull();
+  });
+
+  describe("logs why the picture was left off the card, without its address", () => {
+    const url = "https://cdn.discordapp.com/avatars/1234/a.png";
+    let logs: CapturedLogs;
+    beforeEach(() => {
+      logs = captureLogs();
+    });
+    afterEach(() => logs.restore());
+
+    it.each([
+      ["a bad status", () => new Response("nope", { status: 404 }), "status_404"],
+      [
+        "another type",
+        () => new Response(Uint8Array.of(1), { headers: { "content-type": "text/html" } }),
+        "wrong_type",
+      ],
+      [
+        "too much",
+        () =>
+          new Response(new Uint8Array(300 * 1024), { headers: { "content-type": "image/png" } }),
+        "wrong_size",
+      ],
+    ])("%s", async (_name, answer, reason) => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(answer());
+      expect(await fetchAvatar(url)).toBeNull();
+      expect(logs.find("og.avatar_failed")).toMatchObject({ level: "warn", reason });
+      expect(logs.lines.join("")).not.toContain("1234");
+    });
+
+    it("a fetch that throws", async () => {
+      vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("offline"));
+      expect(await fetchAvatar(url)).toBeNull();
+      expect(logs.find("og.avatar_failed")).toMatchObject({
+        level: "warn",
+        reason: "fetch_failed",
+        err: { message: "offline" },
+      });
+    });
+
+    it("says nothing when there is no picture to fetch", async () => {
+      expect(await fetchAvatar(null)).toBeNull();
+      expect(await fetchAvatar("https://evil.example/a.png")).toBeNull();
+      expect(logs.entries).toEqual([]);
+    });
   });
 });
 
