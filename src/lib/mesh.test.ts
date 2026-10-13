@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { VideoCodecs } from "./codecs";
+import type { ConnectionEvent } from "./connection-events";
 import type { QualityView } from "./mesh";
 import {
   CONNECT_TIMEOUT_MS,
@@ -258,6 +259,10 @@ function page(
     // The tests of the controller run in no time at all: unless one says otherwise, no sender is
     // in its first minute (`paceOf`).
     firstMinuteMs: 0,
+    // Anything logged is a failure, unless a test expects it.
+    log: (message, error) => {
+      throw new Error(`${message}: ${String(error)}`);
+    },
     ...extra,
     RTCPeerConnection: class extends FakePC {
       constructor(configuration?: RTCConfiguration) {
@@ -265,9 +270,6 @@ function page(
         pcs.push(this);
       }
     } as unknown as typeof RTCPeerConnection,
-    log: (message, error) => {
-      throw new Error(`${message}: ${String(error)}`);
-    },
   });
   network.set(userId, mesh);
   mesh.subscribe((event) => events.push(event));
@@ -2046,6 +2048,392 @@ describe("Mesh ICE (ADR 3)", () => {
     await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS * 2);
     expect(bo.events).toHaveLength(events);
     expect(bo.pcs[1]?.iceRestarts).toBe(0);
+  });
+
+  // What the Mesh tells the room timeline about each pair (#116): `onReport` gets a
+  // `ConnectionEvent` for every connection state, restart (and whether it recovered), path and
+  // negotiation error.
+  describe("connection events (#116)", () => {
+    /** A page for `userId` whose reports are collected in `reports`. */
+    function reporting(
+      userId: string,
+      network: Map<string, Mesh>,
+      extra: Partial<MeshOptions> = {},
+      servers: RTCIceServer[] = turn,
+    ) {
+      const reports: ConnectionEvent[] = [];
+      const p = page(userId, network, servers, undefined, undefined, {
+        onReport: (event) => reports.push(event),
+        ...extra,
+      });
+      return { ...p, reports };
+    }
+    /** Ana and bo, negotiated (not yet connected), both reporting. */
+    async function reported(anaExtra: Partial<MeshOptions> = {}) {
+      vi.useFakeTimers();
+      const network = new Map<string, Mesh>();
+      const ana = reporting("ana", network, anaExtra);
+      const bo = reporting("bo", network);
+      ana.mesh.join(everyone);
+      bo.mesh.join(everyone);
+      await tick();
+      return { ana, bo, anaPc: ana.pcs[0] as FakePC, boPc: bo.pcs[0] as FakePC };
+    }
+    /** The reports of one kind, without the peer (always bo here). */
+    const of = (reports: ConnectionEvent[], kind: ConnectionEvent["kind"]) =>
+      reports.filter((r) => r.kind === kind);
+    const stateNames = (reports: ConnectionEvent[]) =>
+      reports.flatMap((r) => (r.kind === "pair_state" ? [r.state] : []));
+
+    /** A direct pair: host candidates on both ends, over UDP. */
+    const directStats = () =>
+      new Map<string, unknown>(
+        [
+          { id: "T", type: "transport", selectedCandidatePairId: "P" },
+          { id: "P", type: "candidate-pair", localCandidateId: "L", remoteCandidateId: "R" },
+          { id: "L", type: "local-candidate", candidateType: "host", protocol: "udp" },
+          { id: "R", type: "remote-candidate", candidateType: "srflx", protocol: "udp" },
+        ].map((s) => [s.id, s]),
+      );
+
+    it("reports each connection state a pair goes through, and its path when it connects", async () => {
+      const { ana, anaPc } = await reported();
+      anaPc.setConnectionState("connecting");
+      anaPc.stats = directStats();
+      anaPc.setConnectionState("connected");
+      await tick();
+      anaPc.setConnectionState("disconnected");
+      anaPc.setConnectionState("connected");
+      await tick();
+      expect(stateNames(ana.reports)).toEqual([
+        "connecting",
+        "connected",
+        "disconnected",
+        "connected",
+      ]);
+      expect(ana.reports.every((r) => "peerId" in r && r.peerId === "bo")).toBe(true);
+      // A path at each connect, with the candidate types and transport and no address.
+      const paths = of(ana.reports, "pair_path");
+      expect(paths).toEqual([
+        {
+          kind: "pair_path",
+          peerId: "bo",
+          change: "connect",
+          path: "direct",
+          local: { type: "host", protocol: "udp" },
+          remote: { type: "srflx", protocol: "udp" },
+        },
+        expect.objectContaining({ change: "connect", path: "direct" }),
+      ]);
+      expect(JSON.stringify(ana.reports)).not.toMatch(/\d+\.\d+\.\d+\.\d+/);
+    });
+
+    it("reports a relayed pair's path with the transport to the TURN server", async () => {
+      const { bo, boPc } = await reported();
+      boPc.stats = relayStats();
+      boPc.setConnectionState("connected");
+      await tick();
+      expect(of(bo.reports, "pair_path")).toMatchObject([
+        { path: "relay", local: { type: "relay", protocol: "udp", relayProtocol: "tls" } },
+      ]);
+    });
+
+    it("reports a path change on the next quality pass, and only a change", async () => {
+      const { ana, anaPc } = await reported();
+      anaPc.stats = directStats();
+      anaPc.setConnectionState("connected");
+      await tick();
+      await ana.mesh.adjust();
+      await tick();
+      expect(of(ana.reports, "pair_path")).toHaveLength(1);
+
+      // The pair in use moves to a relay.
+      anaPc.stats = relayStats();
+      await ana.mesh.adjust();
+      await tick();
+      expect(of(ana.reports, "pair_path").at(-1)).toMatchObject({
+        change: "change",
+        path: "relay",
+      });
+      await ana.mesh.adjust();
+      await tick();
+      expect(of(ana.reports, "pair_path")).toHaveLength(2);
+    });
+
+    it("never lets a slow or hung path read hold up the quality pass", async () => {
+      const { ana, anaPc } = await reported();
+      anaPc.stats = directStats();
+      anaPc.setConnectionState("connected");
+      await tick();
+      // The connection's stats never come back. The pass still ends (it would hang on the read
+      // if it waited), and asks only once while that read is out.
+      let reads = 0;
+      anaPc.getStats = () => {
+        reads++;
+        return new Promise(() => {});
+      };
+      await ana.mesh.adjust();
+      await ana.mesh.adjust();
+      await ana.mesh.adjust();
+      expect(reads).toBe(1);
+      expect(of(ana.reports, "pair_path")).toHaveLength(1);
+    });
+
+    it("adjusts the senders before it reads the path, and not after waiting for it", async () => {
+      const { ana, anaPc } = await reported();
+      anaPc.stats = directStats();
+      anaPc.setConnectionState("connected");
+      await tick();
+      const order: string[] = [];
+      anaPc.getStats = async () => {
+        order.push("path");
+        return anaPc.stats;
+      };
+      const cam = track("ana cam");
+      ana.mesh.setLocalTracks({ cam });
+      await tick();
+      const sender = anaPc.transceivers.find((t) => t.sender.track === cam)?.sender;
+      if (!sender) throw new Error("the camera is not being sent");
+      sender.getStats = async () => {
+        order.push("sender");
+        return sender.stats;
+      };
+      order.length = 0;
+      await ana.mesh.adjust();
+      await tick();
+      // The pass's own read first; the path read after it (and not waited for).
+      expect(order).toEqual(["sender", "path"]);
+    });
+
+    it("reports an ICE restart and that it recovered", async () => {
+      const { ana, anaPc } = await reported();
+      anaPc.setConnectionState("connected");
+      await tick();
+      anaPc.setConnectionState("failed");
+      await tick();
+      await vi.advanceTimersByTimeAsync(2_500);
+      anaPc.setConnectionState("connected");
+      await tick();
+      expect(of(ana.reports, "pair_restart")).toEqual([
+        { kind: "pair_restart", peerId: "bo", how: "ice_restart", why: "failed" },
+      ]);
+      expect(of(ana.reports, "pair_recovery")).toEqual([
+        {
+          kind: "pair_recovery",
+          peerId: "bo",
+          how: "ice_restart",
+          recovered: true,
+          afterMs: 2_520,
+        },
+      ]);
+    });
+
+    it("reports an ICE restart that did not recover, when the pair gives up", async () => {
+      const { ana, anaPc } = await reported();
+      anaPc.setConnectionState("connected");
+      await tick();
+      anaPc.setConnectionState("failed");
+      await tick();
+      anaPc.setConnectionState("failed");
+      await tick();
+      expect(of(ana.reports, "pair_recovery")).toMatchObject([
+        { how: "ice_restart", recovered: false },
+      ]);
+      expect(stateNames(ana.reports).at(-1)).toBe("failed");
+    });
+
+    it("says a restart was because connecting took too long, or because TURN arrived", async () => {
+      vi.useFakeTimers();
+      const network = new Map<string, Mesh>();
+      const stun = [{ urls: "stun:stun.example:3478" }];
+      const ana = reporting("ana", network, {}, stun);
+      const bo = reporting("bo", network, {}, stun);
+      ana.mesh.join(everyone);
+      bo.mesh.join(everyone);
+      await tick();
+      const anaPc = ana.pcs[0] as FakePC;
+      await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS);
+      await tick();
+      expect(of(ana.reports, "pair_restart")).toMatchObject([
+        { how: "ice_restart", why: "timeout" },
+      ]);
+      await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS);
+      await tick();
+      ana.mesh.setIceServers([{ urls: "stun:other.example:3478" }]);
+      ana.mesh.setIceServers(turn);
+      await tick();
+      expect(of(ana.reports, "pair_restart").at(-1)).toMatchObject({ why: "turn" });
+      expect(anaPc.iceRestarts).toBe(2);
+    });
+
+    it("reports a pair that never negotiated, its automatic start-over and that it did not recover", async () => {
+      vi.useFakeTimers();
+      const network = new Map<string, Mesh>();
+      // Bo's offers go nowhere: ana's page isn't there.
+      const bo = reporting("bo", network);
+      bo.mesh.join(everyone);
+      await tick();
+      await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS);
+      await tick();
+      expect(of(bo.reports, "negotiation_error")).toMatchObject([
+        { peerId: "ana", step: "never_finished" },
+      ]);
+      expect(of(bo.reports, "pair_restart")).toEqual([
+        { kind: "pair_restart", peerId: "ana", how: "start_over", why: "timeout" },
+      ]);
+      await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS);
+      await tick();
+      expect(of(bo.reports, "negotiation_error")).toHaveLength(2);
+      expect(of(bo.reports, "pair_recovery")).toMatchObject([
+        { how: "start_over", recovered: false, afterMs: CONNECT_TIMEOUT_MS },
+      ]);
+    });
+
+    it("reports that a start-over connected", async () => {
+      vi.useFakeTimers();
+      const network = new Map<string, Mesh>();
+      const bo = reporting("bo", network);
+      const ana = reporting("ana", network);
+      network.delete("ana");
+      bo.mesh.join(everyone);
+      ana.mesh.join(everyone);
+      await tick();
+      network.set("ana", ana.mesh);
+      await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS);
+      await tick();
+      const open = bo.pcs.find((pc) => pc.signalingState !== "closed") as FakePC;
+      open.setConnectionState("connected");
+      await tick();
+      expect(of(bo.reports, "pair_recovery")).toMatchObject([
+        { how: "start_over", recovered: true },
+      ]);
+    });
+
+    it("reports a start-over the person asked for, and one the peer began", async () => {
+      const { ana, anaPc } = await reported();
+      anaPc.setConnectionState("failed");
+      await tick();
+      anaPc.setConnectionState("failed");
+      await tick();
+      ana.mesh.retry("bo");
+      await tick();
+      expect(of(ana.reports, "pair_restart").at(-1)).toEqual({
+        kind: "pair_restart",
+        peerId: "bo",
+        how: "start_over",
+        why: "retry",
+      });
+    });
+
+    it("reports a start-over the peer began (a reload): this side starts over too", async () => {
+      vi.useFakeTimers();
+      // Ana alone: the peer's page is only what these two hellos say.
+      const ana = reporting("ana", new Map());
+      ana.mesh.join(everyone);
+      await tick();
+      ana.mesh.receive("bo", { kind: "hello", session: "bo-1" });
+      ana.mesh.receive("bo", { kind: "hello", session: "bo-2" });
+      await tick();
+      expect(of(ana.reports, "pair_restart")).toEqual([
+        { kind: "pair_restart", peerId: "bo", how: "start_over", why: "peer" },
+      ]);
+    });
+
+    it("reports a failed offer, and a description the browser refused", async () => {
+      const log = vi.fn();
+      const { ana, bo, anaPc } = await reported({ log });
+      anaPc.setLocalDescription = async () => {
+        throw Object.assign(new Error("offer blocked"), { name: "InvalidStateError" });
+      };
+      ana.mesh.setLocalTracks({ cam: track("ana cam") });
+      await tick();
+      expect(of(ana.reports, "negotiation_error")).toEqual([
+        {
+          kind: "negotiation_error",
+          peerId: "bo",
+          step: "offer",
+          name: "InvalidStateError",
+          message: "offer blocked",
+        },
+      ]);
+
+      anaPc.setRemoteDescription = async () => {
+        throw Object.assign(new Error("Failed to parse SessionDescription at 10.1.2.3"), {
+          name: "InvalidAccessError",
+        });
+      };
+      ana.mesh.receive("bo", {
+        kind: "description",
+        // The session bo has been using with ana.
+        session: bo.sent[0]?.session as string,
+        description: { type: "offer", sdp: "[]" },
+      });
+      await tick();
+      const refused = of(ana.reports, "negotiation_error").at(-1);
+      expect(refused).toMatchObject({
+        step: "remote_description",
+        name: "InvalidAccessError",
+        message: "Failed to parse SessionDescription at [ip]",
+      });
+      expect(log).toHaveBeenCalled();
+    });
+
+    it("reports a refused candidate once, not for every one trickled after a bad description", async () => {
+      const log = vi.fn();
+      const { ana, bo, anaPc } = await reported({ log });
+      const session = bo.sent[0]?.session as string;
+      anaPc.addIceCandidate = async () => {
+        throw Object.assign(new Error("bad candidate"), { name: "OperationError" });
+      };
+      const trickle = () =>
+        ana.mesh.receive("bo", {
+          kind: "candidate",
+          session,
+          candidate: { candidate: "candidate:1 1 udp 1 1.1.1.1 1 typ host" },
+        } as SignalPayload);
+      for (let i = 0; i < 25; i++) trickle();
+      await tick();
+      expect(of(ana.reports, "negotiation_error")).toMatchObject([
+        { step: "candidate", name: "OperationError" },
+      ]);
+
+      // A description that is applied starts it afresh: the next refused candidate is news again.
+      bo.mesh.setLocalTracks({ cam: track("bo cam") });
+      await tick();
+      trickle();
+      trickle();
+      await tick();
+      expect(of(ana.reports, "negotiation_error")).toHaveLength(2);
+    });
+
+    it("is not broken by a listener that throws", async () => {
+      vi.useFakeTimers();
+      const network = new Map<string, Mesh>();
+      const ana = reporting("ana", network, {
+        onReport: () => {
+          throw new Error("reporter down");
+        },
+      });
+      const bo = reporting("bo", network);
+      ana.mesh.join(everyone);
+      bo.mesh.join(everyone);
+      await tick();
+      (ana.pcs[0] as FakePC).setConnectionState("connected");
+      await tick();
+      expect(ana.mesh.peers()).toMatchObject([{ userId: "bo", state: "connected" }]);
+    });
+
+    it("stops reporting once closed", async () => {
+      const { ana, bo, anaPc } = await reported();
+      anaPc.setConnectionState("connected");
+      await tick();
+      const before = ana.reports.length;
+      ana.mesh.close();
+      anaPc.setConnectionState("failed");
+      await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS * 2);
+      expect(ana.reports).toHaveLength(before);
+      expect(bo.reports.length).toBeGreaterThan(0);
+    });
   });
 });
 

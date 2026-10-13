@@ -2,6 +2,8 @@
 // so it plays whether or not their tile is shown. Volume and mute are this viewer's own
 // (per-tile local controls).
 import { useEffect, useRef } from "react";
+import { audioBlockedEvent } from "~/lib/connection-events";
+import { getConnectionReporter } from "~/lib/connection-report";
 
 export function PeerAudio({
   userId,
@@ -31,6 +33,8 @@ export function PeerAudio({
     audio.play().catch(() => {
       // Refused after cleanup (the track changed, or the tile went): nothing to retry.
       if (cancelled) return;
+      // Once per track, for the room timeline: the browser blocked it until a click.
+      getConnectionReporter().add(audioBlockedEvent(userId, share));
       window.addEventListener("pointerdown", retry, { once: true });
       window.addEventListener("keydown", retry, { once: true });
     });
@@ -40,7 +44,7 @@ export function PeerAudio({
       window.removeEventListener("keydown", retry);
       audio.srcObject = null;
     };
-  }, [track]);
+  }, [track, userId, share]);
 
   useEffect(() => {
     const audio = ref.current;

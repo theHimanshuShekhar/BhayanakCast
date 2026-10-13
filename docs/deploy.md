@@ -262,10 +262,11 @@ What the app logs (successful requests and server-function calls are not logged)
 | `server_fn.failed`, `http.unhandled` | error | A server function, route or page threw, with `route` and `userId`. `server_fn.refused` (warn) is a refusal the app throws on purpose: not signed in, not an admin, an invalid input. |
 | `auth.log`, `auth.api_refused`, `auth.api_error` | error, warn | Better Auth's own errors, such as a Discord callback that didn't validate or a banned user turned away. |
 | `db.slow_write` | warn | A write that took 500 ms or more (`SLOW_WRITE_MS`, `src/server/log-events.ts`): the realtime store's writes, the timeline batch insert, the quality insert and the thumbnail upload, with the `operation` and `ms`. Half a second is slow for these, and the realtime server runs them on one queue. |
-| `ice.report`, `ice.mint_failed`, `turn_usage.failed` | info, warn | Relayed or failed ICE pairs (candidate types only), failed TURN minting, failed Cloudflare analytics. |
+| `ice.mint_failed`, `turn_usage.failed` | warn | Failed TURN minting, failed Cloudflare analytics. Which pairs relay or fail is no longer logged here: browsers report it to the room timeline (ADR 3 addendum). |
+| `connection_event.dropped` | warn | A connection-event report from a page, or some of its events, that the server threw away, with the `reason`: `invalid`, `too_large` (a beacon past 64 KiB), `over_limit` (too many reports), `not_in_room`, `peer_not_in_room`, `over_cap` (a person's 120 events in 10 minutes; one `events_dropped` row on the timeline says how many). The events that are stored appear as `timeline.pair_state`, `timeline.pair_path`, `timeline.device_error` and so on. |
 | `maintenance.*`, `migrate.*` | info, error | The daily purge, and the migration run at start. |
 
-Not written yet: the dropped connection-event and problem reports (`connection_event.dropped`, `problem.dropped`, warn). `logReportDropped` in `src/server/log-events.ts` is the hook for the tickets that add those reports.
+Not written yet: the dropped problem reports (`problem.dropped`, warn). `logReportDropped` in `src/server/log-events.ts` is the hook for the ticket that adds those reports.
 
 **Noise.** The same event from the same user (or socket) is written in full for its first 10 lines in
 a minute; after that one line a minute carries `suppressed: N`. Errors are counted by their message
@@ -392,10 +393,9 @@ file or mount on the host, which this git-backed stack avoids (ADR 9 addendum). 
 - **TURN and NAT (ADR 3):** each signed-in user gets TURN credentials that last 4 hours. They're
   cached per user and minted again 30 minutes before they expire. If minting fails, the app logs
   `ice.mint_failed` ("minting TURN credentials failed; STUN only") and pages get STUN only until
-  the next try. A peer pair that relays through TURN, or fails even after an ICE restart, is logged
-  as `ice.report` with `outcome` `relayed` or `failed`. The line has candidate types and transports
-  only, with no addresses or user IDs. In the viewer, `event:="ice.report" _time:30d | stats by
-  (outcome) count() n` shows how often double NAT bites.
+  the next try. Which peer pairs relay through TURN or fail is no longer logged: each browser
+  reports its connections (state changes, restarts, path, errors) to the room's timeline, which
+  admins read (ADR 3 addendum on connection events). The `ice.report` log event is gone.
 - **Data** lives in the `pgdata` volume. Don't delete the stack's volumes when removing or re-creating it.
   Nightly dumps are on the NAS share (section 5, Backups to the NAS).
 

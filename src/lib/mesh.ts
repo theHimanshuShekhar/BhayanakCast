@@ -70,6 +70,18 @@
  * Local tracks belong to the caller (./local-media.ts): the Mesh never stops them.
  */
 import { localVideoCodecs, orderCodecs, type VideoCodecs } from "./codecs";
+import {
+  type ConnectionEvent,
+  type NegotiationStep,
+  negotiationEvent,
+  pairStateEvent,
+  pathEvent,
+  pathKey,
+  type RestartKind,
+  type RestartReason,
+  recoveryEvent,
+  restartEvent,
+} from "./connection-events";
 import { hasTurn, type IcePath, icePathOf, isRelayed, STUN_SERVERS } from "./ice";
 import {
   aboveCeiling,
@@ -272,6 +284,12 @@ export interface MeshOptions {
   onQuality?: (sample: PendingSample) => void;
   /** How long a telemetry window runs. Defaults to `SAMPLE_WINDOW_MS`. */
   sampleWindowMs?: number;
+  /**
+   * What happens to each pair, for the room timeline (ADR 3 addendum): every connection state,
+   * ICE restart or start-over and whether it recovered, the path when the pair connects and when
+   * it changes, and negotiation errors. Without it nothing is collected.
+   */
+  onReport?: (event: ConnectionEvent) => void;
   /** How long a sender's first minute lasts (`paceOf`). Defaults to `FIRST_MINUTE_MS`. For tests. */
   firstMinuteMs?: number;
   /** For tests. */
@@ -526,6 +544,16 @@ interface Link {
   restarted: boolean;
   /** It replaces a connection that never negotiated (see `#failed`). */
   startedOver: boolean;
+  /** The restart or start-over that hasn't yet connected or given up, for the room timeline. */
+  attempt?: { how: RestartKind; since: number };
+  /** The path last reported (`pathKey`), to see when it changes. */
+  pathKey?: string;
+  /** The connection state last reported, so none is reported twice running. */
+  stateReported?: string;
+  /** A refused candidate was reported since the last description was applied. */
+  candidateFailed?: boolean;
+  /** A path read for the room timeline is under way (`#checkPath`). */
+  pathReading?: boolean;
   /** The video codecs the peer can decode, once it has said. */
   remoteCodecs?: string[];
   /** Where each of this side's video senders is on its ladder. */
@@ -556,6 +584,7 @@ export class Mesh {
   readonly #degradation = new WeakMap<RTCRtpSender, RTCDegradationPreference>();
   /** Undefined without `onQuality`. */
   readonly #telemetry: QualityCollector | undefined;
+  readonly #onReport: MeshOptions["onReport"];
   readonly #links = new Map<string, Link>();
   readonly #listeners = new Set<(event: MeshEvent) => void>();
   readonly #local: Partial<Record<MediaSlot, MediaStreamTrack | null>> = {};
@@ -579,6 +608,7 @@ export class Mesh {
     this.#codecs = options.codecs ?? localVideoCodecs();
     this.#firstMinuteMs = options.firstMinuteMs ?? FIRST_MINUTE_MS;
     this.#budget = new UplinkBudget(options.uplink ?? INITIAL_UPLINK);
+    this.#onReport = options.onReport;
     if (options.onQuality) {
       this.#telemetry = new QualityCollector({
         emit: options.onQuality,
@@ -628,7 +658,8 @@ export class Mesh {
     if ("peerSession" in payload && payload.peerSession && payload.peerSession !== link?.session) {
       return;
     }
-    if (link?.remoteSession && link.remoteSession !== payload.session) {
+    const peerStartedOver = !!link?.remoteSession && link.remoteSession !== payload.session;
+    if (peerStartedOver) {
       // They started over (a reload, a takeover): so does this side.
       this.peerLeft(from);
       link = undefined;
@@ -636,7 +667,10 @@ export class Mesh {
     // The server only relays from people in the room, and ahead of their `left`. An offer is
     // the first word this side needs; anything else means theirs may have been lost.
     const offer = payload.kind === "description" && payload.description.type === "offer";
-    link ??= this.#open(from, !offer);
+    if (!link) {
+      link = this.#open(from, !offer);
+      if (peerStartedOver) this.#began(link, "start_over", "peer");
+    }
     link.remoteSession = payload.session;
     if ((payload.kind === "hello" || payload.kind === "description") && payload.codecs) {
       link.remoteCodecs = payload.codecs;
@@ -725,14 +759,16 @@ export class Mesh {
     this.#iceServers = iceServers;
     for (const link of this.#links.values()) {
       this.#configure(link);
-      if (gotTurn && link.state === "failed" && link.pc.remoteDescription) this.#restartIce(link);
+      if (gotTurn && link.state === "failed" && link.pc.remoteDescription) {
+        this.#restartIce(link, "turn");
+      }
     }
   }
 
   /** Start over with `userId` (after `failed`): a new connection, and they start over too. */
   retry(userId: string): void {
     if (this.#closed || !this.#links.has(userId)) return;
-    this.#startOver(userId);
+    this.#startOver(userId, "retry");
   }
 
   /**
@@ -928,6 +964,7 @@ export class Mesh {
     pc.ontrack = ({ transceiver, track }) => this.#track(link, transceiver, track);
     pc.onconnectionstatechange = () => this.#stateChanged(link);
     this.#emit({ type: "state", userId, state: link.state });
+    this.#reportState(link, "connecting");
     this.#waitToConnect(link);
     // What the pair receives is measured too (telemetry), whether or not this page sends.
     if (this.#telemetry) this.#watchQuality();
@@ -1294,6 +1331,9 @@ export class Mesh {
     try {
       const reading = await this.#adjustSenders(link);
       await this.#readReceivers(link);
+      // After the pass's own work, and not waited for: a slow or hung read of the connection's
+      // stats must never hold up the adjustment (ADR 2: the pass costs what its sender reads do).
+      this.#checkPath(link);
       return reading;
     } finally {
       link.adjusting = false;
@@ -1643,6 +1683,7 @@ export class Mesh {
       if (this.#current(link)) this.#sendDescription(link);
     } catch (error) {
       if (this.#current(link)) this.#log(`offering to ${link.userId} failed`, error);
+      this.#negotiationFailed(link, "offer", error);
     } finally {
       link.makingOffer = false;
     }
@@ -1660,7 +1701,15 @@ export class Mesh {
         await pc.addIceCandidate(payload.candidate);
       } catch (error) {
         // Candidates for an offer this side ignored fail, as they should.
-        if (!link.ignoreOffer) throw error;
+        if (!link.ignoreOffer) {
+          // Once until a description is applied: a refused description is followed by every
+          // candidate trickled after it, and each would be the same news.
+          if (!link.candidateFailed) {
+            link.candidateFailed = true;
+            this.#negotiationFailed(link, "candidate", error);
+          }
+          throw error;
+        }
       }
       return;
     }
@@ -1674,15 +1723,26 @@ export class Mesh {
     if (link.ignoreOffer) return;
     const sdp = this.#forSenders(link, description.sdp);
     // A polite side's own pending offer is rolled back implicitly.
-    await pc.setRemoteDescription({ type: description.type, sdp });
+    try {
+      await pc.setRemoteDescription({ type: description.type, sdp });
+    } catch (error) {
+      this.#negotiationFailed(link, "remote_description", error);
+      throw error;
+    }
     link.remoteSdp = description.sdp;
+    link.candidateFailed = false;
     // Encoding parameters can only be set once there is something negotiated to set them on.
     for (const slot of VIDEO_SLOTS) {
       const sender = link.own.get(slot)?.sender;
       if (sender) this.#tune(link, slot, sender);
     }
     if (offer) {
-      await pc.setLocalDescription();
+      try {
+        await pc.setLocalDescription();
+      } catch (error) {
+        this.#negotiationFailed(link, "answer", error);
+        throw error;
+      }
       if (!this.#current(link)) return;
       this.#sendDescription(link);
       // The polite side's own transceivers: negotiated next, from a stable state.
@@ -1794,6 +1854,7 @@ export class Mesh {
 
   #stateChanged(link: Link): void {
     if (!this.#current(link)) return;
+    this.#reportState(link, link.pc.connectionState);
     switch (link.pc.connectionState) {
       case "connected":
         this.#stopWaiting(link);
@@ -1801,7 +1862,7 @@ export class Mesh {
         void this.#connected(link);
         return;
       case "failed":
-        this.#failed(link);
+        this.#failed(link, "failed");
         return;
       case "closed":
         // `closed` events cover it.
@@ -1818,6 +1879,8 @@ export class Mesh {
     const ice = await this.#icePath(link);
     if (!this.#current(link) || link.pc.connectionState !== "connected") return;
     this.#setState(link, ice && isRelayed(ice) ? "relayed" : "connected", ice);
+    this.#reportPath(link, ice, "connect");
+    this.#ended(link, true);
   }
 
   /** Arm the connect timeout, unless it is already running. */
@@ -1825,7 +1888,9 @@ export class Mesh {
     if (link.connectTimer !== undefined) return;
     link.connectTimer = setTimeout(() => {
       this.#stopWaiting(link);
-      if (this.#current(link) && link.pc.connectionState !== "connected") this.#failed(link);
+      if (this.#current(link) && link.pc.connectionState !== "connected") {
+        this.#failed(link, "timeout");
+      }
     }, CONNECT_TIMEOUT_MS);
   }
 
@@ -1842,18 +1907,22 @@ export class Mesh {
    * (a new session, and a `hello`); its failure is a signalling stall, not an ICE failure, and
    * comes without an ICE path.
    */
-  #failed(link: Link): void {
+  #failed(link: Link, why: RestartReason): void {
     this.#stopWaiting(link);
     const negotiated = link.pc.remoteDescription !== null;
+    if (!negotiated) this.#negotiationFailed(link, "never_finished");
     if (!negotiated && !link.startedOver) {
-      this.#startOver(link.userId, true);
+      this.#startOver(link.userId, why, true);
       return;
     }
     if (negotiated && !link.restarted) {
-      this.#restartIce(link);
+      this.#restartIce(link, why);
       return;
     }
     if (link.state === "failed") return;
+    // Giving up: a timeout is not a state the connection reported itself.
+    this.#reportState(link, "failed");
+    this.#ended(link, false);
     if (!negotiated) {
       this.#setState(link, "failed");
       return;
@@ -1867,8 +1936,9 @@ export class Mesh {
   }
 
   /** Restart ICE on `link` with the latest ICE servers (its one automatic restart). */
-  #restartIce(link: Link): void {
+  #restartIce(link: Link, why: RestartReason): void {
     link.restarted = true;
+    this.#began(link, "ice_restart", why);
     this.#configure(link);
     link.pc.restartIce();
     this.#waitToConnect(link);
@@ -1886,9 +1956,75 @@ export class Mesh {
   }
 
   /** Replace the connection to `userId` with a new one; the peer starts over too. */
-  #startOver(userId: string, automatic = false): void {
+  #startOver(userId: string, why: RestartReason, automatic = false): void {
     this.peerLeft(userId);
-    this.#open(userId, true, automatic);
+    this.#began(this.#open(userId, true, automatic), "start_over", why);
+  }
+
+  // The room timeline's reports (ADR 3 addendum). A pair is reported to `onReport` as it goes.
+
+  #report(event: ConnectionEvent | undefined): void {
+    if (!event || this.#closed) return;
+    try {
+      this.#onReport?.(event);
+    } catch {
+      // Reporting is best-effort: a listener that throws must never break a connection.
+    }
+  }
+
+  /** A restart or start-over of `link` began; the next time it connects, or gives up, is its end. */
+  #began(link: Link, how: RestartKind, why: RestartReason): void {
+    link.attempt = { how, since: Date.now() };
+    this.#report(restartEvent(link.userId, how, why));
+  }
+
+  /** The restart in progress on `link` ended: the pair connected again, or gave up. */
+  #ended(link: Link, recovered: boolean): void {
+    const { attempt } = link;
+    if (!attempt) return;
+    link.attempt = undefined;
+    this.#report(recoveryEvent(link.userId, attempt.how, recovered, Date.now() - attempt.since));
+  }
+
+  /** The connection state of `link`'s pair, unless it is the one just reported. */
+  #reportState(link: Link, state: string): void {
+    if (link.stateReported === state) return;
+    link.stateReported = state;
+    this.#report(pairStateEvent(link.userId, state));
+  }
+
+  /** The path `link` uses now: reported when the pair connects (`connect`), or if it moved. */
+  #reportPath(link: Link, ice: IcePath | undefined, change: "connect" | "change"): void {
+    if (!this.#onReport) return;
+    const event = pathEvent(link.userId, ice ?? { local: [], remote: [] }, change);
+    const key = pathKey(event);
+    // A path that can't be read now says nothing about a change.
+    if (change === "change" && (event.kind !== "pair_path" || event.path === "unknown")) return;
+    if (change === "change" && key === link.pathKey) return;
+    link.pathKey = key;
+    this.#report(event);
+  }
+
+  /** Report a failed negotiation step with `link`'s peer (`error` absent: it never finished). */
+  #negotiationFailed(link: Link, step: NegotiationStep, error?: unknown): void {
+    if (this.#current(link)) this.#report(negotiationEvent(link.userId, step, error));
+  }
+
+  /**
+   * On a quality pass, see whether a connected pair has moved to another path, and report it.
+   * Runs on its own (the pass doesn't wait for it), one read per pair at a time: a read that
+   * hangs holds its pair's next checks off, and nothing else.
+   */
+  #checkPath(link: Link): void {
+    if (!this.#onReport || link.pathKey === undefined || link.pathReading) return;
+    link.pathReading = true;
+    void this.#icePath(link)
+      .then((ice) => {
+        if (ice && this.#live(link)) this.#reportPath(link, ice, "change");
+      })
+      .finally(() => {
+        link.pathReading = false;
+      });
   }
 
   /** Give `link` the current ICE servers (used from its next ICE restart). */

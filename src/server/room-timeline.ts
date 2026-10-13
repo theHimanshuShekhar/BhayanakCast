@@ -32,7 +32,7 @@ import {
   type TimelineEventRow,
 } from "../lib/room-timeline.ts";
 import { type Clock, systemClock, type Timer } from "./clock.ts";
-import { logTimelineEvent, logTimelineWriteFailed, timedWrite } from "./log-events.ts";
+import { logTimelineRow, logTimelineWriteFailed, timedWrite } from "./log-events.ts";
 import { log } from "./logger.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -156,18 +156,7 @@ export class TimelineRecorder implements TimelineSink {
     this.#push(row);
     this.#schedule();
     // After the event is safely queued, and never a reason for the caller to hear of a failure.
-    try {
-      logTimelineEvent({
-        kind: row.kind,
-        roomId: row.roomId,
-        userId: row.actorUserId ?? undefined,
-        targetUserId: row.targetUserId ?? undefined,
-        at: row.at.toISOString(),
-        details: row.details,
-      });
-    } catch {
-      // The log is down; the timeline row is not affected.
-    }
+    logTimelineRow(row);
   }
 
   refused(

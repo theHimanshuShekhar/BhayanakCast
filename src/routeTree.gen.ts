@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
+import { Route as ApiConnectionEventsRouteImport } from './routes/api/connection-events'
 import { Route as ApiHealthRouteImport } from './routes/api/health'
 import { Route as JoinInviteTokenRouteImport } from './routes/join/$inviteToken'
 import { Route as PastRoomIdRouteImport } from './routes/past/$roomId'
@@ -29,6 +30,11 @@ const IndexRoute = IndexRouteImport.update({
 const AdminRoute = AdminRouteImport.update({
   id: '/admin',
   path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiConnectionEventsRoute = ApiConnectionEventsRouteImport.update({
+  id: '/api/connection-events',
+  path: '/api/connection-events',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiHealthRoute = ApiHealthRouteImport.update({
@@ -82,6 +88,7 @@ const ApiThumbnailsRoomIdUserIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/api/connection-events': typeof ApiConnectionEventsRoute
   '/api/health': typeof ApiHealthRoute
   '/join/$inviteToken': typeof JoinInviteTokenRoute
   '/past/$roomId': typeof PastRoomIdRoute
@@ -95,6 +102,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/api/connection-events': typeof ApiConnectionEventsRoute
   '/api/health': typeof ApiHealthRoute
   '/join/$inviteToken': typeof JoinInviteTokenRoute
   '/past/$roomId': typeof PastRoomIdRoute
@@ -109,6 +117,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/api/connection-events': typeof ApiConnectionEventsRoute
   '/api/health': typeof ApiHealthRoute
   '/join/$inviteToken': typeof JoinInviteTokenRoute
   '/past/$roomId': typeof PastRoomIdRoute
@@ -124,6 +133,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/admin'
+    | '/api/connection-events'
     | '/api/health'
     | '/join/$inviteToken'
     | '/past/$roomId'
@@ -137,6 +147,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/admin'
+    | '/api/connection-events'
     | '/api/health'
     | '/join/$inviteToken'
     | '/past/$roomId'
@@ -150,6 +161,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/admin'
+    | '/api/connection-events'
     | '/api/health'
     | '/join/$inviteToken'
     | '/past/$roomId'
@@ -164,6 +176,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
+  ApiConnectionEventsRoute: typeof ApiConnectionEventsRoute
   ApiHealthRoute: typeof ApiHealthRoute
   JoinInviteTokenRoute: typeof JoinInviteTokenRoute
   PastRoomIdRoute: typeof PastRoomIdRoute
@@ -189,6 +202,13 @@ declare module '@tanstack/react-router' {
       path: '/admin'
       fullPath: '/admin'
       preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/connection-events': {
+      id: '/api/connection-events'
+      path: '/api/connection-events'
+      fullPath: '/api/connection-events'
+      preLoaderRoute: typeof ApiConnectionEventsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/health': {
@@ -260,6 +280,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
+  ApiConnectionEventsRoute: ApiConnectionEventsRoute,
   ApiHealthRoute: ApiHealthRoute,
   JoinInviteTokenRoute: JoinInviteTokenRoute,
   PastRoomIdRoute: PastRoomIdRoute,

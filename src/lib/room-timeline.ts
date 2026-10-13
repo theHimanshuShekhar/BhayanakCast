@@ -44,6 +44,24 @@ export const TIMELINE_EVENT_KINDS = [
   "slow_client",
   /** The server closed a socket for flooding it. */
   "flood_close",
+  // Reported by browsers about their own connections (ADR 3 addendum), not by the hub; the actor
+  // is the reporter and the target the peer of a pair, if the event is about one.
+  /** A pair's connection state changed. */
+  "pair_state",
+  /** A pair began an ICE restart or started over. */
+  "pair_restart",
+  /** A restart ended: the pair connected again, or gave up. */
+  "pair_recovery",
+  /** The path a pair uses (direct or relay, and the transport), when it connects and when it changes. */
+  "pair_path",
+  /** A failed offer or answer, a refused description, or a negotiation that never finished. */
+  "negotiation_error",
+  /** The screen picker, the camera or the mic was refused or failed. */
+  "device_error",
+  /** The browser would not play a peer's audio before a click. */
+  "audio_blocked",
+  /** A person went over their cap of reported events; `details.count` were not recorded. */
+  "events_dropped",
 ] as const;
 export type TimelineEventKind = (typeof TIMELINE_EVENT_KINDS)[number];
 

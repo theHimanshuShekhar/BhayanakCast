@@ -159,6 +159,34 @@ describe("getRoomTimeline", () => {
     });
   });
 
+  it("returns the connection events each browser reported, with reporter, peer and particulars", async () => {
+    await db.insert(roomTimelineEvents).values([
+      event("r1", 1, "pair_state", {
+        actorUserId: "ana",
+        targetUserId: "bo",
+        details: { state: "connected" },
+      }),
+      event("r1", 2, "pair_path", {
+        actorUserId: "ana",
+        targetUserId: "bo",
+        details: { change: "connect", path: "relay", local: { type: "relay", protocol: "udp" } },
+      }),
+      event("r1", 3, "device_error", {
+        actorUserId: "bo",
+        details: { device: "camera", name: "NotReadableError", message: "in use" },
+      }),
+      event("r1", 4, "events_dropped", { actorUserId: "ana", details: { count: 30 } }),
+    ]);
+    const { entries, people } = await read();
+    expect(entries).toMatchObject([
+      { source: "event", kind: "pair_state", actorUserId: "ana", targetUserId: "bo" },
+      { source: "event", kind: "pair_path", details: { path: "relay" } },
+      { source: "event", kind: "device_error", actorUserId: "bo", targetUserId: null },
+      { source: "event", kind: "events_dropped", details: { count: 30 } },
+    ]);
+    expect(Object.keys(people).sort()).toEqual(["ana", "bo"]);
+  });
+
   it("keeps events in the order they were recorded when they share a time", async () => {
     await db
       .insert(roomTimelineEvents)

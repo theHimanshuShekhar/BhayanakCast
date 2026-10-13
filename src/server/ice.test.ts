@@ -7,14 +7,12 @@ import { type Caller, type SignedInCaller, SignInRequiredError } from "./caller.
 import { FakeClock } from "./clock.ts";
 import {
   cloudflareTurn,
-  ICE_REPORT_RATE_LIMIT,
   IceService,
   mayEnterRoom,
   TURN_CREDENTIAL_TTL_S,
   TURN_REFRESH_MARGIN_S,
   type TurnProvider,
 } from "./ice.ts";
-import { LOG_SAMPLE_LIMIT } from "./logger.ts";
 import { type CapturedLogs, captureLogs } from "./test-logs.ts";
 
 let logs: CapturedLogs;
@@ -290,40 +288,5 @@ describe("Cloudflare TURN", () => {
       cloudflareTurn({ keyId: "k", apiToken: "t", fetch: async () => response });
     await expect(answering(new Response("nope", { status: 401 })).mint(60)).rejects.toThrow(/401/);
     await expect(answering(Response.json({ servers: [] })).mint(60)).rejects.toThrow();
-  });
-});
-
-describe("ICE reports", () => {
-  const report = {
-    outcome: "relayed" as const,
-    path: {
-      selected: {
-        local: { type: "relay" as const, protocol: "udp" as const, relayProtocol: "tls" as const },
-        remote: { type: "srflx" as const, protocol: "udp" as const },
-      },
-      local: [{ type: "host" as const, protocol: "udp" as const }],
-      remote: [],
-    },
-  };
-
-  it("are logged without who sent them, for signed-in callers only", () => {
-    const { service } = setup();
-    expect(() => service.report(visitor, report)).toThrow(SignInRequiredError);
-    expect(service.report(asUser("ana"), report)).toBe(true);
-    expect(logs.entries).toHaveLength(1);
-    expect(logs.entries[0]).toMatchObject({ level: "info", event: "ice.report", ...report });
-    expect(logs.lines[0]).not.toContain("ana");
-  });
-
-  it("are dropped over the rate limit, per user, until the window passes", () => {
-    const { clock, service } = setup();
-    for (let i = 0; i < ICE_REPORT_RATE_LIMIT.reports; i++) service.report(asUser("ana"), report);
-    expect(service.report(asUser("ana"), report)).toBe(false);
-    expect(service.report(asUser("bo"), report)).toBe(true);
-    clock.advance(ICE_REPORT_RATE_LIMIT.windowMs);
-    expect(service.report(asUser("ana"), report)).toBe(true);
-    // Accepted reports are logged, apart from what the logger's sampling holds back: ana's first
-    // LOG_SAMPLE_LIMIT in the minute, and bo's one.
-    expect(logs.all("ice.report")).toHaveLength(LOG_SAMPLE_LIMIT + 1);
   });
 });

@@ -464,7 +464,7 @@ export interface QualityReporterOptions {
 }
 
 /**
- * Batches a page's rows for the server. They go over a server function, like `reportIceFn`, and
+ * Batches a page's rows for the server. They go over a server function, like the connection events (./connection-reporter.ts), and
  * not the room socket: the hub runs every socket's messages on one serial queue and this is
  * database work (ADR 4 addendum on flooding), samples don't depend on the socket being up, and
  * a report that fails costs a few rows, not a reconnect. Rows wait `REPORT_DELAY_MS` for company

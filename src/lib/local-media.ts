@@ -22,6 +22,8 @@
  * Browser-only: call it from effects and event handlers, never during render.
  */
 import { useSyncExternalStore } from "react";
+import { deviceErrorEvent } from "./connection-events";
+import { getConnectionReporter } from "./connection-report";
 import { fitCapture, MAX_CAPTURE_PIXELS } from "./quality";
 import type { RoomKind } from "./rooms";
 
@@ -211,6 +213,12 @@ export interface LocalMediaOptions {
    * `applyConstraints` is unverified (headless Firefox has no screen to capture).
    */
   fitScreen?: boolean;
+  /**
+   * Called when the camera, mic or screen picker was refused or failed (ADR 3 addendum on the
+   * room timeline), with the error and the labels and ids of the devices known, which a report
+   * must not repeat.
+   */
+  onError?: (device: "camera" | "mic" | "screen", error: unknown, secrets: string[]) => void;
 }
 
 type Listener = () => void;
@@ -243,6 +251,7 @@ export class LocalMedia {
   readonly #storage: Storage | null;
   readonly #userActivation: LocalMediaOptions["userActivation"];
   readonly #fitScreen: boolean;
+  readonly #onError: LocalMediaOptions["onError"];
   readonly #listeners = new Set<Listener>();
   #state: LocalMediaState;
   /** Bumped per kind by every enable/disable, so a slow `getUserMedia` that lost knows it. */
@@ -252,6 +261,7 @@ export class LocalMedia {
     this.#mediaDevices = options.mediaDevices;
     this.#storage = options.storage ?? null;
     this.#userActivation = options.userActivation;
+    this.#onError = options.onError;
     this.#fitScreen =
       options.fitScreen ??
       (typeof navigator !== "undefined" && !/Firefox\//.test(navigator.userAgent));
@@ -325,11 +335,13 @@ export class LocalMedia {
     this.#setTrack(kind, { status: "starting", track: null, failure: null, lost: false });
     let track: MediaStreamTrack | null = null;
     let failure: LocalTrackFailure | null = null;
+    let failed: unknown;
     const selected = this.#state.selected[kind];
     try {
       track = await this.#capture(kind, selected);
     } catch (error) {
       failure = failureOf(error);
+      failed = error;
       // The remembered device is gone: fall back to the default one.
       if (failure === "missing" && selected) {
         try {
@@ -337,9 +349,13 @@ export class LocalMedia {
           failure = null;
         } catch (retryError) {
           failure = failureOf(retryError);
+          failed = retryError;
         }
       }
     }
+    // Only a start that ended in failure is reported; one that fell back to the default device
+    // worked.
+    if (failure) this.#reportError(kind === "cam" ? "camera" : "mic", failed);
     if (attempt !== this.#attempt[kind]) {
       // Turned off (or on again) while the browser was asking: this one lost.
       track?.stop();
@@ -426,6 +442,7 @@ export class LocalMedia {
       });
     } catch (error) {
       failure = failureOf(error);
+      this.#reportError("screen", error);
     }
     const [video] = stream?.getVideoTracks() ?? [];
     const [audio = null] = stream?.getAudioTracks() ?? [];
@@ -456,6 +473,22 @@ export class LocalMedia {
     track?.stop();
     audio?.stop();
     if (this.#state.share !== SHARE_OFF) this.#set({ share: SHARE_OFF });
+  }
+
+  /**
+   * Tell `onError` that `device` failed. The labels and ids of every device this browser has
+   * listed or remembered go with it, so the report can leave them out of the error's message.
+   */
+  #reportError(device: "camera" | "mic" | "screen", error: unknown): void {
+    if (!this.#onError) return;
+    const { devices, selected } = this.#state;
+    const secrets = [...devices.mic, ...devices.cam].flatMap((d) => [d.id, d.label]);
+    for (const id of Object.values(selected)) if (id) secrets.push(id);
+    try {
+      this.#onError(device, error, secrets);
+    } catch {
+      // Reporting is best-effort: it must never break turning a device on.
+    }
   }
 
   #capture(kind: LocalDeviceKind, deviceId: string | null): Promise<MediaStreamTrack> {
@@ -527,6 +560,8 @@ export function getLocalMedia(): LocalMedia {
       mediaDevices: navigator.mediaDevices,
       storage,
       userActivation: navigator.userActivation,
+      onError: (device, error, secrets) =>
+        getConnectionReporter().add(deviceErrorEvent(device, error, secrets)),
     });
   }
   return localMedia;
