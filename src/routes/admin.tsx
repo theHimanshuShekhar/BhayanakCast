@@ -41,10 +41,16 @@ import {
   adminOverviewQuery,
   adminRecentRoomsQuery,
   adminUsersQuery,
+  recentReportsQuery,
   turnUsageQuery,
 } from "~/lib/admin.queries";
 import { useCurrentSession } from "~/lib/current-user";
 import { fmtAgo, fmtMins } from "~/lib/format";
+import {
+  PROBLEM_CATEGORY_LABELS,
+  type RecentReport,
+  type SnapshotStream,
+} from "~/lib/problem-report";
 import type { LiveRoomCard, RoomPerson } from "~/lib/rooms";
 import { roomKeys } from "~/lib/rooms.queries";
 import { TURN_FREE_TIER_GB } from "~/lib/turn-usage";
@@ -64,6 +70,7 @@ export const Route = createFileRoute("/admin")({
       queryClient.ensureQueryData(adminRecentRoomsQuery(FIRST_ROOMS_PAGE)),
       queryClient.ensureQueryData(adminLeaderboardsQuery()),
       queryClient.ensureQueryData(adminUsersQuery(FIRST_USERS_PAGE)),
+      queryClient.ensureQueryData(recentReportsQuery()),
     ]);
   },
   component: AdminPage,
@@ -468,6 +475,117 @@ const fmtDate = (iso: string) =>
     year: "numeric",
     timeZone: "UTC",
   });
+
+const mbpsText = (bps: number) => `${(bps / 1_000_000).toFixed(1)} Mbps`;
+
+/** One stream of a snapshot as the quality modal words it: step, cap, numbers, path, reason. */
+function streamText(s: SnapshotStream): string {
+  const parts = [
+    s.step && `${s.step}${s.cap === undefined ? "" : ` (cap ${mbpsText(s.cap)})`}`,
+    s.bps !== undefined && mbpsText(s.bps),
+    s.height !== undefined && `${s.width ?? "?"}×${s.height}`,
+    s.fps !== undefined && `${s.fps} fps`,
+    s.loss !== undefined && `loss ${(s.loss * 100).toFixed(1)}%`,
+    s.rttMs !== undefined && `rtt ${s.rttMs} ms`,
+    s.path,
+    s.reason,
+  ];
+  return parts.filter(Boolean).join(" · ");
+}
+
+/** The snapshots a report came with, one browser each, folded away until opened. */
+const SnapshotsCell = ({ report }: { report: RecentReport }) => {
+  const { snapshots } = report;
+  if (snapshots.length === 0) return <span className="text-subtle">none yet</span>;
+  return (
+    <details>
+      <summary className="cursor-pointer text-fg-muted">
+        {snapshots.length} {snapshots.length === 1 ? "snapshot" : "snapshots"}
+        <span className="text-subtle"> · {snapshots.map((s) => s.user.username).join(", ")}</span>
+        {report.reused && <span className="text-subtle"> · the room's earlier one</span>}
+      </summary>
+      <ul className="m-0 mt-2 p-0 list-none flex flex-col gap-2 text-[11.5px]">
+        {snapshots.map((s) => (
+          <li key={s.user.id} className="flex flex-col gap-0.5">
+            <b className="text-fg">
+              {s.user.username}
+              <span className="font-normal text-subtle">
+                {" "}
+                · {s.browser.name} {s.browser.version}
+                {s.own ? " · sent with the report" : ""}
+              </span>
+            </b>
+            {s.streams.map((st) => (
+              <span key={`${st.from}>${st.to}`}>
+                {st.from === s.user.id ? "sending to" : "receiving from"}{" "}
+                {st.from === s.user.id ? st.to.slice(0, 8) : st.from.slice(0, 8)}:{" "}
+                {streamText(st) || "no reading"}
+              </span>
+            ))}
+            {s.pairs.length > 0 && (
+              <span className="text-subtle">
+                pairs: {s.pairs.map((p) => `${p.peerId.slice(0, 8)} ${p.state}`).join(", ")}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+};
+
+/** Problem reports across rooms, newest first (CONTEXT.md, Problem report). */
+const RecentReportsTable = ({ onInspect }: { onInspect: (room: QualityTarget) => void }) => {
+  const { data, isError } = useQuery(recentReportsQuery());
+  const reports = data?.reports ?? [];
+  return (
+    <div className="overflow-x-auto">
+      <table aria-label="recent reports" className="w-full min-w-[820px] border-collapse text-xs">
+        <thead>
+          <tr>
+            <th className={th}>when</th>
+            <th className={th}>room</th>
+            <th className={th}>reporter</th>
+            <th className={th}>problem</th>
+            <th className={th}>snapshots</th>
+          </tr>
+        </thead>
+        <tbody>
+          {reports.map((r) => {
+            const room = { id: r.roomId, name: r.roomName ?? r.roomId };
+            return (
+              <tr key={r.id} className="group align-top">
+                <td className={td}>
+                  <Since iso={r.at} format={fmtAgo} />
+                </td>
+                <td className={td}>
+                  <div className="flex flex-col items-start gap-1.5">
+                    <span className="font-medium text-fg">{room.name}</span>
+                    <QualityBtn room={room} onInspect={() => onInspect(room)} />
+                  </div>
+                </td>
+                <td className={td}>
+                  <UserCell person={r.reporter} />
+                </td>
+                <td className={td}>
+                  <b className="text-fg">{PROBLEM_CATEGORY_LABELS[r.category]}</b>
+                  {r.stream && <span className="text-subtle"> · {r.stream.username}'s screen</span>}
+                  {r.note && <p className="m-0 mt-1 text-fg-muted break-words">{r.note}</p>}
+                </td>
+                <td className={`${td} max-w-[420px]`}>
+                  <SnapshotsCell report={r} />
+                </td>
+              </tr>
+            );
+          })}
+          {reports.length === 0 && (
+            <EmptyRow cols={5}>{isError ? "reports unavailable" : "no reports yet"}</EmptyRow>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+};
 
 const BanStatus = ({ ban }: { ban: AdminUserRow["ban"] }) =>
   ban ? (
@@ -945,6 +1063,17 @@ function AdminPage() {
             <RoomQualityPanel key={quality.id} roomId={quality.id} />
           </section>
         )}
+
+        <SectionHead
+          title="recent reports"
+          sub="problems people flagged in a room · newest first · kept 90 days"
+          dot="live"
+          size="sm"
+          className="mt-6"
+        />
+        <div className={`${card} overflow-hidden`}>
+          <RecentReportsTable onInspect={setQuality} />
+        </div>
 
         <SectionHead title="users" sub="search · ban and unban" size="sm" className="mt-6" />
         <div className={`${card} overflow-hidden`}>

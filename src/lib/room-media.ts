@@ -13,13 +13,15 @@
  * arriving late restarts the pairs that failed on STUN. Each pair's connection events (states,
  * restarts, path, negotiation errors) go to the room timeline in batches
  * (./connection-reporter.ts), and its quality telemetry to the server in batches
- * (./quality-telemetry.ts).
+ * (./quality-telemetry.ts). When the server asks (`snapshot.request`, a problem report), the
+ * page's current numbers go the same way as one more connection event.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getConnectionReporter } from "./connection-report";
 import { keepIceServersFresh } from "./ice";
 import { getIceServersFn } from "./ice.functions";
 import { Mesh, type PeerQuality, type PeerState, type QualityView } from "./mesh";
+import { browserOf, buildSnapshot, type ReportSnapshot } from "./problem-report";
 import { QualityReporter, sampleWindowMs } from "./quality-telemetry";
 import { reportQualityFn } from "./quality-telemetry.functions";
 import type { MediaSlot, RoomParticipant } from "./realtime";
@@ -44,6 +46,8 @@ export interface RoomMesh {
   streamQuality: (userId: string) => QualityView | undefined;
   /** Read that pair now, so an open modal stays current (about once a second). */
   refreshQuality: (userId: string) => Promise<void>;
+  /** This page's numbers and pair states now, for a problem report (./problem-report.ts). */
+  snapshot: () => ReportSnapshot;
 }
 
 /** What this page sends everyone (null: nothing). */
@@ -125,6 +129,13 @@ export function useRoomMesh(
     const unsubscribeSocket = client.subscribe((message) => {
       if (message.type === "signal" && message.roomId === roomId) {
         current.receive(message.from, message.payload);
+      } else if (message.type === "snapshot.request" && message.roomId === roomId) {
+        // Someone reported a problem: quietly send this page's numbers as they are now, through
+        // the batched connection events (ADR 4 addendum on problem reports). Nothing is shown.
+        getConnectionReporter().add(
+          { kind: "report_snapshot", reportId: message.reportId, ...snapshotOf(current, meId) },
+          roomId,
+        );
       } else if (message.type === "room.snapshot" && message.roomId === roomId) {
         // Back in the room after a reconnect: the client re-joins right after `welcome`, and
         // the server handles a socket's messages in order, so what is sent from here is relayed.
@@ -198,7 +209,41 @@ export function useRoomMesh(
     await mesh.current?.refreshQuality(userId);
   }, []);
 
-  return { remote, states, shareAudio, retry, quality, streamQuality, refreshQuality };
+  // This page's snapshot for a problem report it makes itself (it is sent with the report).
+  const snapshot = useCallback(
+    () => (meId && mesh.current ? snapshotOf(mesh.current, meId) : EMPTY_SNAPSHOT()),
+    [meId],
+  );
+
+  return { remote, states, shareAudio, retry, quality, streamQuality, refreshQuality, snapshot };
+}
+
+const EMPTY_SNAPSHOT = (): ReportSnapshot =>
+  buildSnapshot({
+    meId: "",
+    views: [],
+    peers: [],
+    browser: browserOf(navigator.userAgent),
+    now: 0,
+  });
+
+/**
+ * What this page's `mesh` shows now, for a problem report (./problem-report.ts): the quality
+ * modal's view of every share it receives and of its own, and each pair's state.
+ */
+function snapshotOf(mesh: Mesh, meId: string): ReportSnapshot {
+  const peers = mesh.peers();
+  const views = [meId, ...peers.map((peer) => peer.userId)].flatMap((userId) => {
+    const view = mesh.streamQuality(userId);
+    return view ? [view] : [];
+  });
+  return buildSnapshot({
+    meId,
+    views,
+    peers: peers.map(({ userId, state }) => ({ userId, state })),
+    browser: browserOf(navigator.userAgent),
+    now: Date.now(),
+  });
 }
 
 /** Tell `mesh` whose cameras (of everyone else in `roster`) this page is showing. */

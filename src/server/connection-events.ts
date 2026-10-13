@@ -32,6 +32,7 @@ import {
   type ReportConnectionEventsInput,
   reportConnectionEventsInput,
 } from "../lib/connection-events.ts";
+import { MAX_SNAPSHOT_DETAILS_BYTES } from "../lib/problem-report.ts";
 import { boundDetails, type TimelineEventRow } from "../lib/room-timeline.ts";
 import {
   type Caller,
@@ -48,6 +49,7 @@ import {
   timedWrite,
 } from "./log-events.ts";
 import { forgetIdle, withinRateLimit } from "./rate-limit.ts";
+import { getReportSnapshots, type ReportSnapshots } from "./report-snapshots.ts";
 import { isSameOrigin, readBodyCapped } from "./thumbnails.ts";
 
 /**
@@ -83,6 +85,8 @@ export interface ConnectionEventServiceOptions {
   clock?: Clock;
   /** Whether a signed-in caller may enter the live room (`mayEnterRoom`). */
   mayEnter?: (caller: SignedInCaller, roomId: string) => Promise<boolean>;
+  /** The snapshots a problem report asked for (./report-snapshots.ts). Defaults to the server's. */
+  snapshots?: ReportSnapshots;
 }
 
 /** One person's drops that no marker has recorded yet. */
@@ -98,6 +102,7 @@ export class ConnectionEventService {
   readonly #db: Db;
   readonly #clock: Clock;
   readonly #mayEnter: NonNullable<ConnectionEventServiceOptions["mayEnter"]>;
+  readonly #snapshots: ReportSnapshots;
   /** When each person's reports arrived (epoch ms, oldest first). */
   readonly #batches = new Map<string, number[]>();
   /** When each person's stored events were reported (epoch ms, oldest first, one per event). */
@@ -110,6 +115,7 @@ export class ConnectionEventService {
     this.#clock = options.clock ?? systemClock;
     this.#mayEnter =
       options.mayEnter ?? ((caller, roomId) => mayEnterRoom(this.#db, caller, roomId));
+    this.#snapshots = options.snapshots ?? getReportSnapshots();
   }
 
   /**
@@ -179,22 +185,47 @@ export class ConnectionEventService {
     const happened = (e: ConnectionEventInput) =>
       now.getTime() - Math.min(Math.max(e.ageMs, 0), MAX_EVENT_AGE_MS);
     // The pre-join is the one place a device can fail before the caller is in the room.
-    const lobby = events.some((e) => !("peerId" in e) && !wasIn(reporter, happened(e)));
+    const lobby = events.some((e) => e.kind === "device_error" && !wasIn(reporter, happened(e)));
     const mayEnter = lobby ? await this.#mayEnter(caller, roomId) : false;
     const verdict = (e: ConnectionEventInput): "ok" | "not_in_room" | "peer_not_in_room" => {
       const at = happened(e);
+      if (e.kind === "report_snapshot") return wasIn(reporter, at) ? "ok" : "not_in_room";
       if (!("peerId" in e)) return wasIn(reporter, at) || mayEnter ? "ok" : "not_in_room";
       if (!wasIn(reporter, at)) return "not_in_room";
       return e.peerId !== reporter && wasIn(e.peerId, at) ? "ok" : "peer_not_in_room";
     };
     const verdicts = events.map(verdict);
-    const allowed = events.filter((_, i) => verdicts[i] === "ok");
+    const permitted = events.filter((_, i) => verdicts[i] === "ok");
     for (const reason of ["not_in_room", "peer_not_in_room"] as const) {
       const count = verdicts.filter((v) => v === reason).length;
       if (count > 0) {
         logReportDropped("connection_event", reason, { userId: reporter, roomId, events: count });
       }
     }
+    // A snapshot is taken only for one the server asked for, once from each person (a problem
+    // report's, ADR 4 addendum); the place is given back if it ends up not stored.
+    const claimed = new Set<ConnectionEventInput>();
+    const allowed = permitted.filter((e) => {
+      if (e.kind !== "report_snapshot") return true;
+      if (!this.#snapshots.claim(roomId, reporter, e.reportId, now)) return false;
+      claimed.add(e);
+      return true;
+    });
+    const unasked = permitted.length - allowed.length;
+    if (unasked > 0) {
+      logReportDropped("connection_event", "snapshot_not_asked", {
+        userId: reporter,
+        roomId,
+        events: unasked,
+      });
+    }
+    const unclaim = (stored: readonly ConnectionEventInput[]) => {
+      for (const e of claimed) {
+        if (e.kind === "report_snapshot" && !stored.includes(e)) {
+          this.#snapshots.release(roomId, reporter, e.reportId);
+        }
+      }
+    };
     if (allowed.length === 0) return { stored: 0, dropped: 0 };
 
     // The cap: the first events that fit are kept, the rest dropped.
@@ -217,6 +248,7 @@ export class ConnectionEventService {
       });
       this.#drop(reporter, roomId, dropped, now);
     }
+    unclaim(kept);
     if (kept.length === 0) return { stored: 0, dropped };
 
     const rows = kept.map((e) => rowOf(roomId, reporter, e, now));
@@ -229,6 +261,7 @@ export class ConnectionEventService {
     } catch (error) {
       // The allowance is for events that were stored: give it back so a retry can have it.
       this.#refund(recent, now.getTime(), kept.length);
+      unclaim([]);
       logTimelineWriteFailed(
         error,
         { userId: reporter, roomId, events: rows.length },
@@ -321,7 +354,10 @@ function rowOf(
     kind,
     actorUserId: reporter,
     targetUserId: peerId,
-    details: boundDetails(details as TimelineEventRow["details"]),
+    details: boundDetails(
+      details as TimelineEventRow["details"],
+      kind === "report_snapshot" ? MAX_SNAPSHOT_DETAILS_BYTES : undefined,
+    ),
   };
 }
 

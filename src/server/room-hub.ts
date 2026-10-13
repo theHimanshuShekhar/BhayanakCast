@@ -617,6 +617,24 @@ export class RoomHub {
   }
 
   /**
+   * A problem was reported in `roomId` (ADR 4 addendum on problem reports): quietly ask everyone
+   * in it but `exceptUserId` for a snapshot named `reportId` (`snapshot.request`). Not a room
+   * event or a feed entry; someone in their reconnect grace has no socket and is skipped.
+   * Resolves with how many were asked.
+   */
+  requestSnapshots(roomId: string, reportId: string, exceptUserId: string): Promise<number> {
+    let asked = 0;
+    return this.#enqueue(() => {
+      const room = this.#rooms.get(roomId);
+      for (const participant of room?.participants.values() ?? []) {
+        if (participant.userId === exceptUserId || participant.connection.closed) continue;
+        this.#send(participant.connection, { type: "snapshot.request", roomId, reportId });
+        asked++;
+      }
+    }).then(() => asked);
+  }
+
+  /**
    * An admin promoted `userId` to admin or demoted them (ADR 6 addendum): their open sockets
    * gain or lose admin powers from their next message, without reconnecting, and so does their
    * place in a room while they're in their reconnect grace (ADR 15). A new admin in a

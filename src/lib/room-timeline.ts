@@ -62,6 +62,11 @@ export const TIMELINE_EVENT_KINDS = [
   "audio_blocked",
   /** A person went over their cap of reported events; `details.count` were not recorded. */
   "events_dropped",
+  // Problem reports (ADR 4 addendum): the actor is the reporter and the target the stream's owner.
+  /** Someone reported a problem: `details` has `reportId`, `category`, `note` and `snapshot`. */
+  "problem_report",
+  /** A browser's snapshot for a report: `details.reportId` ties it to the report's `snapshot`. */
+  "report_snapshot",
 ] as const;
 export type TimelineEventKind = (typeof TIMELINE_EVENT_KINDS)[number];
 
@@ -150,7 +155,10 @@ export interface RoomTimeline {
  * `details` as it will be stored: unchanged if small enough, else `{ truncated: true }`, so a
  * row can never grow without bound whatever a call site passes.
  */
-export function boundDetails(details: TimelineDetails): TimelineDetails {
+export function boundDetails(
+  details: TimelineDetails,
+  max = MAX_TIMELINE_DETAILS_BYTES,
+): TimelineDetails {
   const bytes = new TextEncoder().encode(JSON.stringify(details)).length;
-  return bytes > MAX_TIMELINE_DETAILS_BYTES ? { truncated: true } : details;
+  return bytes > max ? { truncated: true } : details;
 }

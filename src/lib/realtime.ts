@@ -596,6 +596,19 @@ export const signalRelayMessage = z.object({
   payload: signalPayload,
 });
 
+/**
+ * A problem was reported in the room (ADR 4 addendum on problem reports): send a snapshot of your
+ * connections now. Sent quietly to everyone in the room but the reporter, at most once a minute
+ * per room; `reportId` names the snapshot, and goes back with the browser's `report_snapshot`
+ * connection event (src/lib/connection-events.ts). Nothing appears in the room or its feed, and
+ * a client that does not know it ignores it.
+ */
+export const snapshotRequestMessage = z.object({
+  type: z.literal("snapshot.request"),
+  roomId,
+  reportId: z.string().min(1).max(64),
+});
+
 /** A new feed entry, sent to everyone in the room. */
 export const feedEntryMessage = z.object({
   type: z.literal("feed.entry"),
@@ -720,6 +733,7 @@ export const serverMessage = z.discriminatedUnion("type", [
   knockPendingMessage,
   knockResolvedMessage,
   knockStatusMessage,
+  snapshotRequestMessage,
 ]);
 export type ServerMessage = z.infer<typeof serverMessage>;
 export type ServerMessageType = ServerMessage["type"];

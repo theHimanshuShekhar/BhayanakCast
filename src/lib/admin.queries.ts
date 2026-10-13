@@ -14,6 +14,7 @@ import {
   listAdminLiveRoomsFn,
   listAdminRecentRoomsFn,
   listAdminUsersFn,
+  listRecentReportsFn,
 } from "./admin.functions";
 import { STATS_REFRESH_MS } from "./profiles";
 import type { PairTimelineInput } from "./quality-admin";
@@ -34,6 +35,7 @@ export const adminKeys = {
   recent: () => [...adminKeys.all, "recent"] as const,
   recentPage: (input: ListAdminRecentRoomsInput) => [...adminKeys.recent(), input] as const,
   turnUsage: () => [...adminKeys.all, "turn-usage"] as const,
+  reports: () => [...adminKeys.all, "reports"] as const,
   roomQuality: (roomId: string) => [...adminKeys.all, "quality", roomId] as const,
   pairTimeline: (input: PairTimelineInput) =>
     [...adminKeys.all, "quality", input.roomId, input] as const,
@@ -42,6 +44,15 @@ export const adminKeys = {
   users: () => [...adminKeys.all, "users"] as const,
   usersPage: (input: ListAdminUsersInput) => [...adminKeys.users(), input] as const,
 };
+
+/** The problem reports across rooms, newest first (CONTEXT.md, Problem report). */
+export const recentReportsQuery = () =>
+  queryOptions({
+    queryKey: adminKeys.reports(),
+    queryFn: () => listRecentReportsFn(),
+    // Reports arrive while the page is open; there is no push alert yet.
+    refetchInterval: STATS_REFRESH_MS,
+  });
 
 /** A room's video quality pairs (samples are kept 90 days, past the room's own 30). */
 export const roomQualityQuery = (roomId: string) =>

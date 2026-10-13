@@ -20,6 +20,8 @@ import { failureText, Lobby } from "~/components/room/lobby";
 import { PeerAudio } from "~/components/room/peer-audio";
 import { QualityDebug } from "~/components/room/quality-debug";
 import { QualityModal } from "~/components/room/quality-modal";
+import { ReportProblemSheet, useProblemReporter } from "~/components/room/report-problem";
+import { RoomToasts } from "~/components/room/room-toasts";
 import { RoomSide } from "~/components/room/side-panel";
 import { isModerator, type ModAction, Tile } from "~/components/room/tile";
 import { Btn, Chip } from "~/components/ui";
@@ -224,6 +226,7 @@ function RoomInfoMenu({
   canInvite,
   canRegenerate,
   onInviteResult,
+  onReport,
   compact = false,
 }: {
   roomId: string;
@@ -232,6 +235,8 @@ function RoomInfoMenu({
   canInvite: boolean;
   canRegenerate: boolean;
   onInviteResult: (notice: { message: string }) => void;
+  /** Opens the report-a-problem form; absent until the person is in the room. */
+  onReport?: () => void;
   compact?: boolean;
 }) {
   const trigger = (
@@ -303,6 +308,11 @@ function RoomInfoMenu({
             {canRegenerate && (
               <Menu.Item onClick={() => void regenerateInvite()} className={itemCls}>
                 <Icon.Lock size={13} /> regenerate invite link
+              </Menu.Item>
+            )}
+            {onReport && (
+              <Menu.Item onClick={onReport} className={itemCls}>
+                <Icon.Activity size={13} /> report a problem
               </Menu.Item>
             )}
           </Menu.Popup>
@@ -625,6 +635,9 @@ function RoomPage({
   useEffect(() => {
     if (!qualityShared) setQualityId(null);
   }, [qualityShared]);
+  // Reporting a problem (ADR 4 addendum): from a stream's quality modal, or the room info menu.
+  const reporter = useProblemReporter(detail.id, mesh.snapshot);
+  const [reporting, setReporting] = useState(false);
   const [volumes, setVolumes] = useState<Record<string, number>>({});
   const [shareVolumes, setShareVolumes] = useState<Record<string, number>>({});
   const onShareVolume = useCallback(
@@ -952,7 +965,13 @@ function RoomPage({
           names={nameOf}
           read={mesh.streamQuality}
           refresh={mesh.refreshQuality}
+          reporter={joined ? reporter : undefined}
           onClose={() => setQualityId(null)}
+        />
+        <ReportProblemSheet
+          open={reporting}
+          onClose={() => setReporting(false)}
+          reporter={reporter}
         />
         {Object.entries(mesh.remote).map(
           ([userId, tracks]) =>
@@ -992,6 +1011,7 @@ function RoomPage({
               canInvite={isPrivate && joined && isModerator(myRole, admin)}
               canRegenerate={isPrivate && joined && myRole === "host"}
               onInviteResult={setInviteResult}
+              onReport={joined ? () => setReporting(true) : undefined}
             />
           </div>
 
@@ -1086,6 +1106,7 @@ function RoomPage({
               canInvite={isPrivate && joined && isModerator(myRole, admin)}
               canRegenerate={isPrivate && joined && myRole === "host"}
               onInviteResult={setInviteResult}
+              onReport={joined ? () => setReporting(true) : undefined}
             />
             {settings.showChat && (
               <ControlBtn
@@ -1140,6 +1161,7 @@ function RoomPage({
 
       <LeaveGuard roomId={detail.id} active={joined && !out} sentHome={live.ended} />
       {isPrivate && <KnockToasts roomId={detail.id} />}
+      <RoomToasts />
       <DeviceLossNotice onRestored={(kind) => setMedia((m) => ({ ...m, [kind]: true }))} />
       {settings.showChat && (
         <RoomSide

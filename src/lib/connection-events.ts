@@ -15,6 +15,7 @@
  */
 import { z } from "zod";
 import { CANDIDATE_TYPES, type IcePath, isRelayed, RELAY_PROTOCOLS } from "./ice.ts";
+import { reportSnapshot } from "./problem-report.ts";
 
 /** Events in one report: a full room's worth of pairs coming up, and some to spare. */
 export const CONNECTION_BATCH_MAX = 50;
@@ -122,6 +123,17 @@ export const connectionEvent = z.discriminatedUnion("kind", [
     ageMs,
     source: z.enum(AUDIO_SOURCES),
   }),
+  /**
+   * This browser's snapshot for a problem report (ADR 4 addendum on problem reports), asked for
+   * by the room socket's `snapshot.request`; `reportId` ties it to the report. Not about one
+   * pair, so it has no `peerId`.
+   */
+  z.strictObject({
+    kind: z.literal("report_snapshot"),
+    ageMs,
+    reportId: z.string().min(1).max(64),
+    ...reportSnapshot.shape,
+  }),
 ]);
 export type ConnectionEventInput = z.input<typeof connectionEvent>;
 /** The event kinds a page reports. */
@@ -176,9 +188,13 @@ const IPV6 = /(?:[0-9a-f]{1,4}:){3,7}[0-9a-f]{0,4}|(?:[0-9a-f]{1,4}:){1,6}:[0-9a
 /**
  * `text` made fit for the timeline: the strings in `secrets` (device labels and ids the page
  * knows) replaced by `[device]`, then anything shaped like a device id or an IP address, on one
- * line, cut to `MAX_ERROR_MESSAGE` characters.
+ * line, cut to `max` characters (`MAX_ERROR_MESSAGE`, or a problem report note's own limit).
  */
-export function cleanMessage(text: string, secrets: readonly string[] = []): string {
+export function cleanMessage(
+  text: string,
+  secrets: readonly string[] = [],
+  max: number = MAX_ERROR_MESSAGE,
+): string {
   let out = text;
   // Longest first, so a label that contains another is replaced whole.
   for (const secret of [...secrets]
@@ -192,7 +208,7 @@ export function cleanMessage(text: string, secrets: readonly string[] = []): str
     .replace(ID_LIKE, "[id]")
     .replace(/\s+/g, " ")
     .trim()
-    .slice(0, MAX_ERROR_MESSAGE);
+    .slice(0, max);
 }
 
 /** An error's name and cleaned message; anything that isn't an `Error` is just `Error`. */

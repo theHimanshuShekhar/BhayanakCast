@@ -12,7 +12,8 @@ import { causeText, reasonText, type StepReason } from "~/lib/quality-reason";
 import { fmtMbps, Key, Panel } from "../chart-parts";
 import { Sheet } from "../overlays";
 import { TimelineChart, type TimelineSeries } from "../timeline-chart";
-import { Chip, MonoCaps } from "../ui";
+import { Btn, Chip, MonoCaps } from "../ui";
+import { InlineReportForm, type ProblemReporter } from "./report-problem";
 
 const VIZ = "var(--color-viz-1)";
 /** How long after one refresh finishes the next starts. */
@@ -89,6 +90,7 @@ export function QualityModal({
   names,
   read,
   refresh,
+  reporter,
   onClose,
 }: {
   /** Whose stream (the streamer's user id), or null when closed. */
@@ -98,9 +100,14 @@ export function QualityModal({
   names: Readonly<Record<string, string>>;
   read: (userId: string) => QualityView | undefined;
   refresh: (userId: string) => Promise<void>;
+  /** Sends a problem report about this stream (#117); without it there is no report button. */
+  reporter?: ProblemReporter;
   onClose: () => void;
 }) {
   const view = useQualityView(userId, read, refresh);
+  const [reporting, setReporting] = useState(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: closes the form for another stream
+  useEffect(() => setReporting(false), [userId]);
   const yours = userId !== null && userId === meId;
   const name = (id: string) => names[id] ?? "someone";
   return (
@@ -125,6 +132,28 @@ export function QualityModal({
         <p className="m-0 text-[12.5px] text-muted">
           {yours ? "you're not sharing right now." : "not connected to them right now."}
         </p>
+      )}
+      {userId !== null && reporter && (
+        <section aria-label="report a problem with this stream" className="flex flex-col gap-3">
+          {reporting ? (
+            <InlineReportForm
+              reporter={reporter}
+              streamUserId={userId}
+              onDone={() => setReporting(false)}
+            />
+          ) : (
+            <div className="flex items-center justify-between gap-3 pt-3 border-t border-dashed border-border-subtle">
+              <span className="text-[11.5px] text-muted">
+                {reporter.blocked
+                  ? "you just sent a report. try again in a minute."
+                  : "does this look wrong?"}
+              </span>
+              <Btn size="sm" disabled={reporter.blocked} onClick={() => setReporting(true)}>
+                report a problem
+              </Btn>
+            </div>
+          )}
+        </section>
       )}
     </Sheet>
   );
