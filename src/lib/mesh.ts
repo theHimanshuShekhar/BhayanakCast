@@ -70,6 +70,18 @@
  * Local tracks belong to the caller (./local-media.ts): the Mesh never stops them.
  */
 import { localVideoCodecs, orderCodecs, type VideoCodecs } from "./codecs";
+import {
+  type ConnectionEvent,
+  type NegotiationStep,
+  negotiationEvent,
+  pairStateEvent,
+  pathEvent,
+  pathKey,
+  type RestartKind,
+  type RestartReason,
+  recoveryEvent,
+  restartEvent,
+} from "./connection-events";
 import { hasTurn, type IcePath, icePathOf, isRelayed, STUN_SERVERS } from "./ice";
 import {
   aboveCeiling,
@@ -272,6 +284,12 @@ export interface MeshOptions {
   onQuality?: (sample: PendingSample) => void;
   /** How long a telemetry window runs. Defaults to `SAMPLE_WINDOW_MS`. */
   sampleWindowMs?: number;
+  /**
+   * What happens to each pair, for the room timeline (ADR 3 addendum): every connection state,
+   * ICE restart or start-over and whether it recovered, the path when the pair connects and when
+   * it changes, and negotiation errors. Without it nothing is collected.
+   */
+  onReport?: (event: ConnectionEvent) => void;
   /** How long a sender's first minute lasts (`paceOf`). Defaults to `FIRST_MINUTE_MS`. For tests. */
   firstMinuteMs?: number;
   /** For tests. */
@@ -526,6 +544,10 @@ interface Link {
   restarted: boolean;
   /** It replaces a connection that never negotiated (see `#failed`). */
   startedOver: boolean;
+  /** The restart or start-over that hasn't yet connected or given up, for the room timeline. */
+  attempt?: { how: RestartKind; since: number };
+  /** The path last reported (`pathKey`), to see when it changes. */
+  pathKey?: string;
   /** The video codecs the peer can decode, once it has said. */
   remoteCodecs?: string[];
   /** Where each of this side's video senders is on its ladder. */
@@ -556,6 +578,7 @@ export class Mesh {
   readonly #degradation = new WeakMap<RTCRtpSender, RTCDegradationPreference>();
   /** Undefined without `onQuality`. */
   readonly #telemetry: QualityCollector | undefined;
+  readonly #onReport: MeshOptions["onReport"];
   readonly #links = new Map<string, Link>();
   readonly #listeners = new Set<(event: MeshEvent) => void>();
   readonly #local: Partial<Record<MediaSlot, MediaStreamTrack | null>> = {};
@@ -579,6 +602,7 @@ export class Mesh {
     this.#codecs = options.codecs ?? localVideoCodecs();
     this.#firstMinuteMs = options.firstMinuteMs ?? FIRST_MINUTE_MS;
     this.#budget = new UplinkBudget(options.uplink ?? INITIAL_UPLINK);
+    this.#onReport = options.onReport;
     if (options.onQuality) {
       this.#telemetry = new QualityCollector({
         emit: options.onQuality,
