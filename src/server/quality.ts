@@ -18,6 +18,8 @@ import {
 } from "../lib/quality-telemetry.ts";
 import { type Caller, requireSignedIn } from "./caller.ts";
 import { type Clock, systemClock } from "./clock.ts";
+import { logReportDropped, timedWrite } from "./log-events.ts";
+import { log } from "./logger.ts";
 import { forgetIdle, withinRateLimit } from "./rate-limit.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -64,8 +66,17 @@ export class QualityService {
     userAgent: string,
   ): Promise<QualityReportResult> {
     requireSignedIn(caller);
-    const { roomId, samples } = reportQualityInput.parse(input);
     const reporter = caller.user.id;
+    const parsed = reportQualityInput.safeParse(input);
+    if (!parsed.success) {
+      const named = (input as { roomId?: unknown } | null)?.roomId;
+      logReportDropped("quality", "invalid", {
+        userId: reporter,
+        roomId: typeof named === "string" ? named : undefined,
+      });
+      throw parsed.error;
+    }
+    const { roomId, samples } = parsed.data;
     const now = this.#clock.now();
     // A report within the allowance counts all its rows, before the room is looked at: rows that
     // turn out unauthorised (the caller or a peer isn't in the room) count though they aren't
@@ -73,6 +84,11 @@ export class QualityService {
     const { rows: max, windowMs } = QUALITY_ROW_RATE_LIMIT;
     forgetIdle(this.#sent, windowMs, now);
     if (!withinRateLimit(this.#sent, reporter, max, windowMs, now, samples.length)) {
+      logReportDropped("quality", "over_limit", {
+        userId: reporter,
+        roomId,
+        rows: samples.length,
+      });
       return { stored: 0 };
     }
 
@@ -92,7 +108,14 @@ export class QualityService {
       );
     const inRoom = new Set(present.map((p) => p.userId));
     const kind = present[0]?.kind;
-    if (!kind || !inRoom.has(reporter)) return { stored: 0 };
+    if (!kind || !inRoom.has(reporter)) {
+      logReportDropped("quality", "not_in_room", {
+        userId: reporter,
+        roomId,
+        rows: samples.length,
+      });
+      return { stored: 0 };
+    }
 
     const browser = browserOf(userAgent);
     const rows = samples
@@ -108,8 +131,23 @@ export class QualityService {
         browser: browser.name,
         browserMajor: browser.major,
       }));
+    const droppedRows = samples.length - rows.length;
+    if (droppedRows > 0) {
+      // Rows about a peer who left since the page measured them, or about the reporter themselves.
+      logReportDropped("quality", "peer_not_in_room", {
+        userId: reporter,
+        roomId,
+        rows: droppedRows,
+      });
+    }
     if (rows.length === 0) return { stored: 0 };
-    await this.#db.insert(qualitySamples).values(rows);
+    const who = { userId: reporter, roomId, rows: rows.length };
+    try {
+      await timedWrite("quality.insert", () => this.#db.insert(qualitySamples).values(rows), who);
+    } catch (error) {
+      log.error("quality.write_failed", "storing quality samples failed", { ...who, err: error });
+      throw error;
+    }
     return { stored: rows.length };
   }
 }

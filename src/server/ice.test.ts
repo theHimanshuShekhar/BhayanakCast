@@ -14,6 +14,14 @@ import {
   TURN_REFRESH_MARGIN_S,
   type TurnProvider,
 } from "./ice.ts";
+import { LOG_SAMPLE_LIMIT } from "./logger.ts";
+import { type CapturedLogs, captureLogs } from "./test-logs.ts";
+
+let logs: CapturedLogs;
+beforeEach(() => {
+  logs = captureLogs();
+});
+afterEach(() => logs.restore());
 
 const visitor: Caller = { user: null, role: "visitor" };
 const asUser = (id: string): Caller => ({ user: { id, username: id, image: null }, role: "user" });
@@ -41,14 +49,8 @@ function setup(
     roomId === "r1" || roomId === "r2",
 ) {
   const clock = new FakeClock();
-  const lines: { line: string; error?: unknown }[] = [];
-  const service = new IceService({
-    turn,
-    mayEnter,
-    clock,
-    log: (line, error) => lines.push({ line, error }),
-  });
-  return { clock, lines, service };
+  const service = new IceService({ turn, mayEnter, clock });
+  return { clock, service };
 }
 
 const username = (servers: RTCIceServer[]) => servers.find((s) => s.username)?.username;
@@ -94,17 +96,19 @@ describe("ICE servers", () => {
   it("fall back to STUN, logged, when minting fails, and try again next time", async () => {
     const turn = fakeTurn();
     turn.failing = true;
-    const { lines, service } = setup(turn);
+    const { service } = setup(turn);
     expect(await service.serversFor(asUser("ana"), "r1")).toEqual({
       iceServers: STUN_SERVERS,
       refreshInSeconds: 60,
     });
-    expect(lines).toEqual([
-      {
-        line: expect.stringContaining("minting TURN credentials failed"),
-        error: expect.any(Error),
-      },
-    ]);
+    expect(logs.entries).toHaveLength(1);
+    expect(logs.entries[0]).toMatchObject({
+      level: "warn",
+      event: "ice.mint_failed",
+      userId: "ana",
+      roomId: "r1",
+      err: { message: "cloudflare down" },
+    });
     turn.failing = false;
     expect(username((await service.serversFor(asUser("ana"), "r1")).iceServers)).toBe("u2");
   });
@@ -303,20 +307,23 @@ describe("ICE reports", () => {
   };
 
   it("are logged without who sent them, for signed-in callers only", () => {
-    const { lines, service } = setup();
+    const { service } = setup();
     expect(() => service.report(visitor, report)).toThrow(SignInRequiredError);
     expect(service.report(asUser("ana"), report)).toBe(true);
-    expect(lines).toEqual([{ line: `[ice] ${JSON.stringify(report)}` }]);
-    expect(lines[0]?.line).not.toContain("ana");
+    expect(logs.entries).toHaveLength(1);
+    expect(logs.entries[0]).toMatchObject({ level: "info", event: "ice.report", ...report });
+    expect(logs.lines[0]).not.toContain("ana");
   });
 
   it("are dropped over the rate limit, per user, until the window passes", () => {
-    const { clock, lines, service } = setup();
+    const { clock, service } = setup();
     for (let i = 0; i < ICE_REPORT_RATE_LIMIT.reports; i++) service.report(asUser("ana"), report);
     expect(service.report(asUser("ana"), report)).toBe(false);
     expect(service.report(asUser("bo"), report)).toBe(true);
     clock.advance(ICE_REPORT_RATE_LIMIT.windowMs);
     expect(service.report(asUser("ana"), report)).toBe(true);
-    expect(lines).toHaveLength(ICE_REPORT_RATE_LIMIT.reports + 2);
+    // Accepted reports are logged, apart from what the logger's sampling holds back: ana's first
+    // LOG_SAMPLE_LIMIT in the minute, and bo's one.
+    expect(logs.all("ice.report")).toHaveLength(LOG_SAMPLE_LIMIT + 1);
   });
 });

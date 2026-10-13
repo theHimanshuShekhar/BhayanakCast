@@ -9,6 +9,7 @@ import { attachRealtime } from "./realtime.ts";
 import { type RealtimeHarness, startRealtimeHarness, type TestUser } from "./realtime-harness.ts";
 import { RoomHub } from "./room-hub.ts";
 import { createDbRoomStore } from "./room-store.ts";
+import { captureLogs } from "./test-logs.ts";
 
 let h: RealtimeHarness;
 let ana: TestUser;
@@ -122,7 +123,7 @@ describe("upgrade", () => {
   });
 
   it("drops the socket cleanly when setting it up throws after the handshake", async () => {
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const logs = captureLogs();
     vi.spyOn(RoomHub.prototype, "connect").mockImplementationOnce(() => {
       throw new Error("boom");
     });
@@ -138,23 +139,27 @@ describe("upgrade", () => {
     });
     // A 500 written into the open stream would show up as a frame error.
     expect(events).toEqual(["open", "close 1006"]);
-    expect(error).toHaveBeenCalledWith(
-      expect.stringContaining("serving a new socket failed"),
-      expect.objectContaining({ message: "boom" }),
-    );
+    expect(logs.find("socket.serve_failed")).toMatchObject({
+      level: "error",
+      msg: expect.stringContaining("serving a new socket failed"),
+      err: { message: "boom" },
+    });
+    logs.restore();
     await expectStillServing();
   });
 
   it("logs a throw on the upgrade path, answers 500, and keeps serving", async () => {
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const logs = captureLogs();
     vi.spyOn(WebSocketServer.prototype, "handleUpgrade").mockImplementationOnce(() => {
       throw new Error("boom");
     });
     expect(await h.upgradeStatus(ana)).toBe(500);
-    expect(error).toHaveBeenCalledWith(
-      expect.stringContaining("handling an upgrade failed"),
-      expect.objectContaining({ message: "boom" }),
-    );
+    expect(logs.find("socket.upgrade_failed")).toMatchObject({
+      level: "error",
+      msg: expect.stringContaining("handling an upgrade failed"),
+      err: { message: "boom" },
+    });
+    logs.restore();
     await expectStillServing();
   });
 });

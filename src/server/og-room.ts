@@ -10,6 +10,7 @@ import type { Db } from "../db/client.ts";
 import { newestThumbnailMs } from "../lib/embed.ts";
 import { discordAvatarUrl } from "../lib/format.ts";
 import type { Caller } from "./caller.ts";
+import { log } from "./logger.ts";
 import { backdropDataUri } from "./og-backdrop.ts";
 import { renderRoomCard } from "./og-card.ts";
 import { getLiveRoom } from "./rooms.ts";
@@ -57,6 +58,15 @@ const AVATAR_PX = 128;
 const AVATAR_MAX_BYTES = 256 * 1024;
 const AVATAR_TIMEOUT_MS = 2000;
 
+/** The card is drawn without the picture; say why (never the picture's address). */
+function avatarFailed(reason: string, err?: unknown): null {
+  log.warn("og.avatar_failed", `link card: the host's picture was left off (${reason})`, {
+    reason,
+    err,
+  });
+  return null;
+}
+
 /** The host's Discord picture as a `data:` URI, or null (none, not Discord's, slow, not PNG/JPEG). */
 export async function fetchAvatar(image: string | null): Promise<string | null> {
   // PNG and JPEG only: resvg can't draw WebP. Discord serves either format by extension.
@@ -68,12 +78,15 @@ export async function fetchAvatar(image: string | null): Promise<string | null> 
       redirect: "error",
     });
     const type = response.headers.get("content-type")?.split(";")[0]?.trim();
-    if (!response.ok || (type !== "image/png" && type !== "image/jpeg")) return null;
+    if (!response.ok) return avatarFailed(`status_${response.status}`);
+    if (type !== "image/png" && type !== "image/jpeg") return avatarFailed("wrong_type");
     const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.byteLength === 0 || bytes.byteLength > AVATAR_MAX_BYTES) return null;
+    if (bytes.byteLength === 0 || bytes.byteLength > AVATAR_MAX_BYTES) {
+      return avatarFailed("wrong_size");
+    }
     return `data:${type};base64,${Buffer.from(bytes).toString("base64")}`;
-  } catch {
-    return null;
+  } catch (error) {
+    return avatarFailed("fetch_failed", error);
   }
 }
 

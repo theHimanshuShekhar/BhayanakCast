@@ -1,0 +1,54 @@
+# The app's stdout (one JSON object per line, src/server/logger.ts) to VictoriaLogs (docs/deploy.md,
+# "Logs"). The shipper reads the Docker socket and finds the app by its compose label; lines
+# written while it is down are not backfilled.
+data_dir: /var/lib/vector
+
+sources:
+  app:
+    type: docker_logs
+    # The label docker-compose.yml puts on `app`, so the project name (set by Dockhand) doesn't matter.
+    include_labels: ["net.bhayanak.cast.logs=app"]
+
+transforms:
+  parse:
+    type: remap
+    inputs: [app]
+    source: |
+      # The logger's JSON becomes fields (roomId, userId, level, event, ...). A line that isn't
+      # JSON (a crash before the logger starts, a library's own console output) is kept as text.
+      parsed, err = parse_json(.message)
+      if err == null && is_object(parsed) {
+        . = merge(., object!(parsed))
+      } else {
+        .msg = .message
+      }
+      del(.message)
+      del(.label)
+      del(.source_type)
+      if !exists(.time) {
+        .time = .timestamp
+      }
+
+sinks:
+  victorialogs:
+    type: http
+    inputs: [parse]
+    # Only `container_name` is a stream field: roomId and userId are high-cardinality and stay
+    # ordinary (indexed) fields.
+    uri: "http://victorialogs:9428/insert/jsonline?_stream_fields=container_name&_msg_field=msg&_time_field=time"
+    method: post
+    # VictoriaLogs' basic auth covers inserts too: the same pair as the viewer (stack variables).
+    # Vector 0.57+ expands variables written like this only with
+    # VECTOR_DANGEROUSLY_ALLOW_ENV_VAR_INTERPOLATION=true, which docker-compose.yml sets on this
+    # service; it holds nothing but these two. (It expands them in comments too, so a comment must
+    # not spell the syntax out: that stops Vector with "Missing environment variable".)
+    auth:
+      strategy: basic
+      user: "${LOGS_VIEWER_USER}"
+      password: "${LOGS_VIEWER_PASSWORD}"
+    encoding: { codec: json }
+    framing: { method: newline_delimited }
+    compression: gzip
+    # VictoriaLogs may start after Vector or restart on its own; the disk buffer holds the lines.
+    healthcheck: { enabled: false }
+    buffer: { type: disk, max_size: 268435488 }

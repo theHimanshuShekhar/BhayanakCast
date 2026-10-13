@@ -7,6 +7,7 @@ import {
 } from "./realtime-harness.ts";
 import { RECONNECT_GRACE_MS } from "./room-hub.ts";
 import type { RoomStore } from "./room-store.ts";
+import { captureLogs } from "./test-logs.ts";
 
 // A client that stops reading and a database that stalls (#61): neither may hold up the hub.
 
@@ -101,7 +102,7 @@ describe("a database that stalls", () => {
     const ana = await h.createUser("ana");
     const bo = await h.createUser("bo");
     const roomId = await h.createRoom(ana);
-    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const logs = captureLogs();
     const a = await h.connectAs(ana, { heartbeat: false });
     const b = await h.connectAs(bo);
 
@@ -118,10 +119,14 @@ describe("a database that stalls", () => {
       a.received.findIndex((m) => m.type === "pong"),
     );
     expect((await snapshot).roomId).toBe(roomId);
-    expect(logged).toHaveBeenCalledWith(
-      "[realtime] room.join failed",
-      expect.objectContaining({ cause: expect.objectContaining({ code: "57014" }) }),
-    );
+    expect(logs.find("realtime.error")).toMatchObject({
+      level: "error",
+      msg: "room.join failed",
+      type: "room.join",
+      userId: ana.id,
+      err: { name: expect.any(String) },
+    });
+    logs.restore();
 
     // The failed join left nothing behind: ana can simply try again.
     expect((await a.join(roomId)).roomId).toBe(roomId);

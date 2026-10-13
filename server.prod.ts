@@ -8,7 +8,10 @@
  */
 import { fileURLToPath } from "node:url";
 import { closeDb, getDb } from "./src/db/client.ts";
+import { getCommit, startedAt } from "./src/server/build-info.ts";
+import { installCrashHandlers } from "./src/server/crash-handlers.ts";
 import { env } from "./src/server/env.ts";
+import { log } from "./src/server/logger.ts";
 import { startMaintenance } from "./src/server/maintenance.ts";
 import { createProdServer } from "./src/server/prod-server.ts";
 import { createShutdown } from "./src/server/shutdown.ts";
@@ -31,8 +34,6 @@ const { server, stop } = createProdServer({
 // Daily retention purge + stats roll-up (ADR 11).
 const maintenance = startMaintenance(getDb());
 
-await server.serve();
-
 // `docker stop` sends SIGTERM and kills after 10 s. So: stop the maintenance timer, stop the
 // server (no new connections, realtime sockets closed, which checkpoints each presence interval),
 // end the database pool, whose sockets would keep the process alive, and exit. If a step hangs,
@@ -45,3 +46,16 @@ const shutdown = createShutdown([
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.once(signal, () => void shutdown(signal));
 }
+// An unhandled rejection is logged and the server keeps running. An uncaught exception is logged
+// and the server shuts down the same way (exit 1), and Docker restarts the container.
+installCrashHandlers({ shutdown });
+
+await server.serve();
+
+// The boot line: which build, when it started, on which Node (docs/deploy.md, "Logs"). The commit
+// is also on every line, as its `commit` field.
+log.info("server.boot", `server started, commit ${getCommit().slice(0, 7)}`, {
+  bootTime: startedAt(),
+  node: process.version,
+  port: env.PORT,
+});

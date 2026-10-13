@@ -1,6 +1,7 @@
 version: 2
 
-# Container image pins (issue #83): bumps the digests in the Dockerfiles and docker-compose.yml.
+# Container image pins (issue #83): bumps the digests in the Dockerfiles and docker-compose.yml
+# (which also pins VictoriaLogs, #119).
 # The `npm` and `github-actions` entries (ticket #84) follow the images.
 # Pinned images and how to bump them by hand: docs/deploy.md ("Pinned images").
 updates:
@@ -23,6 +24,12 @@ updates:
       # pg_dump's major must equal the db service's; a major bump moves the data too (ADR 9).
       - dependency-name: postgres
         update-types: ["version-update:semver-major"]
+
+  # vector/Dockerfile: the log shipper's base (ADR 9 addendum).
+  - package-ecosystem: docker
+    directory: /vector
+    schedule:
+      interval: weekly
 
   # docker-compose.yml: the db service's postgres. Keep its digest equal to backup/Dockerfile's;
   # merge the two postgres PRs together.

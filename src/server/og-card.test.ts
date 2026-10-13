@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { backdropDataUri, encodePng } from "./og-backdrop.ts";
 import { drawable, logoPng, nameFontSize, renderRoomCard, renderSiteCard } from "./og-card.ts";
 import { jpegHeader, pngSize, WEBP_64X36 } from "./test-images.ts";
+import { captureLogs } from "./test-logs.ts";
 
 const room = {
   name: "Friday ranked grind",
@@ -89,6 +90,22 @@ describe("a thumbnail as a backdrop", () => {
   it("is null for a WebP that doesn't decode and for another type", async () => {
     expect(await backdropDataUri(new Uint8Array(64).fill(1), "image/webp")).toBeNull();
     expect(await backdropDataUri(WEBP_64X36, "image/gif")).toBeNull();
+  });
+
+  it("logs a WebP that doesn't decode, and says nothing for a type it doesn't draw", async () => {
+    const logs = captureLogs();
+    try {
+      expect(await backdropDataUri(WEBP_64X36, "image/gif")).toBeNull();
+      expect(logs.entries).toEqual([]);
+      expect(await backdropDataUri(new Uint8Array(64).fill(1), "image/webp")).toBeNull();
+      expect(logs.find("og.backdrop_failed")).toMatchObject({
+        level: "warn",
+        mime: "image/webp",
+        err: expect.objectContaining({ message: expect.any(String) }),
+      });
+    } finally {
+      logs.restore();
+    }
   });
 });
 

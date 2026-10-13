@@ -8,6 +8,7 @@ import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { crc32, deflateSync } from "node:zlib";
 import decodeWebp, { init as initWebp } from "@jsquash/webp/decode.js";
+import { log } from "./logger.ts";
 
 const PNG_SIGNATURE = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -66,7 +67,12 @@ export async function backdropDataUri(image: Uint8Array, mime: string): Promise<
     const pixels = await decodeWebp(new Uint8Array(image).buffer);
     const png = encodePng(pixels.width, pixels.height, pixels.data);
     return `data:image/png;base64,${png.toString("base64")}`;
-  } catch {
+  } catch (error) {
+    // The card is drawn without its backdrop.
+    log.warn("og.backdrop_failed", "link card: decoding the thumbnail failed", {
+      mime,
+      err: error,
+    });
     return null;
   }
 }

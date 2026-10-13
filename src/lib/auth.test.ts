@@ -6,6 +6,7 @@ import { DEFAULT_USER_SETTINGS } from "../db/settings.ts";
 import { createTestDb } from "../db/test-db.ts";
 import { CLIENT_IP_HEADER } from "../server/client-ip.ts";
 import { resolveSession } from "../server/session.ts";
+import { type CapturedLogs, captureLogs } from "../server/test-logs.ts";
 import { createAuth } from "./auth.ts";
 import { BANNED_USER_ERROR } from "./ban.ts";
 
@@ -66,6 +67,50 @@ async function roleOf(id: string) {
   const [row] = await db.select({ role: user.role }).from(user).where(eq(user.id, id));
   return row?.role;
 }
+
+describe("sign-in failures and Better Auth errors in the log", () => {
+  let logs: CapturedLogs;
+  beforeEach(() => {
+    logs = captureLogs();
+  });
+  afterEach(() => logs.restore());
+
+  it("logs a Discord callback that doesn't validate, without the OAuth state", async () => {
+    const response = await auth.handler(
+      new Request(
+        `${testEnv.BETTER_AUTH_URL}/api/auth/callback/discord?code=abc&state=oauth-state-9`,
+      ),
+    );
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toContain("error=state_mismatch");
+    expect(logs.find("auth.log")).toMatchObject({
+      level: "error",
+      code: "state_mismatch",
+      msg: expect.stringContaining("state"),
+    });
+    expect(logs.lines.join("")).not.toContain("oauth-state-9");
+  });
+
+  it("logs a refused endpoint call as a warning with its code", async () => {
+    const response = await auth.handler(
+      new Request(`${testEnv.BETTER_AUTH_URL}/api/auth/sign-in/social`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: testEnv.BETTER_AUTH_URL },
+        body: JSON.stringify({ provider: "nope" }),
+      }),
+    );
+    expect(response.status).toBe(404);
+    expect(
+      logs.entries.some((line) => line.event === "auth.log" || line.event === "auth.api_refused"),
+    ).toBe(true);
+  });
+
+  it("says nothing about requests that work", async () => {
+    await auth.handler(new Request(`${testEnv.BETTER_AUTH_URL}/api/auth/get-session`));
+    await testSignInRequest("2000", "ana");
+    expect(logs.entries).toEqual([]);
+  });
+});
 
 describe("auth database hooks", () => {
   it("creates users through the Drizzle adapter with default settings", async () => {

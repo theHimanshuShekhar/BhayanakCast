@@ -10,6 +10,7 @@ dist
 !.env.example
 docs
 e2e
+vector
 test-results
 playwright-report
 blob-report

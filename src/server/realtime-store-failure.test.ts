@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { presenceIntervals, rooms } from "../db/schema/index.ts";
 import type { ServerMessage } from "../lib/realtime.ts";
 import { type RealtimeHarness, startRealtimeHarness, type TestUser } from "./realtime-harness.ts";
@@ -11,6 +11,7 @@ import {
   RETRY_MAX_MS,
 } from "./room-hub.ts";
 import type { RoomStore } from "./room-store.ts";
+import { type CapturedLogs, captureLogs } from "./test-logs.ts";
 
 // A database write that fails must not strand the hub's bookkeeping (#62): leaving and ending a
 // room still do their in-memory follow-ups, an end that didn't land is retried with a backoff,
@@ -21,7 +22,7 @@ let ana: TestUser;
 let bo: TestUser;
 let cy: TestUser;
 let roomId: string;
-let error: MockInstance<typeof console.error>;
+let logs: CapturedLogs;
 
 /** Store method -> how many more of its calls fail (`Infinity`: until cleared). */
 let failing: Map<string, number>;
@@ -29,7 +30,7 @@ let failing: Map<string, number>;
 let calls: Record<string, number>;
 
 beforeEach(async () => {
-  error = vi.spyOn(console, "error").mockImplementation(() => {});
+  logs = captureLogs();
   failing = new Map();
   calls = {};
   h = await startRealtimeHarness({
@@ -58,6 +59,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await h.close();
+  logs.restore();
   vi.restoreAllMocks();
 });
 
@@ -78,7 +80,7 @@ async function roomRow() {
 
 /** Whether the hub logged a failure whose message mentions `text`. */
 const logged = (text: string) =>
-  error.mock.calls.some(([message]) => typeof message === "string" && message.includes(text));
+  logs.entries.some((line) => line.level === "error" && line.msg.includes(text));
 
 /** ana joins and leaves at once, so the room is empty since T0. */
 async function joinAndLeave() {

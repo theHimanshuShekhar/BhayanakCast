@@ -71,6 +71,7 @@ import {
 import { createRoomInput, ROOM_NAME_MAX } from "../lib/rooms.ts";
 import type { Caller, SignedInCaller } from "./caller.ts";
 import type { Clock, Timer } from "./clock.ts";
+import { type LogFields, log } from "./logger.ts";
 import { withinRateLimit, withinWindow } from "./rate-limit.ts";
 import type { RoomAnnouncement } from "./room-announcements.ts";
 import type { PresenceSeen, RoomStore, StoredRoom } from "./room-store.ts";
@@ -136,8 +137,8 @@ export interface Connection {
 export interface RoomHubDeps {
   clock: Clock;
   store: RoomStore;
-  /** Where unexpected failures are reported. Defaults to `console.error`. */
-  log?: (message: string, error: unknown) => void;
+  /** Where unexpected failures are reported. Defaults to the logger, as `realtime.error`. */
+  log?: (message: string, error: unknown, fields?: LogFields) => void;
   /** Defaults to `EMPTY_ROOM_TIMEOUT_MS`. */
   emptyRoomTimeoutMs?: number;
 }
@@ -295,7 +296,7 @@ type Handler<T extends ClientMessageType> = (
 export class RoomHub {
   readonly #clock: Clock;
   readonly #store: RoomStore;
-  readonly #log: (message: string, error: unknown) => void;
+  readonly #log: (message: string, error: unknown, fields?: LogFields) => void;
   readonly #emptyRoomTimeoutMs: number;
   readonly #connections = new Set<HubConnection>();
   readonly #rooms = new Map<string, LiveRoom>();
@@ -345,7 +346,9 @@ export class RoomHub {
   constructor(deps: RoomHubDeps) {
     this.#clock = deps.clock;
     this.#store = deps.store;
-    this.#log = deps.log ?? ((message, error) => console.error(`[realtime] ${message}`, error));
+    this.#log =
+      deps.log ??
+      ((message, error, fields) => log.error("realtime.error", message, { ...fields, err: error }));
     this.#emptyRoomTimeoutMs = deps.emptyRoomTimeoutMs ?? EMPTY_ROOM_TIMEOUT_MS;
     // Restart recovery: the first thing on the queue, so joins wait for it.
     void this.#enqueue(() => this.#recover(0));
@@ -452,7 +455,12 @@ export class RoomHub {
         try {
           await this.#dispatch(conn, message);
         } catch (error) {
-          this.#log(`${message.type} failed`, error);
+          this.#log(`${message.type} failed`, error, {
+            type: message.type,
+            userId: conn.caller.user?.id,
+            roomId: conn.roomId ?? undefined,
+            socketId: conn.id,
+          });
           this.#refuse(conn, "internal", "Something went wrong, try again", message.type);
         }
       } finally {
@@ -483,7 +491,10 @@ export class RoomHub {
     try {
       conn.transport.close(FLOOD_CLOSE_CODE, reason);
     } catch (error) {
-      this.#log("closing a flooding socket failed", error);
+      this.#log("closing a flooding socket failed", error, {
+        userId: conn.caller.user?.id,
+        socketId: conn.id,
+      });
     }
     return this.#enqueue(() => this.#drop(conn));
   }
@@ -648,9 +659,9 @@ export class RoomHub {
     this.#restoreRetry?.cancel();
     this.#restoreRetry = undefined;
     if (this.#endings.size > 0) {
-      this.#log(`stopping with ${this.#endings.size} room end(s) not in the database`, [
-        ...this.#endings.keys(),
-      ]);
+      this.#log(`stopping with ${this.#endings.size} room end(s) not in the database`, undefined, {
+        roomIds: [...this.#endings.keys()],
+      });
     }
     for (const timer of this.#endings.values()) timer.cancel();
     this.#endings.clear();
@@ -839,7 +850,7 @@ export class RoomHub {
         else back = await this.#hostBack(room, user.id);
       } catch (error) {
         hostWriteFailed = true;
-        this.#log(`taking host in room ${room.id} failed`, error);
+        this.#log(`taking host in room ${room.id} failed`, error, { roomId: room.id });
         // The host is here, so the grace running (a visitor started it) only retries their
         // return from now on, and isn't shown as an absence.
         if (room.hostUserId === user.id && room.hostGrace) {
@@ -999,7 +1010,13 @@ export class RoomHub {
     this.#cancelHostGrace(room);
     // Without `lastEmptyAt` a restart would date the end from older times, but the timer is what
     // ends the room now, so it starts regardless.
-    await this.#bestEffort("marking a room empty", () => this.#store.markRoomEmpty(room.id, since));
+    await this.#bestEffort(
+      "marking a room empty",
+      () => this.#store.markRoomEmpty(room.id, since),
+      {
+        roomId: room.id,
+      },
+    );
     const timer = this.#setTimer(waitMs, async () => {
       if (room.empty?.timer !== timer || this.#rooms.get(room.id) !== room) return;
       if (room.participants.size > 0) return;
@@ -1057,8 +1074,10 @@ export class RoomHub {
   async #endStoredRoom(roomId: string, endedAt: Date): Promise<boolean> {
     await this.#store.closeHostInterval(roomId, endedAt);
     if (!(await this.#store.endRoom(roomId, endedAt))) return false;
-    await this.#bestEffort("rolling up a room's stats", () =>
-      this.#store.rollupEndedRoom(roomId, this.#clock.now()),
+    await this.#bestEffort(
+      "rolling up a room's stats",
+      () => this.#store.rollupEndedRoom(roomId, this.#clock.now()),
+      { roomId },
     );
     return true;
   }
@@ -1072,7 +1091,9 @@ export class RoomHub {
    */
   #retryEnd(roomId: string, endedAt: Date, failures: number, error: unknown): void {
     const delay = retryDelay(failures - 1);
-    this.#log(`ending room ${roomId} failed (try ${failures}), ${this.#retryNote(delay)}`, error);
+    this.#log(`ending room ${roomId} failed (try ${failures}), ${this.#retryNote(delay)}`, error, {
+      roomId,
+    });
     if (this.#stopped) return;
     const timer = this.#setTimer(delay, async () => {
       if (this.#endings.get(roomId) !== timer) return;
@@ -1095,11 +1116,15 @@ export class RoomHub {
    * Run a database write whose failure the caller can live with: log it and carry on, so the
    * in-memory follow-ups after it still happen.
    */
-  async #bestEffort(what: string, write: () => Promise<unknown>): Promise<void> {
+  async #bestEffort(
+    what: string,
+    write: () => Promise<unknown>,
+    fields?: LogFields,
+  ): Promise<void> {
     try {
       await write();
     } catch (error) {
-      this.#log(`${what} failed`, error);
+      this.#log(`${what} failed`, error, fields);
     }
   }
 
@@ -1112,12 +1137,17 @@ export class RoomHub {
     who: { userId: string; media: { share: boolean } },
     at: Date,
   ): Promise<void> {
-    await this.#bestEffort("closing a presence interval", () =>
-      this.#store.closePresence(roomId, who.userId, at),
+    const fields = { roomId, userId: who.userId };
+    await this.#bestEffort(
+      "closing a presence interval",
+      () => this.#store.closePresence(roomId, who.userId, at),
+      fields,
     );
     if (who.media.share) {
-      await this.#bestEffort("closing a stream interval", () =>
-        this.#store.closeStream(roomId, who.userId, at),
+      await this.#bestEffort(
+        "closing a stream interval",
+        () => this.#store.closeStream(roomId, who.userId, at),
+        fields,
       );
     }
   }
@@ -1273,6 +1303,7 @@ export class RoomHub {
         this.#log(
           `handing host over in room ${room.id} failed (try ${failures + 1}), ${this.#retryNote(next)}`,
           error,
+          { roomId: room.id },
         );
         if (!this.#stopped && room.participants.size > 0) {
           this.#startHostGrace(room, at, failures + 1, retryingReturn);
@@ -1335,7 +1366,7 @@ export class RoomHub {
     try {
       await this.#handOverHost(room, at);
     } catch (error) {
-      this.#log(`handing host over in room ${room.id} failed`, error);
+      this.#log(`handing host over in room ${room.id} failed`, error, { roomId: room.id });
     }
   }
 
@@ -2271,11 +2302,26 @@ export class RoomHub {
     try {
       conn.transport.send(message);
     } catch (error) {
-      this.#log(`send ${message.type} failed`, error);
+      this.#log(`send ${message.type} failed`, error, {
+        type: message.type,
+        userId: conn.caller.user?.id,
+        socketId: conn.id,
+      });
     }
   }
 
   #refuse(conn: HubConnection, code: ErrorCode, message: string, re?: string): void {
+    // A refusal for the client's own doing is logged with the message type it answers. (The room
+    // timeline keeps only a per-minute summary of these.)
+    if (code === "rate_limited" || code === "bad_request") {
+      log.warn("socket.refused", message, {
+        code,
+        type: re,
+        userId: conn.caller.user?.id,
+        roomId: conn.roomId ?? undefined,
+        socketId: conn.id,
+      });
+    }
     this.#send(conn, { type: "error", code, message, ...(re ? { re } : {}) });
   }
 }

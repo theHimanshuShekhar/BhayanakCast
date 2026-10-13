@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BANNED_CLOSE_CODE, SESSION_ENDED_CLOSE_CODE, SIGN_IN_FIRST } from "../lib/realtime.ts";
 import { type RealtimeHarness, startRealtimeHarness, type TestUser } from "./realtime-harness.ts";
 import type { RoomStore } from "./room-store.ts";
+import { captureLogs } from "./test-logs.ts";
 
 // A session that ends (sign-out, revoke) closes its own sockets, and only those (#63). Better
 // Auth's session-delete hook (src/lib/auth.ts) tells the live hub (./live-hub.ts).
@@ -140,7 +141,7 @@ describe("when the database fails while dropping a socket", () => {
           },
         }) as RoomStore,
     });
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const logs = captureLogs();
     try {
       ana = await h.createUser("ana");
       bo = await h.createUser("bo");
@@ -156,7 +157,7 @@ describe("when the database fails while dropping a socket", () => {
       expect(await lobby.closed()).toBe(SESSION_ENDED_CLOSE_CODE);
       failing = false;
     } finally {
-      error.mockRestore();
+      logs.restore();
     }
   });
 });
