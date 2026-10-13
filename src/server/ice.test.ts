@@ -7,7 +7,6 @@ import { type Caller, type SignedInCaller, SignInRequiredError } from "./caller.
 import { FakeClock } from "./clock.ts";
 import {
   cloudflareTurn,
-  ICE_REPORT_RATE_LIMIT,
   IceService,
   mayEnterRoom,
   TURN_CREDENTIAL_TTL_S,
@@ -286,37 +285,5 @@ describe("Cloudflare TURN", () => {
       cloudflareTurn({ keyId: "k", apiToken: "t", fetch: async () => response });
     await expect(answering(new Response("nope", { status: 401 })).mint(60)).rejects.toThrow(/401/);
     await expect(answering(Response.json({ servers: [] })).mint(60)).rejects.toThrow();
-  });
-});
-
-describe("ICE reports", () => {
-  const report = {
-    outcome: "relayed" as const,
-    path: {
-      selected: {
-        local: { type: "relay" as const, protocol: "udp" as const, relayProtocol: "tls" as const },
-        remote: { type: "srflx" as const, protocol: "udp" as const },
-      },
-      local: [{ type: "host" as const, protocol: "udp" as const }],
-      remote: [],
-    },
-  };
-
-  it("are logged without who sent them, for signed-in callers only", () => {
-    const { lines, service } = setup();
-    expect(() => service.report(visitor, report)).toThrow(SignInRequiredError);
-    expect(service.report(asUser("ana"), report)).toBe(true);
-    expect(lines).toEqual([{ line: `[ice] ${JSON.stringify(report)}` }]);
-    expect(lines[0]?.line).not.toContain("ana");
-  });
-
-  it("are dropped over the rate limit, per user, until the window passes", () => {
-    const { clock, lines, service } = setup();
-    for (let i = 0; i < ICE_REPORT_RATE_LIMIT.reports; i++) service.report(asUser("ana"), report);
-    expect(service.report(asUser("ana"), report)).toBe(false);
-    expect(service.report(asUser("bo"), report)).toBe(true);
-    clock.advance(ICE_REPORT_RATE_LIMIT.windowMs);
-    expect(service.report(asUser("ana"), report)).toBe(true);
-    expect(lines).toHaveLength(ICE_REPORT_RATE_LIMIT.reports + 2);
   });
 });

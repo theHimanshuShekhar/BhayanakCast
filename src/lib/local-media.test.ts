@@ -585,3 +585,62 @@ describe("levelOf", () => {
     expect(levelOf(0.0316)).toBeCloseTo(0.5, 1);
   });
 });
+
+// A device that fails is reported to `onError` (#116) with the error and the labels and ids the
+// browser has listed, so the report can keep them out of the message.
+describe("reporting device errors", () => {
+  const mic = device("audioinput", "mic-id-1", "Blue Yeti");
+
+  it("reports a refused mic or camera once, with the device kind and the known labels and ids", async () => {
+    const onError = vi.fn();
+    const media = new LocalMedia({
+      mediaDevices: fakeDevices({ devices: [mic], fail: { any: "NotAllowedError" } }),
+      onError,
+    });
+    await media.refreshDevices();
+    await media.enable("mic");
+    await media.enable("cam");
+    expect(onError).toHaveBeenCalledTimes(2);
+    expect(onError.mock.calls.map(([kind, error]) => [kind, (error as Error).name])).toEqual([
+      ["mic", "NotAllowedError"],
+      ["camera", "NotAllowedError"],
+    ]);
+    expect(onError.mock.calls[0]?.[2]).toEqual(expect.arrayContaining(["mic-id-1", "Blue Yeti"]));
+  });
+
+  it("reports a cancelled or failed screen picker as the screen", async () => {
+    const onError = vi.fn();
+    const media = new LocalMedia({
+      mediaDevices: fakeDevices({ shareFail: "NotAllowedError" }),
+      onError,
+    });
+    await media.startShare("motion");
+    expect(onError).toHaveBeenCalledWith(
+      "screen",
+      expect.objectContaining({ name: "NotAllowedError" }),
+      [],
+    );
+  });
+
+  it("doesn't report a start that worked, even one that fell back to the default device", async () => {
+    const onError = vi.fn();
+    const media = new LocalMedia({
+      mediaDevices: fakeDevices({ fail: { gone: "OverconstrainedError" } }),
+      storage: { getItem: () => JSON.stringify({ mic: "gone", cam: null }), setItem: () => {} },
+      onError,
+    });
+    expect(await media.enable("mic")).not.toBeNull();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("is not broken by a reporter that throws", async () => {
+    const media = new LocalMedia({
+      mediaDevices: fakeDevices({ fail: { any: "NotReadableError" } }),
+      onError: () => {
+        throw new Error("reporter down");
+      },
+    });
+    expect(await media.enable("cam")).toBeNull();
+    expect(media.getSnapshot().cam.failure).toBe("busy");
+  });
+});

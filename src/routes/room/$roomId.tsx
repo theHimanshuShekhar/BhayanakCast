@@ -24,6 +24,7 @@ import { RoomSide } from "~/components/room/side-panel";
 import { isModerator, type ModAction, Tile } from "~/components/room/tile";
 import { Btn, Chip } from "~/components/ui";
 import { useAppActions } from "~/lib/app-actions";
+import { getConnectionReporter } from "~/lib/connection-report";
 import { useCurrentSession } from "~/lib/current-user";
 import { roomMeta } from "~/lib/embed";
 import { fmtMins, MAX_STREAMERS } from "~/lib/format";
@@ -166,6 +167,13 @@ function RoomVisit({ room, admin }: { room: LiveRoomCard; admin: boolean }) {
     },
     [room.id],
   );
+  // The room this visit is for, in the lobby too: a device that fails while choosing is reported
+  // against the room being joined (ADR 3 addendum on the room timeline).
+  useEffect(() => {
+    const reporter = getConnectionReporter();
+    reporter.setRoom(room.id);
+    return () => reporter.setRoom(null);
+  }, [room.id]);
   if (!entered) {
     return (
       <Lobby

@@ -1,5 +1,5 @@
 import { asc, eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { ZodError } from "zod";
 import type { Db } from "../db/client.ts";
 import { presenceIntervals, rooms, roomTimelineEvents, user } from "../db/schema/index.ts";
@@ -16,7 +16,7 @@ import {
   pathEvent,
   type ReportConnectionEventsInput,
 } from "../lib/connection-events.ts";
-import { type Caller, SignInRequiredError } from "./caller.ts";
+import { type Caller, type SignedInCaller, SignInRequiredError } from "./caller.ts";
 import { FakeClock } from "./clock.ts";
 import {
   BEACON_MAX_BYTES,
@@ -39,8 +39,8 @@ const visitor: Caller = { user: null, role: "visitor" };
 let db: Db;
 let close: () => Promise<void>;
 let clock: FakeClock;
-let mayEnter: ReturnType<typeof vi.fn>;
-let log: ReturnType<typeof vi.fn>;
+let mayEnter: Mock<(caller: SignedInCaller, roomId: string) => Promise<boolean>>;
+let log: Mock<(message: string, error: unknown) => void>;
 let service: ConnectionEventService;
 
 beforeEach(async () => {

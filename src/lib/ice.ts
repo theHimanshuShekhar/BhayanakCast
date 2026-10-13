@@ -1,7 +1,8 @@
 /**
  * NAT traversal (ADR 3 and its addendum), shared by the client and the server: the ICE servers
- * a page's Mesh uses, how it keeps them fresh, and the anonymised candidate details it reports
- * when a pair relays or fails (no addresses, only candidate types and transports).
+ * a page's Mesh uses, how it keeps them fresh, and the anonymised candidate details of a pair's
+ * path (no addresses, only candidate types and transports), which its connection events carry to
+ * the room timeline (./connection-events.ts).
  */
 import { z } from "zod";
 
@@ -85,13 +86,6 @@ export const icePath = z.object({
   remote: z.array(iceCandidateInfo).max(ICE_PATH_MAX_CANDIDATES),
 });
 export type IcePath = z.infer<typeof icePath>;
-
-/** What a page tells the server about one pair (`reportIceFn`), for the server log. */
-export const iceReport = z.object({
-  outcome: z.enum(["relayed", "failed"]),
-  path: icePath,
-});
-export type IceReport = z.infer<typeof iceReport>;
 
 /** A stats entry, as far as candidates and pairs go (browsers differ in what they fill in). */
 interface StatsEntry {

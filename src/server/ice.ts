@@ -1,21 +1,20 @@
 /**
- * ICE servers and ICE logging (ADR 3). Each signed-in user in (or about to join) a live room
+ * ICE servers (ADR 3). Each signed-in user in (or about to join) a live room
  * they may enter gets STUN plus Cloudflare TURN credentials minted with the TURN key, which
  * never leaves the server; anyone else gets STUN only, so the relay can't be used outside the
  * app. Credentials are cached per user and minted again once they get close to expiry; pages
  * ask again before that (`refreshInSeconds`). Without a TURN key, or while Cloudflare is
  * failing, it's STUN only.
  *
- * Pages report pairs that relay or fail (`IceReport`: candidate types only, no addresses or
- * user ids), which are logged as `[ice] {…}` lines so double-NAT frequency can be measured.
+ * Which pairs relay or fail is no longer reported here: each page's connection events (path and
+ * failures) go to the room timeline (./connection-events.ts; ADR 3 addendum).
  */
 import { z } from "zod";
-import { type IceReport, type IceServersGrant, STUN_SERVERS } from "~/lib/ice";
+import { type IceServersGrant, STUN_SERVERS } from "~/lib/ice";
 import { type Db, getDb } from "../db/client.ts";
 import { type Caller, requireSignedIn, type SignedInCaller } from "./caller.ts";
 import { type Clock, systemClock } from "./clock.ts";
 import { env } from "./env.ts";
-import { forgetIdle, withinRateLimit } from "./rate-limit.ts";
 import { createDbRoomStore } from "./room-store.ts";
 
 /** How long minted TURN credentials last. */
@@ -28,8 +27,6 @@ const STUN_ONLY_REFRESH_S = 60 * 60;
 const MINT_FAILED_REFRESH_S = 60;
 /** When a page asks again after being refused TURN (the room may be live or open to them by then). */
 const NOT_ENTITLED_REFRESH_S = 60;
-/** Reports logged per user in any `windowMs`; more are dropped, so nobody can flood the log. */
-export const ICE_REPORT_RATE_LIMIT = { reports: 30, windowMs: 10 * 60_000 } as const;
 
 /** Mints short-lived TURN credentials (Cloudflare in production, a fake in tests). */
 export interface TurnProvider {
@@ -115,7 +112,6 @@ export class IceService {
   readonly #clock: Clock;
   readonly #log: (line: string, error?: unknown) => void;
   readonly #cache = new Map<string, CachedCredentials>();
-  readonly #reports = new Map<string, number[]>();
 
   constructor(options: IceServiceOptions) {
     this.#turn = options.turn;
@@ -157,17 +153,6 @@ export class IceService {
       this.#log("[ice] minting TURN credentials failed; STUN only", error);
       return { iceServers: STUN_SERVERS, refreshInSeconds: MINT_FAILED_REFRESH_S };
     }
-  }
-
-  /** Log `report` from the signed-in caller's page, unless they're over `ICE_REPORT_RATE_LIMIT`. */
-  report(caller: Caller, report: IceReport): boolean {
-    requireSignedIn(caller);
-    const now = this.#clock.now();
-    const { reports, windowMs } = ICE_REPORT_RATE_LIMIT;
-    forgetIdle(this.#reports, windowMs, now);
-    if (!withinRateLimit(this.#reports, caller.user.id, reports, windowMs, now)) return false;
-    this.#log(`[ice] ${JSON.stringify(report)}`);
-    return true;
   }
 }
 

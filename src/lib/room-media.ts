@@ -10,13 +10,15 @@
  *
  * The Mesh starts once the ICE servers (STUN plus TURN, ADR 3) have come from the server (STUN
  * alone if fetching them failed), and gets fresh ones before their credentials expire: TURN
- * arriving late restarts the pairs that failed on STUN. Pairs that relay or fail are reported
- * to the server's log (anonymised candidate types). Its quality telemetry goes to the server in
- * batches (./quality-telemetry.ts).
+ * arriving late restarts the pairs that failed on STUN. Each pair's connection events (states,
+ * restarts, path, negotiation errors) go to the room timeline in batches
+ * (./connection-reporter.ts), and its quality telemetry to the server in batches
+ * (./quality-telemetry.ts).
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { getConnectionReporter } from "./connection-report";
 import { keepIceServersFresh } from "./ice";
-import { getIceServersFn, reportIceFn } from "./ice.functions";
+import { getIceServersFn } from "./ice.functions";
 import { Mesh, type PeerQuality, type PeerState, type QualityView } from "./mesh";
 import { QualityReporter, sampleWindowMs } from "./quality-telemetry";
 import { reportQualityFn } from "./quality-telemetry.functions";
@@ -102,6 +104,8 @@ export function useRoomMesh(
       send: (to, payload) => client.send({ type: "signal", to, payload }),
       iceServers: latest.current.iceServers ?? undefined,
       onQuality: (sample) => quality.add(sample),
+      // Each pair's connection events go to the room timeline (ADR 3 addendum).
+      onReport: (event) => getConnectionReporter().add(event, roomId),
       sampleWindowMs: sampleWindowMs(import.meta.env.VITE_QUALITY_WINDOW_MS),
     });
     mesh.current = current;
@@ -113,12 +117,6 @@ export function useRoomMesh(
         }));
       } else if (event.type === "state") {
         setStates((s) => ({ ...s, [event.userId]: event.state }));
-        // Without `ice` it never got as far as ICE (a signalling stall): not a NAT data point.
-        if ((event.state === "relayed" || event.state === "failed") && event.ice) {
-          reportIceFn({ data: { outcome: event.state, path: event.ice } }).catch((error: unknown) =>
-            console.warn("[ice] reporting failed", error),
-          );
-        }
       } else if (event.type === "closed") {
         setRemote(({ [event.userId]: _, ...rest }) => rest);
         setStates(({ [event.userId]: _, ...rest }) => rest);

@@ -5,7 +5,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getIceService } from "~/server/ice";
 import { getCaller } from "~/server/request-caller";
-import { iceReport } from "./ice";
 import { roomIdInput } from "./rooms";
 
 /**
@@ -15,10 +14,3 @@ import { roomIdInput } from "./rooms";
 export const getIceServersFn = createServerFn({ method: "POST" })
   .validator(roomIdInput)
   .handler(async ({ data }) => getIceService().serversFor(await getCaller(), data.roomId));
-
-/** Log that one of the caller's pairs relays or failed (anonymised candidate types). */
-export const reportIceFn = createServerFn({ method: "POST" })
-  .validator(iceReport)
-  .handler(async ({ data }) => {
-    getIceService().report(await getCaller(), data);
-  });

@@ -2059,9 +2059,10 @@ describe("Mesh ICE (ADR 3)", () => {
       userId: string,
       network: Map<string, Mesh>,
       extra: Partial<MeshOptions> = {},
+      servers: RTCIceServer[] = turn,
     ) {
       const reports: ConnectionEvent[] = [];
-      const p = page(userId, network, turn, undefined, undefined, {
+      const p = page(userId, network, servers, undefined, undefined, {
         onReport: (event) => reports.push(event),
         ...extra,
       });
@@ -2169,7 +2170,13 @@ describe("Mesh ICE (ADR 3)", () => {
         { kind: "pair_restart", peerId: "bo", how: "ice_restart", why: "failed" },
       ]);
       expect(of(ana.reports, "pair_recovery")).toEqual([
-        { kind: "pair_recovery", peerId: "bo", how: "ice_restart", recovered: true, afterMs: 2_520 },
+        {
+          kind: "pair_recovery",
+          peerId: "bo",
+          how: "ice_restart",
+          recovered: true,
+          afterMs: 2_520,
+        },
       ]);
     });
 
@@ -2188,7 +2195,15 @@ describe("Mesh ICE (ADR 3)", () => {
     });
 
     it("says a restart was because connecting took too long, or because TURN arrived", async () => {
-      const { ana, anaPc } = await reported();
+      vi.useFakeTimers();
+      const network = new Map<string, Mesh>();
+      const stun = [{ urls: "stun:stun.example:3478" }];
+      const ana = reporting("ana", network, {}, stun);
+      const bo = reporting("bo", network, {}, stun);
+      ana.mesh.join(everyone);
+      bo.mesh.join(everyone);
+      await tick();
+      const anaPc = ana.pcs[0] as FakePC;
       await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS);
       await tick();
       expect(of(ana.reports, "pair_restart")).toMatchObject([
@@ -2260,14 +2275,20 @@ describe("Mesh ICE (ADR 3)", () => {
         how: "start_over",
         why: "retry",
       });
-      // A new session from the peer: they reloaded, so this side starts over too.
-      ana.mesh.receive("bo", { kind: "hello", session: "bo-reloaded" });
-      ana.mesh.receive("bo", { kind: "hello", session: "bo-reloaded-again" });
+    });
+
+    it("reports a start-over the peer began (a reload): this side starts over too", async () => {
+      vi.useFakeTimers();
+      // Ana alone: the peer's page is only what these two hellos say.
+      const ana = reporting("ana", new Map());
+      ana.mesh.join(everyone);
       await tick();
-      expect(of(ana.reports, "pair_restart").at(-1)).toMatchObject({
-        how: "start_over",
-        why: "peer",
-      });
+      ana.mesh.receive("bo", { kind: "hello", session: "bo-1" });
+      ana.mesh.receive("bo", { kind: "hello", session: "bo-2" });
+      await tick();
+      expect(of(ana.reports, "pair_restart")).toEqual([
+        { kind: "pair_restart", peerId: "bo", how: "start_over", why: "peer" },
+      ]);
     });
 
     it("reports a failed offer, and a description the browser refused", async () => {

@@ -7,6 +7,7 @@
  * `POST /api/auth/test/ban` bans or unbans a fake user by Discord id (test-only too).
  * `POST /api/auth/test/seed-room` inserts a room with its presence/stream intervals and
  * end time as given, so browser tests can build past streams without the realtime server.
+ * `POST /api/auth/test/room-timeline` returns a room's merged timeline, as an admin reads it.
  * `POST /api/auth/test/stats` sets a fake user's lifetime stats and co-time (test-only too), as
  * if all from public rooms.
  */
@@ -25,12 +26,14 @@ import {
   userStats,
   user as userTable,
 } from "../db/schema/index.ts";
+import { getRoomTimeline } from "../server/admin-timeline.ts";
 import { ROOM_KINDS } from "./rooms.ts";
 
 export const TEST_SIGN_IN_PATH = "/test/sign-in";
 export const TEST_BAN_PATH = "/test/ban";
 export const TEST_SEED_ROOM_PATH = "/test/seed-room";
 export const TEST_STATS_PATH = "/test/stats";
+export const TEST_ROOM_TIMELINE_PATH = "/test/room-timeline";
 
 const count = z.number().int().nonnegative();
 
@@ -183,6 +186,21 @@ export function testSignIn(db: Db) {
         { method: "POST", body: seedRoomBody },
         async (ctx) => ctx.json({ roomId: await seedRoom(db, ctx.body) }),
       ),
+      // A room's merged timeline as an admin reads it (`getRoomTimeline`), for browser tests: the
+      // admin page has no timeline view yet, and the server function's wire format isn't a
+      // thing a test should speak.
+      testRoomTimeline: createAuthEndpoint(
+        TEST_ROOM_TIMELINE_PATH,
+        { method: "POST", body: z.object({ roomId: z.string().min(1) }) },
+        async (ctx) =>
+          ctx.json(
+            await getRoomTimeline(
+              db,
+              { user: { id: "e2e-admin", username: "e2e-admin", image: null }, role: "admin" },
+              { roomId: ctx.body.roomId },
+            ),
+          ),
+      ),
       // Seeds the persistent aggregates the way the stats roll-up would leave them, so
       // browser tests can show real profile stats without playing out whole rooms.
       testSetStats: createAuthEndpoint(
@@ -252,7 +270,8 @@ export function testSignIn(db: Db) {
           path === TEST_SIGN_IN_PATH ||
           path === TEST_BAN_PATH ||
           path === TEST_SEED_ROOM_PATH ||
-          path === TEST_STATS_PATH,
+          path === TEST_STATS_PATH ||
+          path === TEST_ROOM_TIMELINE_PATH,
         window: 60,
         max: 10_000,
       },
