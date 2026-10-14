@@ -9,12 +9,26 @@ import { type SeedRoom, seedRoom, uniqueRoomName } from "./rooms";
 // zoom. The room is seeded straight into the database (the events the hub and the browsers
 // would have recorded), so the picture is the same every run.
 
+// The admin reads times in their browser's time zone, so it is fixed here: a zone whose offset is
+// half an hour (and which a UTC reading could not be mistaken for) keeps the checks stable.
+const ZONE = "Asia/Kolkata";
+test.use({ timezoneId: ZONE });
+
 type Events = NonNullable<SeedRoom["events"]>;
 
 const MIN = 60_000;
 /** A room that began 20 minutes ago and ended 5 minutes ago. */
 const BASE = Date.now() - 20 * MIN;
 const iso = (sec: number) => new Date(BASE + sec * 1_000).toISOString();
+/** The clock in `ZONE` at `sec` into the room, as the page words it: `12:53:11`. */
+const clock = (sec: number) =>
+  new Intl.DateTimeFormat("en-GB", {
+    timeZone: ZONE,
+    hourCycle: "h23",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(BASE + sec * 1_000);
 
 interface Seeded {
   roomId: string;
@@ -182,15 +196,23 @@ test("an admin opens a room with events and a report, and sees the snapshot tabl
 }) => {
   test.setTimeout(120_000);
   await page.setViewportSize({ width: 1280, height: 800 });
+  // The panel is drawn in the browser after a click, so its zone is the browser's and nothing of
+  // it is in the server's HTML: a mismatch on hydration would be a page error.
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
   await signInAdmin(context);
   const room = await seedTimelineRoom(browser, context);
   await adminOnDashboard(page);
+  await expect(page.getByRole("region", { name: "room timeline" })).toHaveCount(0);
   const section = await openFromRecentRooms(page, room.roomName);
 
   // The room's reports are listed, and its full timeline is the swimlanes.
   const lanes = section.getByTestId("timeline-lanes");
   await expect(lanes).toBeVisible();
-  await expect(section.getByRole("button", { name: /UTC frozen \/ stuttering/ })).toBeVisible();
+  // Times are on the browser's clock, with its zone named, and not UTC's.
+  const picker = section.getByRole("button", { name: /(IST|GMT\+5:30) frozen \/ stuttering/ });
+  await expect(picker).toBeVisible();
+  await expect(picker).toContainText(clock(REPORT_AT));
   const person = (id: string) => lanes.locator(`[data-lane="person:${id}"]`);
   const pairKey = (a: string, b: string) => `pair:${[a, b].sort().join("|")}`;
   await expect(person(room.ana.id)).toHaveAttribute("aria-label", new RegExp(room.ana.username));
@@ -210,6 +232,11 @@ test("an admin opens a room with events and a report, and sees the snapshot tabl
   ).toBeVisible();
   // The same events are in a table, for reading without the chart.
   const table = section.getByRole("table", { name: "events in view" });
+  await expect(table).toContainText(`${clock(0)}`);
+  await expect(table.getByRole("columnheader", { name: /time \((IST|GMT\+5:30)\)/ })).toBeVisible();
+  const readout = section.getByTestId("timeline-view");
+  await expect(readout).toContainText(/(IST|GMT\+5:30)/);
+  await expect(readout).not.toContainText("UTC");
   await expect(table).toContainText(
     `${room.bo.username} reported frozen / stuttering on ${room.ana.username}'s screen`,
   );
@@ -280,6 +307,7 @@ test("an admin opens a room with events and a report, and sees the snapshot tabl
   await lanes.getByRole("button", { name: /open the frozen \/ stuttering report at/ }).click();
   const snapshotTable = section.getByRole("table", { name: "snapshot of everyone's connections" });
   await expect(snapshotTable).toBeVisible();
+  await expect(section.getByText(`everyone's connections at ${clock(REPORT_AT)}`)).toBeVisible();
   const stream = snapshotTable.getByRole("row").filter({
     hasText: `${room.ana.username} → ${room.bo.username}`,
   });
@@ -318,6 +346,7 @@ test("an admin opens a room with events and a report, and sees the snapshot tabl
   // And back to the swimlanes.
   await section.getByRole("button", { name: "full timeline" }).click();
   await expect(lanes).toBeVisible();
+  expect(errors).toEqual([]);
 });
 
 test("the timeline opens from the live rooms table and from a report, and says when a room has nothing", async ({

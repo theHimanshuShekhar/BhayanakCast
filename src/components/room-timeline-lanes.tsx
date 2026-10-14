@@ -20,6 +20,7 @@ import {
   panView,
   type Range,
   viewFraction,
+  zoneName,
   zoomView,
 } from "~/lib/timeline-axis";
 import type {
@@ -478,7 +479,7 @@ export const RoomTimelineLanes = ({
             style={{ fill: "var(--color-subtle)" }}
             fontFamily="inherit"
           >
-            UTC
+            {zoneName(view.t0)}
           </text>
           <line
             x1={labelW}

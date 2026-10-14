@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   axisTicks,
+  browserZone,
   brushView,
   clipSpan,
+  clockLabel,
   dateTimeLabel,
   fullView,
   INCIDENT_WINDOW_MS,
@@ -10,9 +12,13 @@ import {
   panView,
   viewFraction,
   windowAround,
+  zoneName,
   zoomView,
 } from "./timeline-axis";
 
+const UTC = "UTC";
+const IST = "Asia/Kolkata";
+const NY = "America/New_York";
 const SEC = 1_000;
 const MIN = 60 * SEC;
 /** 2026-10-10 22:30:00 UTC */
@@ -127,7 +133,7 @@ describe("clipSpan", () => {
 
 describe("axisTicks", () => {
   it("steps by round times: minutes over a quarter of an hour, seconds when zoomed in", () => {
-    const wide = axisTicks(fullView(domain), 8);
+    const wide = axisTicks(fullView(domain), 8, UTC);
     expect(wide.map((t) => t.label)).toEqual([
       "22:30",
       "22:32",
@@ -138,7 +144,7 @@ describe("axisTicks", () => {
       "22:42",
       "22:44",
     ]);
-    const close = axisTicks({ t0: T0 + 5 * MIN + 3 * SEC, t1: T0 + 5 * MIN + 43 * SEC }, 8);
+    const close = axisTicks({ t0: T0 + 5 * MIN + 3 * SEC, t1: T0 + 5 * MIN + 43 * SEC }, 8, UTC);
     expect(close.map((t) => t.label)).toEqual([
       "22:35:05",
       "22:35:10",
@@ -153,20 +159,64 @@ describe("axisTicks", () => {
 
   it("only gives ticks inside the view, and none that read the same", () => {
     const view = { t0: T0 + 3 * SEC, t1: T0 + 5 * SEC };
-    const ticks = axisTicks(view, 8);
+    const ticks = axisTicks(view, 8, UTC);
     expect(ticks.every((t) => t.t >= view.t0 && t.t <= view.t1)).toBe(true);
     expect(new Set(ticks.map((t) => t.label)).size).toBe(ticks.length);
   });
 
-  it("reads in UTC, like the rest of the dashboard", () => {
-    expect(axisTicks({ t0: T0, t1: T0 + 10 * MIN }, 3)[0]?.label).toBe("22:30");
+  it("reads in the zone it is given, with ticks on round local times", () => {
+    // 22:30 UTC is 04:00 the next day in Kolkata (UTC+5:30).
+    const ist = axisTicks({ t0: T0, t1: T0 + 10 * MIN }, 5, IST);
+    expect(ist.map((t) => t.label)).toEqual(["04:00", "04:02", "04:04", "04:06", "04:08", "04:10"]);
+    // A step of an hour falls on the local hour, not on UTC's, which in a half-hour zone is :30.
+    const hours = axisTicks({ t0: T0, t1: T0 + 6 * 60 * MIN }, 8, IST).map((t) => t.label);
+    expect(hours.length).toBeGreaterThan(2);
+    expect(hours.every((label) => label.endsWith(":00") || label.endsWith(":30"))).toBe(true);
+    expect(hours.every((label) => label.endsWith(":00"))).toBe(true);
+  });
+
+  it("follows daylight saving: the same instants read an hour apart either side of the change", () => {
+    // New York fell back at 2026-11-01 06:00 UTC (02:00 EDT -> 01:00 EST).
+    const before = Date.UTC(2026, 10, 1, 5, 30, 0);
+    const after = Date.UTC(2026, 10, 1, 6, 30, 0);
+    expect(clockLabel(before, false, NY)).toBe("01:30");
+    expect(clockLabel(after, false, NY)).toBe("01:30");
+  });
+});
+
+describe("clockLabel", () => {
+  it("reads the hour, minute and second in a zone", () => {
+    expect(clockLabel(T0 + 4 * SEC, true, UTC)).toBe("22:30:04");
+    expect(clockLabel(T0, false, IST)).toBe("04:00");
+    expect(clockLabel(T0 + 4 * SEC, true, IST)).toBe("04:00:04");
+  });
+
+  it("reads in the browser's zone when none is given", () => {
+    const browser = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    expect(clockLabel(T0, true)).toBe(clockLabel(T0, true, browser));
+    expect(browserZone()).toBe(browser);
+  });
+});
+
+describe("zoneName", () => {
+  it("names the zone as the browser would, so a reader knows which one the times are in", () => {
+    expect(zoneName(T0, UTC)).toBe("UTC");
+    // The name depends on the locale (en-IN says IST, others GMT+5:30), but is never empty.
+    expect(zoneName(T0, IST)).toMatch(/^(IST|GMT\+5:30)$/);
+    // And follows daylight saving.
+    expect(zoneName(Date.UTC(2026, 6, 1), NY)).not.toBe(zoneName(Date.UTC(2026, 0, 1), NY));
   });
 });
 
 describe("dateTimeLabel", () => {
-  it("reads the day, month and time to the second, in UTC", () => {
-    expect(dateTimeLabel(T0 + 5 * MIN + 4 * SEC)).toBe("10 Oct 22:35:04 UTC");
-    expect(dateTimeLabel(Date.UTC(2026, 0, 3, 0, 0, 9))).toBe("3 Jan 00:00:09 UTC");
+  it("reads the day, month and time to the second, with the zone", () => {
+    expect(dateTimeLabel(T0 + 5 * MIN + 4 * SEC, UTC)).toBe("10 Oct 22:35:04 UTC");
+    expect(dateTimeLabel(Date.UTC(2026, 0, 3, 0, 0, 9), UTC)).toBe("3 Jan 00:00:09 UTC");
+  });
+
+  it("changes the date with the zone: late on the 10th in UTC is the 11th in Kolkata", () => {
+    const label = dateTimeLabel(T0 + 5 * MIN + 4 * SEC, IST);
+    expect(label).toMatch(/^11 Oct 04:05:04 (IST|GMT\+5:30)$/);
   });
 });
 

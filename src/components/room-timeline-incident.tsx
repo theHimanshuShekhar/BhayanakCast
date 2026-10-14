@@ -5,7 +5,7 @@
 import { useState } from "react";
 import type { RecentReport } from "~/lib/problem-report";
 import { reasonText } from "~/lib/quality-reason";
-import { clockLabel } from "~/lib/timeline-axis";
+import { clockLabel, zoneName } from "~/lib/timeline-axis";
 import { type SnapshotRow, snapshotRows, TROUBLE_LOSS } from "~/lib/timeline-incident";
 import { fmtMbps } from "./chart-parts";
 import { Btn, Chip, MonoCaps } from "./ui";
@@ -47,7 +47,8 @@ export const SnapshotTable = ({
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2.5 px-3.5 py-2.5 border-b border-border-subtle bg-canvas">
         <MonoCaps>
-          everyone's connections at {clockLabel(Date.parse(report.at), true)} UTC · a row per stream
+          everyone's connections at {clockLabel(Date.parse(report.at), true)}{" "}
+          {zoneName(Date.parse(report.at))} · a row per stream
         </MonoCaps>
         {idle > 0 && (
           <Btn

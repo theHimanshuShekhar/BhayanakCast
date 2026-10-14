@@ -1,7 +1,7 @@
 // The room timeline as a table of events: the incident's window of two minutes either side of a
 // report, and the full timeline's events table, which reads what the swimlanes draw without
 // looking at them (issue #114).
-import { clockLabel } from "~/lib/timeline-axis";
+import { clockLabel, zoneName } from "~/lib/timeline-axis";
 import type { TimelineRow } from "~/lib/timeline-model";
 import { Chip } from "./ui";
 
@@ -41,7 +41,9 @@ export const RowsTable = ({
       <thead>
         <tr>
           <th className={`${th} w-[120px] whitespace-nowrap`}>
-            {relativeTo === undefined ? "time (UTC)" : "from report"}
+            {relativeTo === undefined
+              ? `time (${zoneName(rows[0]?.t ?? Date.now())})`
+              : "from report"}
           </th>
           <th className={`${th} w-[112px]`}>category</th>
           <th className={th}>event</th>

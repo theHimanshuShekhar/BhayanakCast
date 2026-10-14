@@ -105,33 +105,116 @@ const STEPS = [
   24 * HOUR,
 ];
 
-const two = (n: number) => String(n).padStart(2, "0");
-/** UTC, like the rest of the dashboard: `22:35` or, with seconds, `22:35:04`. */
-export function clockLabel(t: number, seconds: boolean): string {
-  const d = new Date(t);
-  const hm = `${two(d.getUTCHours())}:${two(d.getUTCMinutes())}`;
-  return seconds ? `${hm}:${two(d.getUTCSeconds())}` : hm;
-}
+// ---------------------------------------------------------------------------------------------
+// Clock times
+//
+// The admin reads times in their browser's own time zone, with the zone named (an IANA name such
+// as "Asia/Kolkata"; undefined is the browser's). Every function takes the zone last, so a test
+// can pin one. These run in the browser after a click (the panel is not server-rendered), so the
+// zone is never the server's.
+
+/** The browser's own time zone, as an IANA name. */
+export const browserZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-/** "10 Oct 22:35:04 UTC": a moment in full, in the UTC the dashboard uses, whatever the browser's locale. */
-export function dateTimeLabel(t: number): string {
-  const d = new Date(t);
-  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${clockLabel(t, true)} UTC`;
+const formatters = new Map<string, Intl.DateTimeFormat>();
+
+/** One formatter per zone: constructing one is the costly part, and a chart asks for hundreds of labels. */
+function formatter(zone: string | undefined): Intl.DateTimeFormat {
+  const key = zone ?? "";
+  let f = formatters.get(key);
+  if (!f) {
+    f = new Intl.DateTimeFormat(undefined, {
+      timeZone: zone,
+      // Digits and calendar are fixed: only the zone's name follows the browser's language.
+      numberingSystem: "latn",
+      calendar: "gregory",
+      hourCycle: "h23",
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      timeZoneName: "short",
+    });
+    formatters.set(key, f);
+  }
+  return f;
+}
+
+interface ClockParts {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+  /** "IST", or "GMT+5:30" where the browser's language has no short name for it. */
+  zone: string;
+}
+
+function clockParts(t: number, zone: string | undefined): ClockParts {
+  const got: Record<string, string> = {};
+  for (const part of formatter(zone).formatToParts(t)) got[part.type] = part.value;
+  const n = (type: string) => Number(got[type]);
+  return {
+    year: n("year"),
+    month: n("month"),
+    day: n("day"),
+    hour: n("hour"),
+    minute: n("minute"),
+    second: n("second"),
+    zone: got.timeZoneName ?? "",
+  };
+}
+
+/** How far the zone's clock is ahead of UTC at `t`, in ms (+5:30 in Kolkata). */
+function offsetMs(t: number, zone: string | undefined): number {
+  const p = clockParts(t, zone);
+  return (
+    Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - Math.floor(t / 1_000) * 1_000
+  );
+}
+
+const two = (n: number) => String(n).padStart(2, "0");
+
+/** `22:35` or, with seconds, `22:35:04`, on the zone's clock. */
+export function clockLabel(t: number, seconds: boolean, zone?: string): string {
+  const p = clockParts(t, zone);
+  const hm = `${two(p.hour)}:${two(p.minute)}`;
+  return seconds ? `${hm}:${two(p.second)}` : hm;
+}
+
+/** The zone's name at `t` ("IST", "CEST"): daylight saving changes it. */
+export const zoneName = (t: number, zone?: string): string => clockParts(t, zone).zone;
+
+/** "10 Oct 22:35:04 IST": a moment in full, with the zone it is in. */
+export function dateTimeLabel(t: number, zone?: string): string {
+  const p = clockParts(t, zone);
+  return `${p.day} ${MONTHS[p.month - 1]} ${clockLabel(t, true, zone)} ${p.zone}`;
 }
 
 /**
- * Up to `count` ticks along `view`, on round times (every 2 minutes, every 5 seconds...). The
+ * Up to `count` ticks along `view`, on round times of the zone's clock (every 2 minutes, every
+ * 5 seconds, every 2 hours on the local hour even where the zone is a half hour off UTC). The
  * step is the finest that gives no more than `count`, so labels never crowd; the labels carry
  * seconds only when the step is under a minute, so none reads the same as another.
  */
-export function axisTicks(view: Range, count: number): { t: number; label: string }[] {
+export function axisTicks(
+  view: Range,
+  count: number,
+  zone?: string,
+): { t: number; label: string }[] {
   const span = view.t1 - view.t0;
   const step = STEPS.find((s) => span / s <= count) ?? (STEPS.at(-1) as number);
   const seconds = step < MINUTE;
+  // Round on the zone's clock, then put the result back on the UTC one. The offset is taken at
+  // the start of the view, so a daylight saving change inside a view of hours drifts a tick.
+  const offset = offsetMs(view.t0, zone);
   const ticks: { t: number; label: string }[] = [];
-  for (let t = Math.ceil(view.t0 / step) * step; t <= view.t1; t += step) {
-    ticks.push({ t, label: clockLabel(t, seconds) });
+  for (let t = Math.ceil((view.t0 + offset) / step) * step - offset; t <= view.t1; t += step) {
+    ticks.push({ t, label: clockLabel(t, seconds, zone) });
   }
   return ticks;
 }

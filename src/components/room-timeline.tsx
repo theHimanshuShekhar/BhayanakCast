@@ -18,6 +18,7 @@ import {
   panView,
   type Range,
   windowAround,
+  zoneName,
   zoomView,
 } from "~/lib/timeline-axis";
 import type { QualityFocus } from "~/lib/timeline-incident";
@@ -250,7 +251,7 @@ export const RoomTimelinePanel = ({
               <MonoCaps>
                 {incidentRows.length} events from{" "}
                 {clockLabel(incidentAt - INCIDENT_WINDOW_MS, true)} to{" "}
-                {clockLabel(incidentAt + INCIDENT_WINDOW_MS, true)} UTC
+                {clockLabel(incidentAt + INCIDENT_WINDOW_MS, true)} {zoneName(incidentAt)}
               </MonoCaps>
             </div>
             <RowsTable
@@ -354,7 +355,7 @@ export const RoomTimelinePanel = ({
               </fieldset>
               <MonoCaps>
                 <span data-testid="timeline-view" className="normal-case">
-                  {clockLabel(view.t0, true)}–{clockLabel(view.t1, true)} UTC ·{" "}
+                  {clockLabel(view.t0, true)}–{clockLabel(view.t1, true)} {zoneName(view.t0)} ·{" "}
                   {fmtDuration(spanMs / 1_000)}
                 </span>
               </MonoCaps>

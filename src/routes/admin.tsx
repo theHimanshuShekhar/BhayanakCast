@@ -1102,7 +1102,7 @@ function AdminPage() {
             <div className="flex items-start justify-between gap-3">
               <SectionHead
                 title={`room timeline · ${timeline.name}`}
-                sub="events kept 90 days · intervals 30 · times in UTC"
+                sub="events kept 90 days · intervals 30 · times in your time zone"
                 dot="muted"
                 size="sm"
               />
