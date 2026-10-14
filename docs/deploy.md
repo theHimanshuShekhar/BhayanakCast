@@ -280,9 +280,20 @@ the 30 days rooms are kept: that is by design, and admin-only.
 **The commit.** Every line has a `commit` field, and `GET /api/health` returns
 `{"ok":true,"commit":"<7 chars>","startedAt":"<UTC>"}`: `curl http://<HOST_BIND>:<HOST_PORT>/api/health`
 confirms what is deployed. Dockhand copies the repo without `.git`, so the image build asks GitHub
-for it (`scripts/fetch-commit.ts`: `GET https://api.github.com/repos/theHimanshuShekhar/BhayanakCast/commits/main`,
-10 s timeout) and writes it to `COMMIT` in the image. If the request fails (offline, rate limited,
-GitHub down), the commit is `unknown` and the build carries on. The commit is `main`'s newest when
+for it (`scripts/fetch-commit.ts`) and writes it to `COMMIT` in the image. It tries two sources, each
+with a 10 s timeout, in this order:
+
+1. **Git's ref advertisement:** `GET https://github.com/theHimanshuShekhar/BhayanakCast.git/info/refs?service=git-upload-pack`,
+   the request `git ls-remote` makes. It is plain HTTPS with no login and no API quota; the script
+   reads the pkt-line answer itself (no `git` in the image) and takes the 40-hex SHA of
+   `refs/heads/main`.
+2. **The REST API:** `GET https://api.github.com/repos/theHimanshuShekhar/BhayanakCast/commits/main`,
+   only if the first fails. Its unauthenticated limit is 60 requests an hour **per IP**, and the
+   homelab's public IP shares that with everything else on the network. On 2026-10-14 it was used
+   up (`remaining 0`, `commits/main` answered 403) and the first version of this, REST only, baked
+   `unknown`; that is why the REST call is no longer first.
+
+If both fail (offline, an outage), the commit is `unknown` and the build carries on. The commit is `main`'s newest when
 the build asks, so it can be wrong if a push lands in the seconds between Dockhand's clone and the
 build, or on a build from another branch. Docker caches that layer while the files above it are
 unchanged, so a commit that touches only `docs/`, `e2e/` or the other services' files reuses the
