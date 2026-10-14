@@ -6,7 +6,7 @@ import {
   useSuspenseQuery,
 } from "@tanstack/react-query";
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import {
   BanUserDialog,
   type DialogTarget,
@@ -20,6 +20,7 @@ import { RoomQualityPanel } from "~/components/admin-quality";
 import { fmtMbps } from "~/components/chart-parts";
 import { BarChart, LineChart } from "~/components/charts";
 import { Icon } from "~/components/icons";
+import { RoomTimelinePanel } from "~/components/room-timeline";
 import { SectionHead } from "~/components/section-head";
 import { Avatar, Btn, MonoCaps, Seg } from "~/components/ui";
 import {
@@ -55,6 +56,7 @@ import {
 import { reasonText } from "~/lib/quality-reason";
 import type { LiveRoomCard, RoomPerson } from "~/lib/rooms";
 import { roomKeys } from "~/lib/rooms.queries";
+import type { QualityFocus } from "~/lib/timeline-incident";
 import { TURN_FREE_TIER_GB } from "~/lib/turn-usage";
 import { useDebounced } from "~/lib/use-debounced";
 import { useMountedNow } from "~/lib/use-now";
@@ -183,8 +185,16 @@ const Since = ({ iso, format }: { iso: string; format: (iso: string, now: number
   return now === null ? "—" : format(iso, now);
 };
 
-/** The room whose video quality is shown below the room tables. */
-type QualityTarget = { id: string; name: string };
+/** The room whose video quality is shown below the room tables, and the pair to open in it. */
+type QualityTarget = { id: string; name: string; focus?: QualityFocus };
+/** The room whose timeline is shown below them, and the report to open first. */
+type TimelineTarget = { id: string; name: string; reportId?: string };
+
+/** What the room tables open: a room's video quality, or its timeline. */
+interface Inspect {
+  quality: (room: QualityTarget) => void;
+  timeline: (room: TimelineTarget) => void;
+}
 
 const QualityBtn = ({ room, onInspect }: { room: QualityTarget; onInspect: () => void }) => (
   <Btn size="sm" aria-label={`Quality of ${room.name}`} onClick={onInspect}>
@@ -192,13 +202,13 @@ const QualityBtn = ({ room, onInspect }: { room: QualityTarget; onInspect: () =>
   </Btn>
 );
 
-const LiveRoomsTable = ({
-  rooms,
-  onInspect,
-}: {
-  rooms: LiveRoomCard[];
-  onInspect: (room: QualityTarget) => void;
-}) => {
+const TimelineBtn = ({ room, onInspect }: { room: TimelineTarget; onInspect: () => void }) => (
+  <Btn size="sm" aria-label={`Timeline of ${room.name}`} onClick={onInspect}>
+    timeline
+  </Btn>
+);
+
+const LiveRoomsTable = ({ rooms, inspect }: { rooms: LiveRoomCard[]; inspect: Inspect }) => {
   const queryClient = useQueryClient();
   const [endTarget, setEndTarget] = useState<RoomDialogTarget | null>(null);
   const end = async (roomId: string) => {
@@ -243,7 +253,8 @@ const LiveRoomsTable = ({
               </td>
               <td className={td}>
                 <div className="flex justify-end gap-1.5">
-                  <QualityBtn room={r} onInspect={() => onInspect(r)} />
+                  <TimelineBtn room={r} onInspect={() => inspect.timeline(r)} />
+                  <QualityBtn room={r} onInspect={() => inspect.quality(r)} />
                   <Link
                     to="/room/$roomId"
                     params={{ roomId: r.id }}
@@ -347,7 +358,7 @@ const Pager = ({
 );
 
 /** Recent rooms, searched and paged server-side; the sort headers order the page shown. */
-const RecentRoomsTable = ({ onInspect }: { onInspect: (room: QualityTarget) => void }) => {
+const RecentRoomsTable = ({ inspect }: { inspect: Inspect }) => {
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState<Sort>({ key: "endedAt", dir: "desc" });
@@ -454,8 +465,9 @@ const RecentRoomsTable = ({ onInspect }: { onInspect: (room: QualityTarget) => v
                   {r.endedAt ? <Since iso={r.endedAt} format={fmtAgo} /> : "—"}
                 </td>
                 <td className={td}>
-                  <div className="flex justify-end">
-                    <QualityBtn room={r} onInspect={() => onInspect(r)} />
+                  <div className="flex justify-end gap-1.5">
+                    <TimelineBtn room={r} onInspect={() => inspect.timeline(r)} />
+                    <QualityBtn room={r} onInspect={() => inspect.quality(r)} />
                   </div>
                 </td>
               </tr>
@@ -482,15 +494,11 @@ const mbpsText = (bps: number) => `${fmtMbps(bps)} Mbps`;
 
 /**
  * One stream of a snapshot as the quality modal words it: step, cap, numbers, path, and the
- * reason in the modal's own words, from the end of the browser that took the snapshot (`mine`
- * receives it, so it is a viewer's reading; else the streamer's, naming the viewer).
+ * reason in the modal's words, from outside the stream (an admin is neither end), naming both.
  */
-function streamText(s: NamedSnapshotStream, mine: "viewer" | "streamer"): string {
+function streamText(s: NamedSnapshotStream): string {
   const reason = s.reason
-    ? reasonText(
-        s.reason,
-        mine === "viewer" ? { side: "viewer" } : { side: "streamer", viewer: s.toName },
-      ).label
+    ? reasonText(s.reason, { side: "admin", streamer: s.fromName, viewer: s.toName }).label
     : undefined;
   const parts = [
     s.step && `${s.step}${s.cap === undefined ? "" : ` (cap ${mbpsText(s.cap)})`}`,
@@ -535,7 +543,7 @@ const SnapshotsCell = ({ report }: { report: RecentReport }) => {
               return (
                 <span key={`${st.from}>${st.to}`}>
                   {sending ? `sending to ${st.toName}` : `receiving from ${st.fromName}`}:{" "}
-                  {streamText(st, sending ? "streamer" : "viewer") || "no reading"}
+                  {streamText(st) || "no reading"}
                 </span>
               );
             })}
@@ -552,7 +560,7 @@ const SnapshotsCell = ({ report }: { report: RecentReport }) => {
 };
 
 /** Problem reports across rooms, newest first (CONTEXT.md, Problem report). */
-const RecentReportsTable = ({ onInspect }: { onInspect: (room: QualityTarget) => void }) => {
+const RecentReportsTable = ({ inspect }: { inspect: Inspect }) => {
   const { data, isError } = useQuery(recentReportsQuery());
   const reports = data?.reports ?? [];
   return (
@@ -578,7 +586,13 @@ const RecentReportsTable = ({ onInspect }: { onInspect: (room: QualityTarget) =>
                 <td className={td}>
                   <div className="flex flex-col items-start gap-1.5">
                     <span className="font-medium text-fg">{room.name}</span>
-                    <QualityBtn room={room} onInspect={() => onInspect(room)} />
+                    <Btn
+                      size="sm"
+                      aria-label={`Incident in ${room.name}`}
+                      onClick={() => inspect.timeline({ ...room, reportId: r.id })}
+                    >
+                      open incident
+                    </Btn>
                   </div>
                 </td>
                 <td className={td}>
@@ -940,6 +954,24 @@ const windowStat = (count: WindowCount) => ({
   delta: percentChange(count),
 });
 
+/**
+ * What a section opened below the tables needs: it scrolls into view and takes focus on its
+ * heading when `key` changes to something (a different room, report or pair), as the button that
+ * opened it is far above and focus would otherwise stay there, out of sight. `focus` puts focus
+ * back on the heading when something inside the section takes away the control that had it.
+ */
+function useRevealOnOpen(key: string | null) {
+  const section = useRef<HTMLElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const focus = useCallback(() => heading.current?.focus({ preventScroll: true }), []);
+  useEffect(() => {
+    if (!key) return;
+    section.current?.scrollIntoView({ block: "nearest" });
+    focus();
+  }, [key, focus]);
+  return { section, heading, focus };
+}
+
 function AdminPage() {
   const { data: overview } = useSuspenseQuery(adminOverviewQuery());
   const { data: daily } = useSuspenseQuery(adminDailySeriesQuery());
@@ -947,6 +979,12 @@ function AdminPage() {
   const { data: leaderboards } = useSuspenseQuery(adminLeaderboardsQuery());
   const { totals, window: last30 } = overview;
   const [quality, setQuality] = useState<QualityTarget | null>(null);
+  const [timeline, setTimeline] = useState<TimelineTarget | null>(null);
+  const inspect: Inspect = { quality: setQuality, timeline: setTimeline };
+  const timelineReveal = useRevealOnOpen(timeline && `${timeline.id}/${timeline.reportId ?? ""}`);
+  const qualityReveal = useRevealOnOpen(
+    quality && `${quality.id}/${quality.focus?.streamerId}/${quality.focus?.viewerId}`,
+  );
   const chartDays = daily.map((d) => ({
     date: d.day.slice(5),
     new_users: d.newUsers,
@@ -1051,7 +1089,7 @@ function AdminPage() {
           className="mt-6"
         />
         <div className={`${card} overflow-hidden`}>
-          <LiveRoomsTable rooms={liveRooms} onInspect={setQuality} />
+          <LiveRoomsTable rooms={liveRooms} inspect={inspect} />
         </div>
 
         <SectionHead
@@ -1062,13 +1100,39 @@ function AdminPage() {
           className="mt-6"
         />
         <div className={`${card} overflow-hidden`}>
-          <RecentRoomsTable onInspect={setQuality} />
+          <RecentRoomsTable inspect={inspect} />
         </div>
 
-        {quality && (
-          <section aria-label="room quality" className="mt-6">
+        {timeline && (
+          <section ref={timelineReveal.section} aria-label="room timeline" className="mt-6">
             <div className="flex items-start justify-between gap-3">
               <SectionHead
+                headingRef={timelineReveal.heading}
+                title={`room timeline · ${timeline.name}`}
+                sub="events kept 90 days · intervals 30 · times in your time zone"
+                dot="muted"
+                size="sm"
+              />
+              <Btn size="sm" onClick={() => setTimeline(null)}>
+                close
+              </Btn>
+            </div>
+            <RoomTimelinePanel
+              key={`${timeline.id}/${timeline.reportId ?? ""}`}
+              roomId={timeline.id}
+              live={liveRooms.some((r) => r.id === timeline.id)}
+              initialReportId={timeline.reportId}
+              onQuality={(focus) => setQuality({ id: timeline.id, name: timeline.name, focus })}
+              focusHeading={timelineReveal.focus}
+            />
+          </section>
+        )}
+
+        {quality && (
+          <section ref={qualityReveal.section} aria-label="room quality" className="mt-6">
+            <div className="flex items-start justify-between gap-3">
+              <SectionHead
+                headingRef={qualityReveal.heading}
                 title={`video quality · ${quality.name}`}
                 sub="samples kept 90 days · every 30s per stream and at each rung change"
                 size="sm"
@@ -1077,7 +1141,11 @@ function AdminPage() {
                 close
               </Btn>
             </div>
-            <RoomQualityPanel key={quality.id} roomId={quality.id} />
+            <RoomQualityPanel
+              key={`${quality.id}/${quality.focus?.streamerId ?? ""}/${quality.focus?.viewerId ?? ""}`}
+              roomId={quality.id}
+              focus={quality.focus}
+            />
           </section>
         )}
 
@@ -1089,7 +1157,7 @@ function AdminPage() {
           className="mt-6"
         />
         <div className={`${card} overflow-hidden`}>
-          <RecentReportsTable onInspect={setQuality} />
+          <RecentReportsTable inspect={inspect} />
         </div>
 
         <SectionHead title="users" sub="search · ban and unban" size="sm" className="mt-6" />

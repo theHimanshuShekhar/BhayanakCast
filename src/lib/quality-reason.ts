@@ -81,15 +81,23 @@ export interface ReasonText {
 }
 
 /**
- * Words for `reason` from one end: the viewer's ("Streamer's upload is shared") or the
- * streamer's own ("Your upload is shared", naming `viewer`). Undefined is a viewer that hasn't
- * heard from the streamer yet: it knows only what it receives.
+ * Whose words a reason is in: the viewer's, the streamer's own (naming the viewer), or an
+ * admin's reading of a stream from outside it (naming both, since the admin is neither end).
  */
-export function reasonText(
-  reason: StepReason | undefined,
-  from: { side: "viewer" } | { side: "streamer"; viewer: string },
-): ReasonText {
+export type ReasonSide =
+  | { side: "viewer" }
+  | { side: "streamer"; viewer: string }
+  | { side: "admin"; streamer: string; viewer: string };
+
+/**
+ * Words for `reason` from one end: the viewer's ("Streamer's upload is shared"), the
+ * streamer's own ("Your upload is shared", naming `viewer`), or an admin's, in the third person
+ * and naming both. Undefined is a viewer that hasn't heard from the streamer yet: it knows only
+ * what it receives.
+ */
+export function reasonText(reason: StepReason | undefined, from: ReasonSide): ReasonText {
   const mine = from.side === "streamer";
+  const admin = from.side === "admin";
   switch (reason) {
     case "best":
       return {
@@ -103,13 +111,15 @@ export function reasonText(
         label: mine ? "Your upload is shared" : "Streamer's upload is shared",
         explanation: mine
           ? "Held by your upload budget, or by this viewer's fair share of it. More viewers means a thinner slice each."
-          : "Held by the streamer's upload budget, or by your fair share of it. More viewers means a thinner slice each.",
+          : `Held by the streamer's upload budget, or by ${admin ? "this viewer's" : "your"} fair share of it. More viewers means a thinner slice each.`,
       };
     case "connection":
       return {
         label: mine
           ? `The connection between you and ${from.viewer}`
-          : "The connection between you",
+          : admin
+            ? `The connection between ${from.streamer} and ${from.viewer}`
+            : "The connection between you",
         explanation:
           "This pair showed loss, a long round trip or a bandwidth limit. It may be either end or the route between them.",
       };
@@ -128,8 +138,9 @@ export function reasonText(
     default:
       return {
         label: "Streamer's side unknown",
-        explanation:
-          "Nothing yet from the streamer's computer about why. This is what you receive.",
+        explanation: admin
+          ? "Nothing recorded from the streamer's computer about why."
+          : "Nothing yet from the streamer's computer about why. This is what you receive.",
       };
   }
 }
@@ -161,10 +172,7 @@ export function causeOf(reason: RungReason, pressure?: PressureCause): ChangeCau
 }
 
 /** A cause in words, for one step change on the timeline. */
-export function causeText(
-  cause: ChangeCause,
-  from: { side: "viewer" } | { side: "streamer"; viewer: string },
-): string {
+export function causeText(cause: ChangeCause, from: ReasonSide): string {
   const mine = from.side === "streamer";
   switch (cause) {
     case "capture":
@@ -174,9 +182,15 @@ export function causeText(
     case "probe":
       return "Trying higher";
     case "budget":
-      return mine ? "Your upload is shared" : "Upload is shared";
+      return mine
+        ? "Your upload is shared"
+        : from.side === "admin"
+          ? "Streamer's upload is shared"
+          : "Upload is shared";
     case "connection":
-      return mine ? `The connection between you and ${from.viewer}` : "The connection between you";
+      return from.side === "viewer"
+        ? "The connection between you"
+        : `The connection between ${from.side === "admin" ? from.streamer : "you"} and ${from.viewer}`;
     case "computer":
       return mine ? "Your computer" : "Streamer's computer";
   }

@@ -17,7 +17,7 @@ import {
   listAdminRecentRooms,
 } from "~/server/admin";
 import { getPairTimeline, getRoomQuality } from "~/server/admin-quality";
-import { listRecentReports } from "~/server/admin-reports";
+import { listRecentReports, listRoomReports } from "~/server/admin-reports";
 import { endRoom } from "~/server/admin-rooms";
 import { getRoomTimeline } from "~/server/admin-timeline";
 import { banUser, listAdminUsers, setUserRole, unbanUser } from "~/server/admin-users";
@@ -68,6 +68,10 @@ export const getRoomTimelineFn = createServerFn({ method: "GET" })
 export const listRecentReportsFn = createServerFn({ method: "GET" }).handler(async () =>
   listRecentReports(getDb(), await getCaller()),
 );
+
+export const listRoomReportsFn = createServerFn({ method: "GET" })
+  .validator(roomIdInput)
+  .handler(async ({ data }) => listRoomReports(getDb(), await getCaller(), data));
 
 export const getAdminLeaderboardsFn = createServerFn({ method: "GET" }).handler(async () =>
   getAdminLeaderboards(getDb(), await getCaller()),

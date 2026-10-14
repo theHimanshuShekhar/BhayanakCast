@@ -6,7 +6,8 @@
  * It goes through the normal user/session hooks, so admin env ids and bans apply.
  * `POST /api/auth/test/ban` bans or unbans a fake user by Discord id (test-only too).
  * `POST /api/auth/test/seed-room` inserts a room with its presence/stream intervals and
- * end time as given, so browser tests can build past streams without the realtime server.
+ * end time as given (and room timeline events, problem reports and their snapshots among them),
+ * so browser tests can build past streams without the realtime server.
  * `POST /api/auth/test/room-timeline` returns a room's merged timeline, as an admin reads it.
  * `POST /api/auth/test/stats` sets a fake user's lifetime stats and co-time (test-only too), as
  * if all from public rooms.
@@ -21,12 +22,14 @@ import {
   presenceIntervals,
   roomMembers,
   rooms,
+  roomTimelineEvents,
   streamIntervals,
   userCotime,
   userStats,
   user as userTable,
 } from "../db/schema/index.ts";
 import { getRoomTimeline } from "../server/admin-timeline.ts";
+import { TIMELINE_EVENT_KINDS, type TimelineDetails } from "./room-timeline.ts";
 import { ROOM_KINDS } from "./rooms.ts";
 
 export const TEST_SIGN_IN_PATH = "/test/sign-in";
@@ -67,13 +70,25 @@ const seedRoomBody = z.object({
     .default([]),
   presence: z.array(seedInterval).default([]),
   streams: z.array(seedInterval).default([]),
+  /** Room timeline events as the hub and the browsers would have recorded them. */
+  events: z
+    .array(
+      z.object({
+        at: z.iso.datetime(),
+        kind: z.enum(TIMELINE_EVENT_KINDS),
+        actorUserId: z.string().min(1).nullish(),
+        targetUserId: z.string().min(1).nullish(),
+        details: z.record(z.string(), z.json()).default({}),
+      }),
+    )
+    .default([]),
 });
 /** What `POST /api/auth/test/seed-room` takes. User ids come from test sign-ins. */
 export type SeedRoom = z.input<typeof seedRoomBody>;
 
 /** Insert a seeded room and its rows in one transaction; returns the room id. */
 async function seedRoom(db: Db, body: z.output<typeof seedRoomBody>): Promise<string> {
-  const { hostUserId, members, presence, streams, ...room } = body;
+  const { hostUserId, members, presence, streams, events, ...room } = body;
   const date = (iso: string | null | undefined) => (iso ? new Date(iso) : null);
   return db.transaction(async (tx) => {
     const [row] = await tx
@@ -104,6 +119,18 @@ async function seedRoom(db: Db, body: z.output<typeof seedRoomBody>): Promise<st
       ]);
     if (presence.length) await tx.insert(presenceIntervals).values(toRows(presence));
     if (streams.length) await tx.insert(streamIntervals).values(toRows(streams));
+    if (events.length) {
+      await tx.insert(roomTimelineEvents).values(
+        events.map((e) => ({
+          roomId,
+          at: new Date(e.at),
+          kind: e.kind,
+          actorUserId: e.actorUserId ?? null,
+          targetUserId: e.targetUserId ?? null,
+          details: e.details as TimelineDetails,
+        })),
+      );
+    }
     return roomId;
   });
 }
@@ -186,8 +213,8 @@ export function testSignIn(db: Db) {
         { method: "POST", body: seedRoomBody },
         async (ctx) => ctx.json({ roomId: await seedRoom(db, ctx.body) }),
       ),
-      // A room's merged timeline as an admin reads it (`getRoomTimeline`), for browser tests: the
-      // admin page has no timeline view yet, and the server function's wire format isn't a
+      // A room's merged timeline as an admin reads it (`getRoomTimeline`), for browser tests that
+      // check what the hub recorded without the page: the server function's wire format isn't a
       // thing a test should speak.
       testRoomTimeline: createAuthEndpoint(
         TEST_ROOM_TIMELINE_PATH,

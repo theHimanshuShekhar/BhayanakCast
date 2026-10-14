@@ -124,6 +124,25 @@ describe("reasonText", () => {
     );
   });
 
+  it("words each reason for an admin, in the third person, naming both people", () => {
+    const from = (r: Parameters<typeof reasonText>[0]) =>
+      reasonText(r, { side: "admin", streamer: "ana", viewer: "kira" });
+    expect(STEP_REASONS.map((r) => from(r).label)).toEqual([
+      "Best quality",
+      "Streamer's upload is shared",
+      "The connection between ana and kira",
+      "Streamer's computer",
+      "Getting started / trying higher",
+    ]);
+    expect(from(undefined).label).toBe("Streamer's side unknown");
+    // Never "you" or "your": the reader is neither end.
+    for (const r of [...STEP_REASONS, undefined]) {
+      const { label, explanation } = from(r);
+      expect(`${label} ${explanation}`).not.toMatch(/\byou(r|rs)?\b/i);
+    }
+    expect(from("connection").explanation).toMatch(/either end or the route between them/);
+  });
+
   it("marks a streamer's side the viewer hasn't heard as unknown", () => {
     const unknown = reasonText(undefined, { side: "viewer" });
     expect(unknown.label).toBe("Streamer's side unknown");
@@ -224,6 +243,22 @@ describe("causeOf", () => {
 
   it("calls pressure with no recorded cause the connection, as `limited` does", () => {
     expect(causeOf("pressure")).toBe("connection");
+  });
+});
+
+describe("causeText for an admin", () => {
+  it("words each cause in the third person, naming both people", () => {
+    const words = CHANGE_CAUSES.map((c) =>
+      causeText(c, { side: "admin", streamer: "ana", viewer: "kira" }),
+    );
+    expect(words).toEqual([
+      "Screen size changed",
+      "Resumed",
+      "Trying higher",
+      "Streamer's upload is shared",
+      "The connection between ana and kira",
+      "Streamer's computer",
+    ]);
   });
 });
 

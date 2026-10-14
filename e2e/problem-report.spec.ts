@@ -112,8 +112,8 @@ test("a viewer reports 'blurry' from the quality modal, and an admin sees it wit
         /Best quality|upload is shared|The connection between you|computer|Getting started/,
       ),
     ).not.toHaveCount(0);
-    // The room is linked to its inspection.
-    await expect(row.getByRole("button", { name: `Quality of ${roomName}` })).toBeVisible();
+    // The room is linked to its incident on the room timeline (#118).
+    await expect(row.getByRole("button", { name: `Incident in ${roomName}` })).toBeVisible();
     // No address, no device label.
     expect(await row.innerText()).not.toMatch(/\d+\.\d+\.\d+\.\d+/);
   } finally {

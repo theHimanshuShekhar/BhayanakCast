@@ -187,7 +187,7 @@ The palette is a dark tonal ladder carrying three signal colors, and each signal
 
 ### Tertiary
 - **Signal Green** (`signal-green`): means healthy and present. It appears on "Streaming" status, the online dot, capacity chips and ok chips.
-- **Standby Amber** (`standby-amber`): caution states. Use it sparingly. It appears on caution chips (such as the admin's "starved" flag), with `--color-warning-ink` for their text.
+- **Standby Amber** (`standby-amber`): caution states. Use it sparingly. It appears on caution chips (such as the admin's "starved" flag), with `--color-warning-ink` for their text. Where amber is a line or a mark and not a fill (the outline of a caution bar, a caution glyph on a chart), it is `--color-warning-mark`: the fill is about 1.6:1 on the light theme's white, and the mark token clears 3:1 on every panel.
 - **Chart series** (`--color-viz-1`, `--color-viz-2`): the first two hues of the data-viz palette, authored in oklch and stepped for each theme (blue and orange, with gray for context lines). They are data colors for charts only (the admin's quality timelines) and carry no signal meaning.
 
 ### Neutral

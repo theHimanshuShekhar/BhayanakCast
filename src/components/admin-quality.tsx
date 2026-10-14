@@ -12,6 +12,7 @@ import {
   type QualityPairRow,
   STARVED_MIN_SECONDS,
 } from "~/lib/quality-admin";
+import type { QualityFocus } from "~/lib/timeline-incident";
 import { fmtMbps, Key, Panel } from "./chart-parts";
 import { CHART_PAD_Y, RUNG_BAND, TimelineChart, type TimelineSeries } from "./timeline-chart";
 import { Avatar, Btn, Chip, MonoCaps } from "./ui";
@@ -238,9 +239,23 @@ const Starved = ({ pair }: { pair: QualityPair }) =>
   );
 
 /** The room's pairs, streamer to viewer, with a timeline behind each row. */
-export const RoomQualityPanel = ({ roomId }: { roomId: string }) => {
+export const RoomQualityPanel = ({
+  roomId,
+  focus,
+}: {
+  roomId: string;
+  /** A pair to open first (a snapshot row's quality link): the screen stream if it has one. */
+  focus?: QualityFocus;
+}) => {
   const { data, isError } = useQuery(roomQualityQuery(roomId));
-  const [open, setOpen] = useState<string | null>(null);
+  // Undefined until a row is toggled: then the focused pair's row is the one open.
+  const [toggled, setToggled] = useState<string | null | undefined>(undefined);
+  const focused = focus
+    ? data?.pairs
+        .filter((p) => p.streamerId === focus.streamerId && p.viewerId === focus.viewerId)
+        .sort((a, b) => Number(b.slot === "screen") - Number(a.slot === "screen"))[0]
+    : undefined;
+  const open = toggled === undefined ? (focused ? pairKey(focused) : null) : toggled;
   if (isError)
     return <div className={`${card} p-5 text-xs text-live-ink`}>quality unavailable</div>;
   if (!data) return <div className={`${card} p-5 text-xs text-subtle`}>loading…</div>;
@@ -254,6 +269,14 @@ export const RoomQualityPanel = ({ roomId }: { roomId: string }) => {
         </MonoCaps>
         {data.truncated && <MonoCaps>first {MAX_ROOM_SAMPLES} samples only</MonoCaps>}
       </div>
+      {focus && !focused && (
+        <p
+          role="status"
+          className="m-0 border-b border-border-subtle px-3.5 py-2 text-[11.5px] text-muted"
+        >
+          no quality samples for that stream
+        </p>
+      )}
       <div className="overflow-x-auto">
         <table aria-label="quality pairs" className="w-full min-w-[1060px] border-collapse text-xs">
           <thead>
@@ -296,7 +319,7 @@ export const RoomQualityPanel = ({ roomId }: { roomId: string }) => {
                   pair={pair}
                   label={label}
                   open={open === key}
-                  toggle={() => setOpen(open === key ? null : key)}
+                  toggle={() => setToggled(open === key ? null : key)}
                   roomId={roomId}
                 />
               );
