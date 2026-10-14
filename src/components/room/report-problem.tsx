@@ -4,16 +4,16 @@
 // category is chosen, and the note never blocks it. The reporter gets a short thank-you toast;
 // nothing appears for anyone else. The server allows one report per person per minute, and the
 // form stops repeats before that.
-import { useCallback, useEffect, useState } from "react";
+import { type RefObject, useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   PROBLEM_CATEGORIES,
   PROBLEM_CATEGORY_LABELS,
   PROBLEM_NOTE_MAX,
   type ProblemCategory,
   REPORT_PERSON_WINDOW_MS,
-  type ReportSnapshot,
 } from "~/lib/problem-report";
 import { reportProblemFn } from "~/lib/problem-report.functions";
+import type { ReportSnapshot } from "~/lib/report-snapshot";
 import { Sheet } from "../overlays";
 import { Btn, fieldInput, fieldLabel } from "../ui";
 import { roomToasts } from "./room-toasts";
@@ -108,16 +108,26 @@ type Draft = ReturnType<typeof useDraft>;
 const chip =
   "h-[26px] px-2.5 inline-flex items-center rounded-full text-[11px] border cursor-pointer select-none transition-colors bg-canvas border-border text-fg-muted hover:text-fg hover:border-border-strong has-[:checked]:bg-primary has-[:checked]:text-primary-ink has-[:checked]:border-transparent has-[:checked]:font-semibold has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-primary";
 
-/** The category and the note. */
-function Fields({ draft, name }: { draft: Draft; name: string }) {
+/** The category and the note. `first` gets the first category's input, to focus it. */
+function Fields({
+  draft,
+  name,
+  first,
+}: {
+  draft: Draft;
+  name: string;
+  first?: RefObject<HTMLInputElement | null>;
+}) {
+  const counter = useId();
   return (
     <>
       <fieldset className="m-0 p-0 border-0 flex flex-col gap-2">
         <legend className={`${fieldLabel} mb-2 p-0`}>what went wrong?</legend>
         <div className="flex flex-wrap gap-1.5">
-          {PROBLEM_CATEGORIES.map((category) => (
+          {PROBLEM_CATEGORIES.map((category, i) => (
             <label key={category} className={chip}>
               <input
+                ref={i === 0 ? first : undefined}
                 type="radio"
                 name={name}
                 value={category}
@@ -130,20 +140,24 @@ function Fields({ draft, name }: { draft: Draft; name: string }) {
           ))}
         </div>
       </fieldset>
-      <label className="flex flex-col gap-1.5">
-        <span className={fieldLabel}>note (optional)</span>
-        <textarea
-          value={draft.note}
-          onChange={(e) => draft.setNote(e.target.value)}
-          maxLength={PROBLEM_NOTE_MAX}
-          rows={3}
-          placeholder="anything that helps, like what you saw or when it started"
-          className={`${fieldInput} resize-none`}
-        />
-        <span className="self-end text-[10.5px] text-muted tabular-nums">
+      <div className="flex flex-col gap-1.5">
+        <label className="flex flex-col gap-1.5">
+          <span className={fieldLabel}>note (optional)</span>
+          <textarea
+            value={draft.note}
+            onChange={(e) => draft.setNote(e.target.value)}
+            maxLength={PROBLEM_NOTE_MAX}
+            rows={3}
+            aria-describedby={counter}
+            placeholder="anything that helps, like what you saw or when it started"
+            className={`${fieldInput} resize-none`}
+          />
+        </label>
+        {/* Outside the label, so it is the field's description and not part of its name. */}
+        <span id={counter} className="self-end text-[10.5px] text-muted tabular-nums">
           {draft.note.length}/{PROBLEM_NOTE_MAX}
         </span>
-      </label>
+      </div>
     </>
   );
 }
@@ -168,18 +182,23 @@ function Status({ draft, reporter }: { draft: Draft; reporter: ProblemReporter }
 
 /**
  * The form inside a stream's quality modal, for the report on `streamUserId`'s stream: opened
- * by the modal's "report a problem" button, closed (`onDone`) once sent.
+ * by the modal's "report a problem" button, closed (`onDone`) once sent or (`onCancel`) given up.
+ * It takes focus when it opens, on the first category; the modal puts it back on the button.
  */
 export function InlineReportForm({
   reporter,
   streamUserId,
   onDone,
+  onCancel,
 }: {
   reporter: ProblemReporter;
   streamUserId: string;
   onDone: () => void;
+  onCancel: () => void;
 }) {
   const draft = useDraft(reporter, streamUserId, onDone);
+  const first = useRef<HTMLInputElement>(null);
+  useEffect(() => first.current?.focus(), []);
   return (
     <form
       aria-label="report a problem"
@@ -189,9 +208,12 @@ export function InlineReportForm({
         void draft.submit();
       }}
     >
-      <Fields draft={draft} name={`report-category-${streamUserId}`} />
-      <div className="flex items-center justify-between gap-3">
+      <Fields draft={draft} name={`report-category-${streamUserId}`} first={first} />
+      <div className="flex items-center justify-end gap-2">
         <Status draft={draft} reporter={reporter} />
+        <Btn size="sm" onClick={onCancel}>
+          cancel
+        </Btn>
         <Btn type="submit" variant="primary" size="sm" disabled={!draft.canSend}>
           send report
         </Btn>

@@ -254,7 +254,7 @@ What the app logs (successful requests and server-function calls are not logged)
 | `socket.slow_client_dropped`, `socket.error` | warn | A socket that stopped reading, or broke the protocol. |
 | `quality.dropped` | warn | A quality report the server threw away, with the `reason`: `not_in_room`, `over_limit`, `invalid`, `peer_not_in_room`. |
 | `quality.write_failed`, `thumbnail.upload_failed`, `realtime.error`, `maintenance.*_failed` | error | A write or step that failed. |
-| `timeline.<kind>` | info | Every room timeline event as it is recorded (`timeline.join`, `timeline.kick`, ...), with `roomId`, `userId` (the actor), `targetUserId`, `at` and the event's `details`: follow a user or a room across rooms. Never chat. The per-minute `refusals` summaries aren't repeated here (`socket.refused` has each one). |
+| `timeline.<kind>` | info | Every room timeline event as it is recorded (`timeline.join`, `timeline.kick`, ...), with `roomId`, `userId` (the actor), `targetUserId`, `at` and the event's `details`: follow a user or a room across rooms. Never chat. The per-minute `refusals` summaries aren't repeated here (`socket.refused` has each one). A problem report's note is not logged, only its length (`noteChars`): the note is on the room timeline for admins and nowhere else. `timeline.report_snapshot` lines carry a browser's whole snapshot (numbers, pair states and user ids; no text), so they run to 8 KB. |
 | `timeline.write_failed` (error), `timeline.dropped` (warn) | | A timeline write that failed or timed out (its events stay queued and are retried), and events dropped from a full queue while the database is down. |
 | `thumbnail.upload_refused` | warn | An upload answered 403, 413, 415, 429 or 401, with the `status` and `reason`. |
 | `og.card_failed` (error), `og.avatar_failed`, `og.backdrop_failed` (warn) | | A link card that couldn't be drawn, or drawn without the host's picture or the thumbnail behind it. |
@@ -266,7 +266,6 @@ What the app logs (successful requests and server-function calls are not logged)
 | `connection_event.dropped` | warn | A connection-event report from a page, or some of its events, that the server threw away, with the `reason`: `invalid`, `too_large` (a beacon past 64 KiB), `over_limit` (too many reports), `not_in_room`, `peer_not_in_room`, `snapshot_not_asked` (a problem report's snapshot nobody asked for, or a second from the same person), `over_cap` (a person's 120 events in 10 minutes; one `events_dropped` row on the timeline says how many). The events that are stored appear as `timeline.pair_state`, `timeline.pair_path`, `timeline.device_error` and so on. |
 | `problem.dropped` | warn | A problem report the server threw away, with the `reason`: `invalid`, `not_in_room`, `over_limit` (a second report from one person inside a minute). `problem.ask_failed` (error) is the request for snapshots failing; the report itself was kept. |
 | `maintenance.*`, `migrate.*` | info, error | The daily purge, and the migration run at start. |
-
 
 **Noise.** The same event from the same user (or socket) is written in full for its first 10 lines in
 a minute; after that one line a minute carries `suppressed: N`. Errors are counted by their message

@@ -5,6 +5,7 @@
  * purge can't take it, and a deleted account leaves its ids. Its own daily purge is
  * `purgeExpiredTimelineEvents` (src/server/room-timeline.ts).
  */
+import { sql } from "drizzle-orm";
 import { bigint, index, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import type { TimelineDetails, TimelineEventKind } from "../../lib/room-timeline.ts";
 
@@ -26,5 +27,11 @@ export const roomTimelineEvents = pgTable(
   (table) => [
     index("room_timeline_events_room_idx").on(table.roomId, table.at),
     index("room_timeline_events_at_idx").on(table.at),
+    // The admin's recent reports (src/server/admin-reports.ts): the newest of one kind...
+    index("room_timeline_events_kind_at_idx").on(table.kind, table.at),
+    // ...and the snapshots of a report, found by the report id in their details.
+    index("room_timeline_events_snapshot_report_idx")
+      .on(sql`(${table.details}->>'reportId')`)
+      .where(sql`${table.kind} = 'report_snapshot'`),
   ],
 );

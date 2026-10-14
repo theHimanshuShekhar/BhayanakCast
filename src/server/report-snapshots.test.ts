@@ -67,11 +67,18 @@ describe("claiming a place in a snapshot", () => {
     expect(snapshots.claim("r1", "ana", "rep-1", plus(2_000))).toBe(true);
   });
 
-  it("forgets snapshots past their accept time", () => {
+  it("does not let the reporter claim a place: their own snapshot is stored with the report", () => {
     const snapshots = new ReportSnapshots();
-    snapshots.open("r1", "rep-1", T0);
-    snapshots.open("r2", "rep-2", T0);
-    snapshots.open("r3", "rep-3", plus(REPORT_SNAPSHOT_ACCEPT_MS + 1));
-    expect(snapshots.size).toBe(1);
+    snapshots.open("r1", "rep-1", T0, "ana");
+    expect(snapshots.claim("r1", "ana", "rep-1", plus(1_000))).toBe(false);
+    expect(snapshots.claim("r1", "bo", "rep-1", plus(1_000))).toBe(true);
+  });
+
+  it("does not let the reporter of a reusing report claim either: the snapshot is already open", () => {
+    const snapshots = new ReportSnapshots();
+    snapshots.open("r1", "rep-1", T0, "ana");
+    snapshots.open("r1", "rep-2", plus(10_000), "bo");
+    // bo answers the ask of rep-1 as everyone else does; reusing it doesn't take that from him.
+    expect(snapshots.claim("r1", "bo", "rep-1", plus(11_000))).toBe(true);
   });
 });

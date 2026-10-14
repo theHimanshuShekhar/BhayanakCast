@@ -15,7 +15,7 @@
  */
 import { z } from "zod";
 import { CANDIDATE_TYPES, type IcePath, isRelayed, RELAY_PROTOCOLS } from "./ice.ts";
-import { reportSnapshot } from "./problem-report.ts";
+import { reportId, reportSnapshot } from "./report-snapshot.ts";
 
 /** Events in one report: a full room's worth of pairs coming up, and some to spare. */
 export const CONNECTION_BATCH_MAX = 50;
@@ -131,7 +131,7 @@ export const connectionEvent = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("report_snapshot"),
     ageMs,
-    reportId: z.string().min(1).max(64),
+    reportId,
     ...reportSnapshot.shape,
   }),
 ]);
@@ -202,13 +202,18 @@ export function cleanMessage(
     .sort((a, b) => b.length - a.length)) {
     out = out.split(secret).join(DEVICE);
   }
-  return out
-    .replace(IPV4, "[ip]")
-    .replace(IPV6, "[ip]")
-    .replace(ID_LIKE, "[id]")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, max);
+  return (
+    out
+      .replace(IPV4, "[ip]")
+      .replace(IPV6, "[ip]")
+      .replace(ID_LIKE, "[id]")
+      .replace(/\s+/g, " ")
+      // What is left of the control characters (a NUL, an escape): invisible, and six bytes each as
+      // JSON, which would push a row's details over its cap.
+      .replace(/\p{Cc}/gu, "")
+      .trim()
+      .slice(0, max)
+  );
 }
 
 /** An error's name and cleaned message; anything that isn't an `Error` is just `Error`. */

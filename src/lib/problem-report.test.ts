@@ -1,14 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { connectionEvent, reportConnectionEventsInput } from "./connection-events";
 import type { QualityView } from "./mesh";
-import {
-  browserOf,
-  buildSnapshot,
-  PROBLEM_NOTE_MAX,
-  type ReportSnapshot,
-  reportProblemInput,
-  reportSnapshot,
-} from "./problem-report";
+import { PROBLEM_NOTE_MAX, reportProblemInput } from "./problem-report";
+import { type ReportSnapshot, reportSnapshot } from "./report-snapshot";
+import { answerSnapshotRequest, browserOf, buildSnapshot } from "./snapshot-builder";
 
 // A problem report (#117): the snapshot a browser sends of its own connections, and the form the
 // reporter fills in. The snapshot keeps what the quality modal shows and each pair's state, and
@@ -163,6 +158,36 @@ describe("buildSnapshot", () => {
     });
     expect(JSON.stringify(snapshot)).not.toMatch(/\d+\.\d+\.\d+\.\d+|label|deviceId/i);
     expect(reportSnapshot.safeParse(snapshot).success).toBe(true);
+  });
+});
+
+describe("answerSnapshotRequest", () => {
+  const snapshot: ReportSnapshot = { browser: chrome, streams: [], pairs: [] };
+
+  it("hands the snapshot to the queue as a report_snapshot event for the report", () => {
+    const added: unknown[] = [];
+    answerSnapshotRequest(
+      "rep-1",
+      () => snapshot,
+      (event) => added.push(event),
+    );
+    expect(added).toEqual([{ kind: "report_snapshot", reportId: "rep-1", ...snapshot }]);
+  });
+
+  it("swallows whatever goes wrong, so a request nobody on the page made never reaches it", () => {
+    const calm = () => {
+      throw new Error("getStats failed");
+    };
+    expect(() => answerSnapshotRequest("rep-1", calm, () => {})).not.toThrow();
+    expect(() =>
+      answerSnapshotRequest(
+        "rep-1",
+        () => snapshot,
+        () => {
+          throw new Error("queue broke");
+        },
+      ),
+    ).not.toThrow();
   });
 });
 

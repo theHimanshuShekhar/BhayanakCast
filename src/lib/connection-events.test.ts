@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   audioBlockedEvent,
   CONNECTION_BATCH_MAX,
+  cleanMessage,
   describeError,
   deviceErrorEvent,
   MAX_ERROR_MESSAGE,
@@ -116,6 +117,21 @@ describe("negotiationEvent", () => {
       name: "Timeout",
       message: "",
     });
+  });
+});
+
+describe("cleanMessage", () => {
+  it("drops control characters, which would escape to six bytes each in a row's details", () => {
+    expect(cleanMessage("a\u0000b\u0007c\u001bd\u007fe\u0085f")).toBe("abcdef");
+  });
+
+  it("still turns line breaks and tabs into single spaces", () => {
+    expect(cleanMessage("one\r\ntwo\tthree")).toBe("one two three");
+  });
+
+  it("cuts to the length it is given", () => {
+    expect(cleanMessage("x".repeat(500), [], 280)).toHaveLength(280);
+    expect(cleanMessage("x".repeat(500))).toHaveLength(MAX_ERROR_MESSAGE);
   });
 });
 

@@ -57,9 +57,16 @@ test("a viewer reports 'blurry' from the quality modal, and an admin sees it wit
     await expect(modal.getByTestId("quality-reason")).toBeVisible({ timeout: 40_000 });
 
     // The form: one tap sends once a category is picked, and not before.
-    await modal.getByRole("button", { name: "report a problem" }).click();
+    const open = modal.getByRole("button", { name: "report a problem" });
+    await open.click();
     const form = modal.getByRole("form", { name: "report a problem" });
     const send = form.getByRole("button", { name: "send report" });
+    // Focus moves into the form, to the first category; cancelling gives it back to the button.
+    await expect(form.getByRole("radio", { name: "blurry" })).toBeFocused();
+    await form.getByRole("button", { name: "cancel" }).click();
+    await expect(form).toHaveCount(0);
+    await expect(open).toBeFocused();
+    await open.click();
     await expect(send).toBeDisabled();
     await form.getByText("blurry", { exact: true }).click();
     await expect(form.getByRole("radio", { name: "blurry" })).toBeChecked();
@@ -69,7 +76,9 @@ test("a viewer reports 'blurry' from the quality modal, and an admin sees it wit
     // The reporter hears thanks; the form is gone and a second report waits out the minute.
     await expect(viewer.page.getByText(THANKS)).toBeVisible();
     await expect(form).toHaveCount(0);
-    await expect(modal.getByRole("button", { name: "report a problem" })).toBeDisabled();
+    // The button waits out the minute, and still holds focus (it is aria-disabled, not disabled).
+    await expect(open).toBeDisabled();
+    await expect(open).toBeFocused();
 
     // Silent to the room: the streamer sees nothing about it, in the room or its feed.
     await page.waitForTimeout(500);
@@ -93,8 +102,16 @@ test("a viewer reports 'blurry' from the quality modal, and an admin sees it wit
     await expect(row).toContainText("pr.viewer");
     // The numbers are in the snapshots, folded away until opened.
     await row.getByText(/2 snapshots/).click();
-    await expect(row.getByText(/receiving from/)).toBeVisible();
-    await expect(row.getByText(/sending to/)).toBeVisible();
+    // Names and the modal's own words for the reason, never ids or codes.
+    await expect(row.getByText(/receiving from pr\.streamer:/)).toBeVisible();
+    await expect(row.getByText(/sending to pr\.viewer:/)).toBeVisible();
+    // One pairs line per browser, each naming the other person.
+    await expect(row.getByText(/pairs: pr\.(viewer|streamer) (connected|relayed)/)).toHaveCount(2);
+    await expect(
+      row.getByText(
+        /Best quality|upload is shared|The connection between you|computer|Getting started/,
+      ),
+    ).not.toHaveCount(0);
     // The room is linked to its inspection.
     await expect(row.getByRole("button", { name: `Quality of ${roomName}` })).toBeVisible();
     // No address, no device label.

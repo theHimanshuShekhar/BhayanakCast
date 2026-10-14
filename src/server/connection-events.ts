@@ -32,7 +32,6 @@ import {
   type ReportConnectionEventsInput,
   reportConnectionEventsInput,
 } from "../lib/connection-events.ts";
-import { MAX_SNAPSHOT_DETAILS_BYTES } from "../lib/problem-report.ts";
 import { boundDetails, type TimelineEventRow } from "../lib/room-timeline.ts";
 import {
   type Caller,
@@ -49,7 +48,7 @@ import {
   timedWrite,
 } from "./log-events.ts";
 import { forgetIdle, withinRateLimit } from "./rate-limit.ts";
-import { getReportSnapshots, type ReportSnapshots } from "./report-snapshots.ts";
+import { getReportSnapshots, type ReportSnapshots, snapshotDetails } from "./report-snapshots.ts";
 import { isSameOrigin, readBodyCapped } from "./thumbnails.ts";
 
 /**
@@ -354,10 +353,10 @@ function rowOf(
     kind,
     actorUserId: reporter,
     targetUserId: peerId,
-    details: boundDetails(
-      details as TimelineEventRow["details"],
-      kind === "report_snapshot" ? MAX_SNAPSHOT_DETAILS_BYTES : undefined,
-    ),
+    details:
+      kind === "report_snapshot"
+        ? snapshotDetails(details as { reportId: string })
+        : boundDetails(details as TimelineEventRow["details"]),
   };
 }
 

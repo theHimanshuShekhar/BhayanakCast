@@ -16,7 +16,8 @@ import {
   pathEvent,
   type ReportConnectionEventsInput,
 } from "../lib/connection-events.ts";
-import { REPORT_SNAPSHOT_ACCEPT_MS, type ReportSnapshot } from "../lib/problem-report.ts";
+import { REPORT_SNAPSHOT_ACCEPT_MS } from "../lib/problem-report.ts";
+import type { ReportSnapshot } from "../lib/report-snapshot.ts";
 import { type Caller, type SignedInCaller, SignInRequiredError } from "./caller.ts";
 import { FakeClock } from "./clock.ts";
 import {
@@ -584,6 +585,40 @@ describe("report snapshots", () => {
     const [row] = await stored();
     expect(row?.details).toMatchObject({ reportId: "rep-1", streams: expect.any(Array) });
     expect(row?.details.streams).toHaveLength(12);
+  });
+
+  it("keeps the report id and the browser of a snapshot cut for size, so it still belongs to its report", async () => {
+    asked();
+    const huge = {
+      ...snapshot,
+      streams: Array.from({ length: 32 }, (_, i) => ({
+        from: "bo",
+        to: `viewer-${i}-${"x".repeat(50)}`,
+        step: "1080p60",
+        cap: 12_000_000,
+        reason: "connection" as const,
+        path: "relay · UDP",
+        ageMs: 900,
+        bps: 11_000_000,
+        width: 1920,
+        height: 1080,
+        fps: 60,
+        codec: "VP9",
+        loss: 0.0123,
+        rttMs: 80,
+        freezes: 3,
+      })),
+    };
+    await service.record(
+      asUser("bo"),
+      report([{ kind: "report_snapshot", ageMs: 0, reportId: "rep-1", ...huge }]),
+    );
+    const [row] = await stored();
+    expect(row?.details).toEqual({
+      truncated: true,
+      reportId: "rep-1",
+      browser: { name: "chrome", version: "126" },
+    });
   });
 
   it("drops one for a snapshot nobody asked for, or asked for in another room", async () => {

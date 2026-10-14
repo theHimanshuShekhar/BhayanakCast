@@ -17,6 +17,7 @@ import {
   UnbanUserDialog,
 } from "~/components/admin-dialogs";
 import { RoomQualityPanel } from "~/components/admin-quality";
+import { fmtMbps } from "~/components/chart-parts";
 import { BarChart, LineChart } from "~/components/charts";
 import { Icon } from "~/components/icons";
 import { SectionHead } from "~/components/section-head";
@@ -47,10 +48,11 @@ import {
 import { useCurrentSession } from "~/lib/current-user";
 import { fmtAgo, fmtMins } from "~/lib/format";
 import {
+  type NamedSnapshotStream,
   PROBLEM_CATEGORY_LABELS,
   type RecentReport,
-  type SnapshotStream,
 } from "~/lib/problem-report";
+import { reasonText } from "~/lib/quality-reason";
 import type { LiveRoomCard, RoomPerson } from "~/lib/rooms";
 import { roomKeys } from "~/lib/rooms.queries";
 import { TURN_FREE_TIER_GB } from "~/lib/turn-usage";
@@ -476,10 +478,20 @@ const fmtDate = (iso: string) =>
     timeZone: "UTC",
   });
 
-const mbpsText = (bps: number) => `${(bps / 1_000_000).toFixed(1)} Mbps`;
+const mbpsText = (bps: number) => `${fmtMbps(bps)} Mbps`;
 
-/** One stream of a snapshot as the quality modal words it: step, cap, numbers, path, reason. */
-function streamText(s: SnapshotStream): string {
+/**
+ * One stream of a snapshot as the quality modal words it: step, cap, numbers, path, and the
+ * reason in the modal's own words, from the end of the browser that took the snapshot (`mine`
+ * receives it, so it is a viewer's reading; else the streamer's, naming the viewer).
+ */
+function streamText(s: NamedSnapshotStream, mine: "viewer" | "streamer"): string {
+  const reason = s.reason
+    ? reasonText(
+        s.reason,
+        mine === "viewer" ? { side: "viewer" } : { side: "streamer", viewer: s.toName },
+      ).label
+    : undefined;
   const parts = [
     s.step && `${s.step}${s.cap === undefined ? "" : ` (cap ${mbpsText(s.cap)})`}`,
     s.bps !== undefined && mbpsText(s.bps),
@@ -488,7 +500,7 @@ function streamText(s: SnapshotStream): string {
     s.loss !== undefined && `loss ${(s.loss * 100).toFixed(1)}%`,
     s.rttMs !== undefined && `rtt ${s.rttMs} ms`,
     s.path,
-    s.reason,
+    reason,
   ];
   return parts.filter(Boolean).join(" · ");
 }
@@ -515,16 +527,21 @@ const SnapshotsCell = ({ report }: { report: RecentReport }) => {
                 {s.own ? " · sent with the report" : ""}
               </span>
             </b>
-            {s.streams.map((st) => (
-              <span key={`${st.from}>${st.to}`}>
-                {st.from === s.user.id ? "sending to" : "receiving from"}{" "}
-                {st.from === s.user.id ? st.to.slice(0, 8) : st.from.slice(0, 8)}:{" "}
-                {streamText(st) || "no reading"}
-              </span>
-            ))}
+            {s.truncated && (
+              <span className="text-subtle">too large to keep: only the browser is known</span>
+            )}
+            {s.streams.map((st) => {
+              const sending = st.from === s.user.id;
+              return (
+                <span key={`${st.from}>${st.to}`}>
+                  {sending ? `sending to ${st.toName}` : `receiving from ${st.fromName}`}:{" "}
+                  {streamText(st, sending ? "streamer" : "viewer") || "no reading"}
+                </span>
+              );
+            })}
             {s.pairs.length > 0 && (
               <span className="text-subtle">
-                pairs: {s.pairs.map((p) => `${p.peerId.slice(0, 8)} ${p.state}`).join(", ")}
+                pairs: {s.pairs.map((p) => `${p.name} ${p.state}`).join(", ")}
               </span>
             )}
           </li>

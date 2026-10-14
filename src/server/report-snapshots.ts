@@ -10,6 +10,23 @@
  * a report that was never made.
  */
 import { REPORT_SNAPSHOT_ACCEPT_MS, REPORT_SNAPSHOT_WINDOW_MS } from "../lib/problem-report.ts";
+import {
+  MAX_SNAPSHOT_DETAILS_BYTES,
+  type ReportSnapshot,
+  SNAPSHOT_KEEP,
+} from "../lib/report-snapshot.ts";
+import { boundDetails, type TimelineDetails } from "../lib/room-timeline.ts";
+
+/**
+ * The details of a `report_snapshot` row: the snapshot, tied to its report by `reportId`. Over
+ * `MAX_SNAPSHOT_DETAILS_BYTES` it is cut to `{ truncated: true, reportId, browser }`, so it still
+ * belongs to its report.
+ */
+export function snapshotDetails(
+  details: { reportId: string } & Partial<ReportSnapshot>,
+): TimelineDetails {
+  return boundDetails(details as TimelineDetails, MAX_SNAPSHOT_DETAILS_BYTES, SNAPSHOT_KEEP);
+}
 
 interface Open {
   roomId: string;
@@ -23,17 +40,18 @@ export class ReportSnapshots {
   /** The latest snapshot started in each room. */
   readonly #latest = new Map<string, string>();
 
-  /** Snapshots still accepted. For tests. */
-  get size(): number {
-    return this.#open.size;
-  }
-
   /**
-   * The snapshot a report in `roomId` at `at` belongs to: the room's latest if it was started
-   * within the window (`fresh: false`), else a new one named `reportId` (`fresh: true`, and the
-   * caller asks the room for it).
+   * The snapshot a report by `reporter` in `roomId` at `at` belongs to: the room's latest if it
+   * was started within the window (`fresh: false`), else a new one named `reportId` (`fresh:
+   * true`, and the caller asks the room for it). A new one is not asked of the reporter, whose
+   * snapshot is stored with their report, so their place in it is taken.
    */
-  open(roomId: string, reportId: string, at: Date): { snapshotId: string; fresh: boolean } {
+  open(
+    roomId: string,
+    reportId: string,
+    at: Date,
+    reporter?: string,
+  ): { snapshotId: string; fresh: boolean } {
     const now = at.getTime();
     this.#forget(now);
     const latest = this.#latest.get(roomId);
@@ -41,7 +59,11 @@ export class ReportSnapshots {
     if (latest && current && now - current.startedAt < REPORT_SNAPSHOT_WINDOW_MS) {
       return { snapshotId: latest, fresh: false };
     }
-    this.#open.set(reportId, { roomId, startedAt: now, from: new Set() });
+    this.#open.set(reportId, {
+      roomId,
+      startedAt: now,
+      from: new Set(reporter ? [reporter] : []),
+    });
     this.#latest.set(roomId, reportId);
     return { snapshotId: reportId, fresh: true };
   }

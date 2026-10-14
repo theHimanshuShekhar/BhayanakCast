@@ -152,13 +152,21 @@ export interface RoomTimeline {
 }
 
 /**
- * `details` as it will be stored: unchanged if small enough, else `{ truncated: true }`, so a
- * row can never grow without bound whatever a call site passes.
+ * `details` as it will be stored: unchanged if within `max` bytes, else `{ truncated: true }`
+ * with only the `keep` fields that were there, so a row can never grow without bound whatever a
+ * call site passes.
  */
 export function boundDetails(
   details: TimelineDetails,
   max = MAX_TIMELINE_DETAILS_BYTES,
+  keep: readonly string[] = [],
 ): TimelineDetails {
   const bytes = new TextEncoder().encode(JSON.stringify(details)).length;
-  return bytes > max ? { truncated: true } : details;
+  if (bytes <= max) return details;
+  // The fields that tie a row to what it belongs to (a report's ids) survive the cut: without
+  // them the row is lost to whoever reads it by those.
+  const kept = Object.fromEntries(
+    keep.flatMap((key) => (key in details ? [[key, details[key]]] : [])),
+  );
+  return { truncated: true, ...kept };
 }

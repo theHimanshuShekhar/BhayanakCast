@@ -9,7 +9,9 @@
  * - **A `problem_report` row**: the reporter as actor, the stream's owner (when it was sent from
  *   that stream's quality modal and they are in the room) as target, and in `details` the report's
  *   `reportId`, `category`, the note (trimmed, cleaned like a connection event's error message and
- *   cut to `PROBLEM_NOTE_MAX`) and `snapshot`: the id of the room's snapshot it belongs to.
+ *   cut to `PROBLEM_NOTE_MAX`) and `snapshot`: the id of the room's snapshot it belongs to. The
+ *   note is for admins on the timeline only: the server log gets its length, not its text
+ *   (`logTimelineRow`).
  * - **The reporter's own snapshot**, sent with the report, as a `report_snapshot` row under the
  *   report's own id.
  * - **The room is asked for theirs** (`ask`, the hub's `snapshot.request`), unless a snapshot was
@@ -23,11 +25,11 @@ import { type Db, getDb } from "../db/client.ts";
 import { presenceIntervals, rooms, roomTimelineEvents } from "../db/schema/index.ts";
 import { cleanMessage } from "../lib/connection-events.ts";
 import {
-  MAX_SNAPSHOT_DETAILS_BYTES,
+  MAX_REPORT_DETAILS_BYTES,
   PROBLEM_NOTE_MAX,
+  PROBLEM_REPORT_KEEP,
   REPORT_PERSON_WINDOW_MS,
   type ReportProblemInput,
-  type ReportSnapshot,
   reportProblemInput,
 } from "../lib/problem-report.ts";
 import { boundDetails, type TimelineDetails, type TimelineEventRow } from "../lib/room-timeline.ts";
@@ -41,7 +43,7 @@ import {
   timedWrite,
 } from "./log-events.ts";
 import { log } from "./logger.ts";
-import { getReportSnapshots, type ReportSnapshots } from "./report-snapshots.ts";
+import { getReportSnapshots, type ReportSnapshots, snapshotDetails } from "./report-snapshots.ts";
 
 /** What a report came to. */
 export type ProblemReportResult =
@@ -114,8 +116,10 @@ export class ProblemReportService {
     }
     this.#last.set(reporter, now.getTime());
 
+    // A note of nothing but control characters is no note.
+    const cleaned = note ? cleanMessage(note, [], PROBLEM_NOTE_MAX) : undefined;
     const reportId = this.#newId();
-    const { snapshotId, fresh } = this.#snapshots.open(roomId, reportId, now);
+    const { snapshotId, fresh } = this.#snapshots.open(roomId, reportId, now, reporter);
     // Asked before the write: the moment matters more than the row, and if the write fails the
     // retry (inside the minute) points at this snapshot.
     if (fresh) this.#askRoom(roomId, snapshotId, reporter);
@@ -133,15 +137,19 @@ export class ProblemReportService {
       row(
         "problem_report",
         streamUserId && present.has(streamUserId) ? streamUserId : null,
-        boundDetails({
-          reportId,
-          category,
-          ...(note && { note: cleanMessage(note, [], PROBLEM_NOTE_MAX) }),
-          snapshot: snapshotId,
-          ...(!fresh && { reused: true }),
-        }),
+        boundDetails(
+          {
+            reportId,
+            category,
+            ...(cleaned && { note: cleaned }),
+            snapshot: snapshotId,
+            ...(!fresh && { reused: true }),
+          },
+          MAX_REPORT_DETAILS_BYTES,
+          PROBLEM_REPORT_KEEP,
+        ),
       ),
-      row("report_snapshot", null, snapshotDetails(reportId, snapshot)),
+      row("report_snapshot", null, snapshotDetails({ reportId, ...snapshot })),
     ];
     try {
       await timedWrite(
@@ -197,11 +205,6 @@ export class ProblemReportService {
       failed(error);
     }
   }
-}
-
-/** The details of a `report_snapshot` row: the snapshot, tied to its report by `reportId`. */
-export function snapshotDetails(reportId: string, snapshot: ReportSnapshot): TimelineDetails {
-  return boundDetails({ reportId, ...snapshot } as TimelineDetails, MAX_SNAPSHOT_DETAILS_BYTES);
 }
 
 let service: ProblemReportService | undefined;

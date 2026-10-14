@@ -4,7 +4,7 @@
 // Layout is the operator's pick from the #93 prototype (variant C, live history), with the reason
 // on top and taller sparklines per viewer.
 import { Dialog } from "@base-ui/react/dialog";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { fmtDuration } from "~/lib/format";
 import type { QualityView, StreamerQuality, ViewerQuality, ViewerRow } from "~/lib/mesh";
 import { HISTORY_MS, type QualityPoint, type StepChange } from "~/lib/quality-history";
@@ -108,6 +108,16 @@ export function QualityModal({
   const [reporting, setReporting] = useState(false);
   // biome-ignore lint/correctness/useExhaustiveDependencies: closes the form for another stream
   useEffect(() => setReporting(false), [userId]);
+  // The form replaces the button; when it closes (sent or cancelled) focus goes back to it, not
+  // to the top of the dialog.
+  const reportSection = useRef<HTMLElement>(null);
+  const wasReporting = useRef(false);
+  useEffect(() => {
+    if (wasReporting.current && !reporting && userId !== null) {
+      reportSection.current?.querySelector<HTMLElement>("[data-report-button]")?.focus();
+    }
+    wasReporting.current = reporting;
+  }, [reporting, userId]);
   const yours = userId !== null && userId === meId;
   const name = (id: string) => names[id] ?? "someone";
   return (
@@ -134,12 +144,17 @@ export function QualityModal({
         </p>
       )}
       {userId !== null && reporter && (
-        <section aria-label="report a problem with this stream" className="flex flex-col gap-3">
+        <section
+          ref={reportSection}
+          aria-label="report a problem with this stream"
+          className="flex flex-col gap-3"
+        >
           {reporting ? (
             <InlineReportForm
               reporter={reporter}
               streamUserId={userId}
               onDone={() => setReporting(false)}
+              onCancel={() => setReporting(false)}
             />
           ) : (
             <div className="flex items-center justify-between gap-3 pt-3 border-t border-dashed border-border-subtle">
@@ -148,7 +163,15 @@ export function QualityModal({
                   ? "you just sent a report. try again in a minute."
                   : "does this look wrong?"}
               </span>
-              <Btn size="sm" disabled={reporter.blocked} onClick={() => setReporting(true)}>
+              {/* aria-disabled, not disabled: after a send it is where focus returns, and a
+                  disabled button can't take it. */}
+              <Btn
+                data-report-button=""
+                size="sm"
+                aria-disabled={reporter.blocked}
+                className="aria-disabled:opacity-50 aria-disabled:cursor-not-allowed"
+                onClick={() => !reporter.blocked && setReporting(true)}
+              >
                 report a problem
               </Btn>
             </div>

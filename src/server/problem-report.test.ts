@@ -9,8 +9,8 @@ import {
   REPORT_PERSON_WINDOW_MS,
   REPORT_SNAPSHOT_WINDOW_MS,
   type ReportProblemInput,
-  type ReportSnapshot,
 } from "../lib/problem-report.ts";
+import type { ReportSnapshot } from "../lib/report-snapshot.ts";
 import { type Caller, SignInRequiredError } from "./caller.ts";
 import { FakeClock } from "./clock.ts";
 import { ProblemReportService } from "./problem-report.ts";
@@ -127,6 +127,44 @@ describe("recording a report", () => {
     );
     const [report] = await ofKind("problem_report");
     expect(report?.details).toMatchObject({ note: "bo at [ip] on [id] froze" });
+  });
+
+  it("keeps the note on the timeline only: the server log gets how long it was, never what it said", async () => {
+    const note = "bo's share froze right when ana opened the secret deck";
+    await service.report(asUser("ana"), input({ note }));
+    const [report] = await ofKind("problem_report");
+    expect(report?.details).toMatchObject({ note });
+    expect(logs.find("timeline.problem_report")?.details).toEqual({
+      reportId: "rep-1",
+      category: "blurry",
+      snapshot: "rep-1",
+      noteChars: note.length,
+    });
+    // Nowhere in anything logged, whichever line it would have been on.
+    expect(logs.lines.join("\n")).not.toContain("secret deck");
+  });
+
+  it("keeps the report's ids when a note of control characters is the worst case for the row's size", async () => {
+    // 280 NULs would escape to 1,680 bytes of JSON; they are removed, so the note is empty.
+    await service.report(asUser("ana"), input({ note: "\u0000".repeat(PROBLEM_NOTE_MAX) }));
+    const [report] = await ofKind("problem_report");
+    expect(report?.details).toEqual({ reportId: "rep-1", category: "blurry", snapshot: "rep-1" });
+  });
+
+  it("stores the whole note whatever its characters cost: four-byte emoji, or quotes that escape", async () => {
+    const emoji = "😀".repeat(PROBLEM_NOTE_MAX / 2);
+    const quotes = '"'.repeat(PROBLEM_NOTE_MAX);
+    const cjk = "あ".repeat(PROBLEM_NOTE_MAX);
+    for (const [who, note] of [
+      ["ana", emoji],
+      ["bo", quotes],
+    ] as const) {
+      await service.report(asUser(who), input({ note }));
+    }
+    clock.advance(REPORT_PERSON_WINDOW_MS);
+    await service.report(asUser("ana"), input({ note: cjk }));
+    const notes = (await ofKind("problem_report")).map((r) => r.details.note);
+    expect(notes).toEqual([emoji, quotes, cjk]);
   });
 
   it("leaves the stream out when its owner isn't in the room", async () => {

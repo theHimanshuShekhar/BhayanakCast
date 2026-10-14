@@ -93,16 +93,24 @@ export function logTimelineEvent(event: { kind: string; roomId: string } & LogFi
  * `logTimelineEvent` for a stored row, for whoever records one (the hub's recorder, and the
  * connection events a browser reports). Never throws: the log being down is no reason to fail the
  * write it describes.
+ *
+ * A problem report's note is for admins on the room timeline only (ADR 4 addendum on problem
+ * reports): the line says how long it was (`noteChars`), never what it said.
  */
 export function logTimelineRow(row: TimelineEventRow): void {
   try {
+    let details = row.details;
+    if (row.kind === "problem_report") {
+      const { note, ...rest } = details;
+      details = typeof note === "string" ? { ...rest, noteChars: note.length } : rest;
+    }
     logTimelineEvent({
       kind: row.kind,
       roomId: row.roomId,
       userId: row.actorUserId ?? undefined,
       targetUserId: row.targetUserId ?? undefined,
       at: row.at.toISOString(),
-      details: row.details,
+      details,
     });
   } catch {
     // The log is down; the timeline row is not affected.

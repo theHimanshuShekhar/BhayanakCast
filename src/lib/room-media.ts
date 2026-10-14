@@ -21,11 +21,12 @@ import { getConnectionReporter } from "./connection-report";
 import { keepIceServersFresh } from "./ice";
 import { getIceServersFn } from "./ice.functions";
 import { Mesh, type PeerQuality, type PeerState, type QualityView } from "./mesh";
-import { browserOf, buildSnapshot, type ReportSnapshot } from "./problem-report";
 import { QualityReporter, sampleWindowMs } from "./quality-telemetry";
 import { reportQualityFn } from "./quality-telemetry.functions";
 import type { MediaSlot, RoomParticipant } from "./realtime";
 import { getRealtimeClient } from "./realtime-client";
+import type { ReportSnapshot } from "./report-snapshot";
+import { answerSnapshotRequest, browserOf, buildSnapshot } from "./snapshot-builder";
 import { speakingContext, watchSpeaking } from "./speaking";
 
 /** One peer's tracks, by slot. */
@@ -132,9 +133,10 @@ export function useRoomMesh(
       } else if (message.type === "snapshot.request" && message.roomId === roomId) {
         // Someone reported a problem: quietly send this page's numbers as they are now, through
         // the batched connection events (ADR 4 addendum on problem reports). Nothing is shown.
-        getConnectionReporter().add(
-          { kind: "report_snapshot", reportId: message.reportId, ...snapshotOf(current, meId) },
-          roomId,
+        answerSnapshotRequest(
+          message.reportId,
+          () => snapshotOf(current, meId),
+          (event) => getConnectionReporter().add(event, roomId),
         );
       } else if (message.type === "room.snapshot" && message.roomId === roomId) {
         // Back in the room after a reconnect: the client re-joins right after `welcome`, and
@@ -211,14 +213,14 @@ export function useRoomMesh(
 
   // This page's snapshot for a problem report it makes itself (it is sent with the report).
   const snapshot = useCallback(
-    () => (meId && mesh.current ? snapshotOf(mesh.current, meId) : EMPTY_SNAPSHOT()),
+    () => (meId && mesh.current ? snapshotOf(mesh.current, meId) : emptySnapshot()),
     [meId],
   );
 
   return { remote, states, shareAudio, retry, quality, streamQuality, refreshQuality, snapshot };
 }
 
-const EMPTY_SNAPSHOT = (): ReportSnapshot =>
+const emptySnapshot = (): ReportSnapshot =>
   buildSnapshot({
     meId: "",
     views: [],

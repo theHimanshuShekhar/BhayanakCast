@@ -1,8 +1,9 @@
+import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "../db/client.ts";
 import { rooms, roomTimelineEvents, user } from "../db/schema/index.ts";
 import { createTestDb } from "../db/test-db.ts";
-import type { ReportSnapshot } from "../lib/problem-report.ts";
+import type { ReportSnapshot } from "../lib/report-snapshot.ts";
 import { listRecentReports, RECENT_REPORTS_LIMIT } from "./admin-reports.ts";
 import { AdminRequiredError, type Caller } from "./caller.ts";
 
@@ -117,6 +118,76 @@ describe("recent reports", () => {
     });
   });
 
+  it("names the people a snapshot mentions, so the page shows names and not ids", async () => {
+    await db
+      .insert(roomTimelineEvents)
+      .values([report("r1", 0, "ana", "rep-1"), snapshot("r1", 0, "ana", "rep-1", "chrome")]);
+    const [only] = (await listRecentReports(db, admin)).reports;
+    expect(only?.snapshots[0]).toMatchObject({
+      streams: [{ from: "bo", fromName: "bo", to: "ana", toName: "ana" }],
+      pairs: [{ peerId: "bo", name: "bo", state: "connected" }],
+    });
+  });
+
+  it("falls back to the id for an account that has since been deleted", async () => {
+    await db.insert(roomTimelineEvents).values([
+      report("r1", 0, "ana", "rep-1"),
+      {
+        ...snapshot("r1", 0, "ana", "rep-1"),
+        details: {
+          reportId: "rep-1",
+          ...snap("chrome"),
+          pairs: [{ peerId: "gone-user", state: "failed" }],
+        },
+      },
+    ]);
+    const [only] = (await listRecentReports(db, admin)).reports;
+    expect(only?.snapshots[0]?.pairs).toEqual([
+      { peerId: "gone-user", name: "gone-user", state: "failed" },
+    ]);
+  });
+
+  it("lists a snapshot cut for size by its browser alone, marked as cut", async () => {
+    await db.insert(roomTimelineEvents).values([
+      report("r1", 0, "ana", "rep-1"),
+      {
+        roomId: "r1",
+        at: at(0),
+        kind: "report_snapshot",
+        actorUserId: "bo",
+        targetUserId: null,
+        details: {
+          truncated: true,
+          reportId: "rep-1",
+          browser: { name: "firefox", version: "130" },
+        },
+      },
+    ]);
+    const [only] = (await listRecentReports(db, admin)).reports;
+    expect(only?.snapshots).toMatchObject([
+      {
+        user: { username: "bo" },
+        browser: { name: "firefox" },
+        streams: [],
+        pairs: [],
+        truncated: true,
+      },
+    ]);
+  });
+
+  it("still lists a report whose row was cut for size, by the ids it kept", async () => {
+    await db.insert(roomTimelineEvents).values({
+      roomId: "r1",
+      at: at(0),
+      kind: "problem_report",
+      actorUserId: "ana",
+      targetUserId: null,
+      details: { truncated: true, reportId: "rep-1", snapshot: "rep-1", category: "frozen" },
+    });
+    const [only] = (await listRecentReports(db, admin)).reports;
+    expect(only).toMatchObject({ id: "rep-1", category: "frozen", note: null });
+  });
+
   it("points a report that reused the room's snapshot at the earlier one, and keeps the reporter's own", async () => {
     await db
       .insert(roomTimelineEvents)
@@ -165,6 +236,16 @@ describe("recent reports", () => {
     const { reports } = await listRecentReports(db, admin);
     expect(reports).toHaveLength(RECENT_REPORTS_LIMIT);
     expect(reports[0]?.id).toBe(`rep-${RECENT_REPORTS_LIMIT + 4}`);
+  });
+
+  it("is backed by indexes, so each poll doesn't scan the whole timeline table", async () => {
+    const found = (await db.execute(
+      sql`select indexname, indexdef from pg_indexes where tablename = 'room_timeline_events'`,
+    )) as unknown as { rows: { indexname: string; indexdef: string }[] };
+    const defs = Object.fromEntries(found.rows.map((r) => [r.indexname, r.indexdef]));
+    expect(defs.room_timeline_events_kind_at_idx).toContain("(kind, at)");
+    expect(defs.room_timeline_events_snapshot_report_idx).toMatch(/\(details ->> 'reportId'/);
+    expect(defs.room_timeline_events_snapshot_report_idx).toContain("report_snapshot");
   });
 
   it("lists nothing when there are no reports", async () => {
