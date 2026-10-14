@@ -13,7 +13,7 @@
  * Two indexes keep each read off a scan of the table (src/db/schema/timeline.ts): `(kind, at)`
  * for the newest reports, and the `reportId` of the snapshot rows for their lookup.
  */
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, type SQL, sql } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import { rooms, roomTimelineEvents } from "../db/schema/index.ts";
 import {
@@ -22,7 +22,7 @@ import {
   type ReportSnapshotEntry,
 } from "../lib/problem-report.ts";
 import { type ReportSnapshot, reportSnapshot } from "../lib/report-snapshot.ts";
-import type { RoomPerson } from "../lib/rooms.ts";
+import { type RoomPerson, roomIdInput } from "../lib/rooms.ts";
 import { peopleByIds } from "./admin-quality.ts";
 import { type Caller, requireAdmin } from "./caller.ts";
 
@@ -50,10 +50,33 @@ export async function listRecentReports(
   limit = RECENT_REPORTS_LIMIT,
 ): Promise<{ reports: RecentReport[] }> {
   requireAdmin(caller);
+  return readReports(db, undefined, limit);
+}
+
+/**
+ * One room's reports, newest first, for the room timeline's incidents: the recent list is the
+ * newest across all rooms, and holds none of a quiet room's older reports.
+ */
+export async function listRoomReports(
+  db: Db,
+  caller: Caller,
+  input: { roomId: string },
+  limit = RECENT_REPORTS_LIMIT,
+): Promise<{ reports: RecentReport[] }> {
+  requireAdmin(caller);
+  const { roomId } = roomIdInput.parse(input);
+  return readReports(db, eq(roomTimelineEvents.roomId, roomId), limit);
+}
+
+async function readReports(
+  db: Db,
+  scope: SQL | undefined,
+  limit: number,
+): Promise<{ reports: RecentReport[] }> {
   const rows = await db
     .select()
     .from(roomTimelineEvents)
-    .where(eq(roomTimelineEvents.kind, "problem_report"))
+    .where(and(eq(roomTimelineEvents.kind, "problem_report"), scope))
     .orderBy(desc(roomTimelineEvents.at), desc(roomTimelineEvents.id))
     .limit(limit);
   const parsed = rows.flatMap((row) => {

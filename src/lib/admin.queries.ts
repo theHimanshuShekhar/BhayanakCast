@@ -10,11 +10,13 @@ import {
   getAdminOverviewFn,
   getPairTimelineFn,
   getRoomQualityFn,
+  getRoomTimelineFn,
   getTurnUsageFn,
   listAdminLiveRoomsFn,
   listAdminRecentRoomsFn,
   listAdminUsersFn,
   listRecentReportsFn,
+  listRoomReportsFn,
 } from "./admin.functions";
 import { STATS_REFRESH_MS } from "./profiles";
 import type { PairTimelineInput } from "./quality-admin";
@@ -36,6 +38,8 @@ export const adminKeys = {
   recentPage: (input: ListAdminRecentRoomsInput) => [...adminKeys.recent(), input] as const,
   turnUsage: () => [...adminKeys.all, "turn-usage"] as const,
   reports: () => [...adminKeys.all, "reports"] as const,
+  roomReports: (roomId: string) => [...adminKeys.reports(), roomId] as const,
+  roomTimeline: (roomId: string) => [...adminKeys.all, "timeline", roomId] as const,
   roomQuality: (roomId: string) => [...adminKeys.all, "quality", roomId] as const,
   pairTimeline: (input: PairTimelineInput) =>
     [...adminKeys.all, "quality", input.roomId, input] as const,
@@ -51,6 +55,25 @@ export const recentReportsQuery = () =>
     queryKey: adminKeys.reports(),
     queryFn: () => listRecentReportsFn(),
     // Reports arrive while the page is open; there is no push alert yet.
+    refetchInterval: STATS_REFRESH_MS,
+  });
+
+/**
+ * A room's merged timeline (CONTEXT.md, Room timeline), the latest `MAX_TIMELINE_ENTRIES` of it.
+ * A live room's moves on, so it is read again every minute.
+ */
+export const roomTimelineQuery = (roomId: string) =>
+  queryOptions({
+    queryKey: adminKeys.roomTimeline(roomId),
+    queryFn: () => getRoomTimelineFn({ data: { roomId } }),
+    refetchInterval: STATS_REFRESH_MS,
+  });
+
+/** One room's problem reports with their snapshots, which a marker on its timeline opens. */
+export const roomReportsQuery = (roomId: string) =>
+  queryOptions({
+    queryKey: adminKeys.roomReports(roomId),
+    queryFn: () => listRoomReportsFn({ data: { roomId } }),
     refetchInterval: STATS_REFRESH_MS,
   });
 

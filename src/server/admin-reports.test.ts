@@ -4,7 +4,7 @@ import type { Db } from "../db/client.ts";
 import { rooms, roomTimelineEvents, user } from "../db/schema/index.ts";
 import { createTestDb } from "../db/test-db.ts";
 import type { ReportSnapshot } from "../lib/report-snapshot.ts";
-import { listRecentReports, RECENT_REPORTS_LIMIT } from "./admin-reports.ts";
+import { listRecentReports, listRoomReports, RECENT_REPORTS_LIMIT } from "./admin-reports.ts";
 import { AdminRequiredError, type Caller } from "./caller.ts";
 
 // The admin's "recent reports" (#117): problem reports across rooms, newest first, each with the
@@ -256,5 +256,49 @@ describe("recent reports", () => {
     await db.insert(roomTimelineEvents).values(report("r1", 0, "ana", "rep-1"));
     await expect(listRecentReports(db, plain)).rejects.toBeInstanceOf(AdminRequiredError);
     await expect(listRecentReports(db, visitor)).rejects.toBeInstanceOf(AdminRequiredError);
+  });
+});
+
+describe("a room's reports", () => {
+  it("lists only that room's reports, newest first, each with its snapshots", async () => {
+    await db
+      .insert(roomTimelineEvents)
+      .values([
+        report("r1", 0, "ana", "rep-1"),
+        snapshot("r1", 0, "bo", "rep-1"),
+        report("r2", 3, "bo", "rep-2"),
+        report("r1", 5, "cy", "rep-3", { category: "no_audio" }),
+      ]);
+    const { reports } = await listRoomReports(db, admin, { roomId: "r1" });
+    expect(reports.map((r) => r.id)).toEqual(["rep-3", "rep-1"]);
+    expect(reports[1]?.snapshots.map((s) => s.user.username)).toEqual(["bo"]);
+    expect(reports[0]).toMatchObject({ roomName: "room one", category: "no_audio" });
+  });
+
+  it("reaches reports the recent list has already moved past, and is bounded", async () => {
+    await db
+      .insert(roomTimelineEvents)
+      .values([
+        report("r1", 0, "ana", "old-one"),
+        ...Array.from({ length: RECENT_REPORTS_LIMIT + 5 }, (_, i) =>
+          report("r2", 10 + i, "bo", `rep-${i}`),
+        ),
+      ]);
+    expect((await listRecentReports(db, admin)).reports.map((r) => r.id)).not.toContain("old-one");
+    expect((await listRoomReports(db, admin, { roomId: "r1" })).reports.map((r) => r.id)).toEqual([
+      "old-one",
+    ]);
+    const crowded = await listRoomReports(db, admin, { roomId: "r2" });
+    expect(crowded.reports).toHaveLength(RECENT_REPORTS_LIMIT);
+  });
+
+  it("is empty for a room without reports, and for admins only", async () => {
+    expect((await listRoomReports(db, admin, { roomId: "r1" })).reports).toEqual([]);
+    await expect(listRoomReports(db, plain, { roomId: "r1" })).rejects.toBeInstanceOf(
+      AdminRequiredError,
+    );
+    await expect(listRoomReports(db, visitor, { roomId: "r1" })).rejects.toBeInstanceOf(
+      AdminRequiredError,
+    );
   });
 });
