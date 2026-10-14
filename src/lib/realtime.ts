@@ -18,6 +18,7 @@
 import { z } from "zod";
 import { inviteToken } from "./invites.ts";
 import { stepNoteFields } from "./quality-reason.ts";
+import { reportId } from "./report-snapshot.ts";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -596,6 +597,20 @@ export const signalRelayMessage = z.object({
   payload: signalPayload,
 });
 
+/**
+ * A problem was reported in the room (ADR 4 addendum on problem reports): send a snapshot of your
+ * connections now. Sent quietly to everyone in the room but the reporter, at most once a minute
+ * per room; `reportId` names the snapshot, and goes back with the browser's `report_snapshot`
+ * connection event (src/lib/connection-events.ts). Nothing appears in the room or its feed. A
+ * client built before it existed logs a console warning for it (`parseServerMessage` refuses an
+ * unknown type) and carries on.
+ */
+export const snapshotRequestMessage = z.object({
+  type: z.literal("snapshot.request"),
+  roomId,
+  reportId,
+});
+
 /** A new feed entry, sent to everyone in the room. */
 export const feedEntryMessage = z.object({
   type: z.literal("feed.entry"),
@@ -720,6 +735,7 @@ export const serverMessage = z.discriminatedUnion("type", [
   knockPendingMessage,
   knockResolvedMessage,
   knockStatusMessage,
+  snapshotRequestMessage,
 ]);
 export type ServerMessage = z.infer<typeof serverMessage>;
 export type ServerMessageType = ServerMessage["type"];

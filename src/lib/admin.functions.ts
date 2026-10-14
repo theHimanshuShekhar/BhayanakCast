@@ -1,7 +1,7 @@
 /**
  * Admin server functions: thin `createServerFn` wrappers over src/server/admin.ts,
- * src/server/admin-users.ts, src/server/admin-rooms.ts, src/server/admin-quality.ts and
- * src/server/admin-timeline.ts (see
+ * src/server/admin-users.ts, src/server/admin-rooms.ts, src/server/admin-quality.ts,
+ * src/server/admin-timeline.ts and src/server/admin-reports.ts (see
  * rooms.functions.ts for the pattern). Each derives the
  * caller from the session; the server half refuses non-admins. Read through admin.queries.ts.
  */
@@ -17,6 +17,7 @@ import {
   listAdminRecentRooms,
 } from "~/server/admin";
 import { getPairTimeline, getRoomQuality } from "~/server/admin-quality";
+import { listRecentReports } from "~/server/admin-reports";
 import { endRoom } from "~/server/admin-rooms";
 import { getRoomTimeline } from "~/server/admin-timeline";
 import { banUser, listAdminUsers, setUserRole, unbanUser } from "~/server/admin-users";
@@ -63,6 +64,10 @@ export const getPairTimelineFn = createServerFn({ method: "GET" })
 export const getRoomTimelineFn = createServerFn({ method: "GET" })
   .validator(roomIdInput)
   .handler(async ({ data }) => getRoomTimeline(getDb(), await getCaller(), data));
+
+export const listRecentReportsFn = createServerFn({ method: "GET" }).handler(async () =>
+  listRecentReports(getDb(), await getCaller()),
+);
 
 export const getAdminLeaderboardsFn = createServerFn({ method: "GET" }).handler(async () =>
   getAdminLeaderboards(getDb(), await getCaller()),

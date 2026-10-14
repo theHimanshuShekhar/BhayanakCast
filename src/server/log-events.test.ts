@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { TimelineEventRow } from "../lib/room-timeline.ts";
 import { createClientIpResolver } from "./client-ip.ts";
 import {
   logReportDropped,
   logTimelineEvent,
+  logTimelineRow,
   logTimelineWriteFailed,
   logUntrustedProxy,
   SLOW_WRITE_MS,
@@ -97,6 +99,54 @@ describe("hooks for the room timeline (ticket #115)", () => {
       kind: "joined",
       err: { message: "insert failed" },
     });
+  });
+});
+
+describe("logTimelineRow", () => {
+  const row = (kind: TimelineEventRow["kind"], details: TimelineEventRow["details"]) => ({
+    roomId: "r1",
+    at: new Date("2026-10-14T12:00:00Z"),
+    kind,
+    actorUserId: "ana",
+    targetUserId: "bo",
+    details,
+  });
+
+  it("logs a row under its kind with the actor, target and details", () => {
+    logTimelineRow(row("pair_state", { state: "connected" }));
+    expect(logs.find("timeline.pair_state")).toMatchObject({
+      roomId: "r1",
+      userId: "ana",
+      targetUserId: "bo",
+      details: { state: "connected" },
+    });
+  });
+
+  it("logs a problem report without its note, only how long it was (the note is for admins on the timeline)", () => {
+    logTimelineRow(
+      row("problem_report", {
+        reportId: "rep-1",
+        category: "blurry",
+        note: "bo's screen froze at 10:42 during the demo",
+        snapshot: "rep-1",
+      }),
+    );
+    expect(logs.find("timeline.problem_report")).toMatchObject({
+      details: { reportId: "rep-1", category: "blurry", snapshot: "rep-1", noteChars: 42 },
+    });
+    expect(logs.lines.join("\n")).not.toContain("froze at");
+  });
+
+  it("logs a problem report with no note without a length", () => {
+    logTimelineRow(row("problem_report", { reportId: "rep-1", category: "other" }));
+    expect(logs.find("timeline.problem_report")?.details).toEqual({
+      reportId: "rep-1",
+      category: "other",
+    });
+  });
+
+  it("never throws, whatever the details", () => {
+    expect(() => logTimelineRow(row("problem_report", { note: 7 }))).not.toThrow();
   });
 });
 

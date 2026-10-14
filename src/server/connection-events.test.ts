@@ -16,6 +16,8 @@ import {
   pathEvent,
   type ReportConnectionEventsInput,
 } from "../lib/connection-events.ts";
+import { REPORT_SNAPSHOT_ACCEPT_MS } from "../lib/problem-report.ts";
+import type { ReportSnapshot } from "../lib/report-snapshot.ts";
 import { type Caller, type SignedInCaller, SignInRequiredError } from "./caller.ts";
 import { FakeClock } from "./clock.ts";
 import {
@@ -27,6 +29,7 @@ import {
   DROP_MARKER_DELAY_MS,
   readBeacon,
 } from "./connection-events.ts";
+import { ReportSnapshots } from "./report-snapshots.ts";
 import { type CapturedLogs, captureLogs } from "./test-logs.ts";
 
 // What a page may tell the room timeline about its connections (#116): only from a signed-in
@@ -43,6 +46,7 @@ let close: () => Promise<void>;
 let clock: FakeClock;
 let mayEnter: Mock<(caller: SignedInCaller, roomId: string) => Promise<boolean>>;
 let logs: CapturedLogs;
+let snapshots: ReportSnapshots;
 let service: ConnectionEventService;
 
 beforeEach(async () => {
@@ -50,7 +54,8 @@ beforeEach(async () => {
   ({ db, close } = await createTestDb());
   clock = new FakeClock(T0);
   mayEnter = vi.fn(async () => false);
-  service = new ConnectionEventService({ db, clock, mayEnter });
+  snapshots = new ReportSnapshots();
+  service = new ConnectionEventService({ db, clock, mayEnter, snapshots });
   await db
     .insert(user)
     .values(
@@ -511,6 +516,175 @@ describe("reading a beacon", () => {
     const read = await readBeacon(post(JSON.stringify(report([pair("bo")]))));
     if (!read.ok) throw new Error(read.error);
     expect(await service.record(asUser("ana"), read.input)).toEqual({ stored: 1, dropped: 0 });
+  });
+});
+
+// A problem report (#117) asks every browser in the room for a snapshot; the answers come through
+// this same path, as `report_snapshot` events, and are taken only for a snapshot the server asked
+// for, in that room, once from each person.
+describe("report snapshots", () => {
+  const snapshot: ReportSnapshot = {
+    browser: { name: "chrome", version: "126" },
+    streams: [
+      { from: "bo", to: "ana", step: "720p30", cap: 3_000_000, reason: "shared", bps: 2_800_000 },
+    ],
+    pairs: [{ peerId: "bo", state: "connected" }],
+  };
+  const snap = (reportId: string, ageMs = 0) =>
+    ({
+      kind: "report_snapshot",
+      ageMs,
+      reportId,
+      ...snapshot,
+    }) as ReportConnectionEventsInput["events"][number];
+  const asked = (roomId = "r1", reportId = "rep-1") => snapshots.open(roomId, reportId, T0);
+
+  it("stores one as a timeline row tied to its report by id, dated by the age the page gave", async () => {
+    asked();
+    expect(await service.record(asUser("bo"), report([snap("rep-1", 1_500)]))).toEqual({
+      stored: 1,
+      dropped: 0,
+    });
+    const [row] = await stored();
+    expect(row).toMatchObject({
+      roomId: "r1",
+      kind: "report_snapshot",
+      actorUserId: "bo",
+      targetUserId: null,
+      details: { reportId: "rep-1", ...snapshot },
+    });
+    expect(row?.at).toEqual(new Date(T0.getTime() - 1_500));
+  });
+
+  it("keeps a snapshot whole where an ordinary event's details would be cut at 1 KB", async () => {
+    asked();
+    const big = {
+      ...snapshot,
+      streams: Array.from({ length: 12 }, (_, i) => ({
+        from: "bo",
+        to: `viewer-${i}`,
+        step: "1080p60",
+        cap: 12_000_000,
+        reason: "connection" as const,
+        path: "relay · UDP",
+        ageMs: 900,
+        bps: 11_000_000,
+        width: 1920,
+        height: 1080,
+        fps: 60,
+        codec: "VP9",
+        loss: 0.0123,
+        rttMs: 80,
+        freezes: 3,
+      })),
+    };
+    await service.record(
+      asUser("bo"),
+      report([{ kind: "report_snapshot", ageMs: 0, reportId: "rep-1", ...big }]),
+    );
+    const [row] = await stored();
+    expect(row?.details).toMatchObject({ reportId: "rep-1", streams: expect.any(Array) });
+    expect(row?.details.streams).toHaveLength(12);
+  });
+
+  it("keeps the report id and the browser of a snapshot cut for size, so it still belongs to its report", async () => {
+    asked();
+    const huge = {
+      ...snapshot,
+      streams: Array.from({ length: 32 }, (_, i) => ({
+        from: "bo",
+        to: `viewer-${i}-${"x".repeat(50)}`,
+        step: "1080p60",
+        cap: 12_000_000,
+        reason: "connection" as const,
+        path: "relay · UDP",
+        ageMs: 900,
+        bps: 11_000_000,
+        width: 1920,
+        height: 1080,
+        fps: 60,
+        codec: "VP9",
+        loss: 0.0123,
+        rttMs: 80,
+        freezes: 3,
+      })),
+    };
+    await service.record(
+      asUser("bo"),
+      report([{ kind: "report_snapshot", ageMs: 0, reportId: "rep-1", ...huge }]),
+    );
+    const [row] = await stored();
+    expect(row?.details).toEqual({
+      truncated: true,
+      reportId: "rep-1",
+      browser: { name: "chrome", version: "126" },
+    });
+  });
+
+  it("drops one for a snapshot nobody asked for, or asked for in another room", async () => {
+    asked("r2", "rep-2");
+    expect(await service.record(asUser("bo"), report([snap("made-up")]))).toEqual({
+      stored: 0,
+      dropped: 0,
+    });
+    expect(await service.record(asUser("bo"), report([snap("rep-2")]))).toEqual({
+      stored: 0,
+      dropped: 0,
+    });
+    expect(await stored()).toEqual([]);
+    expect(logs.all("connection_event.dropped").map((l) => [l.reason, l.events])).toEqual([
+      ["snapshot_not_asked", 1],
+      ["snapshot_not_asked", 1],
+    ]);
+  });
+
+  it("takes one from each person once, and a repeat is dropped", async () => {
+    asked();
+    await service.record(asUser("bo"), report([snap("rep-1")]));
+    expect(await service.record(asUser("bo"), report([snap("rep-1")]))).toEqual({
+      stored: 0,
+      dropped: 0,
+    });
+    expect(await service.record(asUser("ana"), report([snap("rep-1")]))).toEqual({
+      stored: 1,
+      dropped: 0,
+    });
+    expect((await stored()).map((r) => r.actorUserId)).toEqual(["bo", "ana"]);
+  });
+
+  it("still takes one that arrives after the minute, until the snapshot is no longer accepted", async () => {
+    asked();
+    clock.advance(REPORT_SNAPSHOT_ACCEPT_MS - 1_000);
+    expect((await service.record(asUser("bo"), report([snap("rep-1")]))).stored).toBe(1);
+    clock.advance(2_000);
+    expect((await service.record(asUser("ana"), report([snap("rep-1")]))).stored).toBe(0);
+  });
+
+  it("is not taken from someone who isn't in the room", async () => {
+    asked();
+    expect(await service.record(asUser("dee"), report([snap("rep-1")]))).toEqual({
+      stored: 0,
+      dropped: 0,
+    });
+    // And it doesn't use up their place: they could still send one from inside.
+    expect(logs.all("connection_event.dropped").map((l) => l.reason)).toEqual(["not_in_room"]);
+  });
+
+  it("gives the place back when the write fails, so the page's retry is taken", async () => {
+    asked();
+    const failing = vi.spyOn(db, "insert").mockImplementationOnce(() => {
+      throw new Error("db down");
+    });
+    await expect(service.record(asUser("bo"), report([snap("rep-1")]))).rejects.toThrow("db down");
+    failing.mockRestore();
+    expect((await service.record(asUser("bo"), report([snap("rep-1")]))).stored).toBe(1);
+  });
+
+  it("travels with other events in a batch, each judged on its own", async () => {
+    asked();
+    const result = await service.record(asUser("bo"), report([pair("ana"), snap("rep-1")]));
+    expect(result.stored).toBe(2);
+    expect((await stored()).map((r) => r.kind)).toEqual(["pair_state", "report_snapshot"]);
   });
 });
 

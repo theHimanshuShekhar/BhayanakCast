@@ -1,0 +1,2 @@
+CREATE INDEX "room_timeline_events_kind_at_idx" ON "room_timeline_events" USING btree ("kind","at");--> statement-breakpoint
+CREATE INDEX "room_timeline_events_snapshot_report_idx" ON "room_timeline_events" USING btree (("details"->>'reportId')) WHERE "room_timeline_events"."kind" = 'report_snapshot';

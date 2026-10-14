@@ -4,7 +4,7 @@
 // Layout is the operator's pick from the #93 prototype (variant C, live history), with the reason
 // on top and taller sparklines per viewer.
 import { Dialog } from "@base-ui/react/dialog";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { fmtDuration } from "~/lib/format";
 import type { QualityView, StreamerQuality, ViewerQuality, ViewerRow } from "~/lib/mesh";
 import { HISTORY_MS, type QualityPoint, type StepChange } from "~/lib/quality-history";
@@ -12,7 +12,8 @@ import { causeText, reasonText, type StepReason } from "~/lib/quality-reason";
 import { fmtMbps, Key, Panel } from "../chart-parts";
 import { Sheet } from "../overlays";
 import { TimelineChart, type TimelineSeries } from "../timeline-chart";
-import { Chip, MonoCaps } from "../ui";
+import { Btn, Chip, MonoCaps } from "../ui";
+import { InlineReportForm, type ProblemReporter } from "./report-problem";
 
 const VIZ = "var(--color-viz-1)";
 /** How long after one refresh finishes the next starts. */
@@ -89,6 +90,7 @@ export function QualityModal({
   names,
   read,
   refresh,
+  reporter,
   onClose,
 }: {
   /** Whose stream (the streamer's user id), or null when closed. */
@@ -98,9 +100,24 @@ export function QualityModal({
   names: Readonly<Record<string, string>>;
   read: (userId: string) => QualityView | undefined;
   refresh: (userId: string) => Promise<void>;
+  /** Sends a problem report about this stream (#117); without it there is no report button. */
+  reporter?: ProblemReporter;
   onClose: () => void;
 }) {
   const view = useQualityView(userId, read, refresh);
+  const [reporting, setReporting] = useState(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: closes the form for another stream
+  useEffect(() => setReporting(false), [userId]);
+  // The form replaces the button; when it closes (sent or cancelled) focus goes back to it, not
+  // to the top of the dialog.
+  const reportSection = useRef<HTMLElement>(null);
+  const wasReporting = useRef(false);
+  useEffect(() => {
+    if (wasReporting.current && !reporting && userId !== null) {
+      reportSection.current?.querySelector<HTMLElement>("[data-report-button]")?.focus();
+    }
+    wasReporting.current = reporting;
+  }, [reporting, userId]);
   const yours = userId !== null && userId === meId;
   const name = (id: string) => names[id] ?? "someone";
   return (
@@ -125,6 +142,41 @@ export function QualityModal({
         <p className="m-0 text-[12.5px] text-muted">
           {yours ? "you're not sharing right now." : "not connected to them right now."}
         </p>
+      )}
+      {userId !== null && reporter && (
+        <section
+          ref={reportSection}
+          aria-label="report a problem with this stream"
+          className="flex flex-col gap-3"
+        >
+          {reporting ? (
+            <InlineReportForm
+              reporter={reporter}
+              streamUserId={userId}
+              onDone={() => setReporting(false)}
+              onCancel={() => setReporting(false)}
+            />
+          ) : (
+            <div className="flex items-center justify-between gap-3 pt-3 border-t border-dashed border-border-subtle">
+              <span className="text-[11.5px] text-muted">
+                {reporter.blocked
+                  ? "you just sent a report. try again in a minute."
+                  : "does this look wrong?"}
+              </span>
+              {/* aria-disabled, not disabled: after a send it is where focus returns, and a
+                  disabled button can't take it. */}
+              <Btn
+                data-report-button=""
+                size="sm"
+                aria-disabled={reporter.blocked}
+                className="aria-disabled:opacity-50 aria-disabled:cursor-not-allowed"
+                onClick={() => !reporter.blocked && setReporting(true)}
+              >
+                report a problem
+              </Btn>
+            </div>
+          )}
+        </section>
       )}
     </Sheet>
   );
