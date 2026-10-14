@@ -10,8 +10,13 @@
  * both, their own is the one shown. The people a snapshot names are resolved here, so the page
  * shows names and not ids.
  *
- * Two indexes keep each read off a scan of the table (src/db/schema/timeline.ts): `(kind, at)`
- * for the newest reports, and the `reportId` of the snapshot rows for their lookup.
+ * `listRoomReports` is the same read for one room, for its incident view (CONTEXT.md, Incident):
+ * the recent list holds only the newest across all rooms, so a quiet room's older reports are
+ * not in it.
+ *
+ * Three indexes keep each read off a scan of the table (src/db/schema/timeline.ts): `(kind, at)`
+ * for the newest reports, `(room_id, at)` for one room's, and the `reportId` of the snapshot rows
+ * for their lookup.
  */
 import { and, desc, eq, inArray, type SQL, sql } from "drizzle-orm";
 import type { Db } from "../db/client.ts";

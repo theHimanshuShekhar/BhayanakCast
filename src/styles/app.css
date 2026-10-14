@@ -19,6 +19,9 @@
   --color-live: oklch(0.72 0.22 25);
   --color-success: oklch(0.78 0.18 150);
   --color-warning: oklch(0.8 0.17 70);
+  /* Amber as a line or a mark rather than a fill: the outline of a caution bar and the colour of
+     a caution glyph, which the fill is too light to be on a white panel (about 1.6:1). */
+  --color-warning-mark: oklch(0.62 0.15 65);
   --color-live-ink: oklch(0.47 0.19 25);
   --color-success-ink: oklch(0.45 0.13 150);
   --color-warning-ink: oklch(0.45 0.11 70);
@@ -134,6 +137,7 @@
 
 /* Dark theme overrides the @theme tokens (light is the default). */
 .dark {
+  --color-warning-mark: oklch(0.8 0.17 70);
   --color-live-ink: oklch(0.98 0.02 25);
   --color-success-ink: oklch(0.78 0.18 150);
   --color-warning-ink: oklch(0.86 0.14 70);

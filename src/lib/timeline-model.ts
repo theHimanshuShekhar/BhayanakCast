@@ -25,7 +25,7 @@ import type {
   TimelineEventKind,
   TimelineJson,
 } from "./room-timeline";
-import { MIN_VIEW_MS, type Range } from "./timeline-axis";
+import { MIN_VIEW_MS, type Range, viewFraction } from "./timeline-axis";
 
 /** What the filter chips switch, and what colours and groups the lanes. */
 export const CATEGORIES = [
@@ -862,6 +862,100 @@ export function buildTimelineModel(timeline: RoomTimeline, until?: number): Time
 
 function start(lane: Lane): number {
   return Math.min(...lane.segments.map((s) => s.from), ...lane.marks.map((m) => m.t));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Drawing a crowded lane
+//
+// A lane of 5,000 entries is 800 pixels wide: most marks fall on one another, and a segment a
+// fraction of a pixel wide is not there to see. Both are folded to what the screen can show, and
+// what is folded away is still read out (a group says how many it holds), so zooming in is how
+// to separate them, not how to find them.
+
+/** Marks of one kind that fall in one column of pixels, drawn as one. */
+export interface MarkGroup {
+  /** The first one's time, and the last one's. */
+  t: number;
+  to: number;
+  kind: MarkKind;
+  relay: boolean;
+  marks: Mark[];
+}
+
+/**
+ * `marks` in `view` (a lane `plotWidth` pixels wide), with those of one kind in the same column
+ * of `columnPx` pixels grouped. A relayed path is a kind of its own. Order is by first mark.
+ */
+export function groupMarks(
+  marks: readonly Mark[],
+  view: Range,
+  plotWidth: number,
+  columnPx: number,
+): MarkGroup[] {
+  const groups = new Map<string, MarkGroup>();
+  for (const m of marks) {
+    if (m.t < view.t0 || m.t > view.t1) continue;
+    const column = Math.floor((viewFraction(view, m.t) * plotWidth) / columnPx);
+    const relay = m.relay === true;
+    const key = `${column}:${m.kind}:${relay}`;
+    const group = groups.get(key);
+    if (group) {
+      group.marks.push(m);
+      group.to = Math.max(group.to, m.t);
+    } else groups.set(key, { t: m.t, to: m.t, kind: m.kind, relay, marks: [m] });
+  }
+  return [...groups.values()];
+}
+
+/** A segment to draw: the first of a run of thin ones folded together, with what they cover. */
+export interface DrawnSegment {
+  segment: Segment;
+  /** Its place in the lane's segments, which is how it is keyed. */
+  index: number;
+  /** How many were folded into this one (1 for one drawn as it is). */
+  count: number;
+  /** Where the last of them ends. */
+  to: number;
+}
+
+/** A segment this many pixels wide or more is always drawn as it is. */
+const MIN_SEGMENT_PX = 2;
+
+/**
+ * The segments of a lane that touch `view`, as drawn. One that is at least `MIN_SEGMENT_PX`
+ * wide is drawn as it is. Thinner ones of one track and tone that start in the same column of
+ * `columnPx` pixels are one, from the first's start to the last's end.
+ */
+export function visibleSegments(
+  segments: readonly Segment[],
+  view: Range,
+  plotWidth: number,
+  columnPx = 4,
+): DrawnSegment[] {
+  const span = view.t1 - view.t0;
+  const out: DrawnSegment[] = [];
+  const thin = new Map<string, DrawnSegment>();
+  segments.forEach((segment, index) => {
+    if (segment.to < view.t0 || segment.from > view.t1) return;
+    const from = Math.max(segment.from, view.t0);
+    const to = Math.min(segment.to, view.t1);
+    if (((to - from) / span) * plotWidth >= MIN_SEGMENT_PX) {
+      out.push({ segment, index, count: 1, to: segment.to });
+      return;
+    }
+    const column = Math.floor((viewFraction(view, from) * plotWidth) / columnPx);
+    const key = `${column}:${segment.track}:${segment.tone}`;
+    const group = thin.get(key);
+    if (group) {
+      group.count++;
+      group.to = Math.max(group.to, segment.to);
+    } else {
+      const drawn = { segment, index, count: 1, to: segment.to };
+      thin.set(key, drawn);
+      out.push(drawn);
+    }
+  });
+  return out.sort((a, b) => a.index - b.index);
 }
 
 // ---------------------------------------------------------------------------------------------

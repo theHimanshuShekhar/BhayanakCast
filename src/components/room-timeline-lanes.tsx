@@ -9,13 +9,26 @@
 // stretch to zoom to, and `+` and `-` zoom from the keyboard; the buttons and the reset live
 // with the panel (./room-timeline.tsx). Hovering or focusing an item reads it out below the
 // chart, and the panel's events table holds the same things for reading without the chart.
-import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
+//
+// A lane is drawn by a memoised `LaneBody`, so a hover (which changes only the active item) draws
+// the one lane it is on and not all of them, and what a lane draws is folded to what its pixels
+// can show: marks of one kind in one column are one, and a run of sub-pixel bars is one
+// (../lib/timeline-model.ts, `groupMarks` and `visibleSegments`).
+import {
+  memo,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { fmtDuration } from "~/lib/format";
 import { PROBLEM_CATEGORY_LABELS } from "~/lib/problem-report";
 import {
   axisTicks,
   brushView,
-  clipSpan,
   clockLabel,
   panView,
   type Range,
@@ -23,14 +36,17 @@ import {
   zoneName,
   zoomView,
 } from "~/lib/timeline-axis";
-import type {
-  Lane,
-  Mark,
-  MarkKind,
-  ReportMarker,
-  Segment,
-  Tone,
-  Track,
+import {
+  type DrawnSegment,
+  groupMarks,
+  type Lane,
+  type Mark,
+  type MarkGroup,
+  type MarkKind,
+  type ReportMarker,
+  type Tone,
+  type Track,
+  visibleSegments,
 } from "~/lib/timeline-model";
 
 const FONT = 10;
@@ -44,6 +60,8 @@ const PAIR_H = 34;
 const BRUSH_MIN_PX = 5;
 /** One wheel notch (about 100) zooms by this much. */
 const WHEEL_ZOOM = 1.0025;
+/** Marks of one kind this close are drawn as one. */
+const MARK_COLUMN_PX = 9;
 
 const TRACK_BOX: Record<Track, { y: number; h: number }> = {
   presence: { y: 20, h: 8 },
@@ -57,18 +75,22 @@ const TRACK_BOX: Record<Track, { y: number; h: number }> = {
 const mix = (color: string, pct: number) =>
   `color-mix(in oklch, var(${color}) ${pct}%, transparent)`;
 
-/** How a segment is painted, by what it says. Never a colour a reader must decode alone: the track, the legend and the readout say it too. */
+/**
+ * How a segment is painted, by what it says. Never a colour a reader must decode alone: the
+ * track, the legend and the readout say it too. Amber is a fill too light to be seen on the
+ * light theme's white, so it carries an outline in `warning-mark`.
+ */
 const TONE_PAINT: Record<Tone, { fill: string; stroke?: string }> = {
   present: { fill: mix("--color-success", 30), stroke: mix("--color-success", 60) },
   host: { fill: "var(--color-primary)" },
-  grace: { fill: "var(--color-warning)" },
+  grace: { fill: "var(--color-warning)", stroke: "var(--color-warning-mark)" },
   share: { fill: "var(--color-live)" },
   cam: { fill: "var(--color-viz-1)" },
   mic: { fill: "var(--color-viz-2)" },
   connecting: { fill: "var(--color-surface-3)", stroke: "var(--color-border-strong)" },
   connected: { fill: mix("--color-success", 45), stroke: mix("--color-success", 70) },
-  disconnected: { fill: "var(--color-warning)" },
-  failed: { fill: "var(--color-warning)" },
+  disconnected: { fill: "var(--color-warning)", stroke: "var(--color-warning-mark)" },
+  failed: { fill: "var(--color-warning)", stroke: "var(--color-warning-mark)" },
 };
 
 type Shape = "up" | "down" | "diamond" | "ring" | "square" | "cross";
@@ -81,14 +103,24 @@ interface MarkLook {
 }
 const MARK_LOOK: Record<MarkKind, MarkLook> = {
   moderation: { shape: "up", solid: true, color: "var(--color-muted)", meaning: "moderation" },
-  refusal: { shape: "ring", solid: false, color: "var(--color-warning)", meaning: "refusals" },
-  error: { shape: "cross", solid: false, color: "var(--color-warning)", meaning: "error" },
+  refusal: {
+    shape: "ring",
+    solid: false,
+    color: "var(--color-warning-mark)",
+    meaning: "refusals",
+  },
+  error: { shape: "cross", solid: false, color: "var(--color-warning-mark)", meaning: "error" },
   takeover: { shape: "square", solid: true, color: "var(--color-muted)", meaning: "takeover" },
   path: { shape: "diamond", solid: false, color: "var(--color-primary)", meaning: "path (direct)" },
-  restart: { shape: "down", solid: false, color: "var(--color-warning)", meaning: "restart" },
+  restart: {
+    shape: "down",
+    solid: false,
+    color: "var(--color-warning-mark)",
+    meaning: "restart",
+  },
   step: { shape: "down", solid: true, color: "var(--color-viz-2)", meaning: "quality step" },
 };
-const lookOf = (m: Pick<Mark, "kind" | "relay">): MarkLook =>
+const lookOf = (m: { kind: MarkKind; relay?: boolean }): MarkLook =>
   m.kind === "path" && m.relay
     ? { ...MARK_LOOK.path, solid: true, meaning: "path (relayed)" }
     : MARK_LOOK[m.kind];
@@ -168,15 +200,12 @@ function useClientWidth() {
 /** What hovering or focusing reads out. */
 interface Item {
   key: string;
-  lane: string;
   t: number;
-  /** Where it ends, for a stretch. */
+  /** Where it ends, for a stretch or a group of marks. */
   to?: number;
   open?: boolean;
   label: string;
   detail?: string;
-  mark?: Mark;
-  segment?: Segment;
 }
 
 const when = (item: Item) =>
@@ -189,6 +218,201 @@ const clip = (text: string, width: number) => {
   const chars = Math.max(4, Math.floor(width / (LABEL_FONT * 0.62)));
   return text.length > chars ? `${text.slice(0, chars - 1)}…` : text;
 };
+
+/** A lane with what it draws at this view and width, and what can be read out of it. */
+interface LaneDraw {
+  lane: Lane;
+  segments: DrawnSegment[];
+  groups: MarkGroup[];
+  items: Item[];
+}
+
+function drawLane(lane: Lane, view: Range, plotW: number): LaneDraw {
+  const segments = visibleSegments(lane.segments, view, plotW);
+  const groups = groupMarks(lane.marks, view, plotW, MARK_COLUMN_PX);
+  const items: Item[] = [
+    ...segments.map(({ segment, index, count, to }) => ({
+      key: `${lane.id}:s${index}`,
+      t: segment.from,
+      to: count > 1 ? to : segment.to,
+      open: count === 1 && segment.open,
+      label:
+        count > 1
+          ? `${segment.label} (and ${count - 1} more here: zoom in to separate them)`
+          : segment.label,
+    })),
+    ...groups.map((group, i) => {
+      const first = group.marks[0] as Mark;
+      const n = group.marks.length;
+      return {
+        key: `${lane.id}:m${i}`,
+        t: group.t,
+        ...(n > 1 && { to: group.to }),
+        label:
+          n > 1
+            ? `${first.label} (and ${n - 1} more like it here: zoom in to separate them)`
+            : first.label,
+        ...(first.detail && { detail: first.detail }),
+      };
+    }),
+  ].sort((a, b) => a.t - b.t);
+  return { lane, segments, groups, items };
+}
+
+const LaneBody = memo(function LaneBody({
+  draw,
+  top,
+  h,
+  view,
+  labelW,
+  plotW,
+  W,
+  pattern,
+  activeKey,
+  cursor,
+  onEnter,
+  onLeave,
+}: {
+  draw: LaneDraw;
+  top: number;
+  h: number;
+  view: Range;
+  labelW: number;
+  plotW: number;
+  W: number;
+  pattern: string;
+  /** The key of the active item, if it is this lane's. */
+  activeKey: string | null;
+  /** The keyboard's lane. */
+  cursor: boolean;
+  onEnter: (key: string) => void;
+  onLeave: (key: string) => void;
+}) {
+  const { lane } = draw;
+  const x = (t: number) => labelW + plotW * viewFraction(view, t);
+  const relay = [...lane.marks].reverse().find((m) => m.kind === "path")?.relay;
+  const markY = top + (lane.kind === "person" ? 10 : 9);
+  return (
+    <g data-lane={lane.id}>
+      {cursor && (
+        <rect
+          x={1}
+          y={top + 1}
+          width={W - 2}
+          height={h - 2}
+          rx={3}
+          fill="none"
+          style={{ stroke: "var(--color-primary)" }}
+          strokeWidth={2}
+          pointerEvents="none"
+        />
+      )}
+      <line
+        x1={0}
+        x2={W}
+        y1={top + h - 0.5}
+        y2={top + h - 0.5}
+        style={{ stroke: "var(--color-border-subtle)" }}
+      />
+      <text
+        x={10}
+        y={top + (lane.kind === "person" ? 14 : h / 2 + 4)}
+        fontSize={LABEL_FONT}
+        fontFamily="inherit"
+        fontWeight={lane.kind === "person" ? 600 : 400}
+        style={{ fill: lane.kind === "person" ? "var(--color-fg)" : "var(--color-fg-muted)" }}
+      >
+        <title>{lane.label}</title>
+        {clip(lane.label, labelW - (relay ? 36 : 20))}
+        {relay && (
+          <tspan dx={5} fontSize={FONT} style={{ fill: "var(--color-primary-strong)" }}>
+            relay
+          </tspan>
+        )}
+      </text>
+      {draw.segments.map(({ segment: s, index, count, to }) => {
+        const box = TRACK_BOX[s.track];
+        const from = Math.max(s.from, view.t0);
+        const x0 = x(from);
+        const w = Math.max(2, x(Math.min(count > 1 ? to : s.to, view.t1)) - x0);
+        const paint = TONE_PAINT[s.tone];
+        const key = `${lane.id}:s${index}`;
+        return (
+          <g key={key}>
+            <rect
+              data-track={s.track}
+              data-tone={s.tone}
+              x={x0}
+              y={top + box.y}
+              width={w}
+              height={box.h}
+              rx={2}
+              style={{
+                fill: s.tone === "failed" ? `url(#${pattern})` : paint.fill,
+                stroke: paint.stroke ?? "var(--color-surface)",
+              }}
+              strokeWidth={paint.stroke ? 1 : 0.75}
+              pointerEvents="none"
+            />
+            {activeKey === key && (
+              <rect
+                x={x0 - 2}
+                y={top + box.y - 2}
+                width={w + 4}
+                height={box.h + 4}
+                rx={3}
+                fill="none"
+                style={{ stroke: "var(--color-primary)" }}
+                strokeWidth={2}
+                pointerEvents="none"
+              />
+            )}
+            {/* A target bigger than the bar: a 40 second share is a few pixels wide. */}
+            <rect
+              x={x0 - Math.max(0, (12 - w) / 2)}
+              y={top + box.y - 3}
+              width={Math.max(12, w)}
+              height={box.h + 6}
+              fill="transparent"
+              onPointerEnter={() => onEnter(key)}
+              onPointerLeave={() => onLeave(key)}
+            />
+          </g>
+        );
+      })}
+      {draw.groups.map((group, i) => {
+        const key = `${lane.id}:m${i}`;
+        const n = group.marks.length;
+        return (
+          <g key={key} data-mark={group.kind} data-count={n}>
+            <Glyph look={lookOf(group)} x={x(group.t)} y={markY} active={activeKey === key} />
+            {n > 1 && (
+              <text
+                x={x(group.t) + R + 3}
+                y={markY + 3.5}
+                fontSize={FONT}
+                fontFamily="inherit"
+                className="tabular-nums"
+                style={{ fill: "var(--color-muted)" }}
+                pointerEvents="none"
+              >
+                {n}
+              </text>
+            )}
+            <circle
+              cx={x(group.t)}
+              cy={markY}
+              r={12}
+              fill="transparent"
+              onPointerEnter={() => onEnter(key)}
+              onPointerLeave={() => onLeave(key)}
+            />
+          </g>
+        );
+      })}
+    </g>
+  );
+});
 
 export const RoomTimelineLanes = ({
   lanes,
@@ -217,65 +441,44 @@ export const RoomTimelineLanes = ({
   const x = (t: number) => labelW + plotW * viewFraction(view, t);
   const [active, setActive] = useState<string | null>(null);
   const [brush, setBrush] = useState<{ a: number; b: number } | null>(null);
+  const [focused, setFocused] = useState(false);
+  const [cursorLane, setCursorLane] = useState<string | null>(null);
+  const onEnter = useCallback((key: string) => setActive(key), []);
+  const onLeave = useCallback((key: string) => setActive((a) => (a === key ? null : a)), []);
 
-  const people = lanes.filter((l) => l.kind === "person");
-  const pairs = lanes.filter((l) => l.kind === "pair");
-  const rows: { lane: Lane; y: number; h: number }[] = [];
+  // What each lane draws, and can be read out of, at this view: not redone on a hover.
+  const draws = useMemo(
+    () => lanes.map((lane) => drawLane(lane, view, plotW)),
+    [lanes, view, plotW],
+  );
+  const people = draws.filter((d) => d.lane.kind === "person");
+  const pairs = draws.filter((d) => d.lane.kind === "pair");
+  const rows: { draw: LaneDraw; y: number; h: number }[] = [];
   let y = 0;
   if (people.length) y += CAPTION_H;
-  for (const lane of people) {
-    rows.push({ lane, y, h: PERSON_H });
+  for (const draw of people) {
+    rows.push({ draw, y, h: PERSON_H });
     y += PERSON_H;
   }
   const pairsCaptionY = y;
   if (pairs.length) y += CAPTION_H;
-  for (const lane of pairs) {
-    rows.push({ lane, y, h: PAIR_H });
+  for (const draw of pairs) {
+    rows.push({ draw, y, h: PAIR_H });
     y += PAIR_H;
   }
   const bodyH = Math.max(y, 1);
 
-  // What can be read out, per lane, in time order: only what is in view.
-  const items = useMemo(() => {
-    const byLane = new Map<string, Item[]>();
-    for (const lane of lanes) {
-      const list: Item[] = [];
-      lane.segments.forEach((segment, i) => {
-        const span = clipSpan(view, segment.from, segment.to);
-        if (!span) return;
-        list.push({
-          key: `${lane.id}:s${i}`,
-          lane: lane.id,
-          t: segment.from,
-          to: segment.to,
-          open: segment.open,
-          label: segment.label,
-          segment,
-        });
-      });
-      lane.marks.forEach((mark, i) => {
-        if (mark.t < view.t0 || mark.t > view.t1) return;
-        list.push({
-          key: `${lane.id}:m${i}`,
-          lane: lane.id,
-          t: mark.t,
-          label: mark.label,
-          ...(mark.detail && { detail: mark.detail }),
-          mark,
-        });
-      });
-      list.sort((a, b) => a.t - b.t);
-      byLane.set(lane.id, list);
-    }
-    return byLane;
-  }, [lanes, view]);
+  const cursorId = rows.some((r) => r.draw.lane.id === cursorLane)
+    ? cursorLane
+    : (rows[0]?.draw.lane.id ?? null);
+  const cursorDraw = draws.find((d) => d.lane.id === cursorId);
   const flagged = active?.startsWith("report:")
     ? reports.find((r) => `report:${r.id}` === active)
     : undefined;
   const current: Item | undefined = flagged
-    ? { key: active as string, lane: "", t: flagged.t, label: reportLabel(flagged) }
+    ? { key: active as string, t: flagged.t, label: reportLabel(flagged) }
     : active
-      ? [...items.values()].flat().find((item) => item.key === active)
+      ? draws.flatMap((d) => d.items).find((item) => item.key === active)
       : undefined;
 
   // ---- zoom and pan with the wheel
@@ -335,106 +538,31 @@ export const RoomTimelineLanes = ({
       onView(brushView(domain, d.a, timeAt(e.clientX)));
   };
 
-  // ---- keyboard: arrows step through a lane's items and between lanes
-  const laneKeys = (laneId: string, e: React.KeyboardEvent) => {
-    const order = rows.map((r) => r.lane.id);
-    const list = items.get(laneId) ?? [];
+  // ---- keyboard: one tab stop; up and down choose a lane, left and right step through it
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (!cursorDraw) return;
+    const list = cursorDraw.items;
     const at = list.findIndex((i) => i.key === active);
-    let next: string | null | undefined;
-    if (e.key === "ArrowRight") next = list[Math.min(list.length - 1, at + 1)]?.key;
-    else if (e.key === "ArrowLeft") next = list[Math.max(0, at - 1)]?.key;
-    else if (e.key === "Home") next = list[0]?.key;
-    else if (e.key === "End") next = list.at(-1)?.key;
-    else if (e.key === "Escape") next = null;
+    if (e.key === "ArrowRight") setActive(list[Math.min(list.length - 1, at + 1)]?.key ?? null);
+    else if (e.key === "ArrowLeft") setActive(list[Math.max(0, at - 1)]?.key ?? null);
+    else if (e.key === "Home") setActive(list[0]?.key ?? null);
+    else if (e.key === "End") setActive(list.at(-1)?.key ?? null);
+    else if (e.key === "Escape") setActive(null);
     else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      const other = order[order.indexOf(laneId) + (e.key === "ArrowDown" ? 1 : -1)];
-      if (other) {
-        e.preventDefault();
-        wrapper.current?.querySelector<SVGElement>(`[data-lane="${CSS.escape(other)}"]`)?.focus();
-        setActive(null);
-      }
-      return;
+      const order = rows.map((r) => r.draw.lane.id);
+      const next = order[order.indexOf(cursorDraw.lane.id) + (e.key === "ArrowDown" ? 1 : -1)];
+      if (next) setCursorLane(next);
+      setActive(null);
     } else if (e.key === "+" || e.key === "=" || e.key === "-") {
       onView(zoomView(view, domain, e.key === "-" ? 1.5 : 1 / 1.5));
       return;
     } else return;
     e.preventDefault();
-    setActive(next ?? null);
   };
 
   const ticks = axisTicks(view, plotW >= 560 ? 8 : 4);
   const flags = reports.filter((r) => r.t >= view.t0 && r.t <= view.t1);
   const pattern = `${patternId}-hatch`;
-
-  const segment = (lane: Lane, s: Segment, i: number, top: number) => {
-    const span = clipSpan(view, s.from, s.to);
-    if (!span) return null;
-    const box = TRACK_BOX[s.track];
-    const x0 = x(span.from);
-    const w = Math.max(2, x(span.to) - x0);
-    const paint = TONE_PAINT[s.tone];
-    const key = `${lane.id}:s${i}`;
-    return (
-      <g key={key}>
-        <rect
-          data-track={s.track}
-          data-tone={s.tone}
-          x={x0}
-          y={top + box.y}
-          width={w}
-          height={box.h}
-          rx={2}
-          style={{
-            fill: s.tone === "failed" ? `url(#${pattern})` : paint.fill,
-            stroke: paint.stroke ?? "var(--color-surface)",
-          }}
-          strokeWidth={paint.stroke ? 1 : 0.75}
-          pointerEvents="none"
-        />
-        {active === key && (
-          <rect
-            x={x0 - 2}
-            y={top + box.y - 2}
-            width={w + 4}
-            height={box.h + 4}
-            rx={3}
-            fill="none"
-            style={{ stroke: "var(--color-primary)" }}
-            strokeWidth={2}
-            pointerEvents="none"
-          />
-        )}
-        {/* A target bigger than the bar: a 40 second share is a few pixels wide. */}
-        <rect
-          x={x0 - Math.max(0, (12 - w) / 2)}
-          y={top + box.y - 3}
-          width={Math.max(12, w)}
-          height={box.h + 6}
-          fill="transparent"
-          onPointerEnter={() => setActive(key)}
-          onPointerLeave={() => setActive((a) => (a === key ? null : a))}
-        />
-      </g>
-    );
-  };
-
-  const mark = (lane: Lane, m: Mark, i: number, top: number, cy: number) => {
-    if (m.t < view.t0 || m.t > view.t1) return null;
-    const key = `${lane.id}:m${i}`;
-    return (
-      <g key={key} data-mark={m.kind}>
-        <Glyph look={lookOf(m)} x={x(m.t)} y={top + cy} active={active === key} />
-        <circle
-          cx={x(m.t)}
-          cy={top + cy}
-          r={12}
-          fill="transparent"
-          onPointerEnter={() => setActive(key)}
-          onPointerLeave={() => setActive((a) => (a === key ? null : a))}
-        />
-      </g>
-    );
-  };
 
   const brushRect = brush && (
     <rect
@@ -547,7 +675,7 @@ export const RoomTimelineLanes = ({
                   width={w}
                   height={15}
                   rx={3}
-                  style={{ fill: "var(--color-warning)", stroke: "var(--color-surface)" }}
+                  style={{ fill: "var(--color-warning)", stroke: "var(--color-warning-mark)" }}
                   strokeWidth={1.5}
                 />
                 <text
@@ -565,7 +693,7 @@ export const RoomTimelineLanes = ({
                   x2={x(r.t)}
                   y1={fy + 15}
                   y2={AXIS_H}
-                  style={{ stroke: "var(--color-warning)" }}
+                  style={{ stroke: "var(--color-warning-mark)" }}
                   strokeWidth={1.5}
                 />
               </g>
@@ -574,14 +702,24 @@ export const RoomTimelineLanes = ({
           {brushRect}
         </svg>
 
-        {/* biome-ignore lint/a11y/useSemanticElements: an SVG group; a fieldset can't be one */}
+        {/* One tab stop for all the lanes (a full room has 65): the arrow keys move within it. */}
         <svg
           width={W}
           height={bodyH}
           viewBox={`0 0 ${W} ${bodyH}`}
-          role="group"
-          aria-label="swimlanes: a lane for each person and each pair"
-          className="block"
+          role="application"
+          // The lanes are read with the arrow keys (one tab stop for all of them: a full room has
+          // 65), and each item is read out in the status line below.
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: see above
+          tabIndex={0}
+          aria-label="swimlanes, a lane for each person and each pair. Up and down choose a lane, left and right step through what is in it, plus and minus zoom."
+          className="block outline-none"
+          onKeyDown={onKeyDown}
+          onFocus={() => setFocused(true)}
+          onBlur={() => {
+            setFocused(false);
+            setActive(null);
+          }}
         >
           <defs>
             <pattern
@@ -592,7 +730,7 @@ export const RoomTimelineLanes = ({
               patternTransform="rotate(45)"
             >
               <rect width="5" height="5" style={{ fill: "var(--color-surface)" }} />
-              <rect width="2.5" height="5" style={{ fill: "var(--color-warning)" }} />
+              <rect width="2.5" height="5" style={{ fill: "var(--color-warning-mark)" }} />
             </pattern>
           </defs>
           {ticks.map((tick) => (
@@ -612,7 +750,7 @@ export const RoomTimelineLanes = ({
               x2={x(r.t)}
               y1={0}
               y2={bodyH}
-              style={{ stroke: "var(--color-warning)" }}
+              style={{ stroke: "var(--color-warning-mark)" }}
               strokeWidth={1.5}
               pointerEvents="none"
             />
@@ -621,61 +759,23 @@ export const RoomTimelineLanes = ({
           {pairs.length > 0 && (
             <Caption y={pairsCaptionY}>connections · a lane for each pair</Caption>
           )}
-          {rows.map(({ lane, y: top, h }) => {
-            const list = items.get(lane.id) ?? [];
-            const relay = [...lane.marks].reverse().find((m) => m.kind === "path")?.relay;
-            return (
-              // biome-ignore lint/a11y/useSemanticElements: an SVG group
-              // biome-ignore lint/a11y/noInteractiveElementToNoninteractiveRole: a focusable lane steps through its items with the arrow keys and reads each out in the status line
-              <g
-                key={lane.id}
-                data-lane={lane.id}
-                role="group"
-                tabIndex={0}
-                aria-label={`${lane.label}: ${list.length} ${list.length === 1 ? "item" : "items"} in view. Arrow keys step through them.`}
-                className="outline-none [&:focus-visible>rect:first-child]:stroke-[var(--color-primary)] [&:focus-visible>rect:first-child]:stroke-2"
-                onKeyDown={(e) => laneKeys(lane.id, e)}
-                onFocus={() => setActive((a) => (a?.startsWith(`${lane.id}:`) ? a : null))}
-              >
-                <rect
-                  x={0.5}
-                  y={top + 0.5}
-                  width={W - 1}
-                  height={h - 1}
-                  rx={3}
-                  fill="transparent"
-                  style={{ stroke: "transparent" }}
-                />
-                <line
-                  x1={0}
-                  x2={W}
-                  y1={top + h - 0.5}
-                  y2={top + h - 0.5}
-                  style={{ stroke: "var(--color-border-subtle)" }}
-                />
-                <text
-                  x={10}
-                  y={top + (lane.kind === "person" ? 14 : h / 2 + 4)}
-                  fontSize={LABEL_FONT}
-                  fontFamily="inherit"
-                  fontWeight={lane.kind === "person" ? 600 : 400}
-                  style={{
-                    fill: lane.kind === "person" ? "var(--color-fg)" : "var(--color-fg-muted)",
-                  }}
-                >
-                  <title>{lane.label}</title>
-                  {clip(lane.label, labelW - (relay ? 36 : 20))}
-                  {relay && (
-                    <tspan dx={5} fontSize={FONT} style={{ fill: "var(--color-primary-strong)" }}>
-                      relay
-                    </tspan>
-                  )}
-                </text>
-                {lane.segments.map((s, i) => segment(lane, s, i, top))}
-                {lane.marks.map((m, i) => mark(lane, m, i, top, lane.kind === "person" ? 10 : 9))}
-              </g>
-            );
-          })}
+          {rows.map(({ draw, y: top, h }) => (
+            <LaneBody
+              key={draw.lane.id}
+              draw={draw}
+              top={top}
+              h={h}
+              view={view}
+              labelW={labelW}
+              plotW={plotW}
+              W={W}
+              pattern={pattern}
+              activeKey={active?.startsWith(`${draw.lane.id}:`) ? active : null}
+              cursor={focused && draw.lane.id === cursorId}
+              onEnter={onEnter}
+              onLeave={onLeave}
+            />
+          ))}
           {brushRect}
         </svg>
       </div>
@@ -689,6 +789,12 @@ export const RoomTimelineLanes = ({
           <>
             <b className="tabular-nums text-fg">{when(current)}</b> · {current.label}
             {current.detail && <span className="text-subtle"> · {current.detail}</span>}
+          </>
+        ) : focused && cursorDraw ? (
+          <>
+            <b className="text-fg">{cursorDraw.lane.label}</b> · {cursorDraw.items.length}{" "}
+            {cursorDraw.items.length === 1 ? "item" : "items"} in view · left and right step through
+            them
           </>
         ) : (
           <span className="text-subtle">
@@ -733,18 +839,20 @@ export const LanesLegend = () => (
       <span key={tone} className="inline-flex items-center gap-1.5">
         <svg width="14" height="8" aria-hidden="true">
           <rect
-            width="14"
-            height="8"
+            x="0.5"
+            y="0.5"
+            width="13"
+            height="7"
             rx="2"
             style={{
-              fill: tone === "failed" ? "var(--color-warning)" : TONE_PAINT[tone].fill,
+              fill: TONE_PAINT[tone].fill,
               stroke: TONE_PAINT[tone].stroke ?? "none",
             }}
           />
           {tone === "failed" && (
             <path
               d="M0 8 L8 0 M6 8 L14 0"
-              style={{ stroke: "var(--color-surface)" }}
+              style={{ stroke: "var(--color-warning-mark)" }}
               strokeWidth="2"
             />
           )}
@@ -773,7 +881,14 @@ export const LanesLegend = () => (
     ))}
     <span className="inline-flex items-center gap-1.5">
       <svg width="14" height="12" aria-hidden="true">
-        <rect x="0" y="0" width="14" height="12" rx="2" style={{ fill: "var(--color-warning)" }} />
+        <rect
+          x="0.5"
+          y="0.5"
+          width="13"
+          height="11"
+          rx="2"
+          style={{ fill: "var(--color-warning)", stroke: "var(--color-warning-mark)" }}
+        />
       </svg>
       problem report
     </span>

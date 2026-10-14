@@ -9,6 +9,7 @@ import {
   fullView,
   INCIDENT_WINDOW_MS,
   MIN_VIEW_MS,
+  offsetLabel,
   panView,
   viewFraction,
   windowAround,
@@ -195,6 +196,20 @@ describe("clockLabel", () => {
     const browser = Intl.DateTimeFormat().resolvedOptions().timeZone;
     expect(clockLabel(T0, true)).toBe(clockLabel(T0, true, browser));
     expect(browserZone()).toBe(browser);
+  });
+});
+
+describe("offsetLabel", () => {
+  it("reads a distance from a moment, signed, in the units that fit", () => {
+    expect(offsetLabel(-72 * SEC)).toBe("-1m 12s");
+    expect(offsetLabel(30 * SEC)).toBe("+30s");
+    expect(offsetLabel(-2 * MIN)).toBe("-2m");
+  });
+
+  it("says 0s for what is within half a second, and never 'report': only the report's own row is", () => {
+    expect(offsetLabel(0)).toBe("0s");
+    expect(offsetLabel(400)).toBe("0s");
+    expect(offsetLabel(-400)).toBe("0s");
   });
 });
 

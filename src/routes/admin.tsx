@@ -6,7 +6,7 @@ import {
   useSuspenseQuery,
 } from "@tanstack/react-query";
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import {
   BanUserDialog,
   type DialogTarget,
@@ -955,15 +955,21 @@ const windowStat = (count: WindowCount) => ({
 });
 
 /**
- * A ref for a section opened below the tables: it scrolls into view when `key` changes to
- * something (a different room, report or pair), where the tables that open it are far above.
+ * What a section opened below the tables needs: it scrolls into view and takes focus on its
+ * heading when `key` changes to something (a different room, report or pair), as the button that
+ * opened it is far above and focus would otherwise stay there, out of sight. `focus` puts focus
+ * back on the heading when something inside the section takes away the control that had it.
  */
 function useRevealOnOpen(key: string | null) {
-  const ref = useRef<HTMLElement>(null);
+  const section = useRef<HTMLElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const focus = useCallback(() => heading.current?.focus({ preventScroll: true }), []);
   useEffect(() => {
-    if (key) ref.current?.scrollIntoView({ block: "nearest" });
-  }, [key]);
-  return ref;
+    if (!key) return;
+    section.current?.scrollIntoView({ block: "nearest" });
+    focus();
+  }, [key, focus]);
+  return { section, heading, focus };
 }
 
 function AdminPage() {
@@ -975,8 +981,8 @@ function AdminPage() {
   const [quality, setQuality] = useState<QualityTarget | null>(null);
   const [timeline, setTimeline] = useState<TimelineTarget | null>(null);
   const inspect: Inspect = { quality: setQuality, timeline: setTimeline };
-  const timelineRef = useRevealOnOpen(timeline && `${timeline.id}/${timeline.reportId ?? ""}`);
-  const qualityRef = useRevealOnOpen(
+  const timelineReveal = useRevealOnOpen(timeline && `${timeline.id}/${timeline.reportId ?? ""}`);
+  const qualityReveal = useRevealOnOpen(
     quality && `${quality.id}/${quality.focus?.streamerId}/${quality.focus?.viewerId}`,
   );
   const chartDays = daily.map((d) => ({
@@ -1098,9 +1104,10 @@ function AdminPage() {
         </div>
 
         {timeline && (
-          <section ref={timelineRef} aria-label="room timeline" className="mt-6">
+          <section ref={timelineReveal.section} aria-label="room timeline" className="mt-6">
             <div className="flex items-start justify-between gap-3">
               <SectionHead
+                headingRef={timelineReveal.heading}
                 title={`room timeline · ${timeline.name}`}
                 sub="events kept 90 days · intervals 30 · times in your time zone"
                 dot="muted"
@@ -1116,14 +1123,16 @@ function AdminPage() {
               live={liveRooms.some((r) => r.id === timeline.id)}
               initialReportId={timeline.reportId}
               onQuality={(focus) => setQuality({ id: timeline.id, name: timeline.name, focus })}
+              focusHeading={timelineReveal.focus}
             />
           </section>
         )}
 
         {quality && (
-          <section ref={qualityRef} aria-label="room quality" className="mt-6">
+          <section ref={qualityReveal.section} aria-label="room quality" className="mt-6">
             <div className="flex items-start justify-between gap-3">
               <SectionHead
+                headingRef={qualityReveal.heading}
                 title={`video quality · ${quality.name}`}
                 sub="samples kept 90 days · every 30s per stream and at each rung change"
                 size="sm"

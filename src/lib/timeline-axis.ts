@@ -186,6 +186,14 @@ export function clockLabel(t: number, seconds: boolean, zone?: string): string {
   return seconds ? `${hm}:${two(p.second)}` : hm;
 }
 
+/** "-1m 12s", "+30s", "0s": how far a moment is from another, `ms` after it (negative: before). */
+export function offsetLabel(ms: number): string {
+  const s = Math.round(Math.abs(ms) / 1_000);
+  if (s === 0) return "0s";
+  const text = s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${s % 60 ? ` ${s % 60}s` : ""}`;
+  return `${ms < 0 ? "-" : "+"}${text}`;
+}
+
 /** The zone's name at `t` ("IST", "CEST"): daylight saving changes it. */
 export const zoneName = (t: number, zone?: string): string => clockParts(t, zone).zone;
 

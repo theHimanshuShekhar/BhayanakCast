@@ -181,6 +181,16 @@ for (const panel of PANELS) {
     bg: (p) => p.tok(panel),
   });
 }
+// Amber on the room timeline: the outline of a caution mark or bar, which must be seen against
+// the panel (the `warning` fill alone is about 1.6:1 on the light theme's white).
+for (const panel of ["bg", "canvas", "surface"]) {
+  pairs.push({
+    label: `warning-mark (caution marks and outlines on the room timeline) on bg-${panel}`,
+    min: 3,
+    fg: (p) => p.tok("warning-mark"),
+    bg: (p) => p.tok(panel),
+  });
+}
 pairs.push(
   {
     label: "text-primary-ink on bg-primary (button, accent chip, active control)",

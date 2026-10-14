@@ -11,10 +11,14 @@ import {
   filterLanes,
   filterReports,
   filterRows,
+  groupMarks,
   type Lane,
+  type Mark,
   reportMarkers,
+  type Segment,
   type TimelineFilter,
   toRows,
+  visibleSegments,
 } from "./timeline-model";
 
 const SEC = 1_000;
@@ -679,5 +683,133 @@ describe("filtering", () => {
       expect(onlyMedia.map((l) => l.id)).toEqual(["person:ana"]);
       expect(onlyMedia[0]?.segments.map((s) => s.track)).toEqual(["share"]);
     });
+  });
+});
+
+describe("drawing a crowded lane", () => {
+  const view = { t0: T0, t1: T0 + 1_000 * SEC };
+  const mark = (sec: number, kind: Mark["kind"] = "refusal", relay?: boolean): Mark => ({
+    t: at(sec),
+    kind,
+    category: "refusals",
+    label: `mark at ${sec}`,
+    people: [],
+    ...(relay && { relay }),
+  });
+
+  it("groups marks of one kind that fall in the same pixel column, at the first one's time", () => {
+    // 1,000 s over 100 px, in columns of 10 px: 100 s each.
+    const groups = groupMarks([mark(10), mark(20), mark(90), mark(150), mark(950)], view, 100, 10);
+    expect(groups.map((g) => [(g.t - T0) / SEC, g.marks.length])).toEqual([
+      [10, 3],
+      [150, 1],
+      [950, 1],
+    ]);
+    expect(groups[0]?.marks.map((m) => m.label)).toEqual([
+      "mark at 10",
+      "mark at 20",
+      "mark at 90",
+    ]);
+  });
+
+  it("keeps different kinds apart, and a relayed path apart from a direct one", () => {
+    const groups = groupMarks(
+      [mark(10, "refusal"), mark(20, "error"), mark(30, "path"), mark(40, "path", true)],
+      view,
+      100,
+      10,
+    );
+    expect(groups.map((g) => g.kind)).toEqual(["refusal", "error", "path", "path"]);
+  });
+
+  it("separates them again when zoomed in, so nothing is lost to the grouping", () => {
+    const marks = [mark(10), mark(20), mark(90)];
+    const wide = groupMarks(marks, view, 100, 10);
+    const close = groupMarks(marks, { t0: T0, t1: T0 + 100 * SEC }, 100, 10);
+    expect(wide).toHaveLength(1);
+    expect(close).toHaveLength(3);
+  });
+
+  it("leaves out what is outside the view", () => {
+    expect(groupMarks([mark(-5), mark(500), mark(1_200)], view, 100, 10)).toHaveLength(1);
+  });
+
+  it("draws one of a run of segments too thin to see, and every one that is wide enough", () => {
+    const seg = (from: number, to: number, tone: Segment["tone"]): Segment => ({
+      track: "state",
+      from: at(from),
+      to: at(to),
+      tone,
+      open: false,
+      label: tone,
+      category: "connection",
+      people: [],
+    });
+    // 1,000 s over 1,000 px: a pixel is a second. A flap of 0.5 s is half of one.
+    const flaps = Array.from({ length: 10 }, (_, i) => [
+      seg(100 + i, 100.5 + i, "connected"),
+      seg(100.5 + i, 101 + i, "disconnected"),
+    ]).flat();
+    const wide = seg(500, 600, "connected");
+    const drawn = visibleSegments([...flaps, wide], view, 1_000);
+    expect(drawn.length).toBeLessThan(flaps.length / 2);
+    expect(drawn.at(-1)?.segment).toBe(wide);
+    // Their order in the lane is how they are keyed, so each carries it.
+    expect(drawn.at(-1)?.index).toBe(flaps.length);
+    // At a scale where each is wide enough, all of them are drawn.
+    expect(visibleSegments(flaps, { t0: at(100), t1: at(110) }, 1_000)).toHaveLength(flaps.length);
+  });
+
+  it("keeps a 5,000 entry room quick: the model, a filter and the grouping", () => {
+    const people = ["ana", "bo", "cy", "dee", "eve", "fay"];
+    const entries: RoomTimelineEntry[] = people.map((p) => span("presence", p, 0, 5_000));
+    for (let i = 0; i < 4_900; i++) {
+      const a = people[i % 6] as string;
+      const b = people[(i + 1 + (i % 5)) % 6] as string;
+      if (a === b) continue;
+      const kind = i % 4;
+      entries.push(
+        kind === 0
+          ? ev(i, "pair_state", a, {
+              target: b,
+              details: { state: i % 8 ? "connected" : "failed" },
+            })
+          : kind === 1
+            ? ev(i, i % 8 === 1 ? "cam_on" : "cam_off", a)
+            : kind === 2
+              ? ev(i, "refusals", a, { details: { counts: { "chat:rate_limited": 1 } } })
+              : ev(i, "pair_path", a, {
+                  target: b,
+                  details: { change: "change", path: "direct" },
+                }),
+      );
+    }
+    const timeline = room(entries);
+    const started = performance.now();
+    const model = buildTimelineModel(timeline, NOW);
+    const shown = filterLanes(model.lanes, {
+      categories: new Set(["presence", "media", "connection", "moderation", "refusals", "reports"]),
+      people: new Set(),
+    });
+    let drawn = 0;
+    let raw = 0;
+    const marksOnly: number[] = [];
+    for (const lane of shown) {
+      const groups = groupMarks(lane.marks, model.domain, 800, 8).length;
+      const kinds = new Set(lane.marks.map((m) => m.kind)).size;
+      // A lane 800 px wide has 100 columns of 8 px: one mark per column and kind at most (twice
+      // for a path, which can be direct or relayed).
+      expect(groups).toBeLessThanOrEqual(100 * kinds * 2);
+      marksOnly.push(groups);
+      drawn += groups + visibleSegments(lane.segments, model.domain, 800).length;
+      raw += lane.marks.length + lane.segments.length;
+    }
+    const took = performance.now() - started;
+    expect(raw).toBeGreaterThan(2_000);
+    // Well under what there is, though how far depends on how the room's entries fall.
+    expect(drawn).toBeLessThan(raw * 0.75);
+    expect(marksOnly.reduce((a, b) => a + b, 0)).toBeLessThan(raw / 3);
+    // Generous: it takes tens of milliseconds, and a slow runner is no reason to fail.
+    expect(took).toBeLessThan(2_000);
   });
 });

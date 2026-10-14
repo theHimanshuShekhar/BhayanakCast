@@ -1,7 +1,7 @@
 // The room timeline as a table of events: the incident's window of two minutes either side of a
 // report, and the full timeline's events table, which reads what the swimlanes draw without
 // looking at them (issue #114).
-import { clockLabel, zoneName } from "~/lib/timeline-axis";
+import { clockLabel, offsetLabel, zoneName } from "~/lib/timeline-axis";
 import type { TimelineRow } from "~/lib/timeline-model";
 import { Chip } from "./ui";
 
@@ -63,7 +63,11 @@ export const RowsTable = ({
               }
             >
               <td className={`${td} whitespace-nowrap tabular-nums text-subtle`}>
-                {relativeTo === undefined ? clockLabel(row.t, true) : offset(row.t - relativeTo)}
+                {relativeTo === undefined
+                  ? clockLabel(row.t, true)
+                  : isReport
+                    ? "report"
+                    : offsetLabel(row.t - relativeTo)}
               </td>
               <td className={td}>
                 <Chip kind={CATEGORY_CHIP[row.category]}>{row.category}</Chip>
@@ -86,11 +90,3 @@ export const RowsTable = ({
     </table>
   </div>
 );
-
-/** "report", "-1m 12s", "+30s". */
-function offset(ms: number): string {
-  const s = Math.round(Math.abs(ms) / 1_000);
-  if (s === 0) return "report";
-  const text = s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${s % 60 ? ` ${s % 60}s` : ""}`;
-  return `${ms < 0 ? "-" : "+"}${text}`;
-}

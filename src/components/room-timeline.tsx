@@ -38,6 +38,9 @@ import { LanesLegend, RoomTimelineLanes } from "./room-timeline-lanes";
 import { RowsTable } from "./room-timeline-rows";
 import { Btn, Chip, MonoCaps } from "./ui";
 
+/** A domain to hold the place of one that has not loaded. */
+const NO_DOMAIN: Range = { t0: 0, t1: MIN_VIEW_MS };
+
 /** The most rows the events table draws; a room can have 5,000 entries. */
 const MAX_TABLE_ROWS = 500;
 
@@ -96,11 +99,18 @@ export const RoomTimelinePanel = ({
   live,
   initialReportId,
   onQuality,
+  focusHeading,
 }: {
   roomId: string;
   live: boolean;
   initialReportId?: string;
   onQuality: (focus: QualityFocus) => void;
+  /**
+   * Put focus on this section's heading. Called when switching between the incident and the
+   * swimlanes takes away the control that had it (a marker, a button), which would otherwise
+   * drop focus to the page.
+   */
+  focusHeading: () => void;
 }) => {
   const timelineQuery = useQuery(roomTimelineQuery(roomId));
   const reportsQuery = useQuery(roomReportsQuery(roomId));
@@ -121,6 +131,32 @@ export const RoomTimelinePanel = ({
     [timeline, until],
   );
 
+  // What the filters leave, worked out when the model or the filters change and not on every
+  // draw: a wheel turn or a hover redraws the panel, and none of this has moved.
+  const domain = model?.domain ?? NO_DOMAIN;
+  const full = fullView(domain);
+  const view = zoom ?? full;
+  const lanes = useMemo(() => (model ? filterLanes(model.lanes, filter) : []), [model, filter]);
+  const shownReports = useMemo(
+    () => (model ? filterReports(model.reports, filter) : []),
+    [model, filter],
+  );
+  const filteredRows = useMemo(
+    () => (model ? filterRows(model.rows, filter) : []),
+    [model, filter],
+  );
+  const rowsInView = useMemo(
+    () => filteredRows.filter((r) => r.t >= view.t0 && r.t <= view.t1),
+    [filteredRows, view.t0, view.t1],
+  );
+  const counts = useMemo(() => {
+    const byCategory = new Map<Category, number>();
+    for (const r of model?.rows ?? [])
+      byCategory.set(r.category, (byCategory.get(r.category) ?? 0) + 1);
+    return byCategory;
+  }, [model]);
+  const everyone = useMemo(() => model?.lanes.filter((l) => l.kind === "person") ?? [], [model]);
+
   if (timelineQuery.isError) {
     return <div className={`${card} p-5 text-xs text-live-ink`}>timeline unavailable</div>;
   }
@@ -133,10 +169,7 @@ export const RoomTimelinePanel = ({
     );
   }
 
-  const { domain } = model;
-  const view = zoom ?? fullView(domain);
   const spanMs = view.t1 - view.t0;
-  const full = fullView(domain);
   const zoomed = spanMs < full.t1 - full.t0 - 1;
 
   const marker = model.reports.find((r) => r.id === reportId);
@@ -145,22 +178,25 @@ export const RoomTimelinePanel = ({
   const incidentAt = marker?.t ?? (report ? Date.parse(report.at) : null);
   const inIncident = mode === "incident" && reportId !== null && incidentAt !== null;
 
+  // Each of these takes away the control that was pressed, so focus goes to the heading.
   const open = (id: string) => {
     setReportId(id);
     setMode("incident");
+    focusHeading();
   };
   const showOnTimeline = () => {
     if (incidentAt === null) return;
     setZoom(brushView(domain, incidentAt - INCIDENT_WINDOW_MS, incidentAt + INCIDENT_WINDOW_MS));
     setMode("full");
+    focusHeading();
+  };
+  const showFullTimeline = () => {
+    setMode("full");
+    focusHeading();
   };
 
-  const lanes = filterLanes(model.lanes, filter);
-  const shownReports = filterReports(model.reports, filter);
-  const rowsInView = filterRows(model.rows, filter).filter((r) => r.t >= view.t0 && r.t <= view.t1);
   const incidentRows = incidentAt === null ? [] : windowAround(model.rows, incidentAt);
-  const countOf = (c: Category) => model.rows.filter((r) => r.category === c).length;
-  const everyone = model.lanes.filter((l) => l.kind === "person");
+  const countOf = (c: Category) => counts.get(c) ?? 0;
   const filtered = filter.people.size > 0 || filter.categories.size < CATEGORIES.length;
 
   const reportLabel = (m: ReportMarker) => {
@@ -211,7 +247,7 @@ export const RoomTimelinePanel = ({
                 <Btn size="sm" onClick={showOnTimeline}>
                   see it on the timeline
                 </Btn>
-                <Btn size="sm" onClick={() => setMode("full")}>
+                <Btn size="sm" onClick={showFullTimeline}>
                   full timeline
                 </Btn>
               </span>

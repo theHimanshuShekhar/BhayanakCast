@@ -244,6 +244,8 @@ describe("recent reports", () => {
     )) as unknown as { rows: { indexname: string; indexdef: string }[] };
     const defs = Object.fromEntries(found.rows.map((r) => [r.indexname, r.indexdef]));
     expect(defs.room_timeline_events_kind_at_idx).toContain("(kind, at)");
+    // One room's reports (a room's incident view) are found by room and time.
+    expect(defs.room_timeline_events_room_idx).toContain("(room_id, at)");
     expect(defs.room_timeline_events_snapshot_report_idx).toMatch(/\(details ->> 'reportId'/);
     expect(defs.room_timeline_events_snapshot_report_idx).toContain("report_snapshot");
   });
