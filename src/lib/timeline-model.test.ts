@@ -204,6 +204,39 @@ describe("person lanes", () => {
     ]);
   });
 
+  it("builds host stretches from host_change events when the host intervals are gone", () => {
+    const { lanes } = buildTimelineModel(
+      room([
+        span("presence", "ana", 0, 600),
+        span("presence", "bo", 0, 500),
+        ev(0, "host_change", "ana", { target: "ana", details: {} }),
+        ev(300, "host_change", "bo", { target: "bo", details: { from: "ana" } }),
+      ]),
+      NOW,
+    );
+    // Ana hosted until the change; Bo until they left.
+    expect(spans(lane(lanes, "person:ana"), "host")).toEqual([[0, 300, "host", false]]);
+    expect(spans(lane(lanes, "person:bo"), "host")).toEqual([[300, 500, "host", false]]);
+  });
+
+  it("keeps a host that is still there open, and uses the stored intervals when it has them", () => {
+    const open = buildTimelineModel(
+      room([span("presence", "ana", 0, null), ev(0, "host_change", "ana", { target: "ana" })]),
+      NOW,
+    );
+    expect(spans(lane(open.lanes, "person:ana"), "host")).toEqual([[0, 900, "host", true]]);
+    // Both, and the events are not drawn on top of the intervals.
+    const both = buildTimelineModel(
+      room([
+        span("presence", "ana", 0, 600),
+        span("host", "ana", 0, 200),
+        ev(0, "host_change", "ana", { target: "ana" }),
+      ]),
+      NOW,
+    );
+    expect(spans(lane(both.lanes, "person:ana"), "host")).toEqual([[0, 200, "host", false]]);
+  });
+
   it("keeps a camera that is still on open", () => {
     const { lanes } = buildTimelineModel(
       room([span("presence", "ana", 0, null), ev(10, "cam_on", "ana")]),
@@ -528,6 +561,41 @@ describe("rows", () => {
       [90, "Bo left"],
       [100, "Ana left"],
     ]);
+  });
+
+  it("files a kick under the person kicked: their presence ends there, with no second 'left'", () => {
+    const rows = toRows(
+      room([
+        span("presence", "ana", 0, 600),
+        span("presence", "bo", 0, 300),
+        ev(300, "kick", "ana", { target: "bo" }),
+      ]),
+    );
+    expect(rows.map((r) => [(r.t - T0) / SEC, r.text])).toEqual([
+      [0, "Ana joined"],
+      [0, "Bo joined"],
+      [300, "Ana kicked Bo"],
+      // The kicker's own presence is not what the kick told: it still needs its end.
+      [600, "Ana left"],
+    ]);
+  });
+
+  it("closes a kicked person's lane stretches at the kick, whether or not the intervals are there", () => {
+    const { lanes } = buildTimelineModel(
+      room([
+        ev(0, "join", "ana"),
+        ev(0, "join", "bo"),
+        ev(50, "mic_on", "bo"),
+        ev(300, "kick", "ana", { target: "bo" }),
+      ]),
+      NOW,
+    );
+    expect(spans(lane(lanes, "person:bo"), "presence")).toEqual([[0, 300, "present", false]]);
+    expect(spans(lane(lanes, "person:bo"), "mic")).toEqual([[50, 300, "mic", false]]);
+    expect(spans(lane(lanes, "person:ana"), "presence")).toEqual([[0, 900, "present", true]]);
+    // The kick is a mark on the lane of the person kicked, not on the kicker's.
+    expect(lane(lanes, "person:bo").marks.map((m) => m.kind)).toEqual(["moderation"]);
+    expect(lane(lanes, "person:ana").marks).toEqual([]);
   });
 
   it("says what a refusals summary counted", () => {

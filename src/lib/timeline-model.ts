@@ -88,6 +88,33 @@ const EVENT_CATEGORY: Record<TimelineEventKind, Category> = {
   report_snapshot: "reports",
 };
 
+/**
+ * Kinds whose target is who they happened to, and the actor who did it: a kick, a ban, a host
+ * hand-over, a role, a refused knock. Every other kind is about its actor.
+ */
+const ABOUT_TARGET = new Set<TimelineEventKind>([
+  "kick",
+  "ban",
+  "stop_share",
+  "role_change",
+  "host_change",
+  "knock_approve",
+  "knock_deny",
+]);
+
+/**
+ * The person an event is about, whose lane it belongs on and whose presence, share or grace it
+ * can end: the one kicked, not the kicker. Null for a room's own (a rename, the room ending).
+ * One rule for every place that files an event under someone, so they can't disagree.
+ */
+export function subjectOf(
+  e: Pick<EventEntry, "kind" | "actorUserId" | "targetUserId">,
+): string | null {
+  return ABOUT_TARGET.has(e.kind)
+    ? (e.targetUserId ?? e.actorUserId)
+    : (e.actorUserId ?? e.targetUserId);
+}
+
 export type Track = "presence" | "host" | "share" | "cam" | "mic" | "state";
 export type Tone =
   | "present"
@@ -418,9 +445,7 @@ export function toRows(timeline: RoomTimeline): TimelineRow[] {
   const events = entries.filter(isEvent);
   // Per person: whoever has any such event on the timeline has their intervals told by them.
   const told = (kinds: TimelineEventKind[]) =>
-    new Set(
-      events.filter((e) => kinds.includes(e.kind)).map((e) => e.actorUserId ?? e.targetUserId),
-    );
+    new Set(events.filter((e) => kinds.includes(e.kind)).map(subjectOf));
   const joined = told(["join"]);
   const left = told(["leave", "kick", "ban"]);
   const shared = told(["share_start"]);
@@ -528,7 +553,7 @@ export function buildTimelineModel(timeline: RoomTimeline, until?: number): Time
   }
   for (const [user, list] of groupBy(
     events.filter((e) => ["join", "leave", "kick", "ban"].includes(e.kind)),
-    (e) => (e.kind === "kick" || e.kind === "ban" ? e.targetUserId : e.actorUserId),
+    subjectOf,
   )) {
     if (presence.has(user)) continue;
     const spans: Interval[] = [];
@@ -593,6 +618,30 @@ export function buildTimelineModel(timeline: RoomTimeline, until?: number): Time
       "host",
       ms(i.at),
       i.endedAt ? ms(i.endedAt) : null,
+      "host",
+      "host",
+      "presence",
+    );
+  }
+
+  // Where the host intervals are gone (they reach back 30 days, the events 90), the hand-overs
+  // say who hosted when: from each `host_change` to the next, or to the host leaving.
+  const hosted = new Set(intervals.filter((i) => i.source === "host").map((i) => i.userId));
+  const handOvers = events.filter((e) => e.kind === "host_change");
+  for (const [i, change] of handOvers.entries()) {
+    const host = subjectOf(change);
+    if (!host || hosted.has(host)) continue;
+    const next = handOvers.slice(i + 1).find((e) => subjectOf(e) !== host);
+    const from = ms(change.at);
+    const left = presenceEnd(host, from);
+    const stops = [next ? ms(next.at) : null, left].filter(
+      (t): t is number => typeof t === "number",
+    );
+    push(
+      personLane(host),
+      "host",
+      from,
+      stops.length ? Math.min(...stops) : null,
       "host",
       "host",
       "presence",
@@ -667,11 +716,9 @@ export function buildTimelineModel(timeline: RoomTimeline, until?: number): Time
     "kick",
     "ban",
   ]);
-  const aboutUser = (e: EventEntry) =>
-    e.kind === "kick" || e.kind === "ban" ? e.targetUserId : e.actorUserId;
   for (const [user, mine] of groupBy(
     events.filter((e) => e.kind === "grace_start" || ENDS_GRACE.has(e.kind)),
-    aboutUser,
+    subjectOf,
   )) {
     for (const [i, start] of mine.entries()) {
       if (start.kind !== "grace_start") continue;
@@ -711,7 +758,7 @@ export function buildTimelineModel(timeline: RoomTimeline, until?: number): Time
       });
     };
     if (e.kind === "takeover") mark(e.actorUserId, "takeover");
-    else if (category === "moderation") mark(e.targetUserId ?? e.actorUserId, "moderation");
+    else if (category === "moderation") mark(subjectOf(e), "moderation");
     else if (e.kind === "device_error" || e.kind === "audio_blocked") mark(e.actorUserId, "error");
     else if (category === "refusals") mark(e.actorUserId, "refusal");
   }
