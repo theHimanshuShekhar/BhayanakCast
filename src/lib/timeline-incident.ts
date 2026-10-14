@@ -29,8 +29,6 @@ export interface SnapshotRow {
   step?: string;
   cap?: number;
   reason?: NamedSnapshotStream["reason"];
-  /** Whose words `reason` is in (the streamer's browser knows it first-hand). */
-  reasonFrom?: "streamer" | "viewer";
   path?: string;
   bps?: number;
   width?: number;
@@ -122,8 +120,6 @@ export function snapshotRows(report: Pick<RecentReport, "snapshots">): SnapshotR
       const v = sent?.[f] ?? received?.[f];
       if (v !== undefined) Object.assign(row, { [f]: v });
     }
-    if (row.reason !== undefined)
-      row.reasonFrom = sent?.reason !== undefined ? "streamer" : "viewer";
     for (const f of READING_FIELDS) {
       const v = received?.[f] ?? sent?.[f];
       if (v !== undefined) Object.assign(row, { [f]: v });

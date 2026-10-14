@@ -494,15 +494,11 @@ const mbpsText = (bps: number) => `${fmtMbps(bps)} Mbps`;
 
 /**
  * One stream of a snapshot as the quality modal words it: step, cap, numbers, path, and the
- * reason in the modal's own words, from the end of the browser that took the snapshot (`mine`
- * receives it, so it is a viewer's reading; else the streamer's, naming the viewer).
+ * reason in the modal's words, from outside the stream (an admin is neither end), naming both.
  */
-function streamText(s: NamedSnapshotStream, mine: "viewer" | "streamer"): string {
+function streamText(s: NamedSnapshotStream): string {
   const reason = s.reason
-    ? reasonText(
-        s.reason,
-        mine === "viewer" ? { side: "viewer" } : { side: "streamer", viewer: s.toName },
-      ).label
+    ? reasonText(s.reason, { side: "admin", streamer: s.fromName, viewer: s.toName }).label
     : undefined;
   const parts = [
     s.step && `${s.step}${s.cap === undefined ? "" : ` (cap ${mbpsText(s.cap)})`}`,
@@ -547,7 +543,7 @@ const SnapshotsCell = ({ report }: { report: RecentReport }) => {
               return (
                 <span key={`${st.from}>${st.to}`}>
                   {sending ? `sending to ${st.toName}` : `receiving from ${st.fromName}`}:{" "}
-                  {streamText(st, sending ? "streamer" : "viewer") || "no reading"}
+                  {streamText(st) || "no reading"}
                 </span>
               );
             })}

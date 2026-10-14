@@ -249,7 +249,7 @@ export const RoomQualityPanel = ({
 }) => {
   const { data, isError } = useQuery(roomQualityQuery(roomId));
   // Undefined until a row is toggled: then the focused pair's row is the one open.
-  const [toggled, setOpen] = useState<string | null | undefined>(undefined);
+  const [toggled, setToggled] = useState<string | null | undefined>(undefined);
   const focused = focus
     ? data?.pairs
         .filter((p) => p.streamerId === focus.streamerId && p.viewerId === focus.viewerId)
@@ -319,7 +319,7 @@ export const RoomQualityPanel = ({
                   pair={pair}
                   label={label}
                   open={open === key}
-                  toggle={() => setOpen(open === key ? null : key)}
+                  toggle={() => setToggled(open === key ? null : key)}
                   roomId={roomId}
                 />
               );

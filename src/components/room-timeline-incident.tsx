@@ -6,7 +6,7 @@ import { useState } from "react";
 import type { RecentReport } from "~/lib/problem-report";
 import { reasonText } from "~/lib/quality-reason";
 import { clockLabel } from "~/lib/timeline-axis";
-import { type SnapshotRow, snapshotRows } from "~/lib/timeline-incident";
+import { type SnapshotRow, snapshotRows, TROUBLE_LOSS } from "~/lib/timeline-incident";
 import { fmtMbps } from "./chart-parts";
 import { Btn, Chip, MonoCaps } from "./ui";
 
@@ -24,10 +24,9 @@ const PAIR_CHIP = {
 
 function reasonOf(row: SnapshotRow): string | null {
   if (!row.reason) return null;
-  return reasonText(
-    row.reason,
-    row.reasonFrom === "streamer" ? { side: "streamer", viewer: row.viewer } : { side: "viewer" },
-  ).label;
+  // An admin reads the stream from outside it, whichever end's browser said why.
+  return reasonText(row.reason, { side: "admin", streamer: row.streamer, viewer: row.viewer })
+    .label;
 }
 
 /** The snapshot table of `report`: a row per stream, idle pairs shown or hidden. */
@@ -122,7 +121,7 @@ export const SnapshotTable = ({
                 </td>
                 <td className={`${td} text-right tabular-nums`}>{r.fps ?? dash}</td>
                 <td
-                  className={`${td} text-right tabular-nums ${(r.loss ?? 0) > 0.02 ? "!text-warning-ink font-semibold" : ""}`}
+                  className={`${td} text-right tabular-nums ${(r.loss ?? 0) > TROUBLE_LOSS ? "!text-warning-ink font-semibold" : ""}`}
                 >
                   {r.loss === undefined ? dash : `${(r.loss * 100).toFixed(1)}%`}
                 </td>
