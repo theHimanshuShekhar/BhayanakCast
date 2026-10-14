@@ -215,7 +215,7 @@ test("an admin opens a room with events and a report, and sees the snapshot tabl
   await expect(picker).toContainText(clock(REPORT_AT));
   const person = (id: string) => lanes.locator(`[data-lane="person:${id}"]`);
   const pairKey = (a: string, b: string) => `pair:${[a, b].sort().join("|")}`;
-  await expect(person(room.ana.id)).toHaveAttribute("aria-label", new RegExp(room.ana.username));
+  await expect(person(room.ana.id)).toContainText(room.ana.username);
   await expect(person(room.bo.id)).toBeVisible();
   await expect(person(room.cy.id)).toBeVisible();
   await expect(lanes.locator(`[data-lane="${pairKey(room.ana.id, room.bo.id)}"]`)).toBeVisible();
@@ -251,10 +251,15 @@ test("an admin opens a room with events and a report, and sees the snapshot tabl
   await expect(section.getByTestId("timeline-readout")).toContainText("sharing");
   await expect(section.getByTestId("timeline-readout")).toContainText("(40s)");
 
-  // From the keyboard: a lane takes focus, and the arrow keys step through it.
-  await person(room.ana.id).focus();
+  // From the keyboard: all the lanes are one tab stop (a full room has 65), up and down choose a
+  // lane and the arrow keys step through what is in it.
+  const stop = lanes.getByRole("application", { name: /swimlanes/ });
+  await expect(lanes.locator("[data-lane][tabindex]")).toHaveCount(0);
+  await stop.focus();
   await page.keyboard.press("ArrowRight");
   await expect(section.getByTestId("timeline-readout")).toContainText(/\d\d:\d\d:\d\d/);
+  await page.keyboard.press("ArrowDown");
+  await expect(section.getByTestId("timeline-readout")).toContainText(room.bo.username);
   await page.keyboard.press("Escape");
 
   // Filter chips: by category...
@@ -303,8 +308,11 @@ test("an admin opens a room with events and a report, and sees the snapshot tabl
   await expect(view).not.toHaveText(fitText);
   await section.getByRole("button", { name: "Reset zoom" }).click();
 
-  // A marker opens the incident: everyone's snapshot first, then two minutes either side.
+  // A marker opens the incident: everyone's snapshot first, then two minutes either side. The
+  // marker goes with the swimlanes, so focus goes to the section's heading, not to the page.
+  const heading = section.getByRole("heading", { name: /room timeline/ });
   await lanes.getByRole("button", { name: /open the frozen \/ stuttering report at/ }).click();
+  await expect(heading).toBeFocused();
   const snapshotTable = section.getByRole("table", { name: "snapshot of everyone's connections" });
   await expect(snapshotTable).toBeVisible();
   await expect(section.getByText(`everyone's connections at ${clock(REPORT_AT)}`)).toBeVisible();
@@ -341,11 +349,14 @@ test("an admin opens a room with events and a report, and sees the snapshot tabl
     .click();
   const quality = page.getByRole("region", { name: "room quality" });
   await expect(quality).toBeVisible();
+  // The section opened far from its button, so focus follows it.
+  await expect(quality.getByRole("heading", { name: /video quality/ })).toBeFocused();
   await expect(quality.getByText("no quality samples for that stream")).toBeVisible();
 
   // And back to the swimlanes.
   await section.getByRole("button", { name: "full timeline" }).click();
   await expect(lanes).toBeVisible();
+  await expect(heading).toBeFocused();
   expect(errors).toEqual([]);
 });
 
@@ -406,6 +417,8 @@ test("the timeline opens from the live rooms table and from a report, and says w
     section.getByRole("table", { name: "snapshot of everyone's connections" }),
   ).toBeVisible();
   await expect(section.getByRole("table", { name: "events around the report" })).toBeVisible();
+  // Opened from a button far above: the section's heading has focus.
+  await expect(section.getByRole("heading", { name: new RegExp(room.roomName) })).toBeFocused();
   await expect(section.getByTestId("timeline-lanes")).toHaveCount(0);
   await expect(section.getByRole("heading", { name: new RegExp(room.roomName) })).toBeVisible();
   await section.getByRole("button", { name: "close" }).click();
@@ -438,9 +451,32 @@ test("a room with more entries than the read allows says it shows the latest", a
   await adminOnDashboard(page);
   const section = await openFromRecentRooms(page, roomName);
   await expect(section.getByText(/showing the latest 5,000 entries/)).toBeVisible();
+  // About 5,000 marks on one lane are drawn as a few dozen, one for each pixel column, with the
+  // number each holds; zooming (here by the wheel, timed) redraws them quickly.
+  const lanes = section.getByTestId("timeline-lanes");
+  const marks = lanes.locator("[data-mark]");
+  await expect(marks.first()).toBeVisible();
+  expect(await marks.count()).toBeLessThan(200);
+  const held = await marks.evaluateAll((els) =>
+    els.reduce((sum, el) => sum + Number(el.getAttribute("data-count")), 0),
+  );
+  expect(held).toBeGreaterThan(2_000);
   // The table draws a bounded number of rows, however many are in view.
   await expect(section.getByRole("table", { name: "events in view" }).getByRole("row")).toHaveCount(
     501,
   );
   await expect(section.getByText(/the first 500 shown/)).toBeVisible();
+  // Zooming with the wheel redraws them quickly.
+  const view = section.getByTestId("timeline-view");
+  const before = (await view.textContent()) ?? "";
+  await lanes.scrollIntoViewIfNeeded();
+  const box = await lanes.boundingBox();
+  if (!box) throw new Error("no lanes");
+  await page.mouse.move(box.x + box.width / 2, box.y + Math.min(120, box.height / 2));
+  const began = Date.now();
+  await page.keyboard.down("Control");
+  for (let i = 0; i < 5; i++) await page.mouse.wheel(0, -200);
+  await page.keyboard.up("Control");
+  await expect(view).not.toHaveText(before);
+  expect(Date.now() - began).toBeLessThan(5_000);
 });

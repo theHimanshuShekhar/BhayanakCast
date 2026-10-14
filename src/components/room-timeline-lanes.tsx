@@ -81,14 +81,14 @@ const mix = (color: string, pct: number) =>
  * light theme's white, so it carries an outline in `warning-mark`.
  */
 const TONE_PAINT: Record<Tone, { fill: string; stroke?: string }> = {
-  present: { fill: mix("--color-success", 30), stroke: mix("--color-success", 60) },
+  present: { fill: mix("--color-success", 30), stroke: mix("--color-success-ink", 75) },
   host: { fill: "var(--color-primary)" },
   grace: { fill: "var(--color-warning)", stroke: "var(--color-warning-mark)" },
   share: { fill: "var(--color-live)" },
   cam: { fill: "var(--color-viz-1)" },
   mic: { fill: "var(--color-viz-2)" },
   connecting: { fill: "var(--color-surface-3)", stroke: "var(--color-border-strong)" },
-  connected: { fill: mix("--color-success", 45), stroke: mix("--color-success", 70) },
+  connected: { fill: mix("--color-success", 45), stroke: mix("--color-success-ink", 85) },
   disconnected: { fill: "var(--color-warning)", stroke: "var(--color-warning-mark)" },
   failed: { fill: "var(--color-warning)", stroke: "var(--color-warning-mark)" },
 };

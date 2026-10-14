@@ -130,7 +130,8 @@ export const SnapshotTable = ({
                   {r.rttMs === undefined ? dash : `${Math.round(r.rttMs)} ms`}
                 </td>
                 <td className={td}>{r.path ?? dash}</td>
-                <td className={td}>{reasonOf(r) ?? dash}</td>
+                {/* "The connection between ana and kira" is long: it wraps rather than push the quality link out of view. */}
+                <td className={`${td} !whitespace-normal max-w-[230px]`}>{reasonOf(r) ?? dash}</td>
                 <td className={td}>
                   {r.pair ? <Chip kind={PAIR_CHIP[r.pair]}>{r.pair}</Chip> : dash}
                 </td>
