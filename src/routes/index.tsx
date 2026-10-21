@@ -99,20 +99,21 @@ const StatMini = ({
   pending?: string;
 }) => (
   <div className="min-w-0 bg-surface rounded-[var(--radius-sm)] px-2.5 py-2.5" title={pending}>
-    <div className="flex items-center gap-[5px] text-[10px] tracking-[0.04em] text-muted uppercase truncate">
-      <span className="inline-flex shrink-0">
-        <I size={10} />
+    {/* The label gets the full width: three tiles share a 300px sidebar. */}
+    <div className="text-[10px] tracking-[0.04em] text-muted uppercase truncate">{label}</div>
+    <div className="mt-1 flex items-center justify-between gap-1">
+      {pending ? (
+        <div className="text-lg font-bold tracking-[-0.01em] text-subtle">
+          <span aria-hidden="true">—</span>
+          <span className="sr-only">{pending}</span>
+        </div>
+      ) : (
+        <div className="text-lg font-bold tracking-[-0.01em] tabular-nums">{value}</div>
+      )}
+      <span className="inline-flex shrink-0 text-subtle">
+        <I size={12} />
       </span>
-      <span className="truncate">{label}</span>
     </div>
-    {pending ? (
-      <div className="mt-1 text-lg font-bold tracking-[-0.01em] text-subtle">
-        <span aria-hidden="true">—</span>
-        <span className="sr-only">{pending}</span>
-      </div>
-    ) : (
-      <div className="mt-1 text-lg font-bold tracking-[-0.01em] tabular-nums">{value}</div>
-    )}
   </div>
 );
 
