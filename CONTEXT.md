@@ -13,7 +13,7 @@ Small-group live screen-sharing hangouts. Anyone signs in with Discord, starts o
 - **Stream interval**: a span during which a user is streaming in a room.
 - **Recap**: the past-stream page, showing who joined and for how long, and who streamed and for how long. It has no chat.
 - **Co-time**: total seconds two users have spent in the same room at the same time. It persists forever. Profiles list co-users from public rooms only (admins see all).
-- **Stats**: per-user lifetime aggregates (hours streamed/watched, rooms hosted/joined, peak viewers) and platform daily counters. They include rooms in progress, and persist forever. A profile or search result shows only public-room stats (admins see all); community totals count every room.
+- **Stats**: per-user lifetime aggregates (hours streamed/watched, rooms hosted/joined, peak viewers) and platform daily counters. They include rooms in progress, and persist forever. A profile or search result shows only public-room stats (admins see all); community totals count every room. *Peak viewers* is the most other people present at once during any of a user's streams; it is not a room's peak, which counts everyone present at once.
 - **Thumbnail**: a still captured by a streamer's browser every 3 min, used in room card mosaics.
 - **Mesh**: one RTCPeerConnection between every pair of participants.
 - **Online user**: a signed-in user with an open connection, whether or not they are in a room. The side rail's count adds the online visitors to these (see **Online count**).
