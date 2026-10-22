@@ -1,16 +1,27 @@
 /**
  * Video quality samples (ADR 2 and ADR 11 addendums): a browser's stats for each video sender
- * and receiver, one row per 30-second window and one per rung change. Kept 90 days,
+ * and receiver, one row per 30-second window and one per rung change or codec switch. Kept 90 days,
  * longer than the 30 days of room data, so like the admin audit log they have no foreign keys,
  * to `rooms` or `user`: the 30-day room purge can't take them, and they hold the room's id and
  * kind (which decides how a share is tuned) themselves. Their own daily purge is
  * `purgeExpiredQualitySamples` (src/server/quality.ts).
  */
-import { index, integer, pgEnum, pgTable, real, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  index,
+  integer,
+  pgEnum,
+  pgTable,
+  real,
+  text,
+  timestamp,
+  uuid,
+} from "drizzle-orm/pg-core";
 import type { CandidateType, RelayProtocol } from "../../lib/ice.ts";
 import type { Limit } from "../../lib/quality.ts";
 import {
   type BrowserName,
+  CODEC_REASONS,
   QUALITY_DIRECTIONS,
   QUALITY_SLOTS,
   QUALITY_TRIGGERS,
@@ -22,6 +33,7 @@ export const qualityDirection = pgEnum("quality_direction", QUALITY_DIRECTIONS);
 export const qualitySlot = pgEnum("quality_slot", QUALITY_SLOTS);
 export const qualityTrigger = pgEnum("quality_trigger", QUALITY_TRIGGERS);
 export const rungReason = pgEnum("quality_rung_reason", RUNG_REASONS);
+export const codecReason = pgEnum("quality_codec_reason", CODEC_REASONS);
 
 /**
  * Every metric is null when the browser didn't say (Firefox senders lack several), never 0.
@@ -65,7 +77,17 @@ export const qualitySamples = pgTable(
     availableBitrate: integer("available_bitrate"),
     /** Δ`qpSum` / Δframes. Comparable only within one codec. */
     qp: real("qp"),
+    /** For a `codec` row, the codec the sender moved to (the stats are of `fromCodec`). */
     codec: text("codec"),
+    /** A `send` row: why the sender is on its codec. Null for `recv` rows and rows from before. */
+    codecReason: codecReason("codec_reason"),
+    /** A `codec` row: the codec the sender left. */
+    fromCodec: text("from_codec"),
+    /** A sender's encoder, where the browser says (Chromium, while capturing); null otherwise. */
+    encoderImplementation: text("encoder_implementation"),
+    powerEfficientEncoder: boolean("power_efficient_encoder"),
+    /** Encode time per frame, ms: Δ`totalEncodeTime` / Δ`framesEncoded` (Chromium, Firefox). */
+    encodeMs: real("encode_ms"),
     frameWidth: integer("frame_width"),
     frameHeight: integer("frame_height"),
     fps: real("fps"),

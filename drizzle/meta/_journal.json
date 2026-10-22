@@ -92,6 +92,13 @@
       "when": 1792669160487,
       "tag": "0012_drop_room_peak_participants",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1792695018896,
+      "tag": "0013_quality_codec_reason_and_encoder",
+      "breakpoints": true
     }
   ]
 }

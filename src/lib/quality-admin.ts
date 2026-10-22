@@ -223,7 +223,10 @@ export function settledOf(sent: readonly QualityRow[]): number | null {
   for (const [i, row] of sent.entries()) {
     if (row.sinceStartMs === null) return null;
     if (row.trigger === "rung") lastChange = row.sinceStartMs;
-    else if (row.windowMs > 0 && !cutByCodec(row, sent[i + 1])) return lastChange / 1_000;
+    // A `codec` row, which a switch writes, ends a window early too: it is no spell on one step.
+    else if (row.trigger === "window" && row.windowMs > 0 && !cutByCodec(row, sent[i + 1])) {
+      return lastChange / 1_000;
+    }
   }
   return null;
 }
