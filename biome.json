@@ -30,6 +30,16 @@
       "preset": "recommended"
     }
   },
+  "markdown": {
+    "formatter": {
+      "enabled": false
+    }
+  },
+  "yaml": {
+    "formatter": {
+      "enabled": false
+    }
+  },
   "css": {
     "parser": {
       "tailwindDirectives": true
