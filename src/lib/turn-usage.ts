@@ -10,6 +10,16 @@ export const TURN_WARNING_RATIO = 0.8;
 /** Cloudflare bills in decimal gigabytes. */
 export const BYTES_PER_GB = 1_000_000_000;
 
+/** The least width, in percent, the usage bar's fill shows once there is any usage. */
+const MIN_BAR_PERCENT = 1.5;
+
+/**
+ * The usage bar's fill width in percent for `percent` of the free tier (0-100): any use shows a
+ * sliver.
+ */
+export const usageBarWidth = (percent: number) =>
+  percent > 0 ? Math.max(percent, MIN_BAR_PERCENT) : 0;
+
 /** One UTC day of relayed egress. */
 export interface TurnUsageDay {
   /** `YYYY-MM-DD`, UTC. */
