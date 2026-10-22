@@ -57,7 +57,7 @@ import { reasonText } from "~/lib/quality-reason";
 import type { LiveRoomCard, RoomPerson } from "~/lib/rooms";
 import { roomKeys } from "~/lib/rooms.queries";
 import type { QualityFocus } from "~/lib/timeline-incident";
-import { TURN_FREE_TIER_GB } from "~/lib/turn-usage";
+import { TURN_FREE_TIER_GB, usageBarWidth } from "~/lib/turn-usage";
 import { useDebounced } from "~/lib/use-debounced";
 import { useMountedNow } from "~/lib/use-now";
 
@@ -924,10 +924,10 @@ const TurnUsagePanel = () => {
           aria-label="TURN free tier used"
           aria-valuemin={0}
           aria-valuemax={100}
-          aria-valuenow={Math.round(bar)}
+          aria-valuenow={bar}
           className="h-2 rounded-full bg-surface-2 border border-border overflow-hidden"
         >
-          <span className={barFill} style={{ width: `${bar}%` }} />
+          <span className={barFill} style={{ width: `${usageBarWidth(bar)}%` }} />
         </div>
         {usage.warning && (
           <div role="alert" className="text-xs text-live-ink">
