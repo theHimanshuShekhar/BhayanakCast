@@ -24,15 +24,37 @@ const useScale = <K extends string>(
   const scaleY = (v: number) => pad.t + h - (h * v) / maxY;
   const yVals = Array.from({ length: 5 }, (_, i) => (maxY * i) / 4);
   const xStep = Math.ceil(data.length / 6);
-  return { w, h, scaleY, yVals, xStep };
+  return { w, h, scaleY, yVals, maxY, xStep };
+};
+
+/**
+ * A y-axis tick's label. The ticks are `max / 4` apart, so from a max of 4 up whole numbers stay
+ * distinct and read best; below that they would collapse (`1 1 1 0 0` on a 0-1 scale), so it keeps
+ * up to two decimals without trailing zeros.
+ */
+export const fmtTick = (v: number, max: number) =>
+  max >= 4 ? String(Math.round(v)) : String(Number(v.toFixed(2)));
+
+/**
+ * The x indexes to label: every `step`-th and always the last. When the last would sit closer
+ * than half a step to the one before it, the one before is dropped so the two never overlap.
+ */
+export const labelIndexes = (count: number, step: number) => {
+  const picked = Array.from({ length: count }, (_, i) => i).filter((i) => i % step === 0);
+  const last = count - 1;
+  if (last < 0 || picked.at(-1) === last) return new Set(picked);
+  if (last - (picked.at(-1) ?? last) < step / 2) picked.pop();
+  return new Set([...picked, last]);
 };
 
 const YGrid = ({
   yVals,
+  maxY,
   scaleY,
   w,
 }: {
   yVals: number[];
+  maxY: number;
   scaleY: (v: number) => number;
   w: number;
 }) => (
@@ -57,7 +79,7 @@ const YGrid = ({
           fontFamily="inherit"
           letterSpacing="0.05em"
         >
-          {Math.round(v)}
+          {fmtTick(v, maxY)}
         </text>
       </g>
     ))}
@@ -78,12 +100,13 @@ export const LineChart = <X extends string, K extends string>({
   label: string;
 }) => {
   const uid = useId();
-  const { w, h, scaleY, yVals, xStep } = useScale(data, series, height);
+  const { w, h, scaleY, yVals, maxY, xStep } = useScale(data, series, height);
   const scaleX = (i: number) => pad.l + (w * i) / Math.max(1, data.length - 1);
   const path = (key: K) =>
     data
       .map((d, i) => `${i === 0 ? "M" : "L"} ${scaleX(i).toFixed(1)} ${scaleY(d[key]).toFixed(1)}`)
       .join(" ");
+  const labelled = labelIndexes(data.length, xStep);
   const area = (key: K) =>
     `${path(key)} L ${scaleX(data.length - 1)} ${pad.t + h} L ${pad.l} ${pad.t + h} Z`;
 
@@ -103,10 +126,10 @@ export const LineChart = <X extends string, K extends string>({
           </linearGradient>
         ))}
       </defs>
-      <YGrid yVals={yVals} scaleY={scaleY} w={w} />
+      <YGrid yVals={yVals} maxY={maxY} scaleY={scaleY} w={w} />
       {data.map(
         (d, i) =>
-          (i % xStep === 0 || i === data.length - 1) && (
+          labelled.has(i) && (
             <text
               key={d[xKey]}
               x={scaleX(i)}
@@ -149,9 +172,10 @@ export const BarChart = <X extends string, K extends string>({
   height?: number;
   label: string;
 }) => {
-  const { w, h, scaleY, yVals, xStep } = useScale(data, series, height);
+  const { w, h, scaleY, yVals, maxY, xStep } = useScale(data, series, height);
   const group = w / data.length;
   const barW = (group - 4) / series.length;
+  const labelled = labelIndexes(data.length, xStep);
 
   return (
     <svg
@@ -161,7 +185,7 @@ export const BarChart = <X extends string, K extends string>({
       role="img"
       aria-label={label}
     >
-      <YGrid yVals={yVals} scaleY={scaleY} w={w} />
+      <YGrid yVals={yVals} maxY={maxY} scaleY={scaleY} w={w} />
       {data.map((d, i) => (
         <g key={d[xKey]}>
           {series.map((s, si) => {
@@ -180,7 +204,7 @@ export const BarChart = <X extends string, K extends string>({
               </rect>
             );
           })}
-          {(i % xStep === 0 || i === data.length - 1) && (
+          {labelled.has(i) && (
             <text
               x={pad.l + i * group + group / 2}
               y={pad.t + h + 14}
