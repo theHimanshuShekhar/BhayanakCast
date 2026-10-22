@@ -75,6 +75,11 @@ const sample = (peerId: string, extra: Partial<QualitySample> = {}): QualitySamp
   availableBitrate: 5_000_000,
   qp: 38.5,
   codec: "video/VP9",
+  codecReason: "preferred",
+  fromCodec: null,
+  encoderImplementation: "libvpx",
+  powerEfficientEncoder: false,
+  encodeMs: 6.5,
   frameWidth: 1920,
   frameHeight: 1080,
   fps: 30,
@@ -144,6 +149,72 @@ describe("reporting quality samples", () => {
     expect((await stored()).map((row) => row.sinceStartMs).sort()).toEqual([12_500, null]);
   });
 
+  it("stores the codec reason and the encoder of a sent row, and none for a page that predates them", async () => {
+    const {
+      codecReason: _a,
+      fromCodec: _b,
+      encoderImplementation: _c,
+      powerEfficientEncoder: _d,
+      encodeMs: _e,
+      ...older
+    } = sample("bo");
+    await service.record(
+      asUser("ana"),
+      report([sample("bo", { codecReason: "hardware" }), older as QualitySample]),
+      CHROME,
+    );
+    const rows = (await stored()).sort((x, y) =>
+      (x.codecReason ?? "").localeCompare(y.codecReason ?? ""),
+    );
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      codecReason: null,
+      fromCodec: null,
+      encoderImplementation: null,
+      powerEfficientEncoder: null,
+      encodeMs: null,
+    });
+    expect(rows[1]).toMatchObject({
+      codecReason: "hardware",
+      fromCodec: null,
+      encoderImplementation: "libvpx",
+      powerEfficientEncoder: false,
+      encodeMs: 6.5,
+    });
+  });
+
+  it("stores a codec switch row with the codec it left", async () => {
+    const result = await service.record(
+      asUser("ana"),
+      report([
+        sample("bo", {
+          trigger: "codec",
+          codec: "video/H264",
+          fromCodec: "video/AV1",
+          codecReason: "cpu",
+          qp: null,
+        }),
+      ]),
+      CHROME,
+    );
+    expect(result).toEqual({ stored: 1 });
+    expect((await stored())[0]).toMatchObject({
+      trigger: "codec",
+      codec: "video/H264",
+      fromCodec: "video/AV1",
+      codecReason: "cpu",
+      toRung: null,
+      rungReason: null,
+    });
+  });
+
+  it("drops a row with a codec reason it doesn't know, and keeps the rest of the report", async () => {
+    const odd = sample("bo", { codecReason: "gpu" as never });
+    expect(await service.record(asUser("ana"), report([odd, sample("bo")]), CHROME)).toEqual({
+      stored: 1,
+    });
+  });
+
   it("keeps a stat a browser lacked null, not 0", async () => {
     const firefox = sample("ana", {
       direction: "recv",
@@ -152,6 +223,10 @@ describe("reporting quality samples", () => {
       targetBitrate: null,
       availableBitrate: null,
       qp: null,
+      codecReason: null,
+      encoderImplementation: null,
+      powerEfficientEncoder: null,
+      encodeMs: null,
       limitation: null,
       freezes: 0,
     });

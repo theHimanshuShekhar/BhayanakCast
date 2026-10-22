@@ -134,6 +134,7 @@ import {
   type StepNote,
 } from "./quality-reason";
 import {
+  type CodecReason,
   type PendingSample,
   type RungReason,
   readStream,
@@ -503,6 +504,11 @@ interface Adaptation extends LadderState {
    * it alone.
    */
   startedAt: number;
+  /**
+   * Why the sender is on its codec, which its telemetry rows say. Always `preferred` until the
+   * up-front pick and the codec switch (ADR 2, codecs addendum) set another.
+   */
+  codecReason: CodecReason;
   /** The latest reading (the next one's `sendBitrate` is measured from it). */
   last?: StatsSample;
   codec?: string;
@@ -614,6 +620,7 @@ export class Mesh {
         emit: options.onQuality,
         windowMs: options.sampleWindowMs,
         startedAt: ({ peerId, slot }) => this.#links.get(peerId)?.quality[slot]?.startedAt,
+        codecReason: ({ peerId, slot }) => this.#links.get(peerId)?.quality[slot]?.codecReason,
       });
     }
   }
@@ -1115,6 +1122,7 @@ export class Mesh {
         ...built,
         readings: 0,
         startedAt: Date.now(),
+        codecReason: "preferred",
       };
       link.quality[slot] = state;
     } else if (!sameSteps(state.steps, built.steps)) {

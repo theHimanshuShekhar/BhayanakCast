@@ -474,6 +474,80 @@ test("a share in a two-person room records quality samples the admin view shows"
   }
 });
 
+/** A node of a server function's body, in seroval's JSON form: a value, a constant, or an object. */
+type Node = { t: number; s?: unknown; p?: { k: string[]; v: Node[] }; a?: Node[] };
+/** Seroval's constants, by the `s` of a `t: 2` node. */
+const CONSTANTS = [null, undefined, true, false];
+
+/** The quality rows in a server function's body, each as the plain object it was sent as. */
+function qualityRowsIn(node: unknown): Record<string, unknown>[] {
+  if (typeof node !== "object" || node === null) return [];
+  const { p, a } = node as Node;
+  if (p?.k.includes("codecReason")) {
+    const value = ({ t, s }: Node) => (t === 2 ? CONSTANTS[s as number] : s);
+    return [Object.fromEntries(p.k.map((key, i) => [key, value(p.v[i] as Node)]))];
+  }
+  return [...(p?.v ?? []), ...(a ?? [])].flatMap(qualityRowsIn);
+}
+
+/**
+ * The quality rows `page` reports to the server, as they go out (`reportQualityFn`). They are
+ * the only place a browser's own stats reach the server, so the request is what is read.
+ */
+function reportedRows(page: Page): Record<string, unknown>[] {
+  const rows: Record<string, unknown>[] = [];
+  page.on("request", (request) => {
+    const body = request.method() === "POST" ? request.postData() : null;
+    if (body?.includes("codecReason")) rows.push(...qualityRowsIn(JSON.parse(body).t));
+  });
+  return rows;
+}
+
+test("a share's send rows say why it is on its codec, and how hard its encoder works", async ({
+  page,
+  context,
+  browser,
+  browserName,
+}) => {
+  test.setTimeout(90_000);
+  await signIn(context, { username: "share.encoder" });
+  const roomId = await createRoomOnPage(page, {
+    name: uniqueRoomName("share encoder"),
+    kind: "gaming",
+  });
+  const viewer = await joinAs(browser, "share.encoderviewer", roomId);
+  const rows = reportedRows(page);
+  try {
+    await page.getByRole("button", { name: "Share screen" }).click();
+    await expect(page.getByRole("button", { name: "Stop sharing" })).toBeEnabled();
+    // A window runs 8 s in this build, and its report goes a few seconds after.
+    await expect.poll(() => rows.some((row) => row.windowMs), { timeout: 45_000 }).toBe(true);
+
+    for (const row of rows.filter((r) => r.direction === "send")) {
+      // Every sender is on the normal order until the later codec picks land.
+      expect(row.codecReason).toBe("preferred");
+      expect(row.fromCodec).toBeNull();
+    }
+    const timed = rows.filter((row) => row.windowMs);
+    // Encode time is Δ`totalEncodeTime` / Δ`framesEncoded`, which both browsers give.
+    for (const row of timed) expect(row.encodeMs).toBeGreaterThan(0);
+    for (const row of timed) {
+      if (browserName === "chromium") {
+        // The capture's track is a real one, so Chromium names the encoder it uses (a canvas
+        // track doesn't: research #126). Hardware or software depends on the machine.
+        expect(row.encoderImplementation).toEqual(expect.any(String));
+        expect(row.powerEfficientEncoder).toEqual(expect.any(Boolean));
+      } else {
+        // Firefox doesn't say; its fields are null, not a guess.
+        expect(row.encoderImplementation).toBeNull();
+        expect(row.powerEfficientEncoder).toBeNull();
+      }
+    }
+  } finally {
+    await viewer.context.close();
+  }
+});
+
 /**
  * In every page of `context`, record the text of each remote description its connections apply,
  * in `__remoteSdps`, as the browser took it (a description it refused would have thrown).

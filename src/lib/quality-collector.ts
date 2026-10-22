@@ -3,11 +3,13 @@
  * of each video sender and receiver every quality pass. One `SampleWindow` per stream (a peer's
  * screen or camera, sent or received); once it has run `windowMs` its row goes out and the next
  * window starts from the reading that closed it. A sender's rung change closes its window too,
- * with the rung it was on and the one it moved to. A receiver is told when its peer stops
- * sharing a slot (`setSharing`): the window so far goes out as a last row and the readings of
- * that slot are ignored until the peer shares it again.
+ * with the rung it was on and the one it moved to. A sender's codec switch (`codecSwitched`)
+ * closes it too, and so does a change of the codec or the encoder its readings report. A
+ * receiver is told when its peer stops sharing a slot (`setSharing`): the window so far goes out
+ * as a last row and the readings of that slot are ignored until the peer shares it again.
  */
 import {
+  type CodecReason,
   type Direction,
   type PendingSample,
   type QualitySlot,
@@ -23,6 +25,11 @@ export interface StreamId {
   slot: QualitySlot;
   direction: Direction;
 }
+
+/** What ended a window early, apart from a reading that changed the codec or the encoder. */
+type Ending =
+  | { trigger: "rung"; to: string; reason: RungReason }
+  | { trigger: "codec"; to: string; reason: CodecReason };
 
 /** A sender's rung. */
 export interface RungInfo {
@@ -76,6 +83,8 @@ export interface QualityCollectorOptions {
    * long after that they ended (`sinceStartMs`). A receiver's stream has none.
    */
   startedAt?: (id: StreamId) => number | undefined;
+  /** Why the sender of stream `id` is on its codec, if it is known: its rows say so. */
+  codecReason?: (id: StreamId) => CodecReason | undefined;
 }
 
 export class QualityCollector {
@@ -83,6 +92,7 @@ export class QualityCollector {
   readonly #windowMs: number;
   readonly #now: () => number;
   readonly #startedAt: (id: StreamId) => number | undefined;
+  readonly #codecReason: (id: StreamId) => CodecReason | undefined;
   readonly #streams = new Map<string, Stream>();
   /** Per peer and slot, whether they share it. Everything counts as shared until said. */
   readonly #shares = new Map<string, Map<QualitySlot, Share>>();
@@ -92,6 +102,7 @@ export class QualityCollector {
     this.#windowMs = options.windowMs ?? SAMPLE_WINDOW_MS;
     this.#now = options.now ?? Date.now;
     this.#startedAt = options.startedAt ?? (() => undefined);
+    this.#codecReason = options.codecReason ?? (() => undefined);
   }
 
   /** Take `reading` of the stream `id` (a sender's, with the `rung` it is on). */
@@ -118,9 +129,10 @@ export class QualityCollector {
       return;
     }
     stream.received = received;
-    if (reading.codec && stream.window.codec && reading.codec !== stream.window.codec) {
-      // QP is only comparable within one codec: the window ends where the codec changed (on the
-      // rung it had), and the next starts from this reading, the new codec's first.
+    if (changedCodec(stream.window, reading) || changedEncoder(stream.window, reading)) {
+      // QP is only comparable within one codec, and encode time within one encoder: the window
+      // ends where either changed (on the rung it had), and the next starts from this reading,
+      // the first of the new codec or encoder.
       this.#close(stream, undefined, reading);
       stream.rung = rung ?? stream.rung;
       return;
@@ -137,8 +149,18 @@ export class QualityCollector {
   rungChanged(id: StreamId, to: RungInfo, reason: RungReason): void {
     const stream = this.#streams.get(keyOf(id));
     if (!stream) return;
-    this.#close(stream, { to: to.label, reason });
+    this.#close(stream, { trigger: "rung", to: to.label, reason });
     stream.rung = to;
+  }
+
+  /**
+   * The sender `id` moved to the codec `to` (a MIME type) for `reason`: the window so far, which
+   * ran on the codec it left, ends here as a row saying so. The rung is as it was. A stream not
+   * read yet has no window to end.
+   */
+  codecSwitched(id: StreamId, to: string, reason: CodecReason): void {
+    const stream = this.#streams.get(keyOf(id));
+    if (stream) this.#close(stream, { trigger: "codec", to, reason });
   }
 
   /**
@@ -181,7 +203,7 @@ export class QualityCollector {
   }
 
   /** Send the window's row and start the next, from `next` or the reading that ended this one. */
-  #close(stream: Stream, change?: { to: string; reason: RungReason }, next?: StreamReading): void {
+  #close(stream: Stream, ending?: Ending, next?: StreamReading): void {
     const { id } = stream;
     const summary = stream.window.summarise();
     const startedAt = id.direction === "send" ? this.#startedAt(id) : undefined;
@@ -189,17 +211,25 @@ export class QualityCollector {
     // A receiver that never got anything (a camera never shown, a share not begun: its
     // transceiver exists from the first negotiation) has no traffic to report. One that did and
     // now gets none has stalled, which is a row with a bitrate of 0. A window with no time in it
-    // is a row only when a rung change ended it.
-    if ((id.direction === "send" || stream.received) && (change || summary.windowMs > 0)) {
+    // is a row only when a rung change or a codec switch ended it.
+    if ((id.direction === "send" || stream.received) && (ending || summary.windowMs > 0)) {
+      const rungChange = ending?.trigger === "rung" ? ending : undefined;
+      const codecSwitch = ending?.trigger === "codec" ? ending : undefined;
       this.#emit({
         ...summary,
+        // The stats are of the codec the window ran on, which a switch row's `codec` is not: its
+        // QP would be taken for the new codec's, so it says none.
+        ...(codecSwitch && { codec: codecSwitch.to, qp: null }),
+        fromCodec: codecSwitch ? summary.codec : null,
+        codecReason:
+          id.direction === "send" ? (codecSwitch?.reason ?? this.#codecReason(id) ?? null) : null,
         peerId: id.peerId,
         slot: id.slot,
         direction: id.direction,
-        trigger: change ? "rung" : "window",
+        trigger: ending?.trigger ?? "window",
         rung: stream.rung?.label ?? null,
-        toRung: change?.to ?? null,
-        reason: change?.reason ?? null,
+        toRung: rungChange?.to ?? null,
+        reason: rungChange?.reason ?? null,
         maxBitrate: stream.rung?.maxBitrate ?? null,
         sinceStartMs: startedAt === undefined ? null : Math.max(0, Math.round(endedAt - startedAt)),
         endedAt,
@@ -208,3 +238,23 @@ export class QualityCollector {
     stream.window = new SampleWindow(next ?? stream.window.latest);
   }
 }
+
+/** Whether `reading` is of another codec than `window` has been on. */
+const changedCodec = (window: SampleWindow, reading: StreamReading) =>
+  reading.codec !== undefined && window.codec !== undefined && reading.codec !== window.codec;
+
+/**
+ * Whether `reading` says another encoder than `window` has been on (a fall to software, say). A
+ * browser that doesn't say, or stops saying, is not a change.
+ */
+const changedEncoder = (window: SampleWindow, reading: StreamReading) => {
+  const { implementation, powerEfficient } = window.encoder;
+  return (
+    (reading.encoder?.implementation !== undefined &&
+      implementation !== undefined &&
+      reading.encoder.implementation !== implementation) ||
+    (reading.encoder?.powerEfficient !== undefined &&
+      powerEfficient !== undefined &&
+      reading.encoder.powerEfficient !== powerEfficient)
+  );
+};

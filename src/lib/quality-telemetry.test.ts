@@ -83,6 +83,9 @@ describe("SampleWindow", () => {
       // Δ(qpSum) / Δ(frames).
       qp: 40,
       codec: "video/VP9",
+      encoderImplementation: null,
+      powerEfficientEncoder: null,
+      encodeMs: null,
       frameWidth: 1920,
       frameHeight: 1080,
       fps: 30,
@@ -121,6 +124,9 @@ describe("SampleWindow", () => {
       availableBitrate: null,
       qp: null,
       codec: null,
+      encoderImplementation: null,
+      powerEfficientEncoder: null,
+      encodeMs: null,
       frameWidth: 1280,
       frameHeight: 720,
       fps: 30,
@@ -185,6 +191,41 @@ describe("SampleWindow", () => {
     });
   });
 
+  it("takes the encode time per frame from the growth of the total over the frames encoded", () => {
+    // 3 s of encoding over 900 frames: 3.33 ms a frame.
+    const window = new SampleWindow(reading(100, { encodeSeconds: 10 }));
+    window.add(reading(130, { encodeSeconds: 13 }));
+    expect(window.summarise().encodeMs).toBe(3.33);
+  });
+
+  it("leaves the encode time null when no frames were encoded, the browser doesn't say, or it went backwards", () => {
+    const idle = new SampleWindow({ at: 0, bytes: 0, frames: 50, encodeSeconds: 2 });
+    idle.add({ at: 8_000, bytes: 0, frames: 50, encodeSeconds: 2 });
+    expect(idle.summarise().encodeMs).toBeNull();
+    const silent = new SampleWindow(reading(0));
+    silent.add(reading(8));
+    expect(silent.summarise().encodeMs).toBeNull();
+    const restarted = new SampleWindow(reading(0, { encodeSeconds: 9 }));
+    restarted.add(reading(8, { encodeSeconds: 1 }));
+    expect(restarted.summarise().encodeMs).toBeNull();
+  });
+
+  it("says the encoder the stream last reported, and null where the browser never did", () => {
+    const window = new SampleWindow(reading(0));
+    window.add(reading(4));
+    expect(window.summarise()).toMatchObject({
+      encoderImplementation: null,
+      powerEfficientEncoder: null,
+    });
+    window.add(reading(8, { encoder: { implementation: "libvpx", powerEfficient: false } }));
+    window.add(reading(12));
+    expect(window.summarise()).toMatchObject({
+      encoderImplementation: "libvpx",
+      powerEfficientEncoder: false,
+    });
+    expect(window.encoder).toEqual({ implementation: "libvpx", powerEfficient: false });
+  });
+
   it("knows the codec the stream last reported", () => {
     const window = new SampleWindow(reading(0, { codec: "video/VP9" }));
     window.add(reading(4));
@@ -235,6 +276,9 @@ describe("readStream", () => {
           timestamp: 5_000,
           bytesSent: 1_000,
           framesEncoded: 10,
+          totalEncodeTime: 0.05,
+          encoderImplementation: "libvpx",
+          powerEfficientEncoder: false,
           qpSum: 400,
           keyFramesEncoded: 1,
           pliCount: 2,
@@ -255,6 +299,7 @@ describe("readStream", () => {
       bytes: 1_000,
       frames: 10,
       qpSum: 400,
+      encodeSeconds: 0.05,
       keyFrames: 1,
       plis: 2,
       frameWidth: 1920,
@@ -266,10 +311,55 @@ describe("readStream", () => {
       loss: 0.01,
       limit: "bandwidth",
       codec: "video/AV1",
+      encoder: { implementation: "libvpx", powerEfficient: false },
       localCandidate: "relay",
       remoteCandidate: "srflx",
       relayProtocol: "tls",
     });
+  });
+
+  it("reads Firefox's encode time, and leaves out an encoder or a flag it doesn't say or gives oddly", () => {
+    const send = (extra: Record<string, unknown>) =>
+      readStream(
+        report([
+          {
+            id: "o",
+            type: "outbound-rtp",
+            kind: "video",
+            timestamp: 1,
+            framesEncoded: 4,
+            ...extra,
+          },
+        ]),
+        "send",
+      ) as StreamReading;
+    expect(send({ totalEncodeTime: 0.2 })).toEqual({ at: 1, frames: 4, encodeSeconds: 0.2 });
+    // Empty text and a flag of another type are not what Chromium says: no encoder, never a guess.
+    const odd = send({ encoderImplementation: "", powerEfficientEncoder: "yes" });
+    expect(odd.encoder).toBeUndefined();
+    // A name that isn't text is not an encoder either.
+    expect(
+      send({ encoderImplementation: 5, powerEfficientEncoder: "yes" }).encoder,
+    ).toBeUndefined();
+    expect(send({ powerEfficientEncoder: true }).encoder).toEqual({ powerEfficient: true });
+  });
+
+  it("takes no encoder or encode time from a receiver's stream", () => {
+    const read = readStream(
+      report([
+        {
+          id: "i",
+          type: "inbound-rtp",
+          kind: "video",
+          timestamp: 1,
+          encoderImplementation: "libvpx",
+          totalEncodeTime: 1,
+        },
+      ]),
+      "recv",
+    ) as StreamReading;
+    expect(read.encoder).toBeUndefined();
+    expect(read.encodeSeconds).toBeUndefined();
   });
 
   it("leaves out what a Firefox sender lacks, and what a receiver doesn't have", () => {
@@ -369,6 +459,14 @@ describe("sampleWindowMs", () => {
   });
 });
 
+/** What a received row says of the sender's codec and encoder, which a receiver can't tell. */
+const NO_ENCODER = {
+  codecReason: null,
+  encoderImplementation: null,
+  powerEfficientEncoder: null,
+  encodeMs: null,
+} as const;
+
 /** A valid row as a page sends it. */
 const row = (extra: Partial<QualitySample> = {}): QualitySample => ({
   peerId: "bo",
@@ -387,6 +485,11 @@ const row = (extra: Partial<QualitySample> = {}): QualitySample => ({
   availableBitrate: null,
   qp: 31.5,
   codec: "video/VP9",
+  codecReason: "preferred",
+  fromCodec: null,
+  encoderImplementation: "libvpx",
+  powerEfficientEncoder: false,
+  encodeMs: 6.5,
   frameWidth: 1920,
   frameHeight: 1080,
   fps: 30,
@@ -413,7 +516,15 @@ describe("the report schema", () => {
     expect(accepts(row())).toBe(true);
     expect(accepts(row({ trigger: "rung", toRung: "900p30", reason: "pressure" }))).toBe(true);
     expect(
-      accepts(row({ direction: "recv", rung: null, maxBitrate: null, targetBitrate: null })),
+      accepts(
+        row({
+          direction: "recv",
+          rung: null,
+          maxBitrate: null,
+          targetBitrate: null,
+          ...NO_ENCODER,
+        }),
+      ),
     ).toBe(true);
   });
 
@@ -466,7 +577,15 @@ describe("the report schema", () => {
     ).toBe(true);
     expect(accepts(row({ sinceStartMs: null }))).toBe(true);
     expect(
-      accepts(row({ direction: "recv", rung: null, maxBitrate: null, sinceStartMs: 5_000 })),
+      accepts(
+        row({
+          direction: "recv",
+          rung: null,
+          maxBitrate: null,
+          sinceStartMs: 5_000,
+          ...NO_ENCODER,
+        }),
+      ),
     ).toBe(false);
     for (const bad of [-1, 1.5, 8 * 24 * 3_600_000]) {
       expect(accepts(row({ sinceStartMs: bad })), String(bad)).toBe(false);
@@ -478,6 +597,67 @@ describe("the report schema", () => {
     const parsed = reportQualityInput.safeParse(input([old]));
     expect(parsed.success).toBe(true);
     expect(parsed.data?.samples[0]?.sinceStartMs).toBeNull();
+  });
+
+  it("takes a codec reason and the encoder on a sent row, and a codec switch row", () => {
+    for (const codecReason of ["preferred", "hardware", "browser", "cpu"] as const) {
+      expect(accepts(row({ codecReason })), codecReason).toBe(true);
+    }
+    expect(accepts(row({ encoderImplementation: null, powerEfficientEncoder: null }))).toBe(true);
+    expect(
+      accepts(
+        row({
+          trigger: "codec",
+          codec: "video/H264",
+          fromCodec: "video/AV1",
+          codecReason: "cpu",
+          qp: null,
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses a codec reason it doesn't know, and a codec switch row that doesn't say why", () => {
+    expect(accepts(row({ codecReason: "gpu" as never }))).toBe(false);
+    expect(accepts(row({ trigger: "codec", fromCodec: "video/AV1", codecReason: null }))).toBe(
+      false,
+    );
+    // A switch leaves the rung as it was; and only a switch has a codec it left.
+    expect(
+      accepts(row({ trigger: "codec", codecReason: "cpu", toRung: "900p30", reason: "pressure" })),
+    ).toBe(false);
+    expect(accepts(row({ fromCodec: "video/AV1" }))).toBe(false);
+    expect(
+      accepts(row({ trigger: "rung", toRung: "900p30", reason: "probe", fromCodec: "video/AV1" })),
+    ).toBe(false);
+  });
+
+  it("keeps the codec reason and the encoder off a received row", () => {
+    const received = { direction: "recv", rung: null, maxBitrate: null, ...NO_ENCODER } as const;
+    expect(accepts(row(received))).toBe(true);
+    for (const bad of [
+      { codecReason: "preferred" as const },
+      { encoderImplementation: "libvpx" },
+      { powerEfficientEncoder: true },
+      { encodeMs: 4 },
+    ]) {
+      expect(accepts(row({ ...received, ...bad })), JSON.stringify(bad)).toBe(false);
+    }
+  });
+
+  it("still takes a row from a page that predates the codec reason and the encoder, as null", () => {
+    const {
+      codecReason: _a,
+      fromCodec: _b,
+      encoderImplementation: _c,
+      powerEfficientEncoder: _d,
+      encodeMs: _e,
+      ...old
+    } = row();
+    const parsed = reportQualityInput.safeParse(input([old]));
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.samples[0]).toMatchObject(NO_ENCODER);
+    expect(parsed.data?.samples[0]?.fromCodec).toBeNull();
   });
 
   it("bounds every field", () => {
@@ -494,6 +674,13 @@ describe("the report schema", () => {
       { peerId: "x".repeat(65) },
       { codec: "audio/opus" },
       { codec: `video/${"x".repeat(40)}` },
+      { fromCodec: "audio/opus" },
+      { encoderImplementation: "" },
+      { encoderImplementation: "x".repeat(129) },
+      { encoderImplementation: "lib\nvpx" },
+      { powerEfficientEncoder: "yes" },
+      { encodeMs: -1 },
+      { encodeMs: 200_000 },
       { rung: "1080p 30" },
       { localCandidate: "elsewhere" },
       { slot: "mic" },
@@ -793,6 +980,153 @@ describe("QualityCollector", () => {
     c.observe(sender, { ...reading(0), codec: "video/VP9" }, rung);
     c.observe(sender, reading(4), rung);
     c.observe(sender, { ...reading(8), codec: "video/VP9" }, rung);
+    expect(rows).toEqual([]);
+  });
+
+  it("ends the window where the encoder changes, and where it stops being power efficient", () => {
+    const { rows, c } = collector();
+    const reads = (seconds: number, encoder?: string, powerEfficient?: boolean) =>
+      c.observe(
+        sender,
+        {
+          ...reading(seconds, { fps: 30, encodeSeconds: seconds / 100 }),
+          encoder: { implementation: encoder, powerEfficient },
+        },
+        rung,
+      );
+    for (let s = 0; s <= 12; s += 4) reads(s, "libvpx", false);
+    expect(rows).toEqual([]);
+    // A fall to another encoder ends the window on the rung it had; the next starts from here.
+    reads(16, "OpenH264", false);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      trigger: "window",
+      rung: "1080p30",
+      toRung: null,
+      windowMs: 12_000,
+      encoderImplementation: "libvpx",
+      powerEfficientEncoder: false,
+      encodeMs: 0.33,
+    });
+    reads(20, "OpenH264", false);
+    // It then reports a hardware encoder: the same name, but another kind of encoder.
+    reads(24, "OpenH264", true);
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toMatchObject({ windowMs: 4_000, powerEfficientEncoder: false });
+    for (let s = 28; s <= 52; s += 4) reads(s, "OpenH264", true);
+    expect(rows[2]).toMatchObject({
+      encoderImplementation: "OpenH264",
+      powerEfficientEncoder: true,
+      windowMs: 28_000,
+    });
+    expect(rows).toHaveLength(3);
+  });
+
+  it("ends no window for a reading that doesn't say its encoder", () => {
+    // Chromium says it only while capturing: a pass without it is the browser not saying.
+    const { rows, c } = collector();
+    c.observe(
+      sender,
+      reading(0, { encoder: { implementation: "libvpx", powerEfficient: false } }),
+      rung,
+    );
+    c.observe(sender, reading(4), rung);
+    c.observe(
+      sender,
+      reading(8, { encoder: { implementation: "libvpx", powerEfficient: false } }),
+      rung,
+    );
+    expect(rows).toEqual([]);
+  });
+
+  it("puts the encoder and the encode time on a sender's rows, and none on a receiver's", () => {
+    const { rows, c } = collector();
+    for (let s = 0; s <= 28; s += 4) {
+      c.observe(
+        sender,
+        reading(s, {
+          encodeSeconds: s * 0.005,
+          encoder: { implementation: "libvpx", powerEfficient: false },
+        }),
+        rung,
+      );
+      c.observe(receiver, reading(s));
+    }
+    // 5 ms of encoding a second over 30 frames a second: 0.17 ms a frame.
+    expect(rows.find((r) => r.direction === "send")).toMatchObject({
+      encoderImplementation: "libvpx",
+      powerEfficientEncoder: false,
+      encodeMs: 0.17,
+    });
+    expect(rows.find((r) => r.direction === "recv")).toMatchObject({
+      encoderImplementation: null,
+      powerEfficientEncoder: null,
+      encodeMs: null,
+    });
+  });
+
+  it("puts the sender's codec reason on its rows, and none on a receiver's", () => {
+    const rows: PendingSample[] = [];
+    const c = new QualityCollector({
+      emit: (row) => rows.push(row),
+      windowMs: 30_000,
+      now: () => 0,
+      codecReason: (id) => (id.direction === "send" ? "browser" : undefined),
+    });
+    for (let s = 0; s <= 28; s += 4) {
+      c.observe(sender, reading(s), rung);
+      c.observe(receiver, reading(s));
+    }
+    c.rungChanged(sender, { label: "900p30", maxBitrate: 2_200_000 }, "pressure");
+    expect(rows.map((r) => [r.direction, r.trigger, r.codecReason])).toEqual([
+      ["send", "window", "browser"],
+      ["recv", "window", null],
+      ["send", "rung", "browser"],
+    ]);
+    expect(rows.every((r) => r.fromCodec === null)).toBe(true);
+    // Without the option, the collector says nothing of why.
+    const bare = collector();
+    for (let s = 0; s <= 28; s += 4) bare.read(sender, s, rung);
+    expect(bare.rows[0]?.codecReason).toBeNull();
+  });
+
+  it("ends the window at a codec switch, with the codec it left, the one it moved to and why", () => {
+    const { rows, c } = collector();
+    const av1 = (seconds: number) => ({ ...reading(seconds, { fps: 30 }), codec: "video/AV1" });
+    for (let s = 0; s <= 12; s += 4) c.observe(sender, av1(s), rung);
+    c.codecSwitched(sender, "video/H264", "cpu");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      trigger: "codec",
+      codec: "video/H264",
+      fromCodec: "video/AV1",
+      codecReason: "cpu",
+      // The step is unchanged.
+      rung: "1080p30",
+      toRung: null,
+      reason: null,
+      windowMs: 12_000,
+      // Its stats are of the AV1 the window ran on, so its QP isn't offered as H.264's.
+      qp: null,
+      bitrate: 2_000_000,
+    });
+    // The next window starts from the sender's latest reading (the span from the switch to its
+    // first reading of the new codec is in no row), and reports the new codec alone.
+    for (let s = 16; s <= 44; s += 4) {
+      c.observe(sender, { ...reading(s, { fps: 30 }), codec: "video/H264" }, rung);
+    }
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toMatchObject({
+      trigger: "window",
+      codec: "video/H264",
+      fromCodec: null,
+      windowMs: 28_000,
+    });
+  });
+
+  it("has no row for a codec switch of a stream not read yet", () => {
+    const { rows, c } = collector();
+    c.codecSwitched(sender, "video/H264", "cpu");
     expect(rows).toEqual([]);
   });
 

@@ -172,6 +172,17 @@ describe("aggregatePairs", () => {
       ).toBe(0);
     });
 
+    it("skips the row a codec switch writes: it ends a window early, like a codec change", () => {
+      // The switch ended a 12 s window on a step that held; the next, whole window is the spell.
+      expect(
+        settled(
+          sent(12, { trigger: "codec", windowMs: 12_000, codec: "video/H264" }),
+          sent(40, { windowMs: 28_000, codec: "video/H264" }),
+        ),
+      ).toBe(0);
+      expect(settled(sent(12, { trigger: "codec", windowMs: 12_000 }))).toBeNull();
+    });
+
     it("is the first settling only: a later change does not move it", () => {
       expect(
         settled(

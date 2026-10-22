@@ -691,7 +691,7 @@ const trackWith = (name: string, settings: Partial<MediaTrackSettings> = {}, con
 const senderStats = (
   loss: number,
   codec = "video/VP9",
-  sent?: { bytesSent: number; timestamp: number; [counter: string]: number },
+  sent?: { bytesSent: number; timestamp: number; [stat: string]: number | string | boolean },
   reason?: string,
 ) =>
   new Map<string, unknown>([
@@ -1058,6 +1058,10 @@ describe("Mesh quality telemetry (ADR 2 addendum)", () => {
         framesEncoded: frames,
         qpSum: frames * 40,
         targetBitrate: 2_400_000,
+        // 4 ms of encoding a frame, on the software encoder Chromium names while capturing.
+        totalEncodeTime: frames * 0.004,
+        encoderImplementation: "libvpx",
+        powerEfficientEncoder: false,
       });
       fromAna.stats = new Map<string, unknown>([
         [
@@ -1109,6 +1113,12 @@ describe("Mesh quality telemetry (ADR 2 addendum)", () => {
       bitrate: 2_000_000,
       qp: 40,
       codec: "video/VP9",
+      // Until the codec picks land, every sender is on its codec by the normal order.
+      codecReason: "preferred",
+      fromCodec: null,
+      encoderImplementation: "libvpx",
+      powerEfficientEncoder: false,
+      encodeMs: 4,
     });
     // What bo receives: no rung (it can't tell), QP and size from its own decoder, and the freezes.
     expect(rows.bo).toHaveLength(1);
@@ -1126,6 +1136,10 @@ describe("Mesh quality telemetry (ADR 2 addendum)", () => {
       frameWidth: 1920,
       frameHeight: 1080,
       freezes: 6,
+      codecReason: null,
+      encoderImplementation: null,
+      powerEfficientEncoder: null,
+      encodeMs: null,
     });
     ana.mesh.close();
     bo.mesh.close();
