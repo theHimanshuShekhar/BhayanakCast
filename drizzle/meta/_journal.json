@@ -85,6 +85,13 @@
       "when": 1791959694156,
       "tag": "0011_report_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1792669160487,
+      "tag": "0012_drop_room_peak_participants",
+      "breakpoints": true
     }
   ]
 }

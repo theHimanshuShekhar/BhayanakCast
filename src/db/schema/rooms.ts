@@ -8,7 +8,6 @@ import {
   check,
   customType,
   index,
-  integer,
   pgEnum,
   pgTable,
   primaryKey,
@@ -49,7 +48,6 @@ export const rooms = pgTable(
      * (ADR 6 addendum).
      */
     endedAt: timestamp("ended_at", { withTimezone: true }),
-    peakParticipants: integer("peak_participants").default(0).notNull(),
     lastThumbnailAt: timestamp("last_thumbnail_at", { withTimezone: true }),
     /** Set once aggregates have been rolled into the persistent stats tables (ADR 11). */
     statsRolledUpAt: timestamp("stats_rolled_up_at", { withTimezone: true }),
