@@ -142,7 +142,7 @@ describe("per-connection rate limits", () => {
   });
 
   /** Ping until `a` has used its whole budget for the window, having sent `used` frames so far. */
-  async function useUpBudget(a: TestClient, used: number) {
+  async function spendWholeBudget(a: TestClient, used: number) {
     // In batches, each answered before the next: a burst this big in one go would trip the cap
     // on queued messages instead.
     for (let sent = used; sent < CONNECTION_MESSAGE_BUDGET.messages; sent += 100) {
@@ -155,7 +155,7 @@ describe("per-connection rate limits", () => {
   it("drops frames past the budget, telling the socket once per window, and recovers", async () => {
     const ana = await h.createUser("ana");
     const a = await h.connectAs(ana, { heartbeat: false });
-    await useUpBudget(a, 1); // the hello took one
+    await spendWholeBudget(a, 1); // the hello took one
     for (let i = 0; i < 6; i++) a.send({ type: "ping" });
     await rateLimited(a, 1);
     await h.settled();
@@ -167,7 +167,7 @@ describe("per-connection rate limits", () => {
     a.send({ type: "ping" });
     await a.waitFor("pong");
     // A new window tells it again.
-    await useUpBudget(a, 1);
+    await spendWholeBudget(a, 1);
     a.send({ type: "ping" });
     await rateLimited(a, 1);
   });
@@ -175,7 +175,7 @@ describe("per-connection rate limits", () => {
   it("closes a socket that keeps sending past the budget", async () => {
     const ana = await h.createUser("ana");
     const a = await h.connectAs(ana, { heartbeat: false });
-    await useUpBudget(a, 1);
+    await spendWholeBudget(a, 1);
     // A budget's worth of dropped frames more is tolerated; the next one closes it.
     for (let i = 0; i < CONNECTION_MESSAGE_BUDGET.messages + 1; i++) a.send({ type: "ping" });
     expect(await a.closed()).toBe(FLOOD_CLOSE_CODE);

@@ -49,13 +49,14 @@ describe("toggleFullscreen", () => {
   });
 });
 
+const Probe = () => (
+  <p>
+    {String(useFullscreenElement())} {String(useFullscreenSupported())}
+  </p>
+);
+
 describe("the hooks on the server", () => {
   it("see no fullscreen element, and assume fullscreen is supported", () => {
-    const Probe = () => (
-      <p>
-        {String(useFullscreenElement())} {String(useFullscreenSupported())}
-      </p>
-    );
     expect(renderToStaticMarkup(<Probe />)).toBe("<p>null true</p>");
   });
 });
