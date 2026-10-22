@@ -85,7 +85,16 @@ export const logoPng = (size: number, rounded: boolean): Uint8Array =>
   new Resvg(logoSvg(rounded ? 15 : 0), { fitTo: { mode: "width", value: size } }).render().asPng();
 
 type Style = Record<string, string | number>;
-const fill: Style = { position: "absolute", top: 0, left: 0, width: "100%", height: "100%" };
+// satori sizes boxes like browsers (content-box by default); the cards' sizes include their
+// padding and borders, so the boxes that have both say so.
+const fill: Style = {
+  position: "absolute",
+  top: 0,
+  left: 0,
+  width: "100%",
+  height: "100%",
+  boxSizing: "border-box",
+};
 
 /** The striped stand-in for a screen that hasn't sent a picture, as the app draws it. */
 const stripes = (tint: string) =>
@@ -132,6 +141,7 @@ const well = (style: Style, ...children: ReactElement[]) =>
     {
       style: {
         display: "flex",
+        boxSizing: "border-box",
         borderRadius: 18,
         border: "2px solid rgba(255,255,255,0.14)",
         backgroundColor: OG.well,
