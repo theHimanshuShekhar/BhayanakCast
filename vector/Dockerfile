@@ -4,6 +4,6 @@
 # sends it to VictoriaLogs. See docs/deploy.md ("Logs").
 # Reproducible build: the base is pinned by digest (the tag stays for readers; Docker resolves the
 # digest), and Dependabot opens PRs for it (docs/deploy.md, "Pinned images").
-FROM timberio/vector:0.59.0-alpine@sha256:0e36bc2a290039e9b6a5e92f04bd2f133223506f72d09682c1df16c015172b7a
+FROM timberio/vector:0.60.0-alpine@sha256:1c6a6c4c5c9de08df357fa8adbe72e5a7abcea458b0bd82de0b14ac9b79d5b31
 COPY vector.yaml /etc/vector/vector.yaml
 CMD ["--config", "/etc/vector/vector.yaml"]

@@ -8,7 +8,7 @@
 # (Alpine 3.24: rsync 3.5.0-r0, supercronic 0.2.49-r1). Alpine's repo keeps only the current
 # revision, so when it moves on, the build fails on the pin: re-check with
 # `docker run --rm <image> apk policy rsync supercronic`. See docs/deploy.md ("Pinned images").
-FROM postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+FROM postgres:17-alpine@sha256:1bcc18d81671b02906296aad470ec9778a6b71016ce953092024b680bad007b0
 RUN apk add --no-cache rsync=3.5.0-r0 supercronic=0.2.49-r1
 COPY --chmod=755 backup.sh entrypoint.sh healthcheck.sh /usr/local/bin/
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
