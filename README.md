@@ -8,7 +8,7 @@ No downloads. No meeting links that expire. No "can you see my screen?" Sign in 
 
 👉 **[Start a room at cast.bhayanak.net](https://cast.bhayanak.net)**
 
-![A BhayanakCast room with three people sharing their screens, cameras on, and chat alongside](docs/screenshots/room.jpg)
+![A BhayanakCast room with three people sharing their screens (a racing game, a broken build and a slide deck), two cameras on, and chat alongside](docs/screenshots/room.jpg)
 
 ---
 
@@ -18,15 +18,18 @@ No downloads. No meeting links that expire. No "can you see my screen?" Sign in 
 Up to **3 people can share their screens at the same time** in a room of 10. Watch your friend's ranked match next to your own, or compare two edits side by side. You don't have to take turns.
 
 ### ⚡ Sharp and smooth
-Streams run at **up to 1080p60** and adjust to each viewer's connection as it changes. If one friend's Wi-Fi struggles, their picture adapts and everyone else's stays sharp.
+Streams run at **up to 1440p60**, and ultrawide screens keep their shape. Quality adjusts to each viewer's connection as it changes: if one friend's Wi-Fi struggles, their picture adapts and everyone else's stays sharp. Wondering why a stream looks soft? Its quality button tells you whether it's the connection, the streamer's computer, or their upload stretched across everyone watching.
 
 ### 🔊 Sound included
-Share tab or system audio along with your screen, with a separate volume slider for each stream. Turn on your mic and camera whenever you want to join in yourself.
+Share tab or system audio along with your screen (where your browser allows it), with a separate volume slider for each stream. Turn on your mic and camera whenever you want to join in yourself.
 
 ### 🔗 Direct connections
 Streams travel from browser to browser, not through a central video server. That means less delay and fewer places your screen passes through.
 
-![The home page showing live rooms with thumbnail mosaics of each room's streams](docs/screenshots/home.jpg)
+### 💬 Chat that keeps up
+Chat beside the screens, @mention a friend, and fire off quick reactions without typing a word. The feed keeps track of who joined and who started sharing.
+
+![The home page showing live rooms with a mosaic of each room's screens, and past streams below](docs/screenshots/home.jpg)
 
 ### 🔒 Private when you want it
 Make a room private and share an invite link. Everyone who opens it **knocks**, and you decide who comes in. Need to reset access? Generate a new link and the old one stops working.
@@ -41,7 +44,13 @@ The pre-join check lets you pick and preview your mic and camera first. Both sta
 When a room ends, its recap stays up for 30 days. You can see who showed up, how long they stayed, and who was streaming.
 
 ### 📊 Stats worth bragging about
-Your profile keeps track of hours streamed, hours watched, rooms hosted, and your peak viewer count. Favorite the people you hang out with most.
+Your profile keeps track of hours streamed, hours watched, rooms hosted and joined, and your peak viewer count. It also shows the people you've spent the most time with. Favorite the ones you hang out with most.
+
+### 🎨 Make it yours
+Pick light or dark, one of six accent colors, and a mosaic, grid, or spotlight layout for the screens. Your settings follow you to every device.
+
+### 📎 Links that look good in Discord
+Paste a room link into Discord (or Slack, WhatsApp, X…) and it unfurls into a card with the room name, the host, how many are watching, and a peek at the screen. Private rooms stay private: their links show nothing about the room.
 
 <table>
   <tr>
