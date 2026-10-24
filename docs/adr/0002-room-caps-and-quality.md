@@ -115,7 +115,7 @@ A new connection's bandwidth estimate starts at about 300 kbps and ramps up, and
 - **Watch rooms keep the `motion` hint.** Revisit after the test session if subtitles look bad (#105).
 
 ## Addendum: codecs by what the streamer's machine can afford (2026-10-22)
-Decided on the map [Pick video codecs by what the streamer's machine can afford](https://github.com/theHimanshuShekhar/BhayanakCast/issues/125); built in the tickets linked from that map; so far the telemetry fields below (#135), the caps by codec (#136), the start (#137) and the codec switch (#138).
+Decided on the map [Pick video codecs by what the streamer's machine can afford](https://github.com/theHimanshuShekhar/BhayanakCast/issues/125); built in the tickets linked from that map; so far the telemetry fields below (#135), the caps by codec (#136), the start (#137), the codec switch (#138) and how they are shown (#139).
 
 **Why.** In the 2026-10-21 friends session an Edge 155 streamer sent AV1 to two viewers. The encoder reported a CPU limit within 30 s of the second viewer joining, and the share sat at 720p and 6 to 9 fps for about a minute, while round trips were 2 to 9 ms with no loss. The mesh encodes once per viewer (ADR 1), and desktop Chromium leaves hardware AV1 off for WebRTC by default (Windows, Linux; macOS has no AV1 encoder), so AV1 is almost always libaom in software. libwebrtc already runs AV1 screens at its fastest speed, so only pixels and frames were left to cut. Research: [hardware-encode detection](https://github.com/theHimanshuShekhar/BhayanakCast/issues/126), [fallback codec costs](https://github.com/theHimanshuShekhar/BhayanakCast/issues/127), [mid-share codec switch](https://github.com/theHimanshuShekhar/BhayanakCast/issues/128).
 
@@ -158,13 +158,18 @@ Decided on the map [Pick video codecs by what the streamer's machine can afford]
 - **The switch row:** a new trigger, `codec`. It ends the window and names the old and new codec with the reason `cpu`. The step is unchanged.
   - **Built** (#135; emitted by the codec switch, #138): `QualityCollector.codecSwitched(id, to, reason)`. The row's `codec` is the codec moved **to**, and the new nullable column `from_codec` the one it **left**; `codecReason` is the reason for the new codec. The window's stats are of the codec it left, so its `qp` is null (QP is only comparable within one codec). The admin's settling skips a `codec` row, as it skips a window a codec change cut short.
 - **Quality modal**
-  - **Timeline:** "Switched to H.264", caused by "Streamer's computer" ("Your computer" for the streamer).
-  - **Codec chip tooltip:** why this codec, one of "Lighter codec for the streamer's computer", "Hardware encoder" or "Firefox streams H.264".
+  - **Timeline:** "Switched to H.264" (or VP8), caused by "Streamer's computer" ("Your computer" for the streamer).
+  - **Codec chip tooltip:** why this codec: "Lighter codec for the streamer's computer" ("for your computer" for the streamer), "Hardware encoder" or "Firefox streams H.264". Nothing extra for `preferred`. The Firefox copy names the codec actually sent, so Playwright's Firefox (no H.264, so VP8) reads "Firefox streams VP8".
   - **Transport:** the step message carries it to viewers.
 - **/admin**
   - **Room timeline:** a `codec_switch` event, also in incidents.
   - **Pair table:** the codec cell reads "AV1 → H.264" with the reason. A new encoder column shows hardware or software and the name, or a dash.
   - **Quality charts:** they mark the switch.
+- **Built** (#139):
+  - **Step message** (`StepNote`, src/lib/quality-reason.ts): two optional fields, `codecReason` (the reason `codecReasonOf` gives for the codec the screen sender is on now) and `codecSwitch` (`{from, to}`, MIME types, kept for the rest of the share once the switch happened, as `cause` is for a step change). A page from before them sends neither and the server's validation still takes its message. A viewer notes a switch only when a message brings one that the message held before did not (`switchHeard`), so one who first hears of the share after the switch sees no entry, as for a step's first message. The streamer notes its own switch for each viewer as it moves that pair's sender.
+  - **Quality modal** (`QualityHistory.switched`, `ViewerQuality.switches`, `StreamerQuality.switches`): the timeline merges codec switches with the step changes by time, and the graphs get a hairline at each. The streamer's own modal also shows each viewer's codec in its row, with the same tooltip.
+  - **Room timeline:** `codec_switch` is a connection event kind (`codecSwitchEvent`, src/lib/connection-events.ts), reported by the streamer's browser once per share (for the first sender it moves), with the actor as the streamer and no target. It is a kind of the text column, so it needed no migration. It is in the media category, a mark on the streamer's lane, and a row ("Ana's video switched from AV1 to H.264", with why) in the events table and so in incidents.
+  - **/admin quality:** `QualityPair` gets `switchedFrom`, `codecReason` and `encoder` (the sender's latest rows that say), and `PairTimeline` gets `codecSwitches`, which the charts mark with the rung changes. The codec cell is "AV1 → H.264" with the reason's words under it (nothing for `preferred`); a pair back on the codec it left (a later share) is no longer shown as switched.
 
 **Unverified, to check with the telemetry:**
 - whether the 2026-10-21 streamer's AV1 was software ([checklist](https://github.com/theHimanshuShekhar/BhayanakCast/issues/129))

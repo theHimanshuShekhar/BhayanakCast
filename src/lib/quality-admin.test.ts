@@ -27,6 +27,10 @@ const sent = (seconds: number, extra: Partial<QualityRow> = {}): QualityRow => (
   bitrate: 2_800_000,
   qp: 30,
   codec: "video/VP9",
+  codecReason: null,
+  fromCodec: null,
+  encoderImplementation: null,
+  powerEfficientEncoder: null,
   loss: 0.01,
   rttMs: 20,
   freezes: null,
@@ -244,6 +248,73 @@ describe("aggregatePairs", () => {
     ).toBe(7);
   });
 
+  describe("the codec cell and the encoder column", () => {
+    /** ana's AV1 to bo switched to H.264 at 60 s, with the encoder Chromium named. */
+    const switched = [
+      sent(30, { codec: "video/AV1", codecReason: "preferred" }),
+      sent(60, {
+        trigger: "codec",
+        windowMs: 30_000,
+        codec: "video/H264",
+        fromCodec: "video/AV1",
+        codecReason: "cpu",
+        qp: null,
+      }),
+      sent(90, { codec: "video/H264", codecReason: "cpu" }),
+    ];
+
+    it("says what a pair switched from and why it is on the codec it has now", () => {
+      const [pair] = aggregatePairs(switched);
+      expect(pair).toMatchObject({
+        codec: "video/H264",
+        switchedFrom: "video/AV1",
+        codecReason: "cpu",
+      });
+    });
+
+    it("says nothing of a switch for a pair that never switched, and gives its reason", () => {
+      const [pair] = aggregatePairs([
+        sent(30, { codec: "video/VP9", codecReason: "hardware" }),
+        received(30, { codec: "video/VP9" }),
+      ]);
+      expect(pair).toMatchObject({
+        switchedFrom: null,
+        codecReason: "hardware",
+        encoder: null,
+      });
+      // A sender that didn't say (a row from before): no reason either.
+      expect(aggregatePairs([sent(30)])[0]?.codecReason).toBeNull();
+    });
+
+    it("is not a switch when the pair is back on the codec it left (a later share started on it)", () => {
+      const [pair] = aggregatePairs([...switched, sent(120, { codec: "video/AV1" })]);
+      expect(pair?.switchedFrom).toBeNull();
+    });
+
+    it("takes the switch from the sender's rows only", () => {
+      const [pair] = aggregatePairs([...switched, received(90, { codec: "video/H264" })]);
+      expect(pair).toMatchObject({ switchedFrom: "video/AV1", codec: "video/H264" });
+    });
+
+    it("reads the encoder from the sender's latest row that names one: hardware or software, and what", () => {
+      const rows = (powerEfficientEncoder: boolean | null, encoderImplementation: string | null) =>
+        aggregatePairs([
+          sent(30, { powerEfficientEncoder: false, encoderImplementation: "libvpx" }),
+          sent(60, { powerEfficientEncoder, encoderImplementation }),
+          // A row that lacks them (Chromium names the encoder only while capturing) is no change.
+          sent(90),
+          received(90),
+        ])[0]?.encoder;
+      expect(rows(true, "MediaFoundationVideoEncodeAccelerator")).toEqual({
+        hardware: true,
+        implementation: "MediaFoundationVideoEncodeAccelerator",
+      });
+      expect(rows(false, "libaom")).toEqual({ hardware: false, implementation: "libaom" });
+      // Named but not said to be hardware or software: the name alone.
+      expect(rows(null, "OpenH264")).toEqual({ hardware: null, implementation: "OpenH264" });
+    });
+  });
+
   it("shows a viewer's browser without a version when it had none", () => {
     const [pair] = aggregatePairs([
       sent(30),
@@ -453,6 +524,19 @@ describe("timelineOf", () => {
       sent(90, { codec: "video/AV1", qp: 110 }),
     ]);
     expect(timeline.qp.map((p) => p.v)).toEqual([100, 110]);
+  });
+
+  it("marks the sender's codec switches, with both codecs", () => {
+    const timeline = timelineOf([
+      sent(30, { codec: "video/AV1" }),
+      sent(45, { trigger: "codec", codec: "video/H264", fromCodec: "video/AV1", qp: null }),
+      sent(60, { codec: "video/H264" }),
+      received(60, { codec: "video/H264" }),
+    ]);
+    expect(timeline.codecSwitches).toEqual([
+      { t: T0 + 45_000, from: "video/AV1", to: "video/H264" },
+    ]);
+    expect(timelineOf([sent(30)]).codecSwitches).toEqual([]);
   });
 
   it("leaves a stat a browser lacked out, rather than plotting it as 0", () => {

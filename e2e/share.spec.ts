@@ -489,7 +489,7 @@ test("a share in a two-person room records quality samples the admin view shows"
       .toMatch(/^\d+(s|m)/);
     // The viewer's browser comes from their own report, and the codec from either end's.
     await expect(row).toContainText(browserName === "chromium" ? "chrome" : "firefox");
-    await expect(row).toContainText(/video\/|AV1|VP9|VP8|H264/i);
+    await expect(row).toContainText(/video\/|AV1|VP9|VP8|H\.?264/i);
     await expect(row).toContainText(/\d{4}×\d{3,4}@(30|60)/);
 
     // And its timeline: the charts are there, with the numbers behind them.

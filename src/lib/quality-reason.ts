@@ -9,7 +9,12 @@
  */
 import { z } from "zod";
 import { type StatsSample, strained } from "./quality.ts";
-import type { RungReason } from "./quality-telemetry.ts";
+import {
+  CODEC_REASONS,
+  type CodecReason,
+  codecType,
+  type RungReason,
+} from "./quality-telemetry.ts";
 
 /** The five plain reasons, in the order the modal's legend lists them. */
 export const STEP_REASONS = ["best", "shared", "connection", "computer", "starting"] as const;
@@ -197,6 +202,60 @@ export function causeText(cause: ChangeCause, from: ReasonSide): string {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Codecs
+
+/** A codec's MIME type as people write it: `video/H264` is "H.264", `video/AV1` "AV1". */
+export function codecLabel(mime: string): string {
+  const name = mime.replace(/^video\//i, "").toUpperCase();
+  return name === "H264" ? "H.264" : name;
+}
+
+/**
+ * Why a sender is on its codec (`codecReason` of a row), for the codec chip's tooltip: from the
+ * viewer's side, the streamer's own, or an admin's. Undefined for `preferred` (the normal order,
+ * nothing to explain) and for a sender that didn't say. `codec` names what Firefox streams: H.264
+ * or, where H.264 isn't on both sides, VP8.
+ */
+export function codecReasonText(
+  reason: CodecReason | undefined,
+  from: ReasonSide,
+  codec?: string,
+): string | undefined {
+  switch (reason) {
+    case "cpu":
+      return from.side === "streamer"
+        ? "Lighter codec for your computer"
+        : "Lighter codec for the streamer's computer";
+    case "hardware":
+      return "Hardware encoder";
+    case "browser":
+      return `Firefox streams ${codec ? codecLabel(codec) : "H.264"}`;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * The codec switch `now` announces that this page saw happen: `now` carries one that `was`, the
+ * message held before, did not. A page that first hears of a sender after the switch (no `was`)
+ * saw nothing happen, as for a step's first message.
+ */
+export function switchHeard(was: StepBody | undefined, now: StepBody): CodecSwitch | undefined {
+  const moved = now.codecSwitch;
+  if (!was || !moved) return undefined;
+  return was.codecSwitch?.from === moved.from && was.codecSwitch.to === moved.to
+    ? undefined
+    : moved;
+}
+
+/** One codec switch on the timeline: "Switched to H.264". */
+export const switchText = (to: string) => `Switched to ${codecLabel(to)}`;
+
+/** A codec switch: the codec the streamer's video left, and the one it moved to. */
+const codecSwitch = z.object({ from: codecType, to: codecType });
+export type CodecSwitch = z.infer<typeof codecSwitch>;
+
+// ---------------------------------------------------------------------------------------------
 // The step message
 
 /**
@@ -204,7 +263,8 @@ export function causeText(cause: ChangeCause, from: ReasonSide): string {
  * its screen sender is on (the label `screenSteps` gives it), that step's `maxBitrate`, and why.
  * `seq` counts the streamer's messages on this connection, so a viewer can tell a late one from
  * a newer one. The bounds are the server's validation (`signalPayload`): a label is at most
- * `2968×1242@60` long in practice, a bitrate far under a gigabit.
+ * `2968×1242@60` long in practice, a bitrate far under a gigabit. The codec fields are optional,
+ * so a page from before them still sends a valid message.
  */
 export const stepNoteFields = {
   seq: z.number().int().min(1),
@@ -213,6 +273,10 @@ export const stepNoteFields = {
   reason: z.enum(STEP_REASONS),
   /** What made the sender move to this step (the latest change); absent before it ever moved. */
   cause: z.enum(CHANGE_CAUSES).optional(),
+  /** Why the sender is on that codec; absent from an older page, and from a sender that didn't say. */
+  codecReason: z.enum(CODEC_REASONS).optional(),
+  /** The codec switch of this share (the latest change, as `cause` is); absent if there was none. */
+  codecSwitch: codecSwitch.optional(),
 };
 const stepNote = z.object(stepNoteFields);
 export type StepNote = z.infer<typeof stepNote>;
@@ -230,7 +294,10 @@ const same = (a: StepBody, b: StepBody) =>
   a.step === b.step &&
   a.maxBitrate === b.maxBitrate &&
   a.reason === b.reason &&
-  a.cause === b.cause;
+  a.cause === b.cause &&
+  a.codecReason === b.codecReason &&
+  a.codecSwitch?.from === b.codecSwitch?.from &&
+  a.codecSwitch?.to === b.codecSwitch?.to;
 
 /**
  * The streamer's side of one pair: decides when the viewer is told. A note is due when the state

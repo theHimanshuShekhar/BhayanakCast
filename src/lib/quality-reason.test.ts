@@ -5,6 +5,8 @@ import {
   CHANGE_CAUSES,
   causeOf,
   causeText,
+  codecLabel,
+  codecReasonText,
   decodeNote,
   NOTE_REFRESH_MS,
   NoteSender,
@@ -14,6 +16,8 @@ import {
   reasonText,
   STEP_REASONS,
   type StepNote,
+  switchHeard,
+  switchText,
 } from "./quality-reason";
 
 // Why a pair sits where it does (ADR 2 addendum: the quality modal), as one of five plain
@@ -327,5 +331,110 @@ describe("decodeNote", () => {
     expect(decodeNote({ kind: "quality", seq: 1, ...body, reason: "because" })).toBeUndefined();
     expect(decodeNote({ kind: "quality", seq: 1, ...body, step: "" })).toBeUndefined();
     expect(decodeNote({ kind: "quality", seq: 1, ...body, maxBitrate: -1 })).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Codecs (ADR 2 addendum: codecs by what the streamer's machine can afford)
+
+describe("codecLabel", () => {
+  it("writes a codec as people do", () => {
+    expect(codecLabel("video/H264")).toBe("H.264");
+    expect(codecLabel("video/VP8")).toBe("VP8");
+    expect(codecLabel("video/av1")).toBe("AV1");
+  });
+});
+
+describe("codecReasonText", () => {
+  const viewer = { side: "viewer" } as const;
+  const streamer = { side: "streamer", viewer: "bo" } as const;
+  const admin = { side: "admin", streamer: "ana", viewer: "bo" } as const;
+
+  it("says the lighter codec is for the streamer's computer, or for yours on the streamer's side", () => {
+    expect(codecReasonText("cpu", viewer)).toBe("Lighter codec for the streamer's computer");
+    expect(codecReasonText("cpu", admin)).toBe("Lighter codec for the streamer's computer");
+    expect(codecReasonText("cpu", streamer)).toBe("Lighter codec for your computer");
+  });
+
+  it("names a hardware encoder, on every side", () => {
+    for (const side of [viewer, streamer, admin]) {
+      expect(codecReasonText("hardware", side)).toBe("Hardware encoder");
+    }
+  });
+
+  it("says Firefox streams the codec it does: H.264, or VP8 where H.264 isn't on both sides", () => {
+    expect(codecReasonText("browser", viewer, "video/H264")).toBe("Firefox streams H.264");
+    expect(codecReasonText("browser", viewer, "video/VP8")).toBe("Firefox streams VP8");
+    expect(codecReasonText("browser", viewer)).toBe("Firefox streams H.264");
+  });
+
+  it("has nothing to add for the normal order, or a sender that didn't say", () => {
+    expect(codecReasonText("preferred", viewer)).toBeUndefined();
+    expect(codecReasonText(undefined, viewer)).toBeUndefined();
+  });
+});
+
+describe("switchText", () => {
+  it("names the codec it switched to", () => {
+    expect(switchText("video/H264")).toBe("Switched to H.264");
+    expect(switchText("video/VP8")).toBe("Switched to VP8");
+  });
+
+  it("is caused by the streamer's computer, or yours on the streamer's side (the computer cause)", () => {
+    expect(causeText("computer", { side: "viewer" })).toBe("Streamer's computer");
+    expect(causeText("computer", { side: "streamer", viewer: "bo" })).toBe("Your computer");
+  });
+});
+
+describe("a step message's codec fields", () => {
+  const moved = { from: "video/AV1", to: "video/H264" };
+
+  it("are part of what the viewer is told: a reason or a switch alone makes a message due", () => {
+    const sender = new NoteSender();
+    sender.delivered(sender.due({ ...body, codecReason: "preferred" }, 0) as StepNote, 0);
+    expect(sender.due({ ...body, codecReason: "preferred" }, 1)).toBeUndefined();
+    const cpu = sender.due({ ...body, codecReason: "cpu" }, 2) as StepNote;
+    expect(cpu).toMatchObject({ seq: 2, codecReason: "cpu" });
+    sender.delivered(cpu, 2);
+    expect(sender.due({ ...body, codecReason: "cpu", codecSwitch: moved }, 3)).toMatchObject({
+      seq: 3,
+      codecSwitch: moved,
+    });
+  });
+
+  it("are read out of a payload, and a payload without them (an older page) is still a message", () => {
+    expect(decodeNote({ kind: "quality", seq: 1, ...body })).toEqual({ seq: 1, ...body });
+    expect(
+      decodeNote({ kind: "quality", seq: 1, ...body, codecReason: "cpu", codecSwitch: moved }),
+    ).toEqual({ seq: 1, ...body, codecReason: "cpu", codecSwitch: moved });
+  });
+
+  it("are refused when they aren't valid: an unknown reason, or a switch that isn't two codecs", () => {
+    expect(decodeNote({ kind: "quality", seq: 1, ...body, codecReason: "luck" })).toBeUndefined();
+    expect(
+      decodeNote({ kind: "quality", seq: 1, ...body, codecSwitch: { from: "video/AV1" } }),
+    ).toBeUndefined();
+    expect(
+      decodeNote({ kind: "quality", seq: 1, ...body, codecSwitch: { from: "AV1", to: "H264" } }),
+    ).toBeUndefined();
+  });
+});
+
+describe("switchHeard", () => {
+  const moved = { from: "video/AV1", to: "video/H264" };
+
+  it("is the switch a message brings that the one before did not", () => {
+    expect(switchHeard(body, { ...body, codecSwitch: moved })).toEqual(moved);
+  });
+
+  it("is nothing for a message that repeats a switch already heard, or has none", () => {
+    expect(switchHeard({ ...body, codecSwitch: moved }, { ...body, codecSwitch: moved })).toBe(
+      undefined,
+    );
+    expect(switchHeard(body, body)).toBeUndefined();
+  });
+
+  it("is nothing for the first message heard: this page saw nothing happen", () => {
+    expect(switchHeard(undefined, { ...body, codecSwitch: moved })).toBeUndefined();
   });
 });

@@ -1,5 +1,6 @@
 import type { Browser, Page } from "@playwright/test";
-import { signIn } from "./auth";
+import { E2E_ADMIN_DISCORD_ID, signIn } from "./auth";
+import { cpuLimitedEncoder, setCpuLimit } from "./cpu-limit";
 import { expect, newPage, test } from "./fixtures";
 import { createRoomOnPage, enterRoom, uniqueRoomName } from "./rooms";
 
@@ -68,7 +69,7 @@ test("a viewer sees why a stream looks as it does, and the streamer how the uplo
     await expect(modal.getByRole("img", { name: /Bitrate received.*Mbps now$/ })).toBeVisible({
       timeout: 30_000,
     });
-    await expect(modal.getByRole("list", { name: /step changes/ })).toBeVisible();
+    await expect(modal.getByRole("list", { name: /quality changes/ })).toBeVisible();
 
     // Focus stays in the dialog however far one tabs (it passes a focus guard on the way round,
     // so each press is given a moment to settle), and Escape closes it.
@@ -108,6 +109,136 @@ test("a viewer sees why a stream looks as it does, and the streamer how the uplo
     await page.getByRole("button", { name: "Stop sharing" }).click();
     await expect(viewer.page.getByRole("dialog", { name: /^quality/ })).toHaveCount(0);
   } finally {
+    await viewer.context.close();
+  }
+});
+
+test("the codec chip says why this codec: Firefox streams H.264 (or VP8), nothing extra for the normal order", async ({
+  page,
+  context,
+  browser,
+  browserName,
+}) => {
+  test.setTimeout(150_000);
+  await signIn(context, { username: "qm.codec" });
+  const roomId = await createRoomOnPage(page, { name: uniqueRoomName("quality codec") });
+  const viewer = await joinAs(browser, "qm.codecviewer", roomId);
+  try {
+    await page.getByRole("button", { name: "Share screen" }).click();
+    await expect(page.getByRole("button", { name: "Stop sharing" })).toBeEnabled();
+    const tile = viewer.page.getByRole("group", { name: "qm.codec", exact: true });
+    await expect(tile.getByLabel("qm.codec's screen")).toBeVisible({ timeout: 30_000 });
+    const modal = await openQuality(viewer.page, "qm.codec", "qm.codec");
+    // The streamer's word (and so the codec reason) reaches the viewer with the first step message.
+    await expect(modal.getByTestId("quality-reason")).toHaveText(REASON, { timeout: 40_000 });
+    const chip = modal.getByText(/^(AV1|VP9|H\.264|VP8)$/);
+    await expect(chip).toBeVisible({ timeout: 30_000 });
+    if (browserName === "firefox") {
+      // Playwright's Firefox has no H.264, so its streamer sends VP8: the tooltip names what it
+      // really streams (H.264 where the build has it).
+      await expect(chip).toHaveAttribute("title", /^Firefox streams (H\.264|VP8)$/);
+    } else {
+      // The normal order has nothing to explain; a hardware VP9 says so.
+      await expect(chip).toHaveAttribute("title", /^(video codec|Hardware encoder)$/);
+    }
+  } finally {
+    await viewer.context.close();
+  }
+});
+
+test("a codec switch is an entry in the viewer's and the streamer's modal, and is on the admin's timeline and quality table", async ({
+  page,
+  context,
+  browser,
+  browserName,
+}) => {
+  // Firefox streamers start on H.264 or VP8 and report no CPU limit, so the switch is for Chromium
+  // streamers on AV1 or VP9 (ADR 2 addendum: the start).
+  test.skip(browserName !== "chromium", "Firefox streams H.264 from the start");
+  test.setTimeout(240_000);
+  await cpuLimitedEncoder(context);
+  await signIn(context, { username: "qm.switch" });
+  const roomName = uniqueRoomName("quality switch");
+  const roomId = await createRoomOnPage(page, { name: roomName });
+  const viewer = await joinAs(browser, "qm.switchviewer", roomId);
+  const adminContext = await browser.newContext();
+  try {
+    await page.getByRole("button", { name: "Share screen" }).click();
+    await expect(page.getByRole("button", { name: "Stop sharing" })).toBeEnabled();
+    const tile = viewer.page.getByRole("group", { name: "qm.switch", exact: true });
+    await expect(tile.getByLabel("qm.switch's screen")).toBeVisible({ timeout: 30_000 });
+    const modal = await openQuality(viewer.page, "qm.switch", "qm.switch");
+    await expect(modal.getByTestId("quality-reason")).toHaveText(REASON, { timeout: 40_000 });
+    const steps = modal.getByRole("list", { name: /quality changes/ });
+
+    // The encoder reports a CPU limit: the streamer's video moves to H.264 (or VP8).
+    await setCpuLimit(page, true);
+    const entry = steps.getByRole("listitem").filter({ hasText: /Switched to (H\.264|VP8)/ });
+    await expect(entry).toHaveCount(1, { timeout: 90_000 });
+    await expect(entry).toContainText("Streamer's computer");
+    // The codec chip says why.
+    await expect(modal.getByText(/^(H\.264|VP8)$/)).toHaveAttribute(
+      "title",
+      "Lighter codec for the streamer's computer",
+      { timeout: 30_000 },
+    );
+
+    // The streamer's own modal: the same entry, caused by "Your computer", naming the viewer.
+    const own = await openQuality(page, "qm.switch (you)", "qm.switch");
+    const ownEntry = own
+      .getByRole("list", { name: /quality changes/ })
+      .getByRole("listitem")
+      .filter({ hasText: /Switched to (H\.264|VP8)/ });
+    await expect(ownEntry).toHaveCount(1);
+    await expect(ownEntry).toContainText("qm.switchviewer");
+    await expect(ownEntry).toContainText("Your computer");
+    await expect(
+      own.getByTitle("Lighter codec for your computer").filter({ hasText: /^(H\.264|VP8)$/ }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+
+    // The admin's room timeline has the event, and the quality table the pair's switch and
+    // encoder (the rows are reported a few seconds after the switch).
+    await signIn(adminContext, { discordId: E2E_ADMIN_DISCORD_ID, username: "admin_jpg" });
+    const admin = await newPage(adminContext);
+    const timeline = admin.getByRole("region", { name: "room timeline" });
+    const switched = timeline
+      .getByRole("table", { name: "events in view" })
+      .getByText(/qm\.switch's video switched from (AV1|VP9) to H\.264/);
+    await expect
+      .poll(
+        async () => {
+          await admin.goto("/admin");
+          await admin
+            .getByRole("button", { name: `Timeline of ${roomName}` })
+            .first()
+            .click();
+          await expect(timeline).toBeVisible();
+          return switched.count();
+        },
+        { timeout: 60_000, intervals: [3_000] },
+      )
+      .toBe(1);
+    const pairs = admin.getByRole("table", { name: "quality pairs" });
+    const row = pairs.getByRole("row", { name: /qm\.switch.*qm\.switchviewer/ });
+    await expect
+      .poll(
+        async () => {
+          await admin.goto("/admin");
+          await admin
+            .getByRole("button", { name: `Quality of ${roomName}` })
+            .first()
+            .click();
+          await expect(pairs).toBeVisible();
+          return row.getByRole("cell", { name: /^(AV1|VP9) → H\.264/ }).count();
+        },
+        { timeout: 90_000, intervals: [3_000] },
+      )
+      .toBe(1);
+    await expect(row).toContainText("Lighter codec for the streamer's computer");
+    await expect(pairs.getByRole("columnheader", { name: "encoder" })).toBeVisible();
+  } finally {
+    await adminContext.close();
     await viewer.context.close();
   }
 });

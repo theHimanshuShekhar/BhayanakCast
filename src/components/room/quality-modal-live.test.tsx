@@ -12,6 +12,7 @@ const view: QualityView = {
   state: "connected",
   points: [],
   changes: [],
+  switches: [],
 };
 
 beforeEach(() => vi.useFakeTimers());

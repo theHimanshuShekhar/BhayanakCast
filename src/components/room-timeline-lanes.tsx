@@ -119,6 +119,7 @@ const MARK_LOOK: Record<MarkKind, MarkLook> = {
     meaning: "restart",
   },
   step: { shape: "down", solid: true, color: "var(--color-viz-2)", meaning: "quality step" },
+  codec: { shape: "diamond", solid: true, color: "var(--color-viz-2)", meaning: "codec switch" },
 };
 const lookOf = (m: { kind: MarkKind; relay?: boolean }): MarkLook =>
   m.kind === "path" && m.relay
@@ -870,6 +871,7 @@ export const LanesLegend = () => (
         ["path: relayed", { ...MARK_LOOK.path, solid: true }],
         ["restart", MARK_LOOK.restart],
         ["quality step", MARK_LOOK.step],
+        ["codec switch", MARK_LOOK.codec],
       ] as [string, MarkLook][]
     ).map(([text, look]) => (
       <span key={text} className="inline-flex items-center gap-1.5">

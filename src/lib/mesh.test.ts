@@ -2029,8 +2029,10 @@ describe("Mesh: the codec switch (ADR 2 addendum)", () => {
     vi.useRealTimers();
     const network = new Map<string, Mesh>();
     const rows: PendingSample[] = [];
+    const reports: ConnectionEvent[] = [];
     const ana = page("ana", network, undefined, capable, uplink, {
       onQuality: (row) => rows.push(row),
+      onReport: (event) => reports.push(event),
       sampleWindowMs: 24_000,
     });
     const viewers = names.map((name) => page(name, network));
@@ -2069,7 +2071,7 @@ describe("Mesh: the codec switch (ADR 2 addendum)", () => {
       await ana.mesh.adjust();
       await vi.advanceTimersByTimeAsync(0);
     };
-    return { ana, viewers, network, screens, cams, rows, pass };
+    return { ana, viewers, network, screens, cams, rows, reports, pass };
   }
 
   it("holds a CPU limit back from the steps until the switch, waits out the warm-up, and fires on the second pass", async () => {
@@ -2225,6 +2227,46 @@ describe("Mesh: the codec switch (ADR 2 addendum)", () => {
     expect(later.length).toBeGreaterThan(0);
     for (const row of later)
       expect([row.trigger, row.codec, row.codecReason]).toEqual(["window", H264, "cpu"]);
+    ana.mesh.close();
+  });
+
+  it("tells the room timeline once, with both codecs, however many pairs move", async () => {
+    const { ana, pass, reports } = await sharing(["bo", "cy"], { cam: true });
+    for (let i = 0; i < 4; i++) await pass();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(reports.filter((e) => e.kind === "codec_switch")).toEqual([
+      { kind: "codec_switch", from: AV1, to: H264, reason: "cpu" },
+    ]);
+    // No second switch, no second report; and the next share can switch (and tell) again.
+    for (let i = 0; i < 4; i++) await pass({ codec: H264, limited: () => false });
+    expect(reports.filter((e) => e.kind === "codec_switch")).toHaveLength(1);
+    ana.mesh.close();
+  });
+
+  it("tells each viewer in the step message, and both ends keep it for their modal", async () => {
+    const { ana, viewers, pass } = await sharing(["bo"]);
+    const [bo] = viewers as [(typeof viewers)[number]];
+    for (let i = 0; i < 2; i++) await pass({ limited: () => false });
+    // Before the switch: the normal order, no switch.
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(bo.mesh.streamQuality("ana")).toMatchObject({
+      side: "viewer",
+      note: { codecReason: "preferred" },
+      switches: [],
+    });
+    for (let i = 0; i < 4; i++) await pass();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await pass({ codec: H264, limited: () => false });
+    await vi.advanceTimersByTimeAsync(1_000);
+    const heard = bo.mesh.streamQuality("ana") as Extract<QualityView, { side: "viewer" }>;
+    expect(heard.note).toMatchObject({
+      codecReason: "cpu",
+      codecSwitch: { from: AV1, to: H264 },
+    });
+    expect(heard.switches).toMatchObject([{ from: AV1, to: H264 }]);
+    const own = ana.mesh.streamQuality("ana") as Extract<QualityView, { side: "streamer" }>;
+    expect(own.switches).toMatchObject([{ userId: "bo", from: AV1, to: H264 }]);
+    expect(own.viewers[0]?.note).toMatchObject({ codecReason: "cpu" });
     ana.mesh.close();
   });
 

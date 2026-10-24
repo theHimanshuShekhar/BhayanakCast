@@ -3,6 +3,7 @@ import {
   audioBlockedEvent,
   CONNECTION_BATCH_MAX,
   cleanMessage,
+  codecSwitchEvent,
   describeError,
   deviceErrorEvent,
   MAX_ERROR_MESSAGE,
@@ -183,6 +184,29 @@ describe("audioBlockedEvent", () => {
       source: "mic",
     });
     expect(audioBlockedEvent("bo", true)).toMatchObject({ source: "share" });
+  });
+});
+
+describe("codecSwitchEvent", () => {
+  it("names the codecs and the reason, and has no peer: it is the streamer's own", () => {
+    expect(codecSwitchEvent("video/AV1", "video/H264", "cpu")).toEqual({
+      kind: "codec_switch",
+      from: "video/AV1",
+      to: "video/H264",
+      reason: "cpu",
+    });
+  });
+
+  it("is a valid report event, and one that isn't a codec or a known reason is dropped", () => {
+    const good = { ...codecSwitchEvent("video/AV1", "video/VP8", "cpu"), ageMs: 0 };
+    const badCodec = { ...good, to: "H264" };
+    const badReason = { ...good, reason: "luck" };
+    const extra = { ...good, peerId: "bo" };
+    const parsed = reportConnectionEventsInput.parse({
+      roomId: "r1",
+      events: [badCodec, good, badReason, extra],
+    });
+    expect(parsed.events).toEqual([good]);
   });
 });
 

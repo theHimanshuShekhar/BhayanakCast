@@ -12,6 +12,7 @@ import {
   type QualityPairRow,
   STARVED_MIN_SECONDS,
 } from "~/lib/quality-admin";
+import { codecLabel, codecReasonText } from "~/lib/quality-reason";
 import type { QualityFocus } from "~/lib/timeline-incident";
 import { fmtMbps, Key, Panel } from "./chart-parts";
 import { CHART_PAD_Y, RUNG_BAND, TimelineChart, type TimelineSeries } from "./timeline-chart";
@@ -71,7 +72,8 @@ function Timelines({ timeline }: { timeline: PairTimeline }) {
   const times = all.flatMap((points) => points.map((p) => p.t));
   if (times.length === 0) return <p className="m-0 text-xs text-subtle">no windows reported</p>;
   const domain: [number, number] = [Math.min(...times), Math.max(...times)];
-  const marks = timeline.changes.map((c) => c.t);
+  // The rung changes, and the moment the codec switched.
+  const marks = [...timeline.changes.map((c) => c.t), ...timeline.codecSwitches.map((c) => c.t)];
   const bitrate: TimelineSeries[] = [
     { key: "sent", label: "sent", color: VIZ[0], points: timeline.sent },
     { key: "target", label: "target", color: VIZ[1], points: timeline.target },
@@ -151,6 +153,17 @@ function Timelines({ timeline }: { timeline: PairTimeline }) {
             .join(" · ")}
         </p>
       )}
+      {timeline.codecSwitches.length > 0 && (
+        <p className="m-0 text-[10.5px] text-muted">
+          codec switch:{" "}
+          {timeline.codecSwitches
+            .map(
+              (c) =>
+                `${fmtDuration((c.t - domain[0]) / 1_000)} ${codecLabel(c.from)} → ${codecLabel(c.to)}`,
+            )
+            .join(" · ")}
+        </p>
+      )}
       {timeline.truncated && (
         <p className="m-0 text-[10.5px] text-muted">
           the first {MAX_PAIR_SAMPLES} windows only: the session has more
@@ -225,6 +238,40 @@ const RungTimes = ({ pair }: { pair: QualityPair }) =>
     <span>{pair.rungTimes.map((r) => `${r.rung} ${fmtDuration(r.seconds)}`).join(" · ")}</span>
   );
 
+/** The codec cell: "AV1 → H.264" when the pair switched, with why it is on its codec. */
+const CodecCell = ({ pair }: { pair: QualityPairRow }) => {
+  if (!pair.codec) return dash;
+  const why = codecReasonText(
+    pair.codecReason ?? undefined,
+    { side: "admin", streamer: pair.streamer.username, viewer: pair.viewer.username },
+    pair.codec,
+  );
+  return (
+    <span className="flex flex-col">
+      <span>
+        {pair.switchedFrom ? `${codecLabel(pair.switchedFrom)} → ` : ""}
+        {codecLabel(pair.codec)}
+      </span>
+      {why && <span className="text-[10.5px] text-muted">{why}</span>}
+    </span>
+  );
+};
+
+/** The encoder cell: hardware or software and the implementation's name, or a dash. */
+const EncoderCell = ({ pair }: { pair: QualityPair }) => {
+  const { encoder } = pair;
+  if (!encoder) return dash;
+  const kind = encoder.hardware === null ? null : encoder.hardware ? "hardware" : "software";
+  return (
+    <span className="flex flex-col">
+      {kind && <span>{kind}</span>}
+      {encoder.implementation && (
+        <span className="text-[10.5px] text-muted">{encoder.implementation}</span>
+      )}
+    </span>
+  );
+};
+
 const Starved = ({ pair }: { pair: QualityPair }) =>
   pair.starved ? (
     <Chip
@@ -278,7 +325,7 @@ export const RoomQualityPanel = ({
         </p>
       )}
       <div className="overflow-x-auto">
-        <table aria-label="quality pairs" className="w-full min-w-[1060px] border-collapse text-xs">
+        <table aria-label="quality pairs" className="w-full min-w-[1160px] border-collapse text-xs">
           <thead>
             <tr>
               <th className={th}>streamer</th>
@@ -286,6 +333,12 @@ export const RoomQualityPanel = ({
               <th className={th}>stream</th>
               <th className={th}>viewer browser</th>
               <th className={th}>codec</th>
+              <th
+                className={th}
+                title="The sender's encoder as its browser says it (Chromium, while capturing): hardware or software, and its implementation"
+              >
+                encoder
+              </th>
               <th className={th}>path</th>
               <th className={th}>time on rung</th>
               <th
@@ -326,7 +379,7 @@ export const RoomQualityPanel = ({
             })}
             {data.pairs.length === 0 && (
               <tr>
-                <td colSpan={14} className="text-center p-7 text-subtle text-[11.5px]">
+                <td colSpan={15} className="text-center p-7 text-subtle text-[11.5px]">
                   no samples for this room
                 </td>
               </tr>
@@ -361,7 +414,12 @@ const PairRows = ({
       </td>
       <td className={td}>{pair.slot === "cam" ? "camera" : "screen"}</td>
       <td className={td}>{pair.viewerBrowser ?? dash}</td>
-      <td className={td}>{pair.codec?.replace("video/", "") ?? dash}</td>
+      <td className={td}>
+        <CodecCell pair={pair} />
+      </td>
+      <td className={td}>
+        <EncoderCell pair={pair} />
+      </td>
       <td className={td}>{pathLabel(pair.path) ?? dash}</td>
       <td className={td}>
         <RungTimes pair={pair} />
@@ -390,7 +448,7 @@ const PairRows = ({
     </tr>
     {open && (
       <tr>
-        <td colSpan={14} className="px-3.5 py-3 border-b border-border-subtle bg-canvas">
+        <td colSpan={15} className="px-3.5 py-3 border-b border-border-subtle bg-canvas">
           <PairCharts roomId={roomId} pair={pair} />
         </td>
       </tr>

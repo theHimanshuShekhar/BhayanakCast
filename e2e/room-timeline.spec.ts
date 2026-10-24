@@ -180,6 +180,9 @@ async function adminOnDashboard(page: Page) {
 /** Open a room's timeline from the recent rooms table. */
 async function openFromRecentRooms(page: Page, roomName: string) {
   await page.getByRole("textbox", { name: "Search rooms or hosts" }).fill(roomName);
+  // The search is debounced and the table keeps the previous page until the answer arrives:
+  // wait for the answer (one room), or the click can land on a row of the stale page.
+  await expect(page.getByRole("table", { name: "recent rooms" }).getByRole("row")).toHaveCount(2);
   await page.getByRole("button", { name: `Timeline of ${roomName}` }).click();
   const section = page.getByRole("region", { name: "room timeline" });
   await expect(section).toBeVisible();
@@ -479,4 +482,62 @@ test("a room with more entries than the read allows says it shows the latest", a
   await page.keyboard.up("Control");
   await expect(view).not.toHaveText(before);
   expect(Date.now() - began).toBeLessThan(5_000);
+});
+
+test("a codec switch is on the streamer's lane and in the events table, and in an incident near it", async ({
+  page,
+  context,
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  await signInAdmin(context);
+  const ana = await createUser(browser, uniqueUsername("tl.sw.ana"));
+  const bo = await createUser(browser, uniqueUsername("tl.sw.bo"));
+  const roomName = uniqueRoomName("timeline switch");
+  const reportId = `tl-switch-${Math.random().toString(36).slice(2, 10)}`;
+  await seedRoom(context, {
+    name: roomName,
+    hostUserId: ana.id,
+    createdAt: iso(0),
+    endedAt: iso(900),
+    presence: [
+      { userId: ana.id, startedAt: iso(0), endedAt: iso(900) },
+      { userId: bo.id, startedAt: iso(20), endedAt: iso(900) },
+    ],
+    streams: [{ userId: ana.id, startedAt: iso(100), endedAt: iso(500) }],
+    events: [
+      { at: iso(0), kind: "join", actorUserId: ana.id },
+      { at: iso(20), kind: "join", actorUserId: bo.id },
+      { at: iso(100), kind: "share_start", actorUserId: ana.id },
+      {
+        at: iso(200),
+        kind: "codec_switch",
+        actorUserId: ana.id,
+        details: { from: "video/AV1", to: "video/H264", reason: "cpu" },
+      },
+      {
+        at: iso(260),
+        kind: "problem_report",
+        actorUserId: bo.id,
+        targetUserId: ana.id,
+        details: { reportId, category: "frozen", note: "", snapshot: reportId },
+      },
+      { at: iso(500), kind: "share_stop", actorUserId: ana.id },
+    ],
+  });
+  await adminOnDashboard(page);
+  const section = await openFromRecentRooms(page, roomName);
+
+  // The full timeline: a mark on the streamer's lane, and a row in the events table.
+  const lanes = section.getByTestId("timeline-lanes");
+  await expect(lanes.locator(`[data-lane="person:${ana.id}"] [data-mark="codec"]`)).toHaveCount(1);
+  const switched = `${ana.username}'s video switched from AV1 to H.264`;
+  const table = section.getByRole("table", { name: "events in view" });
+  await expect(table).toContainText(switched);
+  await expect(table).toContainText("the streamer's computer could not keep up");
+
+  // And in the incident of a report within two minutes of it.
+  await lanes.getByRole("button", { name: /open the frozen \/ stuttering report at/ }).click();
+  const around = section.getByRole("table", { name: "events around the report" });
+  await expect(around).toContainText(switched);
 });

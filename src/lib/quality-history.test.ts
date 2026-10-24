@@ -254,6 +254,21 @@ describe("stepChange", () => {
   });
 });
 
+describe("codec switches", () => {
+  it("are kept per stream, stamped with the clock, and forgotten with it", () => {
+    const c = clock();
+    const h = new QualityHistory(c.now);
+    h.switched("send/bo", { from: "video/AV1", to: "video/H264" });
+    c.advance(5_000);
+    h.switched("send/cy", { from: "video/VP9", to: "video/VP8" });
+    expect(h.switches("send/bo")).toEqual([{ at: 1_000_000, from: "video/AV1", to: "video/H264" }]);
+    expect(h.switches("send/cy")).toHaveLength(1);
+    expect(h.switches("send/none")).toEqual([]);
+    h.forget("send/bo");
+    expect(h.switches("send/bo")).toEqual([]);
+  });
+});
+
 describe("step changes", () => {
   it("are kept oldest first, stamped with the clock", () => {
     const c = clock();

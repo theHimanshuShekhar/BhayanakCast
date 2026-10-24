@@ -7,6 +7,7 @@
 import { z } from "zod";
 import type { CandidateType, RelayProtocol } from "./ice.ts";
 import {
+  type CodecReason,
   QUALITY_SLOTS,
   type QualityDirection,
   type QualitySlot,
@@ -61,7 +62,14 @@ export interface QualityRow {
   targetBitrate: number | null;
   bitrate: number | null;
   qp: number | null;
+  /** For a `codec` row, the codec the sender moved to. */
   codec: string | null;
+  /** A `send` row: why the sender is on `codec`. */
+  codecReason: CodecReason | null;
+  /** A `codec` row: the codec the sender left. */
+  fromCodec: string | null;
+  encoderImplementation: string | null;
+  powerEfficientEncoder: boolean | null;
   loss: number | null;
   rttMs: number | null;
   freezes: number | null;
@@ -76,6 +84,15 @@ export interface QualityPath {
   kind: "direct" | "relay";
   /** A relay's transport to the TURN server, when the browser said. */
   relayProtocol: RelayProtocol | null;
+}
+
+/**
+ * The sender's encoder as the browser said it (Chromium, while capturing): `hardware` is
+ * `powerEfficientEncoder`, null if the browser didn't say.
+ */
+export interface QualityEncoder {
+  hardware: boolean | null;
+  implementation: string | null;
 }
 
 /** Seconds a pair's sender spent on one rung. */
@@ -93,6 +110,12 @@ export interface QualityPair {
   viewerBrowser: string | null;
   /** The codec the pair last used (the one `qp` is of). */
   codec: string | null;
+  /** The codec the pair's sender left at its last codec switch; null if it never switched. */
+  switchedFrom: string | null;
+  /** Why the sender is on `codec` (its latest send row says); null for a sender that didn't say. */
+  codecReason: CodecReason | null;
+  /** The sender's encoder as of its latest row that says; null if none ever did. */
+  encoder: QualityEncoder | null;
   path: QualityPath | null;
   /** Lowest rung first. Empty if the sender never reported. */
   rungTimes: RungTime[];
@@ -143,6 +166,13 @@ export interface SeriesPoint {
   v: number;
 }
 
+/** A codec switch of the sender's: the moment, and the codecs it left and moved to. */
+export interface CodecSwitchMark {
+  t: number;
+  from: string;
+  to: string;
+}
+
 /** A rung change of the sender's. */
 export interface RungChange {
   t: number;
@@ -168,6 +198,8 @@ export interface PairTimeline {
   rung: SeriesPoint[];
   rungs: string[];
   changes: RungChange[];
+  /** The sender's codec switches, for the charts to mark. */
+  codecSwitches: CodecSwitchMark[];
   /** More windows than `MAX_PAIR_SAMPLES`: the series cover the first ones. */
   truncated: boolean;
 }
@@ -195,6 +227,25 @@ const endsOf = (row: QualityRow) =>
   row.direction === "send"
     ? { streamerId: row.reporterUserId, viewerId: row.peerUserId }
     : { streamerId: row.peerUserId, viewerId: row.reporterUserId };
+
+/** The sender's latest encoder reading, if any row said (`sent` is in time order). */
+function encoderOf(sent: readonly QualityRow[]): QualityEncoder | null {
+  const row = sent.findLast(
+    (r) => r.encoderImplementation !== null || r.powerEfficientEncoder !== null,
+  );
+  return row
+    ? { hardware: row.powerEfficientEncoder, implementation: row.encoderImplementation }
+    : null;
+}
+
+/**
+ * The codec the sender left at its last switch, unless its latest codec is that one again (a
+ * later share started over on it): then the pair is not shown as switched.
+ */
+function switchedFromOf(sent: readonly QualityRow[], codec: string | null): string | null {
+  const from = sent.findLast((r) => r.trigger === "codec")?.fromCodec ?? null;
+  return from !== null && from.toLowerCase() !== codec?.toLowerCase() ? from : null;
+}
 
 function pathOf(rows: readonly QualityRow[]): QualityPath | null {
   const seen = rows.filter((row) => row.localCandidate !== null || row.remoteCandidate !== null);
@@ -309,6 +360,9 @@ export function aggregatePairs(rows: readonly QualityRow[]): QualityPair[] {
       slot: first.slot,
       viewerBrowser: browsers.get(viewerId) ?? null,
       codec,
+      switchedFrom: switchedFromOf(sent, codec),
+      codecReason: sent.findLast((r) => r.codecReason !== null)?.codecReason ?? null,
+      encoder: encoderOf(sent),
       path: pathOf(group),
       rungTimes: [...times]
         .sort((a, b) => (maxOf.get(a[0]) ?? 0) - (maxOf.get(b[0]) ?? 0))
@@ -366,6 +420,11 @@ export function timelineOf(rows: readonly QualityRow[]): PairTimeline {
     }),
     rungs,
     truncated: false,
+    codecSwitches: sent.flatMap((row): CodecSwitchMark[] =>
+      row.trigger === "codec" && row.fromCodec !== null && row.codec !== null
+        ? [{ t: row.at.getTime(), from: row.fromCodec, to: row.codec }]
+        : [],
+    ),
     changes: sent.flatMap((row): RungChange[] =>
       row.trigger === "rung" && row.rung !== null && row.toRung !== null
         ? [
