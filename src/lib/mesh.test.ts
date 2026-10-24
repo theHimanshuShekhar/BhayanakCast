@@ -11,6 +11,7 @@ import {
   type MeshOptions,
   QUALITY_INTERVAL_MS,
   SHARE_AUDIO_BITRATE,
+  sentCodecOf,
   withStartBitrate,
   withStereoOpus,
 } from "./mesh";
@@ -61,6 +62,8 @@ class FakeTransceiver {
     stats: Map<string, unknown>;
     /** How many times `setParameters` was called. */
     setCalls: number;
+    /** The codecs `getParameters()` reports: none until a description is negotiated. */
+    codecs?: { mimeType: string }[];
     getStats: () => Promise<Map<string, unknown>>;
     replaceTrack: (track: unknown) => Promise<void>;
     getParameters: () => Partial<RTCRtpSendParameters>;
@@ -74,12 +77,14 @@ class FakeTransceiver {
       track,
       stats: new Map<string, unknown>(),
       setCalls: 0,
+      codecs: undefined as { mimeType: string }[] | undefined,
       getStats: async () => sender.stats,
       replaceTrack: async (next: unknown) => {
         sender.track = next;
       },
       getParameters: () => {
         const reported = structuredClone(parameters);
+        if (sender.codecs) reported.codecs = sender.codecs as RTCRtpCodecParameters[];
         if (!browser.reportsDegradation) delete reported.degradationPreference;
         return reported;
       },
@@ -1726,6 +1731,221 @@ describe("Mesh uplink budget (ADR 2)", () => {
   });
 });
 
+describe("Mesh: caps by codec (ADR 2 addendum)", () => {
+  const MBPS = 1_000_000;
+  const H264 = "video/H264";
+  const encoding = (t: FakeTransceiver) => t.sender.getParameters().encodings?.[0];
+
+  /**
+   * Ana shares a 1080p60 screen (text room: 720p30, 900p30, 1080p30 at 3 Mbps, 1080p60 at 6) to
+   * `names`, all connected, with `uplink` to spend. Ana's connections are in the order of `names`.
+   */
+  async function sharing(names: string[], uplink: number, extra: Partial<MeshOptions> = {}) {
+    const network = new Map<string, Mesh>();
+    const ana = page("ana", network, undefined, undefined, uplink, extra);
+    const viewers = names.map((name) => page(name, network));
+    for (const mesh of network.values()) {
+      mesh.join([{ userId: "ana" }, ...names.map((userId) => ({ userId }))]);
+    }
+    await settle();
+    const screen = trackWith("ana screen", { width: 1920, height: 1080, frameRate: 60 }, "text");
+    ana.mesh.setLocalTracks({ screen });
+    await settle();
+    connect(ana, ...viewers);
+    await settle();
+    const to = ana.pcs.map((pc) => carrying(pc, screen) as FakeTransceiver);
+    return { ana, viewers, to };
+  }
+  const notes = (sent: SignalPayload[]) =>
+    sent.filter((p): p is Extract<SignalPayload, { kind: "quality" }> => p.kind === "quality");
+
+  it("applies 1.5x the step's cap to a pair sending H.264, and leaves one on VP9", async () => {
+    // 8 Mbps over two viewers: 1080p30 each, 3 Mbps on a codec that is not known yet.
+    const { ana, to } = await sharing(["bo", "cy"], 8 * MBPS);
+    const [toBo, toCy] = to as [FakeTransceiver, FakeTransceiver];
+    expect(encoding(toBo)?.maxBitrate).toBe(3 * MBPS);
+    toBo.sender.stats = senderStats(0, H264);
+    toCy.sender.stats = senderStats(0, "video/VP9");
+    await ana.mesh.adjust();
+    await settle();
+    expect(encoding(toBo)).toMatchObject({ maxBitrate: 4.5 * MBPS, maxFramerate: 30 });
+    expect(encoding(toCy)).toMatchObject({ maxBitrate: 3 * MBPS, maxFramerate: 30 });
+    // The labels are the steps' own, and the budget's targets add up the scaled caps.
+    expect(ana.mesh.quality().map((q) => q.screen)).toEqual([
+      { rung: "1080p30", codec: H264 },
+      { rung: "1080p30", codec: "video/VP9" },
+    ]);
+    expect(ana.mesh.uplink()).toEqual({ budget: 8 * MBPS, targeted: 7.5 * MBPS });
+    // The viewer is told the scaled cap with the same step.
+    expect(notes(ana.sent).map((n) => [n.step, n.maxBitrate])).toEqual([
+      ["1080p30", 3 * MBPS],
+      ["1080p30", 3 * MBPS],
+      ["1080p30", 4.5 * MBPS],
+    ]);
+    ana.mesh.close();
+  });
+
+  it("takes no codec from the parameters while a remote offer is applied and not yet answered", async () => {
+    // One viewer is entitled to all 8 Mbps: it starts at 1080p60 (6 Mbps) on a codec not known yet.
+    const { ana, to } = await sharing(["bo"], 8 * MBPS);
+    const [toBo] = to as [FakeTransceiver];
+    expect(ana.mesh.quality()[0]?.screen?.rung).toBe("1080p60");
+    // Until the answer is set the parameters list the browser's capabilities, VP8 first: not
+    // what will be sent, so they must not scale the cap or start the step again (VP8's 1.5x
+    // would refit 1080p60 to 1080p30).
+    toBo.sender.codecs = [{ mimeType: "video/VP8" }, { mimeType: "video/VP9" }];
+    (ana.pcs[0] as FakePC).signalingState = "have-remote-offer";
+    await ana.mesh.adjust();
+    await settle();
+    expect(ana.mesh.quality()[0]?.screen).toEqual({ rung: "1080p60" });
+    expect(encoding(toBo)?.maxBitrate).toBe(6 * MBPS);
+    ana.mesh.close();
+  });
+
+  it("scales VP8 too, and neither AV1 nor an unknown codec", async () => {
+    const { ana, to } = await sharing(["bo", "cy", "di"], 12 * MBPS);
+    const codecs = ["video/VP8", "video/AV1", "video/H265"];
+    to.forEach((t, i) => {
+      t.sender.stats = senderStats(0, codecs[i]);
+    });
+    await ana.mesh.adjust();
+    await settle();
+    expect(to.map((t) => encoding(t)?.maxBitrate)).toEqual([4.5 * MBPS, 3 * MBPS, 3 * MBPS]);
+    ana.mesh.close();
+  });
+
+  it("re-applies the cap when the codec changes, and again when it changes back", async () => {
+    const { ana, to } = await sharing(["bo"], 12 * MBPS);
+    const [toBo] = to as [FakeTransceiver];
+    toBo.sender.stats = senderStats(0, "video/VP9");
+    await ana.mesh.adjust();
+    await settle();
+    const rung = ana.mesh.quality()[0]?.screen?.rung;
+    expect(encoding(toBo)?.maxBitrate).toBe(rungCap(rung));
+    const calls = toBo.sender.setCalls;
+
+    // The codec changes, the step does not: the next pass applies the scaled cap.
+    toBo.sender.stats = senderStats(0, H264);
+    await ana.mesh.adjust();
+    await settle();
+    expect(ana.mesh.quality()[0]?.screen?.rung).toBe(rung);
+    expect(encoding(toBo)?.maxBitrate).toBe((rungCap(rung) as number) * 1.5);
+    expect(toBo.sender.setCalls).toBe(calls + 1);
+
+    // Nothing changed since: nothing is applied again.
+    await ana.mesh.adjust();
+    await settle();
+    expect(toBo.sender.setCalls).toBe(calls + 1);
+
+    toBo.sender.stats = senderStats(0, "video/AV1");
+    await ana.mesh.adjust();
+    await settle();
+    expect(encoding(toBo)?.maxBitrate).toBe(rungCap(rung));
+    expect(toBo.sender.setCalls).toBe(calls + 2);
+    ana.mesh.close();
+  });
+
+  it("steps a pair down to fit the budget when its codec turns out to be H.264", async () => {
+    // 7 Mbps over two viewers: 3.5 each, so 1080p30 (3 Mbps) each: 6 Mbps in all.
+    const { ana, to } = await sharing(["bo", "cy"], 7 * MBPS);
+    const [toBo, toCy] = to as [FakeTransceiver, FakeTransceiver];
+    expect(ana.mesh.uplink()).toEqual({ budget: 7 * MBPS, targeted: 6 * MBPS });
+    toBo.sender.stats = senderStats(0, H264);
+    toCy.sender.stats = senderStats(0, "video/VP9");
+    await ana.mesh.adjust();
+    await settle();
+    // bo's 1080p30 now costs 4.5 and takes more than its 3.5 share: it, and not cy, gives way, to
+    // 900p30 at 2.08 x 1.5 Mbps.
+    expect(ana.mesh.quality().map((q) => q.screen?.rung)).toEqual(["900p30", "1080p30"]);
+    expect(encoding(toBo)?.maxBitrate).toBe(3.12 * MBPS);
+    expect(encoding(toCy)?.maxBitrate).toBe(3 * MBPS);
+    expect(ana.mesh.uplink()).toEqual({ budget: 7 * MBPS, targeted: 6.12 * MBPS });
+    ana.mesh.close();
+  });
+
+  it("steps down under pressure to what the estimate carries at the scaled caps", async () => {
+    const { ana, to } = await sharing(["bo"], 20 * MBPS);
+    const [toBo] = to as [FakeTransceiver];
+    expect(ana.mesh.quality()[0]?.screen?.rung).toBe("1080p60");
+    // Loss, with a 4 Mbps estimate: a step down lands where the scaled cap fits it.
+    const lossy = (estimate: number) => {
+      const stats = senderStats(0.1, H264);
+      stats.set("p", { id: "p", type: "candidate-pair", availableOutgoingBitrate: estimate });
+      return stats;
+    };
+    toBo.sender.stats = lossy(4 * MBPS);
+    for (let i = 0; i < 4; i++) await ana.mesh.adjust();
+    // 1080p30 is 4.5 Mbps on H.264, over the estimate (3 Mbps on VP9 would fit): 900p30, 3.12.
+    expect(ana.mesh.quality()[0]?.screen?.rung).toBe("900p30");
+    expect(encoding(toBo)?.maxBitrate).toBe(3.12 * MBPS);
+    ana.mesh.close();
+  });
+
+  it("probes on the scaled cap: an H.264 pair has to grow the budget where VP9 fits", async () => {
+    const climb = async (codec: string) => {
+      // One viewer is entitled to all 8 Mbps. It starts at 1080p60 on a codec not yet known.
+      const { ana, to } = await sharing(["bo"], 8 * MBPS);
+      const [toBo] = to as [FakeTransceiver];
+      toBo.sender.stats = senderStats(0.1, codec);
+      for (let i = 0; i < 4; i++) await ana.mesh.adjust();
+      toBo.sender.stats = senderStats(0, codec);
+      for (let i = 0; i < 20; i++) await ana.mesh.adjust();
+      await settle();
+      const result = {
+        rung: ana.mesh.quality()[0]?.screen?.rung,
+        maxBitrate: encoding(toBo)?.maxBitrate,
+        budget: ana.mesh.uplink().budget,
+      };
+      ana.mesh.close();
+      return result;
+    };
+    // VP9: down to 1080p30 and back up to 1080p60 (6 Mbps), within the 8 Mbps entitled.
+    expect(await climb("video/VP9")).toEqual({
+      rung: "1080p60",
+      maxBitrate: 6 * MBPS,
+      budget: 8 * MBPS,
+    });
+    // H.264: 1080p60 is 9 Mbps, past the 8 that it is entitled to: it goes up only by growing
+    // the budget to fit the probe, on a clean spell.
+    expect(await climb(H264)).toEqual({
+      rung: "1080p60",
+      maxBitrate: 9 * MBPS,
+      budget: 9 * MBPS,
+    });
+  });
+
+  it("reports the scaled cap as the telemetry's maxBitrate", async () => {
+    const rows: PendingSample[] = [];
+    const { ana, to } = await sharing(["bo"], 5 * MBPS, {
+      onQuality: (row) => rows.push(row),
+      sampleWindowMs: 24_000,
+    });
+    const [toBo] = to as [FakeTransceiver];
+    // 5 Mbps: 1080p30 (3 Mbps), 4.5 Mbps on H.264, still within the budget.
+    for (let seconds = 4; seconds <= 28; seconds += 4) {
+      toBo.sender.stats = senderStats(0, H264, {
+        bytesSent: seconds * 250_000,
+        timestamp: seconds * 1_000,
+      });
+      await ana.mesh.adjust();
+    }
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      direction: "send",
+      rung: "1080p30",
+      maxBitrate: 4.5 * MBPS,
+      codec: H264,
+    });
+    ana.mesh.close();
+  });
+});
+
+/** The cap of a 1080p60 screen's step by label, on AV1 and VP9 (see the steps above). */
+const rungCap = (label: string | undefined) =>
+  ({ "720p30": 1_330_000, "900p30": 2_080_000, "1080p30": 3_000_000, "1080p60": 6_000_000 })[
+    label ?? ""
+  ];
+
 describe("Mesh codec choice (ADR 2)", () => {
   const codec = (mimeType: string) => ({ mimeType, clockRate: 90_000 });
   const chromium: VideoCodecs = {
@@ -2493,6 +2713,47 @@ describe("withStereoOpus", () => {
   });
 });
 
+describe("sentCodecOf", () => {
+  const section = (mid: string, line: string, ...rtpmaps: string[]) =>
+    [`m=video 9 UDP/TLS/RTP/SAVPF ${line}`, `a=mid:${mid}`, ...rtpmaps, ""].join("\r\n");
+  const sdp = (...sections: string[]) =>
+    ["v=0", "o=- 1 2 IN IP4 127.0.0.1", ...sections].join("\r\n");
+  const rtpmaps = [
+    "a=rtpmap:96 VP8/90000",
+    "a=rtpmap:97 rtx/90000",
+    "a=rtpmap:98 VP9/90000",
+    "a=rtpmap:102 H264/90000",
+    "a=rtpmap:103 red/90000",
+  ];
+
+  it("is the first payload type of the section's m-line that carries media, as its MIME type", () => {
+    const mids = new Set(["1"]);
+    expect(sentCodecOf(sdp(section("1", "102 96 97 98", ...rtpmaps)), mids)).toBe("video/H264");
+    expect(sentCodecOf(sdp(section("1", "98 96 97", ...rtpmaps)), mids)).toBe("video/VP9");
+    expect(sentCodecOf(sdp(section("1", "96 98", ...rtpmaps)), mids)).toBe("video/VP8");
+  });
+
+  it("skips retransmission and redundancy formats, which carry no media themselves", () => {
+    const mids = new Set(["1"]);
+    expect(sentCodecOf(sdp(section("1", "97 103 102 96", ...rtpmaps)), mids)).toBe("video/H264");
+    expect(sentCodecOf(sdp(section("1", "97 103", ...rtpmaps)), mids)).toBeUndefined();
+  });
+
+  it("reads only the section whose mid is asked for", () => {
+    const two = sdp(section("0", "96 98", ...rtpmaps), section("1", "102 96", ...rtpmaps));
+    expect(sentCodecOf(two, new Set(["0"]))).toBe("video/VP8");
+    expect(sentCodecOf(two, new Set(["1"]))).toBe("video/H264");
+    expect(sentCodecOf(two, new Set(["2"]))).toBeUndefined();
+    expect(sentCodecOf(two, new Set())).toBeUndefined();
+  });
+
+  it("says nothing of an audio section, or a payload type with no rtpmap", () => {
+    const audio = ["m=audio 9 UDP/TLS/RTP/SAVPF 111", "a=mid:1", "a=rtpmap:111 opus/48000/2", ""];
+    expect(sentCodecOf(sdp(audio.join("\r\n")), new Set(["1"]))).toBeUndefined();
+    expect(sentCodecOf(sdp(section("1", "45 96", ...rtpmaps)), new Set(["1"]))).toBe("video/VP8");
+  });
+});
+
 describe("withStartBitrate", () => {
   /** A Chromium-like description: share audio (mid 0), the screen (mid 1), a camera (mid 2). */
   const video = (mid: string) => [
@@ -2612,20 +2873,36 @@ describe("Mesh: the seeded estimate and a share's first minute (ADR 2 addendum)"
     vi.useRealTimers();
   });
 
-  /** The video section of a description, the way Chromium writes it: VP8 has no fmtp line. */
-  const chromium = (mid: string) =>
-    [
-      "v=0",
-      "o=- 1 2 IN IP4 127.0.0.1",
-      "m=video 9 UDP/TLS/RTP/SAVPF 96 97 98",
-      `a=mid:${mid}`,
-      "a=rtpmap:96 VP8/90000",
-      "a=rtpmap:97 rtx/90000",
-      "a=fmtp:97 apt=96",
-      "a=rtpmap:98 VP9/90000",
-      "a=fmtp:98 profile-id=0",
-      "",
-    ].join("\r\n");
+  /**
+   * The video section of a description, the way Chromium writes it: VP8 has no fmtp line. The
+   * codec the other side lists first is the one the sender sends: VP8 and VP9 are offered, VP9
+   * first, unless `first` is H264, which this offers alone with its retransmission format.
+   */
+  const chromium = (mid: string, first: "VP9" | "H264" = "VP9") =>
+    first === "H264"
+      ? [
+          "v=0",
+          "o=- 1 2 IN IP4 127.0.0.1",
+          "m=video 9 UDP/TLS/RTP/SAVPF 97 99",
+          `a=mid:${mid}`,
+          "a=rtpmap:97 rtx/90000",
+          "a=fmtp:97 apt=99",
+          "a=rtpmap:99 H264/90000",
+          "a=fmtp:99 profile-level-id=42e01f",
+          "",
+        ].join("\r\n")
+      : [
+          "v=0",
+          "o=- 1 2 IN IP4 127.0.0.1",
+          "m=video 9 UDP/TLS/RTP/SAVPF 98 96 97",
+          `a=mid:${mid}`,
+          "a=rtpmap:96 VP8/90000",
+          "a=rtpmap:97 rtx/90000",
+          "a=fmtp:97 apt=96",
+          "a=rtpmap:98 VP9/90000",
+          "a=fmtp:98 profile-id=0",
+          "",
+        ].join("\r\n");
 
   /**
    * Ana shares `capture` to `names`, with `uplink` to spend. The fake browser writes no video
@@ -2645,6 +2922,7 @@ describe("Mesh: the seeded estimate and a share's first minute (ADR 2 addendum)"
       early = true,
       polite = false,
       withCam = false,
+      first = "VP9" as "VP9" | "H264",
     } = {},
   ) {
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -2659,12 +2937,15 @@ describe("Mesh: the seeded estimate and a share's first minute (ADR 2 addendum)"
     const receive = ana.mesh.receive.bind(ana.mesh);
     ana.mesh.receive = (from, payload) => {
       // Her screen sender, whichever capture it carries now.
-      const mid = ana.pcs[names.indexOf(from)]?.transceivers.find((t) =>
+      const transceiver = ana.pcs[names.indexOf(from)]?.transceivers.find((t) =>
         /^ana (screen|window)/.test((t.sender.track as MediaStreamTrack | null)?.id ?? ""),
-      )?.mid;
+      );
+      const mid = transceiver?.mid;
       const answer = payload.kind === "description" && payload.description.type === "answer";
-      if (!answer || !mid) return receive(from, payload);
-      receive(from, { ...payload, description: { type: "answer", sdp: chromium(mid) } });
+      if (!answer || !transceiver || !mid) return receive(from, payload);
+      // Once negotiated, the sender reports the codecs it was given, the one it sends first.
+      transceiver.sender.codecs = [{ mimeType: `video/${first}` }, { mimeType: "video/rtx" }];
+      receive(from, { ...payload, description: { type: "answer", sdp: chromium(mid, first) } });
     };
     const room = [{ userId: self }, ...names.map((userId) => ({ userId }))];
     if (mic) ana.mesh.setLocalTracks({ mic: track("ana mic") });
@@ -2725,6 +3006,44 @@ describe("Mesh: the seeded estimate and a share's first minute (ADR 2 addendum)"
       expect(wide.ana.mesh.quality().map((q) => q.screen?.rung)).toEqual(["2968×1242@60"]);
       expect(seeds(wide.ana)).toEqual([[9603, 9603]]);
       wide.ana.mesh.close();
+    });
+
+    it("is 90% of the scaled cap when the codec it is negotiated to send is H.264", async () => {
+      // One viewer is entitled to all 8 Mbps. On VP9 it starts at 1080p60 (6 Mbps, seed 5400).
+      // On H.264 that step is 9 Mbps, over the 8: it starts at 1080p30, 3 x 1.5 = 4.5 Mbps, and
+      // seeds at 90% of that.
+      const vp9 = await share(["bo"], 8 * MBPS);
+      expect(vp9.ana.mesh.quality().map((q) => q.screen?.rung)).toEqual(["1080p60"]);
+      expect(seeds(vp9.ana)).toEqual([[5400, 5400]]);
+      vp9.ana.mesh.close();
+
+      const h264 = await share(["bo"], 8 * MBPS, undefined, { first: "H264" });
+      expect(h264.ana.mesh.quality().map((q) => q.screen?.rung)).toEqual(["1080p30"]);
+      expect(seeds(h264.ana)).toEqual([[4050]]);
+      expect(firstSdp(h264.ana)).toContain(
+        "a=fmtp:99 profile-level-id=42e01f;x-google-start-bitrate=4050",
+      );
+      // The step it started on is the one its encoding is capped for, on the scaled cap.
+      expect(h264.senders[0]?.sender.getParameters().encodings?.[0]).toMatchObject({
+        maxBitrate: 4.5 * MBPS,
+        maxFramerate: 30,
+      });
+      h264.ana.mesh.close();
+    });
+
+    it("is still never above the pair's ceiling on H.264", async () => {
+      // 4 Mbps for one viewer: 1080p30 on H.264 (4.5) is too much, 900p30 (2.08 x 1.5 = 3.12)
+      // starts, and 90% of that is under the ceiling. At 2.5 Mbps only 720p30 (2) is left, whose
+      // 90% (1.8) is.
+      const four = await share(["bo"], 4 * MBPS, undefined, { first: "H264" });
+      expect(four.ana.mesh.quality().map((q) => q.screen?.rung)).toEqual(["900p30"]);
+      expect(seeds(four.ana)).toEqual([[2808]]);
+      four.ana.mesh.close();
+      // A budget under the lowest step's scaled cap: the ceiling is what the seed is held to.
+      const tight = await share(["bo"], 1 * MBPS, undefined, { first: "H264" });
+      expect(tight.ana.mesh.quality().map((q) => q.screen?.rung)).toEqual(["720p30"]);
+      expect(seeds(tight.ana)).toEqual([[1000]]);
+      tight.ana.mesh.close();
     });
 
     it("never passes the pair's ceiling", async () => {

@@ -31,6 +31,8 @@
  * The thresholds are provisional (ADR 2 addendum).
  */
 
+import { COSTLY_CODECS } from "./codecs.ts";
+
 export interface Rung {
   label: string;
   /** Encoded width in pixels, for a screen step (a camera's follows its capture). */
@@ -149,6 +151,25 @@ export function screenSteps(capture: Capture, giveUpFirst: StepOrder): Rung[] {
       Math.round((size.width * size.height * frameRate * BITS_PER_PIXEL) / 10_000) * 10_000,
   }));
 }
+
+/** What a step's `maxBitrate` is multiplied by for a pair sending H.264 or VP8 (ADR 2 addendum). */
+export const CODEC_CAP_SCALE = 1.5;
+
+/**
+ * The cap of `step` for a sender actually sending `codec` (a MIME type, as stats report it): the
+ * step's `maxBitrate`, times `CODEC_CAP_SCALE` for H.264 and VP8. AV1, VP9 and a codec not yet
+ * known keep the step's own. This is the bitrate everything downstream works on (the encoding,
+ * the budget, probes, the seed, the telemetry); a step's label does not change with it.
+ */
+export function codecCap(step: Rung, codec?: string): number {
+  return codec && COSTLY_CODECS.includes(codec.toLowerCase())
+    ? Math.round(step.maxBitrate * CODEC_CAP_SCALE)
+    : step.maxBitrate;
+}
+
+/** `steps` with their caps for `codec` (`codecCap`), for the fits and decisions on a ladder. */
+export const scaleSteps = (steps: readonly Rung[], codec?: string): readonly Rung[] =>
+  codec ? steps.map((step) => ({ ...step, maxBitrate: codecCap(step, codec) })) : steps;
 
 /**
  * Where a sender whose steps were rebuilt (the capture was resized, or its frame rate became or

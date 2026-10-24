@@ -6,8 +6,10 @@ import {
   BITS_PER_PIXEL,
   CAMERA_DEFAULT_RUNG,
   CAMERA_LADDER,
+  CODEC_CAP_SCALE,
   carryOver,
   ceilingOf,
+  codecCap,
   DOWN_SAMPLES,
   FIRST_MINUTE_MS,
   FIRST_MINUTE_UP_SAMPLES,
@@ -29,6 +31,7 @@ import {
   readSample,
   START_BITRATE_SHARE,
   type StatsSample,
+  scaleSteps,
   screenSteps,
   seedBitrate,
   shedFirst,
@@ -794,10 +797,68 @@ describe("seedBitrate (ADR 2 addendum: the seeded estimate)", () => {
     expect(seedBitrate(top.maxBitrate)).toBe(9_603_000);
   });
 
+  it("is 90% of the scaled cap on H.264 or VP8, and still never above the ceiling", () => {
+    const step1080 = SCREEN_LADDER[SCREEN_DEFAULT_RUNG] as Rung;
+    expect(seedBitrate(codecCap(step1080, "video/H264"))).toBe(4_050_000);
+    expect(seedBitrate(codecCap(step1080, "video/VP8"), 4_000_000)).toBe(4_000_000);
+    expect(seedBitrate(codecCap(step1080, "video/VP9"))).toBe(2_700_000);
+  });
+
   it("never passes the pair's ceiling", () => {
     expect(seedBitrate(6_000_000, 4_000_000)).toBe(4_000_000);
     expect(seedBitrate(6_000_000, 5_400_000)).toBe(5_400_000);
     expect(seedBitrate(6_000_000, 20_000_000)).toBe(5_400_000);
+  });
+});
+
+describe("codecCap (ADR 2 addendum: caps by codec)", () => {
+  const step1080 = SCREEN_LADDER[SCREEN_DEFAULT_RUNG] as Rung;
+
+  it("scales a step's maxBitrate by 1.5 for H.264 and VP8, and leaves AV1 and VP9", () => {
+    expect(CODEC_CAP_SCALE).toBe(1.5);
+    expect(step1080.maxBitrate).toBe(3_000_000);
+    expect(codecCap(step1080, "video/H264")).toBe(4_500_000);
+    expect(codecCap(step1080, "video/VP8")).toBe(4_500_000);
+    expect(codecCap(step1080, "video/VP9")).toBe(3_000_000);
+    expect(codecCap(step1080, "video/AV1")).toBe(3_000_000);
+    // Cameras are steps too.
+    expect(codecCap(CAMERA_LADDER[0] as Rung, "video/H264")).toBe(225_000);
+    expect(codecCap(CAMERA_LADDER[1] as Rung, "video/VP8")).toBe(750_000);
+  });
+
+  it("goes by the MIME type whatever its case, and leaves an unknown codec at the step's cap", () => {
+    expect(codecCap(step1080, "video/h264")).toBe(4_500_000);
+    expect(codecCap(step1080, "VIDEO/VP8")).toBe(4_500_000);
+    expect(codecCap(step1080, undefined)).toBe(3_000_000);
+    expect(codecCap(step1080, "video/H265")).toBe(3_000_000);
+  });
+
+  it("is a whole number of bits per second", () => {
+    expect(codecCap({ ...step1080, maxBitrate: 1_000_001 }, "video/VP8")).toBe(1_500_002);
+  });
+
+  it("scales a whole ladder, keeping labels, sizes and rates", () => {
+    const scaled = scaleSteps(SCREEN_LADDER, "video/H264");
+    expect(scaled.map((s) => s.label)).toEqual(SCREEN_LADDER.map((s) => s.label));
+    expect(scaled.map((s) => s.maxBitrate)).toEqual(
+      SCREEN_LADDER.map((s) => s.maxBitrate * CODEC_CAP_SCALE),
+    );
+    expect(scaled.map((s) => [s.height, s.frameRate])).toEqual(
+      SCREEN_LADDER.map((s) => [s.height, s.frameRate]),
+    );
+    expect(scaleSteps(SCREEN_LADDER, "video/AV1")).toEqual(SCREEN_LADDER);
+    expect(scaleSteps(SCREEN_LADDER, undefined)).toEqual(SCREEN_LADDER);
+  });
+
+  it("moves the ladder's decisions: the fit, and a step down to what the estimate carries", () => {
+    // 5 Mbps fits 1080p30 on AV1 (3 Mbps), but 1080p60 (6 Mbps) only fits as H.264's 1080p30 (4.5).
+    const h264 = scaleSteps(SCREEN_LADDER, "video/H264");
+    expect(fitRung(SCREEN_LADDER, 4_000_000)).toBe(2);
+    expect(fitRung(h264, 4_000_000)).toBe(1);
+    expect(fitRung(h264, 4_500_000)).toBe(2);
+    const lossy = times(DOWN_SAMPLES, { ...LOSSY, availableBitrate: 4_000_000 });
+    expect(nextRung(SCREEN_LADDER, lossy, TOP)).toBe(2);
+    expect(nextRung(h264, lossy, TOP)).toBe(1);
   });
 });
 

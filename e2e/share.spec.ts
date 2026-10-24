@@ -1,5 +1,6 @@
 import type { Browser, BrowserContext, Page } from "@playwright/test";
-import { fitRung, MAX_CAPTURE_PIXELS, screenSteps } from "../src/lib/quality";
+import { COSTLY_CODECS } from "../src/lib/codecs";
+import { codecCap, fitRung, MAX_CAPTURE_PIXELS, screenSteps } from "../src/lib/quality";
 import { MAX_CLIENT_MESSAGE_BYTES } from "../src/lib/realtime";
 import { E2E_ADMIN_DISCORD_ID, signIn } from "./auth";
 import { expect, newPage, test } from "./fixtures";
@@ -543,6 +544,69 @@ test("a share's send rows say why it is on its codec, and how hard its encoder w
         expect(row.powerEfficientEncoder).toBeNull();
       }
     }
+  } finally {
+    await viewer.context.close();
+  }
+});
+
+/**
+ * In every page of `context`, the video codecs the browser says it can send are only H.264, or
+ * VP8 where it has no H.264 (Firefox here): a test-only codec preference. The Mesh offers what
+ * its page can send, best first, so every pair this page sends to ends up on that codec.
+ */
+async function sendOnlyCostlyCodec(context: BrowserContext) {
+  await context.addInitScript((costly: string[]) => {
+    const capabilities = RTCRtpSender.getCapabilities.bind(RTCRtpSender);
+    RTCRtpSender.getCapabilities = (kind) => {
+      const all = capabilities(kind);
+      if (kind !== "video" || !all) return all;
+      const has = (mime: string) => all.codecs.some((c) => c.mimeType.toLowerCase() === mime);
+      const only = costly.find(has);
+      const kept = (c: { mimeType: string }) =>
+        c.mimeType.toLowerCase() === only ||
+        /^video\/(rtx|red|ulpfec|flexfec-03)$/i.test(c.mimeType);
+      return { ...all, codecs: all.codecs.filter(kept) };
+    };
+  }, COSTLY_CODECS);
+}
+
+test("a pair on H.264 or VP8 is capped at 1.5x the step's bitrate (ADR 2 addendum: caps by codec)", async ({
+  page,
+  context,
+  browser,
+}) => {
+  test.setTimeout(90_000);
+  await sendOnlyCostlyCodec(context);
+  await instrument(context);
+  const streamerId = await signIn(context, { username: "share.costly" });
+  // A gaming room: shares give up size before frames.
+  const roomId = await createRoomOnPage(page, {
+    name: uniqueRoomName("share costly"),
+    kind: "gaming",
+  });
+  const viewer = await joinAs(browser, "share.costlyviewer", roomId);
+  try {
+    await page.getByRole("button", { name: "Share screen" }).click();
+    await expect(page.getByRole("button", { name: "Stop sharing" })).toBeEnabled();
+    await expect.poll(() => screenPlays(viewer.page, streamerId), { timeout: 30_000 }).toBe(true);
+
+    // The only viewer is entitled to the whole budget: the top step, at the cap of the codec the
+    // sender is on (`codecCap`: scaled, as it is on H.264 or VP8).
+    const { capture } = await screenEncodings(page);
+    const top = screenSteps(capture, "size").at(-1);
+    expect(top?.maxBitrate).toBeGreaterThan(0);
+    await expect
+      .poll(
+        async () => {
+          const [sender] = (await screenEncodings(page)).senders;
+          return {
+            costly: COSTLY_CODECS.includes(sender?.codec?.toLowerCase() ?? ""),
+            atCap: !!top && sender?.maxBitrate === codecCap(top, sender?.codec),
+          };
+        },
+        { timeout: 30_000 },
+      )
+      .toEqual({ costly: true, atCap: true });
   } finally {
     await viewer.context.close();
   }
