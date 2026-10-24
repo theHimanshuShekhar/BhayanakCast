@@ -64,12 +64,23 @@
  * strain at once the budget drops towards what was being sent and senders step down, cameras
  * first, until the targets fit (ADR 2 addenda). Each side also tells the other which video
  * codecs it can decode (in `hello` and every description), and orders its own senders' codecs
- * best first, AV1 > VP9 > H.264 > VP8, among those (./codecs.ts). A codec preference takes effect
- * in the next offer, which browsers version as they do any other.
+ * best first, AV1 > VP9 > H.264 > VP8, among those (./codecs.ts). A streamer's own order can
+ * differ (Firefox sends H.264, a hardware VP9 goes first): the caller chooses it when a share or
+ * camera turns on (`chooseStartOrder`) and gives it with `setStartOrder` before the tracks, so no
+ * sender is made before it; it is kept for that kind until the kind turns off. A codec
+ * preference takes effect in the next offer, which browsers version as they do any other.
  *
  * Local tracks belong to the caller (./local-media.ts): the Mesh never stops them.
  */
-import { localVideoCodecs, orderCodecs, type VideoCodecs, videoMimeTypes } from "./codecs";
+import {
+  type Capture,
+  codecReasonOf,
+  localVideoCodecs,
+  orderCodecs,
+  type StartOrder,
+  type VideoCodecs,
+  videoMimeTypes,
+} from "./codecs";
 import {
   type ConnectionEvent,
   type NegotiationStep,
@@ -306,7 +317,7 @@ const SLOT_KIND: Record<MediaSlot, "audio" | "video"> = {
   screenAudio: "audio",
 };
 
-type VideoSlot = "screen" | "cam";
+export type VideoSlot = "screen" | "cam";
 const VIDEO_SLOTS: readonly VideoSlot[] = ["screen", "cam"];
 
 /**
@@ -345,6 +356,14 @@ const SLOTS: Record<VideoSlot, SlotPolicy> = {
   },
 };
 const isVideoSlot = (slot: MediaSlot): slot is VideoSlot => slot in SLOTS;
+
+/** What `track` captures for `slot`, and the bitrate of the step it starts on: what `chooseStartOrder` asks of. */
+export function captureOf(slot: VideoSlot, track: MediaStreamTrack): Capture {
+  const policy = SLOTS[slot];
+  const { width, height, frameRate } = track.getSettings?.() ?? {};
+  const { steps } = policy.steps(track);
+  return { width, height, frameRate, bitrate: (steps[policy.start(steps)] as Rung).maxBitrate };
+}
 /**
  * The steps a sender moves along with the caps of the codec it actually sends (`scaleSteps`):
  * every bitrate decision (the encoding, the budget, probes, telemetry) reads these, never the
@@ -541,8 +560,9 @@ interface Adaptation extends LadderState {
    */
   startedAt: number;
   /**
-   * Why the sender is on its codec, which its telemetry rows say. Always `preferred` until the
-   * up-front pick and the codec switch (ADR 2, codecs addendum) set another.
+   * Why the sender was given its codec: the reason of the start order its kind was given,
+   * until the codec switch (ADR 2, codecs addendum) sets another. Its telemetry rows say it
+   * only while the codec sent is the one it is about (`codecReasonOf`).
    */
   codecReason: CodecReason;
   /** The latest reading (the next one's `sendBitrate` is measured from it). */
@@ -623,6 +643,8 @@ export class Mesh {
   readonly #log: (message: string, error?: unknown) => void;
   readonly #RTCPeerConnection: typeof RTCPeerConnection;
   readonly #codecs: VideoCodecs | undefined;
+  /** Per video slot, the order its codecs are offered in while it is on (absent: the normal one). */
+  readonly #codecOrders: Partial<Record<VideoSlot, StartOrder>> = {};
   readonly #firstMinuteMs: number;
   /** What all the video senders' targets may add up to (their sum is `#committed`). */
   readonly #budget: UplinkBudget;
@@ -660,7 +682,10 @@ export class Mesh {
         emit: options.onQuality,
         windowMs: options.sampleWindowMs,
         startedAt: ({ peerId, slot }) => this.#links.get(peerId)?.quality[slot]?.startedAt,
-        codecReason: ({ peerId, slot }) => this.#links.get(peerId)?.quality[slot]?.codecReason,
+        codecReason: ({ peerId, slot }) => {
+          const state = this.#links.get(peerId)?.quality[slot];
+          return state && codecReasonOf(state.codecReason, state.codec);
+        },
       });
     }
   }
@@ -723,7 +748,7 @@ export class Mesh {
       link.remoteCodecs = payload.codecs;
       for (const slot of VIDEO_SLOTS) {
         const transceiver = link.own.get(slot);
-        if (transceiver) this.#prefer(link, transceiver);
+        if (transceiver) this.#prefer(link, slot, transceiver);
       }
     }
     if (payload.kind === "hello") {
@@ -761,6 +786,10 @@ export class Mesh {
     if (this.#closed) return;
     for (const [slot, track] of Object.entries(tracks) as [MediaSlot, MediaStreamTrack | null][]) {
       if (track === undefined) continue;
+      if (!track && isVideoSlot(slot) && this.#codecOrders[slot]) {
+        delete this.#codecOrders[slot];
+        this.#preferAll(slot);
+      }
       // A new capture starts at its ladder's default again.
       if (track && track !== this.#local[slot] && isVideoSlot(slot)) {
         for (const link of this.#links.values()) {
@@ -779,6 +808,25 @@ export class Mesh {
         if (transceiver) this.#sendSlot(link, slot, transceiver);
         else if (track) this.#addSlot(link, slot);
       }
+    }
+  }
+
+  /**
+   * The order to offer `slot`'s codecs in from now on, for as long as the slot is on (turning it
+   * off forgets it): give it before the slot's tracks, so its first sender has it. Transceivers
+   * the slot has already take it too.
+   */
+  setStartOrder(slot: VideoSlot, order: StartOrder): void {
+    if (this.#closed) return;
+    this.#codecOrders[slot] = order;
+    this.#preferAll(slot);
+  }
+
+  /** Offer `slot`'s codecs again on every transceiver it already has, in its order now. */
+  #preferAll(slot: VideoSlot): void {
+    for (const link of this.#links.values()) {
+      const transceiver = link.own.get(slot);
+      if (transceiver) this.#prefer(link, slot, transceiver);
     }
   }
 
@@ -1046,15 +1094,20 @@ export class Mesh {
       ...(slot === "screenAudio" && { sendEncodings: [{ maxBitrate: SHARE_AUDIO_BITRATE }] }),
     });
     link.own.set(slot, transceiver);
-    if (SLOT_KIND[slot] === "video") this.#prefer(link, transceiver);
+    if (isVideoSlot(slot)) this.#prefer(link, slot, transceiver);
     this.#tune(link, slot, transceiver.sender);
   }
 
-  /** Offer `transceiver`'s codecs best first, among those the peer can decode (once known). */
-  #prefer(link: Link, transceiver: RTCRtpTransceiver): void {
+  /**
+   * Offer `transceiver`'s codecs best first, in the order chosen for `slot`, among those the
+   * peer can decode (once known).
+   */
+  #prefer(link: Link, slot: VideoSlot, transceiver: RTCRtpTransceiver): void {
     if (!this.#codecs || !transceiver.setCodecPreferences) return;
     try {
-      transceiver.setCodecPreferences(orderCodecs(this.#codecs.send, link.remoteCodecs));
+      transceiver.setCodecPreferences(
+        orderCodecs(this.#codecs.send, link.remoteCodecs, this.#codecOrders[slot]),
+      );
     } catch (error) {
       this.#log(`choosing codecs for ${link.userId} failed`, error);
     }
@@ -1179,7 +1232,7 @@ export class Mesh {
         ...built,
         readings: 0,
         startedAt: Date.now(),
-        codecReason: "preferred",
+        codecReason: this.#codecOrders[slot]?.reason ?? "preferred",
         ...(codec && { codec }),
       };
       link.quality[slot] = state;
