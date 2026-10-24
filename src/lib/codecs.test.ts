@@ -7,6 +7,8 @@ import {
   HARDWARE_VP9_START,
   NORMAL_START,
   orderCodecs,
+  SWITCHED_START,
+  switchTarget,
   videoMimeTypes,
 } from "./codecs";
 
@@ -163,6 +165,48 @@ describe("orderCodecs with the streamer's own order", () => {
   });
 });
 
+describe("the order after the codec switch", () => {
+  it("puts H.264, then VP8, first, and AV1 and VP9 after them, with nothing left out", () => {
+    expect(types(orderCodecs(CHROMIUM, videoMimeTypes(CHROMIUM), SWITCHED_START))).toEqual([
+      "video/H264",
+      "video/H264",
+      "video/VP8",
+      "video/VP9",
+      "video/VP9",
+      "video/AV1",
+      "video/rtx",
+      "video/red",
+      "video/ulpfec",
+    ]);
+  });
+
+  it("is VP8 first where the viewer has no H.264, and never puts VP9 ahead of the cheaper two", () => {
+    const noH264 = videoMimeTypes(CHROMIUM).filter((type) => type !== "video/H264");
+    expect(types(orderCodecs(CHROMIUM, noH264, SWITCHED_START))[0]).toBe("video/VP8");
+    // A viewer that decodes only AV1 and VP9 still gets a codec: AV1 and VP9, as the browser ranks them.
+    expect(types(orderCodecs(CHROMIUM, ["video/VP9", "video/AV1"], SWITCHED_START))).toEqual([
+      "video/VP9",
+      "video/VP9",
+      "video/AV1",
+      "video/rtx",
+      "video/red",
+      "video/ulpfec",
+    ]);
+  });
+
+  it("picks the pair's target among what it negotiated: H.264, else VP8, never VP9", () => {
+    const negotiated = (...mimeTypes: string[]) => mimeTypes.map((type) => codec(type));
+    expect(
+      switchTarget(negotiated("video/AV1", "video/VP9", "video/H264", "video/VP8"))?.mimeType,
+    ).toBe("video/H264");
+    expect(switchTarget(negotiated("video/AV1", "video/VP9", "video/VP8"))?.mimeType).toBe(
+      "video/VP8",
+    );
+    expect(switchTarget(negotiated("video/AV1", "video/VP9", "video/rtx"))).toBeUndefined();
+    expect(switchTarget([])).toBeUndefined();
+  });
+});
+
 const CAPTURE: Capture = { width: 1920, height: 1080, frameRate: 30, bitrate: 3_000_000 };
 
 /** A `mediaCapabilities` that answers `powerEfficient` per codec (an Error rejects, a missing one hangs). */
@@ -185,9 +229,15 @@ describe("codecReasonOf", () => {
     expect(codecReasonOf("browser", "video/VP9")).toBe("preferred");
   });
 
-  it("leaves the normal order's and the switch's reasons as they are", () => {
+  it("leaves the normal order's reason as it is", () => {
     expect(codecReasonOf("preferred", "video/AV1")).toBe("preferred");
+  });
+
+  it("gives the switch's reason (cpu) for the codec it moved to, not for a reading still on the one it left", () => {
     expect(codecReasonOf("cpu", "video/H264")).toBe("cpu");
+    expect(codecReasonOf("cpu", "video/VP8")).toBe("cpu");
+    expect(codecReasonOf("cpu", "video/AV1")).toBe("preferred");
+    expect(codecReasonOf("cpu", "video/vp9")).toBe("preferred");
   });
 
   it("gives none of them for a codec not known yet", () => {

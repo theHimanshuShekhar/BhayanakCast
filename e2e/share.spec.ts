@@ -4,6 +4,7 @@ import { codecCap, fitRung, MAX_CAPTURE_PIXELS, screenSteps } from "../src/lib/q
 import type { CodecReason } from "../src/lib/quality-telemetry";
 import { MAX_CLIENT_MESSAGE_BYTES } from "../src/lib/realtime";
 import { E2E_ADMIN_DISCORD_ID, signIn } from "./auth";
+import { cpuLimitedEncoder, setCpuLimit } from "./cpu-limit";
 import { expect, newPage, test } from "./fixtures";
 import { createRoomOnPage, enterRoom, uniqueRoomName } from "./rooms";
 
@@ -696,6 +697,144 @@ test("a pair on H.264 or VP8 is capped at 1.5x the step's bitrate (ADR 2 addendu
       )
       .toEqual({ costly: true, atCap: true });
   } finally {
+    await viewer.context.close();
+  }
+});
+
+/** The page's screen senders' SSRC and codec, and the number of peer connections it has opened. */
+const sentScreens = (page: Page) =>
+  page.evaluate(async () => {
+    const w = window as unknown as Instrumented;
+    const open = w.__pcs.filter((pc) => pc.connectionState !== "closed");
+    const senders: { ssrc?: number; codec?: string }[] = [];
+    for (const pc of open) {
+      for (const sender of pc.getSenders()) {
+        const track = sender.track;
+        if (track?.kind !== "video" || !w.__captured.includes(track)) continue;
+        const report = await sender.getStats();
+        report.forEach((s: { type: string; ssrc?: number; codecId?: string }) => {
+          if (s.type !== "outbound-rtp") return;
+          const codec = (report.get(s.codecId ?? "") as { mimeType?: string } | undefined)
+            ?.mimeType;
+          senders.push({ ssrc: s.ssrc, codec });
+        });
+      }
+    }
+    return { senders, connections: w.__pcs.length };
+  });
+
+/** What the page receives of the screen: the track's id, the stream's SSRC and its freezes. */
+const receivedScreen = (page: Page) =>
+  page.evaluate(async () => {
+    const w = window as unknown as Instrumented;
+    for (const pc of w.__pcs) {
+      for (const receiver of pc.getReceivers()) {
+        if (receiver.track.kind !== "video") continue;
+        const report = await receiver.getStats();
+        let inbound: { ssrc?: number; freezeCount?: number; framesDecoded?: number } | undefined;
+        report.forEach((s: { type: string }) => {
+          if (s.type === "inbound-rtp") inbound = s as typeof inbound;
+        });
+        if (inbound?.framesDecoded) {
+          return {
+            track: receiver.track.id,
+            ssrc: inbound.ssrc,
+            freezes: inbound.freezeCount ?? 0,
+          };
+        }
+      }
+    }
+    return undefined;
+  });
+
+test("a CPU-limited AV1 share moves to H.264 on the same stream, once, and the next viewer starts there (ADR 2 addendum: the codec switch)", async ({
+  page,
+  context,
+  browser,
+  browserName,
+}) => {
+  // Firefox streamers start on H.264 or VP8 and report no `qualityLimitationReason` (ADR 2
+  // addendum: the start), so the switch is for Chromium streamers on AV1 or VP9.
+  test.skip(browserName !== "chromium", "Firefox streams H.264 from the start");
+  test.setTimeout(180_000);
+  await cpuLimitedEncoder(context);
+  await instrument(context);
+  const streamerId = await signIn(context, { username: "share.cpu" });
+  const roomId = await createRoomOnPage(page, {
+    name: uniqueRoomName("share cpu"),
+    kind: "gaming",
+  });
+  const viewer = await joinAs(browser, "share.cpuviewer", roomId);
+  let later: Awaited<ReturnType<typeof joinAs>> | undefined;
+  const rows = reportedRows(page);
+  try {
+    await page.getByRole("button", { name: "Share screen" }).click();
+    await expect(page.getByRole("button", { name: "Stop sharing" })).toBeEnabled();
+    await expect.poll(() => screenPlays(viewer.page, streamerId), { timeout: 30_000 }).toBe(true);
+    await expect
+      .poll(async () => (await sentScreens(page)).senders[0]?.codec, { timeout: 15_000 })
+      .toMatch(/^video\/(AV1|VP9)$/i);
+    await expect.poll(() => receivedScreen(viewer.page), { timeout: 15_000 }).toBeTruthy();
+    const before = await sentScreens(page);
+    const received = await receivedScreen(viewer.page);
+
+    // The encoder reports a CPU limit: after the warm-up and two passes in a row (about 4 s
+    // each), the pair moves to H.264 in place.
+    await setCpuLimit(page, true);
+    await expect
+      .poll(async () => (await sentScreens(page)).senders[0]?.codec, { timeout: 60_000 })
+      .toBe("video/H264");
+    const after = await sentScreens(page);
+    // The same stream: same SSRC, no new connection, the viewer's track and stream are the same
+    // ones, and nothing froze.
+    expect(after.senders.map((s) => s.ssrc)).toEqual(before.senders.map((s) => s.ssrc));
+    expect(after.connections).toBe(before.connections);
+    await expect.poll(() => screenPlays(viewer.page, streamerId), { timeout: 15_000 }).toBe(true);
+    const now = await receivedScreen(viewer.page);
+    expect(now).toMatchObject({ track: received?.track, ssrc: received?.ssrc, freezes: 0 });
+
+    // And it stays: the test's CPU limit is on AV1 only, and there is no second switch.
+    await page.waitForTimeout(10_000);
+    expect((await sentScreens(page)).senders.map((s) => s.codec)).toEqual(["video/H264"]);
+
+    // The switch row, then send rows on H.264 saying why; none on AV1 or VP9 after the switch.
+    await expect
+      .poll(() => rows.some((row) => row.trigger === "codec"), { timeout: 30_000 })
+      .toBe(true);
+    await expect
+      .poll(
+        () =>
+          rows.some(
+            (row) =>
+              row.direction === "send" && row.trigger === "window" && row.codec === "video/H264",
+          ),
+        { timeout: 45_000 },
+      )
+      .toBe(true);
+    const sent = rows.filter((row) => row.direction === "send");
+    for (const row of sent.filter((row) => row.trigger === "codec")) {
+      expect(row).toMatchObject({ codec: "video/H264", codecReason: "cpu" });
+      expect(String(row.fromCodec)).toMatch(/^video\/(AV1|VP9)$/i);
+    }
+    const index = sent.findIndex((row) => row.trigger === "codec");
+    for (const row of sent.slice(index + 1)) {
+      if (row.trigger !== "window") continue;
+      expect(row.codec).toBe("video/H264");
+      expect(row.codecReason).toBe("cpu");
+    }
+
+    // The next viewer's pair starts on H.264, with the order the switch left.
+    const second = await joinAs(browser, "share.cpulater", roomId);
+    later = second;
+    await expect.poll(() => screenPlays(second.page, streamerId), { timeout: 30_000 }).toBe(true);
+    await expect
+      .poll(async () => (await sentScreens(page)).senders.map((s) => s.codec), { timeout: 30_000 })
+      .toEqual(["video/H264", "video/H264"]);
+    // The new pair was never on AV1, so it never switched: the one switch row is the first viewer's.
+    const switchRows = rows.filter((row) => row.direction === "send" && row.trigger === "codec");
+    expect(new Set(switchRows.map((row) => row.peerId)).size).toBe(1);
+  } finally {
+    await later?.context.close();
     await viewer.context.close();
   }
 });

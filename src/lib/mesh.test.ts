@@ -9,6 +9,7 @@ import {
 import type { ConnectionEvent } from "./connection-events";
 import type { QualityView } from "./mesh";
 import {
+  CODEC_SWITCH_STAGGER_MS,
   CONNECT_TIMEOUT_MS,
   degradationFor,
   isSameOffer,
@@ -39,8 +40,11 @@ import type { SignalPayload } from "./realtime";
 
 let nextPc = 0;
 
-/** Whether the fake browser reports `degradationPreference` (Firefox, probably Safari, don't). */
-const browser = { reportsDegradation: true };
+/**
+ * What the fake browser supports: reporting `degradationPreference` (Firefox, probably Safari,
+ * don't) and taking `encodings[].codec` (Chromium 119+ and Firefox 142+ do; Safari doesn't).
+ */
+const browser = { reportsDegradation: true, takesEncodingCodec: true };
 
 class FakeTransceiver {
   mid: string | null = null;
@@ -97,6 +101,11 @@ class FakeTransceiver {
       setParameters: async (next: Partial<RTCRtpSendParameters>) => {
         sender.setCalls++;
         parameters = structuredClone(next);
+        if (!browser.takesEncodingCodec) {
+          for (const encoding of parameters.encodings ?? []) {
+            delete (encoding as { codec?: unknown }).codec;
+          }
+        }
       },
     };
     this.sender = sender;
@@ -1420,10 +1429,15 @@ describe("Mesh uplink budget (ADR 2)", () => {
   it("leaves a CPU-bound encoder to its own pairs: it doesn't cut the uplink budget", async () => {
     const { ana, senders } = await crowd(["bo", "cy", "di", "ed", "fi", "gu"], 30 * MBPS);
     for (let i = 0; i < 2; i++) await pass(ana, senders);
+    // The codec switch answers a CPU limit first (the fake pairs have no H.264 to go to, so none
+    // moves, but the switch is spent): the steps hold back until it has fired...
+    await pass(ana, senders, { limit: "cpu" });
+    await pass(ana, senders, { limit: "cpu" });
+    expect(labels(ana)).toEqual(Array(6).fill("1080p30"));
+    // ...and then each pair steps down for it.
     await pass(ana, senders, { limit: "cpu" });
     const { budget } = await pass(ana, senders, { limit: "cpu" });
     expect(budget).toBe(30 * MBPS);
-    // Each pair still steps down for it.
     expect(labels(ana)).toEqual(Array(6).fill("900p30"));
     ana.close();
   });
@@ -1971,6 +1985,414 @@ const rungCap = (label: string | undefined) =>
   ({ "720p30": 1_330_000, "900p30": 2_080_000, "1080p30": 3_000_000, "1080p60": 6_000_000 })[
     label ?? ""
   ];
+
+describe("Mesh: the codec switch (ADR 2 addendum)", () => {
+  const MBPS = 1_000_000;
+  const AV1 = "video/AV1";
+  const H264 = "video/H264";
+  const codec = (mimeType: string, sdpFmtpLine?: string) => ({
+    mimeType,
+    clockRate: 90_000,
+    ...(sdpFmtpLine && { sdpFmtpLine }),
+  });
+  const negotiated = [
+    codec(AV1),
+    codec("video/VP9", "profile-id=0"),
+    codec(H264, "profile-level-id=42e01f"),
+    codec("video/VP8"),
+  ];
+  const capable: VideoCodecs = {
+    send: [...negotiated, codec("video/rtx")],
+    receive: negotiated.map((c) => c.mimeType),
+  };
+  type CodecEncoding = RTCRtpEncodingParameters & { codec?: { mimeType: string } };
+  const encoding = (t: FakeTransceiver) => t.sender.getParameters().encodings?.[0] as CodecEncoding;
+  const codecOf = (t: FakeTransceiver) => encoding(t).codec?.mimeType;
+  const prefers = (t: FakeTransceiver) => t.codecPreferences.map((c) => c.mimeType);
+  const sentRows = (rows: PendingSample[]) => rows.filter((r) => r.direction === "send");
+
+  afterEach(() => {
+    browser.takesEncodingCodec = true;
+    vi.useRealTimers();
+  });
+
+  /**
+   * Ana shares a 1080p60 screen to `names` (and her camera, if asked), all connected, with
+   * `uplink` to spend; then the clock is fake, so that the stagger between pairs can be waited
+   * out. `pass` is one quality pass: every sender in `only` reads `codec` (AV1 by default) with a
+   * CPU limit on the pairs `limited` says (every one by default), at four-second steps.
+   */
+  async function sharing(
+    names: string[],
+    { cam = false, uplink = 40 * MBPS, formats = negotiated } = {},
+  ) {
+    vi.useRealTimers();
+    const network = new Map<string, Mesh>();
+    const rows: PendingSample[] = [];
+    const ana = page("ana", network, undefined, capable, uplink, {
+      onQuality: (row) => rows.push(row),
+      sampleWindowMs: 24_000,
+    });
+    const viewers = names.map((name) => page(name, network));
+    const room = [{ userId: "ana" }, ...names.map((userId) => ({ userId }))];
+    for (const mesh of network.values()) mesh.join(room);
+    await settle();
+    const screen = trackWith("ana screen", { width: 1920, height: 1080, frameRate: 60 }, "text");
+    const camera = trackWith("ana cam", { width: 640, height: 360, frameRate: 15 });
+    ana.mesh.setLocalTracks({ screen, ...(cam && { cam: camera }) });
+    await settle();
+    connect(ana, ...viewers);
+    await settle();
+    const senders = (track: MediaStreamTrack) =>
+      ana.pcs.map((pc) => carrying(pc, track) as FakeTransceiver);
+    const screens = senders(screen);
+    const cams = cam ? senders(camera) : [];
+    for (const t of [...screens, ...cams]) t.sender.codecs = formats;
+    vi.useFakeTimers();
+    let seconds = 0;
+    const pass = async ({
+      codec: sent = AV1,
+      limited = (_pair: number): boolean => true,
+      camLimited = undefined as ((pair: number) => boolean) | undefined,
+    } = {}) => {
+      seconds += 4;
+      [...screens, ...cams].forEach((t, i) => {
+        t.sender.stats = senderStats(
+          0,
+          sent,
+          { bytesSent: seconds * 250_000, timestamp: seconds * 1_000, framesEncoded: seconds * 30 },
+          (i < screens.length ? limited : (camLimited ?? limited))(i % names.length)
+            ? "cpu"
+            : "none",
+        );
+      });
+      await ana.mesh.adjust();
+      await vi.advanceTimersByTimeAsync(0);
+    };
+    return { ana, viewers, network, screens, cams, rows, pass };
+  }
+
+  it("holds a CPU limit back from the steps until the switch, waits out the warm-up, and fires on the second pass", async () => {
+    const { ana, screens, pass } = await sharing(["bo", "cy"]);
+    const rung = ana.mesh.quality()[0]?.screen?.rung;
+    // Two warm-up readings, then one pass with the limit on both pairs: no switch, and no step
+    // down either (a second such pass would step down for a CPU limit, if it were pressure).
+    for (let i = 0; i < 3; i++) await pass();
+    expect(screens.map(codecOf)).toEqual([undefined, undefined]);
+    expect(prefers(screens[0] as FakeTransceiver)[0]).toBe(AV1);
+    expect(ana.mesh.quality().map((q) => q.screen?.rung)).toEqual([rung, rung]);
+    await pass();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(screens.map(codecOf)).toEqual([H264, H264]);
+    expect(ana.mesh.quality().map((q) => q.screen?.rung)).toEqual([rung, rung]);
+    ana.mesh.close();
+  });
+
+  it("does not hold back strain: loss still steps down, switch or not", async () => {
+    const { ana, screens } = await sharing(["bo"]);
+    const rung = ana.mesh.quality()[0]?.screen?.rung;
+    for (let i = 1; i <= 6; i++) {
+      (screens[0] as FakeTransceiver).sender.stats = senderStats(
+        0.1,
+        AV1,
+        { bytesSent: i * 1_000_000, timestamp: i * 4_000 },
+        "cpu",
+      );
+      await ana.mesh.adjust();
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(ana.mesh.quality()[0]?.screen?.rung).not.toBe(rung);
+    ana.mesh.close();
+  });
+
+  it("calls setParameters per pair, a few hundred ms apart, and setCodecPreferences on every transceiver", async () => {
+    const { ana, screens, pass } = await sharing(["bo", "cy", "di"]);
+    for (let i = 0; i < 3; i++) await pass();
+    const calls = () => screens.map((t) => t.sender.setCalls);
+    const before = calls();
+    await pass();
+    // Every video transceiver ranks the abandoned codecs last: H.264, VP8, AV1, VP9.
+    for (const t of screens) {
+      expect(prefers(t)).toEqual([H264, "video/VP8", AV1, "video/VP9", "video/rtx"]);
+    }
+    // The first pair at once, with the cap of its new codec (1.5x) in the same call...
+    const change = () => calls().map((n, i) => n - (before[i] as number));
+    expect(change()).toEqual([1, 0, 0]);
+    expect(encoding(screens[0] as FakeTransceiver).maxBitrate).toBe(
+      1.5 * (rungCap(ana.mesh.quality()[0]?.screen?.rung) as number),
+    );
+    // ...then the others, one after another.
+    await vi.advanceTimersByTimeAsync(CODEC_SWITCH_STAGGER_MS);
+    expect(change()).toEqual([1, 1, 0]);
+    await vi.advanceTimersByTimeAsync(CODEC_SWITCH_STAGGER_MS);
+    expect(change()).toEqual([1, 1, 1]);
+    expect(screens.map(codecOf)).toEqual([H264, H264, H264]);
+    // Once it holds nothing is applied again.
+    await pass({ codec: H264, limited: () => false });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(change()).toEqual([1, 1, 1]);
+    ana.mesh.close();
+  });
+
+  it("needs half of the pairs, and one pair is enough with one viewer", async () => {
+    const third = await sharing(["bo", "cy", "di"]);
+    for (let i = 0; i < 6; i++) await third.pass({ limited: (pair) => pair === 0 });
+    expect(third.screens.map(codecOf)).toEqual([undefined, undefined, undefined]);
+    third.ana.mesh.close();
+    const half = await sharing(["bo", "cy", "di", "ed"]);
+    for (let i = 0; i < 4; i++) await half.pass({ limited: (pair) => pair < 2 });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(half.screens.map(codecOf)).toEqual([H264, H264, H264, H264]);
+    half.ana.mesh.close();
+    const alone = await sharing(["bo"]);
+    for (let i = 0; i < 4; i++) await alone.pass();
+    expect(codecOf(alone.screens[0] as FakeTransceiver)).toBe(H264);
+    alone.ana.mesh.close();
+  });
+
+  it("counts pairs, not senders: a screen and a camera to each viewer are still three pairs", async () => {
+    // Two of three pairs have their screen CPU-limited, and no camera is: two of six senders, but
+    // two of three pairs.
+    const two = await sharing(["bo", "cy", "di"], { cam: true });
+    for (let i = 0; i < 4; i++)
+      await two.pass({ limited: (pair) => pair < 2, camLimited: () => false });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(two.screens.map(codecOf)).toEqual([H264, H264, H264]);
+    expect(two.cams.map(codecOf)).toEqual([H264, H264, H264]);
+    two.ana.mesh.close();
+    const one = await sharing(["bo", "cy", "di"], { cam: true });
+    for (let i = 0; i < 6; i++)
+      await one.pass({ limited: (pair) => pair < 1, camLimited: () => false });
+    expect(one.screens.map(codecOf)).toEqual([undefined, undefined, undefined]);
+    one.ana.mesh.close();
+  });
+
+  it("switches from VP9, and never from H.264 or VP8: a CPU limit there is pressure for the steps", async () => {
+    const vp9 = await sharing(["bo"]);
+    for (let i = 0; i < 4; i++) await vp9.pass({ codec: "video/VP9" });
+    expect(codecOf(vp9.screens[0] as FakeTransceiver)).toBe(H264);
+    vp9.ana.mesh.close();
+    for (const costly of [H264, "video/VP8"]) {
+      const { ana, screens, pass } = await sharing(["bo"]);
+      for (let i = 0; i < 6; i++) await pass({ codec: costly });
+      expect(codecOf(screens[0] as FakeTransceiver)).toBeUndefined();
+      expect(ana.mesh.quality()[0]?.screen?.rung).not.toBe("1080p60");
+      ana.mesh.close();
+    }
+  });
+
+  it("goes to VP8 on a pair where H.264 isn't on both sides, and to nothing where it has neither", async () => {
+    const noH264 = await sharing(["bo"], {
+      formats: negotiated.filter((c) => c.mimeType !== H264),
+    });
+    for (let i = 0; i < 4; i++) await noH264.pass();
+    expect(codecOf(noH264.screens[0] as FakeTransceiver)).toBe("video/VP8");
+    noH264.ana.mesh.close();
+    const neither = await sharing(["bo"], { formats: negotiated.slice(0, 2) });
+    for (let i = 0; i < 4; i++) await neither.pass();
+    expect(codecOf(neither.screens[0] as FakeTransceiver)).toBeUndefined();
+    neither.ana.mesh.close();
+  });
+
+  it("switches once: the step is kept, and a CPU limit is pressure again after the warm-up", async () => {
+    const { ana, screens, pass, rows } = await sharing(["bo"]);
+    for (let i = 0; i < 4; i++) await pass();
+    const rung = ana.mesh.quality()[0]?.screen?.rung;
+    // H.264 reads a CPU limit too: two warm-up readings, then the controller steps down. The
+    // trigger doesn't fire a second time.
+    for (let i = 0; i < 3; i++) await pass({ codec: H264 });
+    expect(ana.mesh.quality()[0]?.screen?.rung).toBe(rung);
+    await pass({ codec: H264 });
+    await pass({ codec: H264 });
+    expect(ana.mesh.quality()[0]?.screen?.rung).not.toBe(rung);
+    expect(sentRows(rows).filter((r) => r.trigger === "codec")).toHaveLength(1);
+    expect(codecOf(screens[0] as FakeTransceiver)).toBe(H264);
+    ana.mesh.close();
+  });
+
+  it("emits the codec row, and leaves out a reading that still names the old codec", async () => {
+    const { ana, pass, rows } = await sharing(["bo"]);
+    for (let i = 0; i < 4; i++) await pass();
+    const rung = ana.mesh.quality()[0]?.screen?.rung;
+    expect(sentRows(rows).map((r) => [r.trigger, r.codec, r.fromCodec])).toEqual([
+      ["codec", H264, AV1],
+    ]);
+    expect(sentRows(rows)[0]).toMatchObject({ rung, codecReason: "cpu", toRung: null });
+    // The stats lag the change by a pass: that reading is still AV1, and is in no window.
+    await pass({ codec: AV1 });
+    for (let i = 0; i < 8; i++) await pass({ codec: H264, limited: () => false });
+    const later = sentRows(rows).slice(1);
+    expect(later.length).toBeGreaterThan(0);
+    for (const row of later)
+      expect([row.trigger, row.codec, row.codecReason]).toEqual(["window", H264, "cpu"]);
+    ana.mesh.close();
+  });
+
+  it("heals a pick that a negotiation reverted on the next pass", async () => {
+    const { ana, screens, pass } = await sharing(["bo"]);
+    for (let i = 0; i < 4; i++) await pass();
+    const toBo = screens[0] as FakeTransceiver;
+    // Chromium drops the pick when a later description's fmtp differs: it reports none.
+    await toBo.sender.setParameters({
+      ...toBo.sender.getParameters(),
+      encodings: [{ ...encoding(toBo), codec: undefined } as CodecEncoding],
+    });
+    expect(codecOf(toBo)).toBeUndefined();
+    const calls = toBo.sender.setCalls;
+    await pass({ codec: AV1, limited: () => false });
+    expect(codecOf(toBo)).toBe(H264);
+    expect(toBo.sender.setCalls).toBe(calls + 1);
+    ana.mesh.close();
+  });
+
+  it("starts a viewer who joins after the switch on H.264", async () => {
+    const { ana, network, pass, rows } = await sharing(["bo"]);
+    for (let i = 0; i < 4; i++) await pass();
+    vi.useRealTimers();
+    const cy = page("cy", network, undefined, capable);
+    for (const mesh of network.values()) {
+      mesh.join([{ userId: "ana" }, { userId: "bo" }, { userId: "cy" }]);
+    }
+    await settle();
+    connect({ pcs: [ana.pcs[1] as FakePC] }, cy);
+    await settle();
+    const toCy = ana.pcs[1]?.transceivers.find((t) => t.sender.track) as FakeTransceiver;
+    expect(prefers(toCy)).toEqual([H264, "video/VP8", AV1, "video/VP9", "video/rtx"]);
+    // It negotiated H.264 already: its reading names it, and it gets no switch row of its own.
+    toCy.sender.codecs = [codec(H264, "profile-level-id=42e01f"), codec("video/VP8")];
+    toCy.sender.stats = senderStats(0, H264, { bytesSent: 1, timestamp: 1_000 }, "none");
+    for (let i = 0; i < 3; i++) await ana.mesh.adjust();
+    expect(rows.filter((r) => r.trigger === "codec" && r.direction === "send")).toHaveLength(1);
+    expect(ana.mesh.quality().find((q) => q.userId === "cy")?.screen?.codec).toBe(H264);
+    expect(codecOf(toCy)).toBeUndefined();
+    ana.mesh.close();
+  });
+
+  it("does not take an empty read-back after the codec worked for a browser without it", async () => {
+    const { ana, screens, pass } = await sharing(["bo"]);
+    const offers = () =>
+      ana.sent.filter((p) => p.kind === "description" && p.description.type === "offer").length;
+    for (let i = 0; i < 4; i++) await pass();
+    const toBo = screens[0] as FakeTransceiver;
+    expect(codecOf(toBo)).toBe(H264);
+    const before = offers();
+    // A negotiation reverts the pick, and the call that puts it back reads back nothing (the
+    // revert landed between the call and the read).
+    await toBo.sender.setParameters({
+      ...toBo.sender.getParameters(),
+      encodings: [{ ...encoding(toBo), codec: undefined } as CodecEncoding],
+    });
+    browser.takesEncodingCodec = false;
+    await pass({ limited: () => false });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(codecOf(toBo)).toBeUndefined();
+    expect(offers()).toBe(before);
+    // The browser still takes it: the next pass puts it back.
+    browser.takesEncodingCodec = true;
+    await pass({ limited: () => false });
+    expect(codecOf(toBo)).toBe(H264);
+    expect(offers()).toBe(before);
+    ana.mesh.close();
+  });
+
+  it("falls back to renegotiating where the browser takes no encodings[].codec", async () => {
+    browser.takesEncodingCodec = false;
+    const { ana, screens, pass } = await sharing(["bo", "cy"]);
+    const offers = () =>
+      ana.sent.filter((p) => p.kind === "description" && p.description.type === "offer").length;
+    const before = offers();
+    for (let i = 0; i < 3; i++) await pass();
+    await pass();
+    await vi.advanceTimersByTimeAsync(2_000);
+    // The preferences are on every transceiver and no codec is in the encodings; each pair got
+    // a new offer, which carries them. Nothing asks the browser for the codec again.
+    for (const t of screens) {
+      expect(codecOf(t)).toBeUndefined();
+      expect(prefers(t)[0]).toBe(H264);
+    }
+    expect(offers() - before).toBe(2);
+    ana.mesh.close();
+  });
+
+  it("resets with the share: the order goes back, and the next share can switch again", async () => {
+    const { ana, screens, pass } = await sharing(["bo"]);
+    for (let i = 0; i < 4; i++) await pass();
+    expect(prefers(screens[0] as FakeTransceiver)[0]).toBe(H264);
+    ana.mesh.setLocalTracks({ screen: null });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(prefers(screens[0] as FakeTransceiver)[0]).toBe(AV1);
+    ana.mesh.setLocalTracks({
+      screen: trackWith("again", { width: 1920, height: 1080, frameRate: 60 }, "text"),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    // The sender still carries the last share's pick until the new share's first tune puts it
+    // back on the start order; the new share is a fresh state: warm-up, then the same trigger.
+    expect(codecOf(screens[0] as FakeTransceiver)).toBe(AV1);
+    for (let i = 0; i < 3; i++) await pass();
+    expect(codecOf(screens[0] as FakeTransceiver)).toBe(AV1);
+    await pass();
+    expect(codecOf(screens[0] as FakeTransceiver)).toBe(H264);
+    ana.mesh.close();
+  });
+
+  it("puts the camera back on its start order, in one setParameters, when the share ends", async () => {
+    const { ana, cams, pass } = await sharing(["bo"], { cam: true });
+    const camera = cams[0] as FakeTransceiver;
+    const cap = encoding(camera).maxBitrate;
+    for (let i = 0; i < 4; i++) await pass();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(encoding(camera).maxBitrate).toBe(1.5 * (cap as number));
+    expect(codecOf(camera)).toBe(H264);
+    expect(prefers(camera)[0]).toBe(H264);
+    const calls = camera.sender.setCalls;
+    ana.mesh.setLocalTracks({ screen: null });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(prefers(camera)[0]).toBe(AV1);
+    expect(codecOf(camera)).toBe(AV1);
+    // The cap of AV1 goes out in the same call, not 1.5x for a pass more.
+    expect(encoding(camera).maxBitrate).toBe(cap);
+    expect(camera.sender.setCalls).toBe(calls + 1);
+    ana.mesh.close();
+  });
+
+  it("keeps a switch made with only a camera on until the camera turns off", async () => {
+    const network = new Map<string, Mesh>();
+    const ana = page("ana", network, undefined, capable);
+    const bo = page("bo", network);
+    for (const mesh of network.values()) mesh.join(everyone);
+    await settle();
+    const camera = trackWith("ana cam", { width: 640, height: 360, frameRate: 15 });
+    ana.mesh.setLocalTracks({ cam: camera });
+    await settle();
+    connect(ana, bo);
+    await settle();
+    const toBo = carrying(ana.pcs[0], camera) as FakeTransceiver;
+    toBo.sender.codecs = negotiated;
+    vi.useFakeTimers();
+    for (let i = 1; i <= 4; i++) {
+      toBo.sender.stats = senderStats(
+        0,
+        AV1,
+        { bytesSent: i * 100_000, timestamp: i * 4_000 },
+        "cpu",
+      );
+      await ana.mesh.adjust();
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(codecOf(toBo)).toBe(H264);
+    // A screen starting and stopping meanwhile doesn't end it.
+    ana.mesh.setLocalTracks({
+      screen: trackWith("s", { width: 1920, height: 1080, frameRate: 60 }),
+    });
+    ana.mesh.setLocalTracks({ screen: null });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(prefers(toBo)[0]).toBe(H264);
+    ana.mesh.setLocalTracks({ cam: null });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(prefers(toBo)[0]).toBe(AV1);
+    ana.mesh.close();
+  });
+});
 
 describe("Mesh codec choice (ADR 2)", () => {
   const codec = (mimeType: string) => ({ mimeType, clockRate: 90_000 });
@@ -3585,7 +4007,8 @@ describe("Mesh quality modal: the step message and the last minute (ADR 2 addend
     const { ana, others, to } = await room(["bo"]);
     const [bo] = others as [(typeof others)[number]];
     (to[0] as FakeTransceiver).sender.stats = senderStats(0, "video/VP9", undefined, "cpu");
-    for (let i = 0; i < 4; i++) await ana.mesh.adjust();
+    // The codec switch first (nothing to move to here); then the step down for the CPU limit.
+    for (let i = 0; i < 6; i++) await ana.mesh.adjust();
     await settle();
     expect(bo.mesh.streamQuality("ana")).toMatchObject({
       note: { step: "1080p30", reason: "computer", cause: "computer" },

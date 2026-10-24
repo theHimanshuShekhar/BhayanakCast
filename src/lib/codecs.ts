@@ -22,6 +22,16 @@ export const VIDEO_CODEC_PREFERENCE = ["video/av1", "video/vp9", "video/h264", "
  */
 export const COSTLY_CODECS = ["video/h264", "video/vp8"];
 
+/**
+ * The codecs a CPU-limited streamer leaves with the codec switch (ADR 2 addendum): software AV1
+ * and VP9 are what a CPU limit shows on. MIME types, lower case.
+ */
+export const SWITCH_FROM = ["video/av1", "video/vp9"];
+
+/** Whether the codec switch leaves `codec` (a MIME type, in any case; none known: no). */
+export const canSwitchFrom = (codec?: string): boolean =>
+  codec !== undefined && SWITCH_FROM.includes(codec.toLowerCase());
+
 /** Retransmission and redundancy formats: kept, last, whichever codec is chosen. */
 const AUXILIARY = /^video\/(rtx|red|ulpfec|flexfec-03)$/i;
 
@@ -42,16 +52,25 @@ export interface StartOrder {
  * The reason a sender's rows give for its codec: the `reason` its order had, but only while the
  * codec it sends (`codec`, once known) is the one that reason is about. `hardware` is about VP9
  * and `browser` about H.264 and VP8; a viewer that can't decode those leaves the sender on
- * another codec, and the reason is then `preferred`.
+ * another codec, and the reason is then `preferred`. `cpu` (the codec switch) is about the codec
+ * the switch moves to: a reading still on AV1 or VP9 (the stats lag the change by a pass, or the
+ * pick was reverted) is `preferred`.
  */
 export function codecReasonOf(reason: CodecReason, codec?: string): CodecReason {
   const type = codec?.toLowerCase();
+  if (reason === "cpu") return canSwitchFrom(type) ? "preferred" : reason;
   if (reason === "hardware") return type === "video/vp9" ? reason : "preferred";
   if (reason === "browser")
     return type === "video/h264" || type === "video/vp8" ? reason : "preferred";
   return reason;
 }
 
+/**
+ * The order after the codec switch (ADR 2 addendum), on every video transceiver of the streamer:
+ * H.264, then VP8, and AV1 and VP9 after them (ranked last, not left out, so that a later
+ * re-offer can't revert the pick, and a viewer that has neither still gets a codec).
+ */
+export const SWITCHED_START: StartOrder = { order: ["video/h264", "video/vp8"], reason: "cpu" };
 /** AV1, VP9, H.264, VP8. */
 export const NORMAL_START: StartOrder = { order: VIDEO_CODEC_PREFERENCE, reason: "preferred" };
 /** VP9 first, for a Chromium streamer whose VP9 is hardware-encoded and AV1 is not. */
@@ -90,6 +109,21 @@ export function orderCodecs<C extends { mimeType: string }>(
   // A stable sort: the browser's order among a codec's variants (H.264 profiles) stays.
   const ordered = [...(shared.length > 0 ? shared : media)].sort((a, b) => rank(a) - rank(b));
   return [...ordered, ...local.filter((codec) => AUXILIARY.test(codec.mimeType))];
+}
+
+/**
+ * The codec the switch moves a pair to, among the codecs it negotiated (`getParameters().codecs`,
+ * so both sides have it): the first H.264, or else the first VP8. Never VP9: software VP9 isn't
+ * reliably cheaper than AV1 on screen text. Undefined where the pair has neither.
+ */
+export function switchTarget<C extends { mimeType: string }>(
+  negotiated: readonly C[],
+): C | undefined {
+  for (const type of ["video/h264", "video/vp8"]) {
+    const found = negotiated.find((codec) => mime(codec) === type);
+    if (found) return found;
+  }
+  return undefined;
 }
 
 /** The MIME types among `codecs` that carry video themselves, each once. */

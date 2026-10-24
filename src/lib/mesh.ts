@@ -68,16 +68,22 @@
  * differ (Firefox sends H.264, a hardware VP9 goes first): the caller chooses it when a share or
  * camera turns on (`chooseStartOrder`) and gives it with `setStartOrder` before the tracks, so no
  * sender is made before it; it is kept for that kind until the kind turns off. A codec
- * preference takes effect in the next offer, which browsers version as they do any other.
+ * preference takes effect in the next offer, which browsers version as they do any other. When
+ * the encoder reports a CPU limit on half the pairs (`watchCodec`), all the streamer's video
+ * moves, once per share, to H.264 or VP8 with `setParameters` (`#moveSenders`).
  *
  * Local tracks belong to the caller (./local-media.ts): the Mesh never stops them.
  */
 import {
   type Capture,
+  canSwitchFrom,
   codecReasonOf,
   localVideoCodecs,
+  NORMAL_START,
   orderCodecs,
   type StartOrder,
+  SWITCHED_START,
+  switchTarget,
   type VideoCodecs,
   videoMimeTypes,
 } from "./codecs";
@@ -99,12 +105,16 @@ import {
   CAMERA_DEFAULT_RUNG,
   CAMERA_LADDER,
   type Claim,
+  type CodecPair,
+  type CodecWatch,
   carryOver,
   codecCap,
+  cpuHeld,
   DOWN_SAMPLES,
   FIRST_MINUTE_MS,
   feeds60,
   fitRung,
+  freshCodecWatch,
   freshLadderState,
   heightCap,
   INITIAL_UPLINK,
@@ -124,6 +134,7 @@ import {
   step,
   strained,
   UplinkBudget,
+  watchCodec,
 } from "./quality";
 import { QualityCollector, type RungInfo } from "./quality-collector";
 import {
@@ -200,6 +211,14 @@ export type MeshEvent =
 export const QUALITY_INTERVAL_MS = 4_000;
 /** A reading older than two quality passes no longer says what a sender sends. */
 const STALE_READING_MS = 2 * QUALITY_INTERVAL_MS;
+/** The codec switch changes one pair's codec after another, this far apart: each is an encoder restart and a keyframe. */
+export const CODEC_SWITCH_STAGGER_MS = 300;
+/**
+ * After a codec change, readings that still name the codec left are of neither codec (the stats
+ * can lag the change by a pass) and are skipped: at most this many, or the change is taken not
+ * to have held.
+ */
+const MAX_STALE_READINGS = 2;
 
 /** What the dev overlay shows of one video sender to one peer. */
 export interface SlotQuality {
@@ -265,6 +284,11 @@ const UPLINK = "uplink";
 interface PairReading {
   /** Whether a sender past its warm-up showed strain on the network; absent if none was past it. */
   strained?: boolean;
+  /**
+   * What the pair's senders past their warm-up show for the codec switch's trigger
+   * (`watchCodec`); absent if none was past it.
+   */
+  pair?: CodecPair;
 }
 
 /** A video sender being sent, with the pair and ladder state it belongs to. */
@@ -387,6 +411,21 @@ const restart = (state: Adaptation, rung: number, steps = state.steps) =>
     backoff: state.backoff,
     limited: state.limited,
   });
+
+/** An encoding with its `codec` (Chromium 119+, Firefox 142+; TypeScript's DOM types lack it). */
+type CodecEncoding = RTCRtpEncodingParameters & { codec?: RTCRtpCodec };
+
+/** The codec the first encoding of `parameters` reports, if the browser takes `encodings[].codec`. */
+const encodingCodecOf = (parameters: RTCRtpSendParameters): RTCRtpCodec | undefined =>
+  (parameters.encodings?.[0] as CodecEncoding | undefined)?.codec;
+
+/** `codec` as `encodings[].codec` takes it (a negotiated codec also has a payload type). */
+const codecParameter = ({ mimeType, clockRate, channels, sdpFmtpLine }: RTCRtpCodec) => ({
+  mimeType,
+  clockRate,
+  ...(channels !== undefined && { channels }),
+  ...(sdpFmtpLine !== undefined && { sdpFmtpLine }),
+});
 
 /** Created with every connection, so a pair connects before anyone unmutes. */
 const EAGER_SLOTS: readonly MediaSlot[] = ["mic"];
@@ -574,6 +613,16 @@ interface Adaptation extends LadderState {
   codec?: string;
   /** What the pressure was down to when it last stepped down under it (`limited` says it holds). */
   cause?: PressureCause;
+  /**
+   * The codec (MIME type, lower case) the codec switch put this sender on: `#applyRung` keeps
+   * it there, and sets it again if a negotiation reverted it.
+   */
+  pinned?: string;
+  /**
+   * The codec (lower case) it was just moved from, and how many readings still naming it have
+   * been skipped since (`MAX_STALE_READINGS`).
+   */
+  leaving?: { codec: string; skipped: number };
 }
 
 interface Link {
@@ -645,6 +694,18 @@ export class Mesh {
   readonly #codecs: VideoCodecs | undefined;
   /** Per video slot, the order its codecs are offered in while it is on (absent: the normal one). */
   readonly #codecOrders: Partial<Record<VideoSlot, StartOrder>> = {};
+  /** The codec switch: the passes that met its trigger, and whether it has happened in this share. */
+  #codecWatch: CodecWatch = freshCodecWatch();
+  /**
+   * What the codec switch lasts as long as: the share, or the camera when only it was on when the
+   * switch happened.
+   */
+  #switchOwner: VideoSlot = "screen";
+  /**
+   * Whether the browser takes `encodings[].codec`, once a `setParameters` with one has shown
+   * (Chromium 119+ and Firefox 142+ do; Safari ignores it, and a new offer carries the change).
+   */
+  #encodingCodec: boolean | undefined;
   readonly #firstMinuteMs: number;
   /** What all the video senders' targets may add up to (their sum is `#committed`). */
   readonly #budget: UplinkBudget;
@@ -784,8 +845,10 @@ export class Mesh {
    */
   setLocalTracks(tracks: LocalTracks): void {
     if (this.#closed) return;
+    const stopped: MediaSlot[] = [];
     for (const [slot, track] of Object.entries(tracks) as [MediaSlot, MediaStreamTrack | null][]) {
       if (track === undefined) continue;
+      if (!track && this.#local[slot]) stopped.push(slot);
       if (!track && isVideoSlot(slot) && this.#codecOrders[slot]) {
         delete this.#codecOrders[slot];
         this.#preferAll(slot);
@@ -809,6 +872,7 @@ export class Mesh {
         else if (track) this.#addSlot(link, slot);
       }
     }
+    if (this.#codecWatch.switched && stopped.includes(this.#switchOwner)) this.#endCodecSwitch();
   }
 
   /**
@@ -820,6 +884,11 @@ export class Mesh {
     if (this.#closed) return;
     this.#codecOrders[slot] = order;
     this.#preferAll(slot);
+  }
+
+  /** The order `slot`'s codecs are offered in now: the codec switch's once it has happened. */
+  #orderOf(slot: VideoSlot): StartOrder | undefined {
+    return this.#codecWatch.switched ? SWITCHED_START : this.#codecOrders[slot];
   }
 
   /** Offer `slot`'s codecs again on every transceiver it already has, in its order now. */
@@ -923,6 +992,14 @@ export class Mesh {
   async adjust(): Promise<void> {
     const links = [...this.#links.values()];
     const readings = await Promise.all(links.map((link) => this.#adjustLink(link)));
+    const { watch, due } = watchCodec(
+      this.#codecWatch,
+      readings.flatMap((reading) => reading?.pair ?? []),
+    );
+    this.#codecWatch = watch;
+    if (due) this.#switchCodecs();
+    // Each pass, for a sender that could not be moved yet (its negotiation was under way).
+    else if (this.#codecWatch.switched) this.#moveSenders();
     // A pair skipped this pass (its last read hasn't returned) has no say; what it sends counts.
     const judged = readings.filter((reading) => reading?.strained !== undefined);
     if (judged.length > 0) {
@@ -1106,7 +1183,7 @@ export class Mesh {
     if (!this.#codecs || !transceiver.setCodecPreferences) return;
     try {
       transceiver.setCodecPreferences(
-        orderCodecs(this.#codecs.send, link.remoteCodecs, this.#codecOrders[slot]),
+        orderCodecs(this.#codecs.send, link.remoteCodecs, this.#orderOf(slot)),
       );
     } catch (error) {
       this.#log(`choosing codecs for ${link.userId} failed`, error);
@@ -1162,10 +1239,14 @@ export class Mesh {
   async #applyRung(link: Link, slot: VideoSlot, sender: RTCRtpSender): Promise<void> {
     const track = sender.track;
     if (!track || !this.#current(link)) return;
-    const rung = stepOf(this.#adaptation(link, slot, track));
+    const state = this.#adaptation(link, slot, track);
+    const rung = stepOf(state);
     const parameters = sender.getParameters();
     const [first, ...others] = parameters.encodings ?? [];
     if (!first) return;
+    // A browser that ignores `encodings[].codec` has nothing to compare or set.
+    const pinned =
+      this.#encodingCodec === false ? undefined : this.#pinnedCodec(state, slot, parameters);
     const height = track.getSettings?.().height;
     const wanted: RTCRtpEncodingParameters = {
       maxBitrate: rung.maxBitrate,
@@ -1175,18 +1256,167 @@ export class Mesh {
     // A camera keeps whatever it has. A browser that doesn't report its degradation preference
     // (Firefox, probably Safari) is taken to have what was last set, or it would never match.
     const degradationPreference = slot === "screen" ? degradationFor(track.contentHint) : undefined;
+    // A pick that a later negotiation reverted is no longer reported, and is made again.
     const unchanged =
       (degradationPreference === undefined ||
         (parameters.degradationPreference ?? this.#degradation.get(sender)) ===
           degradationPreference) &&
+      (!pinned ||
+        encodingCodecOf(parameters)?.mimeType.toLowerCase() === pinned.mimeType.toLowerCase()) &&
       Object.entries(wanted).every(([key, value]) => first[key as keyof typeof first] === value);
     if (unchanged) return;
+    // The cap of the codec it is on goes with the codec, in the same call.
     await sender.setParameters({
       ...parameters,
-      encodings: [{ ...first, ...wanted }, ...others],
+      encodings: [
+        { ...first, ...wanted, ...(pinned && { codec: codecParameter(pinned) }) } as CodecEncoding,
+        ...others,
+      ],
       ...(degradationPreference && { degradationPreference }),
     });
     if (degradationPreference) this.#degradation.set(sender, degradationPreference);
+    // The first read-back says whether the browser takes the codec. Once it has, an empty one is
+    // a negotiation having reverted the pick (healed on the next pass), not a browser without it.
+    if (pinned && this.#encodingCodec === undefined) {
+      this.#encodingCodec = !!encodingCodecOf(sender.getParameters());
+      if (!this.#encodingCodec) this.#renegotiate(link);
+    }
+  }
+
+  /**
+   * The codec `state`'s sender is to be set to, among those it negotiated: the one the codec
+   * switch pinned it to. A sender that carries a codec (`encodings[].codec`, which only this Mesh
+   * sets, and the browser keeps across tracks) that nothing pins it to any more is put back on
+   * the first codec of its kind's start order, which is how a camera returns when the share ends
+   * and a share's sender starts its next share.
+   */
+  #pinnedCodec(
+    state: Adaptation,
+    slot: VideoSlot,
+    parameters: RTCRtpSendParameters,
+  ): RTCRtpCodecParameters | undefined {
+    const codecs = parameters.codecs ?? [];
+    if (state.pinned) return codecs.find((c) => c.mimeType.toLowerCase() === state.pinned);
+    if (!encodingCodecOf(parameters)) return undefined;
+    return orderCodecs(codecs, undefined, this.#orderOf(slot) ?? NORMAL_START)[0];
+  }
+
+  /**
+   * A browser that takes no `encodings[].codec` (Safari) has only the codec preferences, which a
+   * new offer carries. Not while a negotiation is under way: they are in the next one.
+   */
+  #renegotiate(link: Link): void {
+    if (link.pc.signalingState === "stable" && !link.makingOffer) void this.#offer(link);
+  }
+
+  /**
+   * The codec switch (ADR 2 addendum) has fired: every video transceiver ranks the abandoned
+   * codecs last, so that a later offer can't revert the pick (`#orderOf`), and the senders move.
+   */
+  #switchCodecs(): void {
+    this.#switchOwner = this.#local.screen ? "screen" : "cam";
+    for (const slot of VIDEO_SLOTS) this.#preferAll(slot);
+    this.#moveSenders();
+  }
+
+  /**
+   * After the codec switch, move each sender on AV1 or VP9 to H.264, or to VP8 where its pair
+   * lacks it (`switchTarget`; a pair with neither stays). The telemetry row for the window on the
+   * codec it leaves goes first. A pair whose negotiation is still under way is left for the next
+   * pass, when the codecs it negotiated are listed. The encoders change one pair after another
+   * (`CODEC_SWITCH_STAGGER_MS`), each through its own tuning chain with the cap of its new codec.
+   */
+  #moveSenders(): void {
+    const moved: VideoSender[] = [];
+    for (const sender of this.#videoSenders()) {
+      const { link, slot, state } = sender;
+      const target = switchTarget(this.#negotiated(sender));
+      // A pair already on H.264 or VP8 (its viewer lacks the others) has nowhere to go.
+      // A sender whose codec isn't known yet (its negotiation settled since the pass read it) is
+      // left for the next pass: it may already be on H.264.
+      if (state.pinned || !target || !canSwitchFrom(state.codec)) continue;
+      this.#telemetry?.codecSwitched(
+        { peerId: link.userId, slot, direction: "send" },
+        target.mimeType,
+        "cpu",
+      );
+      this.#moved(state, target.mimeType, "cpu");
+      moved.push(sender);
+    }
+    this.#stagger(moved);
+  }
+
+  /**
+   * The share is over (or the camera, with no share): the next one starts fresh. A video sender
+   * still on is put back on the first codec of its kind's start order, by one more
+   * `setParameters` (`#pinnedCodec`); a screen has no track now, and starts its next share there.
+   */
+  #endCodecSwitch(): void {
+    this.#codecWatch = freshCodecWatch();
+    for (const slot of VIDEO_SLOTS) this.#preferAll(slot);
+    const back: VideoSender[] = [];
+    for (const sender of this.#videoSenders()) {
+      const { link, slot, state } = sender;
+      // The rows name the start order's reason again from here (the codec follows in the stats).
+      if (state.codecReason === "cpu")
+        state.codecReason = this.#orderOf(slot)?.reason ?? "preferred";
+      if (!state.pinned) continue;
+      state.pinned = undefined;
+      // The cap of the codec it goes back to goes out in the same call, so the codec is set now;
+      // the stats may name the old one for a pass (`leaving`).
+      const start = orderCodecs(
+        this.#negotiated(sender),
+        undefined,
+        this.#orderOf(slot) ?? NORMAL_START,
+      )[0];
+      if (start && start.mimeType.toLowerCase() !== state.codec?.toLowerCase()) {
+        if (state.codec) state.leaving = { codec: state.codec.toLowerCase(), skipped: 0 };
+        state.codec = start.mimeType;
+        // Not a switch row: the window on the switched codec is dropped.
+        this.#telemetry?.reset({ peerId: link.userId, slot, direction: "send" });
+      }
+      back.push(sender);
+    }
+    this.#stagger(back);
+  }
+
+  /** The codecs `sender` negotiated: only a settled negotiation lists them, not those the browser could send. */
+  #negotiated({ link, sender }: VideoSender): readonly RTCRtpCodecParameters[] {
+    return link.pc.signalingState === "stable" ? (sender.getParameters().codecs ?? []) : [];
+  }
+
+  /**
+   * `state`'s sender is on codec `to` from now on, for `reason` (`pinned`: its next tune tells the
+   * browser, with the cap of the new codec). Its step stays; its window and warm-up readings
+   * start over (as when a sender resumes), so the other codec's readings don't judge this one,
+   * and a CPU limit is pressure for it again.
+   */
+  #moved(state: Adaptation, to: string, reason: CodecReason): void {
+    if (state.codec) state.leaving = { codec: state.codec.toLowerCase(), skipped: 0 };
+    Object.assign(state, {
+      codec: to,
+      pinned: to.toLowerCase(),
+      codecReason: reason,
+      readings: 0,
+      last: undefined,
+    });
+    restart(state, state.rung);
+  }
+
+  /** Tune `senders`, a pair at a time (a pair's own two senders together). */
+  #stagger(senders: readonly VideoSender[]): void {
+    const turns = new Map<Link, number>();
+    for (const { link, slot, sender } of senders) {
+      const turn = turns.get(link) ?? turns.size;
+      turns.set(link, turn);
+      const apply = () => {
+        if (!this.#current(link) || link.own.get(slot)?.sender !== sender) return;
+        if (this.#encodingCodec === false) this.#renegotiate(link);
+        this.#tune(link, slot, sender);
+      };
+      if (turn === 0) apply();
+      else setTimeout(apply, turn * CODEC_SWITCH_STAGGER_MS);
+    }
   }
 
   /**
@@ -1232,7 +1462,7 @@ export class Mesh {
         ...built,
         readings: 0,
         startedAt: Date.now(),
-        codecReason: this.#codecOrders[slot]?.reason ?? "preferred",
+        codecReason: this.#orderOf(slot)?.reason ?? "preferred",
         ...(codec && { codec }),
       };
       link.quality[slot] = state;
@@ -1575,6 +1805,17 @@ export class Mesh {
       }));
       if (!read) continue;
       const { sample, stream } = read;
+      // Just moved to another codec, the stats can still name the one it left for a pass or two:
+      // that reading is of neither. It is left out, not taken for the new codec's (a row on AV1
+      // with the reason `cpu` after the switch row said H.264), up to `MAX_STALE_READINGS`.
+      if (state.leaving) {
+        const stale = sample.codec?.toLowerCase() === state.leaving.codec;
+        if (stale && ++state.leaving.skipped <= MAX_STALE_READINGS) {
+          this.#tune(link, slot, sender);
+          continue;
+        }
+        state.leaving = undefined;
+      }
       // The codec first: its cap is the one this reading, and the step after it, are judged by.
       if (sample.codec) state.codec = sample.codec;
       if (stream) {
@@ -1589,8 +1830,19 @@ export class Mesh {
       const pace = this.#pace(slot, state);
       if (state.readings++ >= pace.warmup) {
         reading.strained = (reading.strained ?? false) || strained(sample);
+        // One entry for the pair: limited if any of its senders is, and on AV1 or VP9 if any is.
+        reading.pair = {
+          cpu: (reading.pair?.cpu ?? false) || sample.limit === "cpu",
+          codec: canSwitchFrom(reading.pair?.codec) ? reading.pair?.codec : state.codec,
+        };
         const max = SLOTS[slot].cap(track, state.steps);
-        const options = { max, reserved: this.#reservedFor(link, slot), upSamples: pace.upSamples };
+        const options = {
+          max,
+          reserved: this.#reservedFor(link, slot),
+          upSamples: pace.upSamples,
+          // A CPU limit is the codec switch's to answer, until it has.
+          ignoreCpu: cpuHeld(this.#codecWatch, state.codec),
+        };
         const ladder = ladderOf(state);
         let next = step(ladder, state, sample, options);
         // A probe the budget refuses is no probe: the window carries on as it was.

@@ -7,9 +7,12 @@ import {
   CAMERA_DEFAULT_RUNG,
   CAMERA_LADDER,
   CODEC_CAP_SCALE,
+  type CodecPair,
+  type CodecWatch,
   carryOver,
   ceilingOf,
   codecCap,
+  cpuHeld,
   DOWN_SAMPLES,
   FIRST_MINUTE_MS,
   FIRST_MINUTE_UP_SAMPLES,
@@ -17,6 +20,7 @@ import {
   feeds60,
   fitCapture,
   fitRung,
+  freshCodecWatch,
   freshLadderState,
   heightCap,
   INITIAL_UPLINK,
@@ -31,6 +35,7 @@ import {
   readSample,
   START_BITRATE_SHARE,
   type StatsSample,
+  SWITCH_PASSES,
   scaleSteps,
   screenSteps,
   seedBitrate,
@@ -43,6 +48,7 @@ import {
   UPLINK_SHARE,
   UplinkBudget,
   WARMUP_READINGS,
+  watchCodec,
 } from "./quality";
 
 /** A 1080p60 screen in a text-like room: 720p30, 900p30, 1080p30, 1080p60. */
@@ -578,6 +584,95 @@ describe("step", () => {
     expect(nextRung(CAMERA_LADDER, times(DOWN_SAMPLES, LOSSY), CAMERA_DEFAULT_RUNG)).toBe(0);
     expect(CAMERA_LADDER[0]?.label).toBe("180p15");
     expect(nextRung(CAMERA_LADDER, times(UP_SAMPLES, GOOD), 0)).toBe(CAMERA_DEFAULT_RUNG);
+  });
+});
+
+describe("the CPU limit before the codec switch (ADR 2 addendum)", () => {
+  const CPU = { ...GOOD, limit: "cpu" as const };
+
+  it("is not pressure to step down for while the switch can answer it, but strain still is", () => {
+    expect(nextRung(SCREEN_LADDER, times(DOWN_SAMPLES, CPU), 3, { ignoreCpu: true })).toBe(3);
+    expect(nextRung(SCREEN_LADDER, times(DOWN_SAMPLES, CPU), 3)).toBe(2);
+    expect(
+      nextRung(SCREEN_LADDER, times(DOWN_SAMPLES, { ...CPU, loss: 0.1 }), 3, { ignoreCpu: true }),
+    ).toBe(2);
+    expect(step(SCREEN_LADDER, freshLadderState(3), CPU, { ignoreCpu: true }).window).toHaveLength(
+      1,
+    );
+  });
+
+  it("is still not a clean sample to probe up on", () => {
+    expect(nextRung(SCREEN_LADDER, times(UP_SAMPLES, CPU), 1, { ignoreCpu: true })).toBe(1);
+  });
+
+  it("is held back only on AV1 or VP9 and until the switch has happened", () => {
+    const fresh = freshCodecWatch();
+    expect(cpuHeld(fresh, "video/AV1")).toBe(true);
+    expect(cpuHeld(fresh, "video/vp9")).toBe(true);
+    expect(cpuHeld(fresh, "video/H264")).toBe(false);
+    expect(cpuHeld(fresh, "video/VP8")).toBe(false);
+    expect(cpuHeld(fresh, undefined)).toBe(false);
+    expect(cpuHeld({ passes: 0, switched: true }, "video/AV1")).toBe(false);
+  });
+});
+
+describe("watchCodec (ADR 2 addendum: the codec switch trigger)", () => {
+  const on = (cpu: boolean, codec = "video/AV1"): CodecPair => ({ cpu, codec });
+  /** Feed `passes` in turn; the pass (1-based) the switch fired on, if any, and where it ends. */
+  function run(passes: CodecPair[][], from: CodecWatch = freshCodecWatch()) {
+    let watch = from;
+    let firedOn: number | undefined;
+    passes.forEach((pairs, i) => {
+      const result = watchCodec(watch, pairs);
+      watch = result.watch;
+      if (result.due) firedOn ??= i + 1;
+    });
+    return { firedOn, watch };
+  }
+
+  it("fires on the second pass in a row with a CPU limit on one pair, with one viewer", () => {
+    expect(SWITCH_PASSES).toBe(2);
+    expect(run([[on(true)], [on(true)]]).firedOn).toBe(2);
+    expect(run([[on(true)]]).firedOn).toBeUndefined();
+  });
+
+  it("needs at least half of the pairs", () => {
+    const pairs = (limited: number, of: number) =>
+      Array.from({ length: of }, (_, i) => on(i < limited));
+    expect(run([pairs(1, 3), pairs(1, 3)]).firedOn).toBeUndefined();
+    expect(run([pairs(2, 4), pairs(2, 4)]).firedOn).toBe(2);
+    expect(run([pairs(2, 3), pairs(2, 3)]).firedOn).toBe(2);
+    expect(run([pairs(0, 3), pairs(0, 3)]).firedOn).toBeUndefined();
+  });
+
+  it("needs the passes in a row: a pass short of it breaks the run", () => {
+    expect(run([[on(true)], [on(false)], [on(true)]]).firedOn).toBeUndefined();
+    expect(run([[on(true)], [on(false)], [on(true)], [on(true)]]).firedOn).toBe(4);
+    // A pass with nothing to judge (every pair still warming up) breaks it too.
+    expect(run([[on(true)], [], [on(true)]]).firedOn).toBeUndefined();
+  });
+
+  it("fires from AV1 or VP9 only", () => {
+    expect(run([[on(true, "video/VP9")], [on(true, "video/VP9")]]).firedOn).toBe(2);
+    expect(run([[on(true, "video/H264")], [on(true, "video/H264")]]).firedOn).toBeUndefined();
+    expect(run([[on(true, "video/VP8")], [on(true, "video/VP8")]]).firedOn).toBeUndefined();
+    expect(run([[{ cpu: true }], [{ cpu: true }]]).firedOn).toBeUndefined();
+    // A mixed streamer: one pair on VP8 (its viewer lacks the others) is still on AV1 elsewhere.
+    const mixed = [on(true), on(false, "video/VP8")];
+    expect(run([mixed, mixed]).firedOn).toBe(2);
+    // A CPU limit counts on whichever pair shows it (the machine is the one that is short), so
+    // the VP8 pair's can send the AV1 one to H.264 too.
+    const vp8 = [on(false), on(true, "video/VP8")];
+    expect(run([vp8, vp8]).firedOn).toBe(2);
+  });
+
+  it("fires once: there is no second switch in a share", () => {
+    const first = run([[on(true)], [on(true)]]);
+    expect(first.watch).toEqual({ passes: 0, switched: true });
+    expect(
+      run([[on(true)], [on(true)], [on(true)], [on(true)]], first.watch).firedOn,
+    ).toBeUndefined();
+    expect(watchCodec(first.watch, [on(true)])).toEqual({ watch: first.watch, due: false });
   });
 });
 
