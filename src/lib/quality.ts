@@ -31,7 +31,7 @@
  * The thresholds are provisional (ADR 2 addendum).
  */
 
-import { COSTLY_CODECS } from "./codecs.ts";
+import { COSTLY_CODECS, canSwitchFrom } from "./codecs.ts";
 
 export interface Rung {
   label: string;
@@ -296,6 +296,11 @@ export interface RungOptions {
   backoff?: number;
   /** Clean samples a probe needs before any backoff. Default `UP_SAMPLES` (see `paceOf`). */
   upSamples?: number;
+  /**
+   * A CPU limit is no pressure to step down for (the codec switch is still to answer it, see
+   * `cpuHeld`). Strain still is, and a CPU-limited sample is still not clean enough to probe on.
+   */
+  ignoreCpu?: boolean;
 }
 
 /** The network shows strain: loss, a long round trip, or a bandwidth limit the estimate backs. */
@@ -308,7 +313,8 @@ export const strained = (sample: StatsSample): boolean =>
     sample.availableBitrate < sample.sendBitrate * ESTIMATE_SHORT);
 
 /** Strain, or a CPU limit (which no uplink budget can help: it shows on every pair at once). */
-const pressured = (sample: StatsSample): boolean => strained(sample) || sample.limit === "cpu";
+const pressured = (sample: StatsSample, ignoreCpu = false): boolean =>
+  strained(sample) || (sample.limit === "cpu" && !ignoreCpu);
 
 const clean = (sample: StatsSample): boolean =>
   !pressured(sample) && sample.loss < LOSS_UP && (sample.rttMs ?? 0) < RTT_UP_MS;
@@ -335,14 +341,25 @@ export function nextRung(
   ladder: readonly Rung[],
   window: readonly StatsSample[],
   current: number,
-  { min = 0, max = ladder.length - 1, reserved = 0, backoff = 0, upSamples }: RungOptions = {},
+  {
+    min = 0,
+    max = ladder.length - 1,
+    reserved = 0,
+    backoff = 0,
+    upSamples,
+    ignoreCpu,
+  }: RungOptions = {},
 ): number {
   const top = Math.max(min, Math.min(max, ladder.length - 1));
   if (current > top) return top;
   if (current < min) return min;
 
   const recent = window.slice(-DOWN_SAMPLES);
-  if (current > min && recent.length === DOWN_SAMPLES && recent.every(pressured)) {
+  if (
+    current > min &&
+    recent.length === DOWN_SAMPLES &&
+    recent.every((sample) => pressured(sample, ignoreCpu))
+  ) {
     // As low as the estimate says it must, and at least one rung.
     const estimates = recent.flatMap((sample) => sample.availableBitrate ?? []);
     const available =
@@ -406,6 +423,57 @@ export function step(
   }
   return { ...state, window };
 }
+
+/** Passes in a row with a CPU limit on at least half the pairs before the codec switch (about 8 s). */
+export const SWITCH_PASSES = 2;
+
+/**
+ * One pair (the streamer's link to a viewer) as a pass saw it, past its warm-up: whether the
+ * encoder of any of its video senders reports a CPU limit.
+ */
+export interface CodecPair {
+  cpu: boolean;
+  /** The codec it sends: AV1 or VP9 if any of its senders does. */
+  codec?: string;
+}
+
+/** What the codec switch remembers of a streamer's share (ADR 2 addendum). */
+export interface CodecWatch {
+  /** Passes in a row that met the trigger. */
+  passes: number;
+  /** The switch has happened in this share: there is no second. */
+  switched: boolean;
+}
+
+export const freshCodecWatch = (): CodecWatch => ({ passes: 0, switched: false });
+
+/**
+ * One pass over the streamer's video `pairs` (those past the warm-up, with a reading): `due` is
+ * whether the codec switch fires now. It does when the encoder reports a CPU limit on at least
+ * half the pairs (with one viewer, that pair is enough) in `SWITCH_PASSES` passes in a row, the
+ * streamer is on AV1 or VP9 on some pair, and it hasn't switched in this share. A pass with no
+ * pairs to judge, or short of the trigger, breaks the run.
+ */
+export function watchCodec(
+  watch: CodecWatch,
+  pairs: readonly CodecPair[],
+): { watch: CodecWatch; due: boolean } {
+  if (watch.switched) return { watch, due: false };
+  const limited = pairs.filter((pair) => pair.cpu).length;
+  const met =
+    limited > 0 && limited * 2 >= pairs.length && pairs.some((p) => canSwitchFrom(p.codec));
+  const passes = met ? watch.passes + 1 : 0;
+  const due = passes >= SWITCH_PASSES;
+  return { watch: { passes: due ? 0 : passes, switched: due }, due };
+}
+
+/**
+ * Whether a CPU limit on a sender of `codec` is held back from stepping it down: while the codec
+ * switch can still answer it (the sender is on AV1 or VP9 and the share hasn't switched). Once
+ * switched, or on a codec the switch doesn't leave, it is pressure like any other.
+ */
+export const cpuHeld = (watch: CodecWatch, codec?: string): boolean =>
+  !watch.switched && canSwitchFrom(codec);
 
 /** ADR 2's floor for a streamer's uplink, bits per second. */
 export const UPLINK_FLOOR = 25_000_000;
