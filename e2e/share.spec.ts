@@ -1,6 +1,7 @@
 import type { Browser, BrowserContext, Page } from "@playwright/test";
-import { COSTLY_CODECS } from "../src/lib/codecs";
+import { COSTLY_CODECS, codecReasonOf } from "../src/lib/codecs";
 import { codecCap, fitRung, MAX_CAPTURE_PIXELS, screenSteps } from "../src/lib/quality";
+import type { CodecReason } from "../src/lib/quality-telemetry";
 import { MAX_CLIENT_MESSAGE_BYTES } from "../src/lib/realtime";
 import { E2E_ADMIN_DISCORD_ID, signIn } from "./auth";
 import { expect, newPage, test } from "./fixtures";
@@ -156,7 +157,8 @@ const shareSenders = (page: Page) =>
 /**
  * How the page's open connections encode its share (ADR 2): each screen sender's encoding
  * (bitrate and frame rate cap, from its quality rung) and the codec it sends with, next to the
- * best codec this browser offers by the ladder AV1 > VP9 > H.264 > VP8.
+ * best codec this browser offers by the ladder AV1 > VP9 > H.264 > VP8 (a Firefox streamer sends
+ * only H.264, or VP8 where it has none: ADR 2 addendum, the start).
  */
 const screenEncodings = (page: Page) =>
   page.evaluate(async () => {
@@ -200,9 +202,10 @@ const screenEncodings = (page: Page) =>
     const offered = (RTCRtpSender.getCapabilities("video")?.codecs ?? []).map((c) =>
       c.mimeType.toLowerCase(),
     );
-    const best = ["video/av1", "video/vp9", "video/h264", "video/vp8"].find((m) =>
-      offered.includes(m),
-    );
+    const ladder = navigator.userAgent.includes("Firefox/")
+      ? ["video/h264", "video/vp8"]
+      : ["video/av1", "video/vp9", "video/h264", "video/vp8"];
+    const best = ladder.find((m) => offered.includes(m));
     return { senders, best, capture };
   });
 
@@ -266,13 +269,16 @@ test("a share plays with its audio for everyone, and a mod's force-stop removes 
     // Each viewer's copy is on the steps built from the capture, and goes out in the best codec
     // this browser offers (both ends are the same browser here). Each starts at the highest step
     // that fits its share of the 23 Mbps budget (two viewers: 11.5 Mbps each), the top step here,
-    // and a gaming room gives up size before frames.
+    // and a gaming room gives up size before frames. Its cap is that of the codec it sends in.
     const steps = screenSteps((await screenEncodings(streamer.page)).capture, "size");
     const start = steps[fitRung(steps, 23_000_000 / 2)];
     const started = async () =>
       (await screenEncodings(streamer.page)).senders.map(
         (s) =>
-          s.maxBitrate === start?.maxBitrate && s.maxFramerate === start?.frameRate && !!s.codec,
+          !!start &&
+          !!s.codec &&
+          s.maxBitrate === codecCap(start, s.codec) &&
+          s.maxFramerate === start.frameRate,
       );
     await expect.poll(started, { timeout: 15_000 }).toEqual([true, true]);
     const { senders, best, capture } = await screenEncodings(streamer.page);
@@ -344,6 +350,7 @@ test("an ultrawide share is encoded in its own shape, not pinned to a 720p ceili
   test.setTimeout(150_000);
   await ultrawideScreen(context);
   await instrument(context);
+  await recordRemoteDescriptions(context);
   const streamerId = await signIn(context, { username: "share.wide" });
   // A code room: a step down gives up frames before size.
   const roomId = await createRoomOnPage(page, {
@@ -374,20 +381,45 @@ test("an ultrawide share is encoded in its own shape, not pinned to a 720p ceili
     const top = steps.at(-1);
     expect(top?.label).toMatch(/^29[67]\d×12[34]\d@60$/);
     expect(top?.maxBitrate).toBe(10_670_000);
+    const firefox = browserName === "firefox";
+    const sentCodec = (await screenEncodings(page)).senders[0]?.codec;
+    // Firefox's viewer asks, in its description, for no frame over `max-fs` macroblocks of 16x16
+    // (12288 for VP8, about 3.1 MP), which holds a sender on VP8 under the top step of a large
+    // capture; H.264 is not verified (Playwright's Firefox has none). The shape holds, and the
+    // frame fills what `max-fs` allows.
+    const descriptions = await page.evaluate(
+      () => (window as unknown as { __remoteSdps: string[] }).__remoteSdps,
+    );
+    const maxFs = Math.min(
+      ...[...descriptions.join("\n").matchAll(/max-fs=(\d+)/g)].map((m) => Number(m[1])),
+    );
+    const topPixels = (top?.width ?? 0) * (top?.height ?? 0);
+    const reachable = Math.min(topPixels, maxFs * 256);
     await expect
       .poll(
         async () => {
           const [sender] = (await screenEncodings(page)).senders;
+          const width = sender?.frameWidth ?? 0;
+          const height = sender?.frameHeight ?? 0;
           return {
             maxBitrate: sender?.maxBitrate,
             maxFramerate: sender?.maxFramerate,
-            wide: Math.abs((sender?.frameWidth ?? 0) - (top?.width ?? 0)) <= 4,
-            tall: Math.abs((sender?.frameHeight ?? 0) - (top?.height ?? 0)) <= 4,
+            size: firefox
+              ? Math.abs(width / (height || 1) - (top?.width ?? 0) / (top?.height ?? 1)) < 0.03 &&
+                width * height <= maxFs * 256 &&
+                width * height >= 0.98 * reachable
+              : Math.abs(width - (top?.width ?? 0)) <= 4 &&
+                Math.abs(height - (top?.height ?? 0)) <= 4,
           };
         },
         { timeout: 30_000 },
       )
-      .toEqual({ maxBitrate: 10_670_000, maxFramerate: 60, wide: true, tall: true });
+      .toEqual({
+        // At the cap of the codec it sends in (Firefox sends H.264 or VP8: 1.5x).
+        maxBitrate: top && codecCap(top, sentCodec),
+        maxFramerate: 60,
+        size: true,
+      });
   } finally {
     await viewer.context.close();
   }
@@ -504,6 +536,18 @@ function reportedRows(page: Page): Record<string, unknown>[] {
   return rows;
 }
 
+/**
+ * What a send row's codec reason may be: Firefox's is `browser` (its streamers send H.264 or
+ * VP8); Chromium's is the normal order (`preferred`), or `hardware` where VP9 went first, and
+ * either way a reason only while the codec sent is the one it is about (`codecReasonOf`).
+ */
+function expectReason(row: Record<string, unknown>, browserName: string) {
+  const reason = row.codecReason as CodecReason;
+  expect(codecReasonOf(reason, String(row.codec))).toBe(reason);
+  if (browserName === "firefox") expect(reason).toBe("browser");
+  else expect(["preferred", "hardware"]).toContain(reason);
+}
+
 test("a share's send rows say why it is on its codec, and how hard its encoder works", async ({
   page,
   context,
@@ -525,8 +569,7 @@ test("a share's send rows say why it is on its codec, and how hard its encoder w
     await expect.poll(() => rows.some((row) => row.windowMs), { timeout: 45_000 }).toBe(true);
 
     for (const row of rows.filter((r) => r.direction === "send")) {
-      // Every sender is on the normal order until the later codec picks land.
-      expect(row.codecReason).toBe("preferred");
+      expectReason(row, browserName);
       expect(row.fromCodec).toBeNull();
     }
     const timed = rows.filter((row) => row.windowMs);
@@ -543,6 +586,51 @@ test("a share's send rows say why it is on its codec, and how hard its encoder w
         expect(row.encoderImplementation).toBeNull();
         expect(row.powerEfficientEncoder).toBeNull();
       }
+    }
+  } finally {
+    await viewer.context.close();
+  }
+});
+
+test("a share starts on the codec its streamer's browser picks (ADR 2 addendum: the start)", async ({
+  page,
+  context,
+  browser,
+  browserName,
+}) => {
+  test.setTimeout(90_000);
+  await instrument(context);
+  const streamerId = await signIn(context, { username: "share.start" });
+  const roomId = await createRoomOnPage(page, {
+    name: uniqueRoomName("share start"),
+    kind: "gaming",
+  });
+  const viewer = await joinAs(browser, "share.startviewer", roomId);
+  const rows = reportedRows(page);
+  try {
+    await page.getByRole("button", { name: "Share screen" }).click();
+    await expect(page.getByRole("button", { name: "Stop sharing" })).toBeEnabled();
+    await expect.poll(() => screenPlays(viewer.page, streamerId), { timeout: 30_000 }).toBe(true);
+    await expect
+      .poll(async () => (await screenEncodings(page)).senders[0]?.codec, { timeout: 15_000 })
+      .toBeTruthy();
+    const { senders } = await screenEncodings(page);
+    const sent = senders.map((s) => s.codec?.toLowerCase());
+    if (browserName === "firefox") {
+      // H.264 where the build has it (OpenH264), else VP8: never AV1 or VP9.
+      const offered = await page.evaluate(() =>
+        (RTCRtpSender.getCapabilities("video")?.codecs ?? []).map((c) => c.mimeType.toLowerCase()),
+      );
+      expect(sent).toEqual([offered.includes("video/h264") ? "video/h264" : "video/vp8"]);
+    } else {
+      // No hardware encoder in CI: the normal order, AV1 first. (Where the machine has hardware
+      // VP9 and no hardware AV1, VP9 goes first, which the rows' reason says.)
+      expect(sent).toEqual([sent[0] === "video/vp9" ? "video/vp9" : "video/av1"]);
+    }
+    // Its rows say the same, once a window has gone out.
+    await expect.poll(() => rows.some((row) => row.windowMs), { timeout: 45_000 }).toBe(true);
+    for (const row of rows.filter((r) => r.direction === "send")) {
+      expectReason(row, browserName);
     }
   } finally {
     await viewer.context.close();

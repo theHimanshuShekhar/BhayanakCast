@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { VideoCodecs } from "./codecs";
+import {
+  FIREFOX_START,
+  HARDWARE_VP9_START,
+  NORMAL_START,
+  type StartOrder,
+  type VideoCodecs,
+} from "./codecs";
 import type { ConnectionEvent } from "./connection-events";
 import type { QualityView } from "./mesh";
 import {
@@ -1032,7 +1038,7 @@ describe("Mesh quality ladder (ADR 2)", () => {
 
 describe("Mesh quality telemetry (ADR 2 addendum)", () => {
   /** Ana shares a 1080p60 screen to bo, both reporting rows over 24 s windows, all connected. */
-  async function watched() {
+  async function watched(start?: StartOrder, sentCodec = "video/VP9") {
     const network = new Map<string, Mesh>();
     const rows = { ana: [] as PendingSample[], bo: [] as PendingSample[] };
     const options = (who: keyof typeof rows) => ({
@@ -1040,6 +1046,7 @@ describe("Mesh quality telemetry (ADR 2 addendum)", () => {
       sampleWindowMs: 24_000,
     });
     const ana = page("ana", network, undefined, undefined, 4_000_000, options("ana"));
+    if (start) ana.mesh.setStartOrder("screen", start);
     const bo = page("bo", network, undefined, undefined, undefined, options("bo"));
     for (const mesh of network.values()) mesh.join(everyone);
     await settle();
@@ -1057,7 +1064,7 @@ describe("Mesh quality telemetry (ADR 2 addendum)", () => {
     const pass = async (loss = 0) => {
       seconds += 4;
       const frames = seconds * 30;
-      toBo.sender.stats = senderStats(loss, "video/VP9", {
+      toBo.sender.stats = senderStats(loss, sentCodec, {
         bytesSent: seconds * 250_000,
         timestamp: seconds * 1_000,
         framesEncoded: frames,
@@ -1148,6 +1155,25 @@ describe("Mesh quality telemetry (ADR 2 addendum)", () => {
     });
     ana.mesh.close();
     bo.mesh.close();
+  });
+
+  it("says in the send rows why the sender is on its codec, while it sends the codec that reason is about", async () => {
+    for (const [start, sent, reason] of [
+      [undefined, "video/VP9", "preferred"],
+      [NORMAL_START, "video/AV1", "preferred"],
+      [HARDWARE_VP9_START, "video/VP9", "hardware"],
+      // A viewer without VP9 leaves the sender on AV1.
+      [HARDWARE_VP9_START, "video/AV1", "preferred"],
+      [FIREFOX_START, "video/H264", "browser"],
+      [FIREFOX_START, "video/VP8", "browser"],
+    ] as const) {
+      const { ana, bo, rows, pass } = await watched(start, sent);
+      for (let i = 0; i < 7; i++) await pass();
+      expect(rows.ana[0]).toMatchObject({ direction: "send", codec: sent, codecReason: reason });
+      expect(rows.bo[0]).toMatchObject({ direction: "recv", codecReason: null });
+      ana.mesh.close();
+      bo.mesh.close();
+    }
   });
 
   it("stops reporting what bo receives once the server says ana no longer shares it", async () => {
@@ -1997,6 +2023,157 @@ describe("Mesh codec choice (ADR 2)", () => {
       "video/rtx",
     ]);
     bo.mesh.close();
+  });
+
+  describe("the streamer's start order", () => {
+    const chromiumWithH264: VideoCodecs = {
+      send: [
+        codec("video/VP8"),
+        codec("video/AV1"),
+        codec("video/VP9"),
+        codec("video/H264"),
+        codec("video/rtx"),
+      ],
+      receive: ["video/VP8", "video/AV1", "video/VP9", "video/H264"],
+    };
+    const capture = { width: 1920, height: 1080, frameRate: 30 };
+    const types = (t: FakeTransceiver | undefined) => t?.codecPreferences.map((c) => c.mimeType);
+    const carryingId = (pc: FakePC | undefined, id: string) =>
+      pc?.transceivers.find((t) => (t.sender.track as { id?: string } | null)?.id === id);
+
+    /** Ana and bo, in the room. */
+    function pair(viewer: VideoCodecs = chromiumWithH264) {
+      const network = new Map<string, Mesh>();
+      const ana = page("ana", network, undefined, chromiumWithH264);
+      const bo = page("bo", network, undefined, viewer);
+      for (const mesh of network.values()) mesh.join(everyone);
+      return { ana, bo };
+    }
+
+    it("sends a Firefox streamer's screen as H.264 or VP8 only", async () => {
+      const { ana, bo } = pair();
+      ana.mesh.setStartOrder("screen", FIREFOX_START);
+      ana.mesh.setLocalTracks({ screen: trackWith("s", capture) });
+      await settle();
+      expect(types(sender(ana.pcs[0]))).toEqual(["video/H264", "video/VP8", "video/rtx"]);
+      ana.mesh.close();
+      bo.mesh.close();
+    });
+
+    it("offers the normal order for a kind that was given no order", async () => {
+      const { ana, bo } = pair();
+      ana.mesh.setLocalTracks({ screen: trackWith("s", capture) });
+      await settle();
+      expect(types(sender(ana.pcs[0]))).toEqual([
+        "video/AV1",
+        "video/VP9",
+        "video/H264",
+        "video/VP8",
+        "video/rtx",
+      ]);
+      ana.mesh.close();
+      bo.mesh.close();
+    });
+
+    it("applies the order to a late joiner", async () => {
+      const network = new Map<string, Mesh>();
+      const ana = page("ana", network, undefined, chromiumWithH264);
+      ana.mesh.join([{ userId: "ana" }]);
+      ana.mesh.setStartOrder("screen", HARDWARE_VP9_START);
+      ana.mesh.setLocalTracks({ screen: trackWith("s", capture) });
+      await settle();
+      const bo = page("bo", network, undefined, chromiumWithH264);
+      for (const mesh of network.values()) mesh.join(everyone);
+      await settle();
+      expect(types(sender(ana.pcs[0]))?.slice(0, 2)).toEqual(["video/VP9", "video/AV1"]);
+      ana.mesh.close();
+      bo.mesh.close();
+    });
+
+    it("leaves out of a pair a codec its viewer can't decode", async () => {
+      const noVp9: VideoCodecs = { ...chromiumWithH264, receive: ["video/AV1", "video/VP8"] };
+      const { ana, bo } = pair(noVp9);
+      await settle();
+      ana.mesh.setStartOrder("screen", HARDWARE_VP9_START);
+      ana.mesh.setLocalTracks({ screen: trackWith("s", capture) });
+      await settle();
+      expect(types(sender(ana.pcs[0]))).toEqual(["video/AV1", "video/VP8", "video/rtx"]);
+      ana.mesh.close();
+      bo.mesh.close();
+    });
+
+    it("keeps the screen's order apart from the camera's", async () => {
+      const { ana, bo } = pair();
+      ana.mesh.setStartOrder("screen", FIREFOX_START);
+      ana.mesh.setStartOrder("cam", HARDWARE_VP9_START);
+      ana.mesh.setLocalTracks({
+        screen: trackWith("s", capture),
+        cam: trackWith("c", { width: 640, height: 360, frameRate: 15 }),
+      });
+      await settle();
+      expect(types(carryingId(ana.pcs[0], "s"))?.[0]).toBe("video/H264");
+      expect(types(carryingId(ana.pcs[0], "c"))?.[0]).toBe("video/VP9");
+      ana.mesh.close();
+      bo.mesh.close();
+    });
+
+    it("keeps an order while its kind is on, and forgets it when the kind goes off", async () => {
+      const { ana, bo } = pair();
+      ana.mesh.setStartOrder("cam", FIREFOX_START);
+      ana.mesh.setLocalTracks({ cam: trackWith("c1", capture) });
+      await settle();
+      expect(types(carryingId(ana.pcs[0], "c1"))).toEqual(["video/H264", "video/VP8", "video/rtx"]);
+      // Another camera while on: the same order.
+      ana.mesh.setLocalTracks({ cam: trackWith("c2", capture) });
+      await settle();
+      expect(types(carryingId(ana.pcs[0], "c2"))?.[0]).toBe("video/H264");
+      // Off, then on with no order given: the normal one, on the transceiver it kept.
+      ana.mesh.setLocalTracks({ cam: null });
+      await settle();
+      ana.mesh.setLocalTracks({ cam: trackWith("c3", capture) });
+      await settle();
+      expect(types(carryingId(ana.pcs[0], "c3"))?.[0]).toBe("video/AV1");
+      // And with a new one given: it takes it, the kept transceiver too.
+      ana.mesh.setStartOrder("cam", HARDWARE_VP9_START);
+      expect(types(carryingId(ana.pcs[0], "c3"))?.[0]).toBe("video/VP9");
+      ana.mesh.close();
+      bo.mesh.close();
+    });
+
+    it("sends a share's screen and its audio in one negotiation, on the order given", async () => {
+      // Ana is the impolite side (zoe > ana), so she offers first.
+      const network = new Map<string, Mesh>();
+      const zoe = page("zoe", network, undefined, chromiumWithH264);
+      const ana = page("ana", network, undefined, chromiumWithH264);
+      for (const mesh of network.values()) mesh.join([{ userId: "ana" }, { userId: "zoe" }]);
+      await settle();
+      const offers = () =>
+        zoe.sent.flatMap((p) =>
+          p.kind === "description" && p.description.type === "offer" ? [p] : [],
+        ).length;
+      const before = offers();
+      zoe.mesh.setStartOrder("screen", FIREFOX_START);
+      zoe.mesh.setLocalTracks({
+        screen: trackWith("s", capture),
+        screenAudio: track("share audio"),
+      });
+      await settle();
+      expect(offers() - before).toBe(1);
+      const pc = zoe.pcs[0];
+      expect(carryingId(pc, "s")?.mid).not.toBeNull();
+      expect(carryingId(pc, "share audio")?.mid).not.toBeNull();
+      expect(types(carryingId(pc, "s"))?.[0]).toBe("video/H264");
+      zoe.mesh.close();
+      ana.mesh.close();
+    });
+
+    it("does nothing with an order once closed", async () => {
+      const { ana, bo } = pair();
+      await settle();
+      ana.mesh.close();
+      expect(() => ana.mesh.setStartOrder("screen", FIREFOX_START)).not.toThrow();
+      bo.mesh.close();
+    });
   });
 });
 
@@ -2923,6 +3100,7 @@ describe("Mesh: the seeded estimate and a share's first minute (ADR 2 addendum)"
       polite = false,
       withCam = false,
       first = "VP9" as "VP9" | "H264",
+      startOrder = undefined as StartOrder | undefined,
     } = {},
   ) {
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -2948,6 +3126,7 @@ describe("Mesh: the seeded estimate and a share's first minute (ADR 2 addendum)"
       receive(from, { ...payload, description: { type: "answer", sdp: chromium(mid, first) } });
     };
     const room = [{ userId: self }, ...names.map((userId) => ({ userId }))];
+    if (startOrder) ana.mesh.setStartOrder("screen", startOrder);
     if (mic) ana.mesh.setLocalTracks({ mic: track("ana mic") });
     // `early`: the share is already on when the viewers arrive; otherwise it starts on live pairs.
     const tracks = withCam ? { screen, cam } : { screen };
@@ -2974,6 +3153,16 @@ describe("Mesh: the seeded estimate and a share's first minute (ADR 2 addendum)"
     ana.pcs[i]?.remoteSdps.find((sdp) => sdp.includes("m=video")) ?? "";
 
   describe("the seed", () => {
+    it("is written with a start order given first, in the one negotiation the screen is in", async () => {
+      // A Mesh made again during a share is given the share's order and its tracks before it joins
+      // the room (room-media), so the first offer has the screen in it, as without an order.
+      for (const startOrder of [FIREFOX_START, HARDWARE_VP9_START]) {
+        const { ana } = await share(["bo"], undefined, undefined, { startOrder });
+        expect(seeds(ana)).toEqual([[5400, 5400]]);
+        ana.mesh.close();
+      }
+    });
+
     it("is 90% of the start step's bitrate, on every video codec of the screen the sender applies", async () => {
       const { ana, viewers } = await share(["bo", "cy"], 8 * MBPS);
       // Each viewer is entitled to 4 Mbps and starts at 1080p30 (3 Mbps): 2700 kbps, on VP8 (a

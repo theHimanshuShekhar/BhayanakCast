@@ -1,5 +1,14 @@
-import { describe, expect, it } from "vitest";
-import { orderCodecs, videoMimeTypes } from "./codecs";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  type Capture,
+  chooseStartOrder,
+  codecReasonOf,
+  FIREFOX_START,
+  HARDWARE_VP9_START,
+  NORMAL_START,
+  orderCodecs,
+  videoMimeTypes,
+} from "./codecs";
 
 const codec = (mimeType: string, sdpFmtpLine?: string) => ({ mimeType, sdpFmtpLine });
 const types = (codecs: { mimeType: string }[]) => codecs.map((c) => c.mimeType);
@@ -92,6 +101,208 @@ describe("orderCodecs", () => {
     ]);
     expect(types(orderCodecs(FIREFOX, []))).toEqual(types(orderCodecs(FIREFOX)));
     expect(types(orderCodecs(FIREFOX, ["video/AV1"]))).toEqual(types(orderCodecs(FIREFOX)));
+  });
+});
+
+describe("orderCodecs with the streamer's own order", () => {
+  it("puts VP9 before AV1 for a streamer on hardware VP9, and a viewer without VP9 gets AV1", () => {
+    expect(
+      types(orderCodecs(CHROMIUM, videoMimeTypes(CHROMIUM), HARDWARE_VP9_START)).slice(0, 5),
+    ).toEqual(["video/VP9", "video/VP9", "video/AV1", "video/H264", "video/H264"]);
+    expect(
+      types(orderCodecs(CHROMIUM, videoMimeTypes(CHROMIUM_NO_AV1), HARDWARE_VP9_START))[0],
+    ).toBe("video/VP9");
+    const noVp9 = ["video/AV1", "video/H264", "video/VP8"];
+    expect(types(orderCodecs(CHROMIUM, noVp9, HARDWARE_VP9_START)).slice(0, 3)).toEqual([
+      "video/AV1",
+      "video/H264",
+      "video/H264",
+    ]);
+  });
+
+  it("sends only H.264 and VP8 from Firefox, H.264 first", () => {
+    expect(types(orderCodecs(CHROMIUM, videoMimeTypes(CHROMIUM), FIREFOX_START))).toEqual([
+      "video/H264",
+      "video/H264",
+      "video/VP8",
+      "video/rtx",
+      "video/red",
+      "video/ulpfec",
+    ]);
+  });
+
+  it("gives a Firefox streamer VP8 where H.264 isn't on both sides", () => {
+    expect(types(orderCodecs(FIREFOX, ["video/VP8", "video/VP9"], FIREFOX_START))).toEqual([
+      "video/VP8",
+      "video/rtx",
+    ]);
+    const noH264 = CHROMIUM.filter((c) => c.mimeType !== "video/H264");
+    expect(types(orderCodecs(noH264, videoMimeTypes(CHROMIUM), FIREFOX_START))[0]).toBe(
+      "video/VP8",
+    );
+  });
+
+  it("keeps VP9 out even when it is all the viewer decodes, and offers what it has if nothing else", () => {
+    expect(types(orderCodecs(FIREFOX, ["video/VP9"], FIREFOX_START))).toEqual([
+      "video/H264",
+      "video/VP8",
+      "video/rtx",
+    ]);
+    // A browser with none of the codecs it keeps offers what it has.
+    const av1Only = [codec("video/AV1"), codec("video/rtx")];
+    expect(types(orderCodecs(av1Only, undefined, FIREFOX_START))).toEqual([
+      "video/AV1",
+      "video/rtx",
+    ]);
+  });
+
+  it("is the normal order with the normal start", () => {
+    expect(orderCodecs(CHROMIUM, videoMimeTypes(CHROMIUM), NORMAL_START)).toEqual(
+      orderCodecs(CHROMIUM, videoMimeTypes(CHROMIUM)),
+    );
+  });
+});
+
+const CAPTURE: Capture = { width: 1920, height: 1080, frameRate: 30, bitrate: 3_000_000 };
+
+/** A `mediaCapabilities` that answers `powerEfficient` per codec (an Error rejects, a missing one hangs). */
+function capabilities(answers: Record<string, boolean | Error | "hang">) {
+  const encodingInfo = vi.fn(async (config: MediaEncodingConfiguration) => {
+    const answer = answers[config.video?.contentType ?? ""];
+    if (answer === "hang") return new Promise<never>(() => {});
+    if (answer instanceof Error) throw answer;
+    return { supported: true, smooth: true, powerEfficient: answer ?? false };
+  });
+  return { encodingInfo } as unknown as MediaCapabilities & { encodingInfo: typeof encodingInfo };
+}
+
+describe("codecReasonOf", () => {
+  it("gives the reason of an order only while the codec sent is the one it is about", () => {
+    expect(codecReasonOf("hardware", "video/VP9")).toBe("hardware");
+    expect(codecReasonOf("hardware", "video/AV1")).toBe("preferred");
+    expect(codecReasonOf("browser", "video/H264")).toBe("browser");
+    expect(codecReasonOf("browser", "video/vp8")).toBe("browser");
+    expect(codecReasonOf("browser", "video/VP9")).toBe("preferred");
+  });
+
+  it("leaves the normal order's and the switch's reasons as they are", () => {
+    expect(codecReasonOf("preferred", "video/AV1")).toBe("preferred");
+    expect(codecReasonOf("cpu", "video/H264")).toBe("cpu");
+  });
+
+  it("gives none of them for a codec not known yet", () => {
+    expect(codecReasonOf("hardware")).toBe("preferred");
+    expect(codecReasonOf("browser")).toBe("preferred");
+  });
+});
+
+describe("chooseStartOrder", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("starts a Firefox streamer on H.264 without asking", async () => {
+    const asked = capabilities({});
+    expect(await chooseStartOrder("firefox", CAPTURE, asked)).toBe(FIREFOX_START);
+    expect(FIREFOX_START).toMatchObject({ reason: "browser", order: ["video/h264", "video/vp8"] });
+    expect(asked.encodingInfo).not.toHaveBeenCalled();
+  });
+
+  it("asks Chromium about AV1 and VP9 at the capture's size, frame rate and bitrate", async () => {
+    const asked = capabilities({});
+    await chooseStartOrder("chrome", CAPTURE, asked);
+    expect(asked.encodingInfo.mock.calls.map(([config]) => config)).toEqual([
+      {
+        type: "webrtc",
+        video: {
+          contentType: "video/AV1",
+          width: 1920,
+          height: 1080,
+          bitrate: 3_000_000,
+          framerate: 30,
+        },
+      },
+      {
+        type: "webrtc",
+        video: {
+          contentType: "video/VP9",
+          width: 1920,
+          height: 1080,
+          bitrate: 3_000_000,
+          framerate: 30,
+        },
+      },
+    ]);
+  });
+
+  it.each([
+    ["AV1 and VP9", { "video/AV1": true, "video/VP9": true }, NORMAL_START],
+    ["AV1 only", { "video/AV1": true, "video/VP9": false }, NORMAL_START],
+    ["VP9 only", { "video/AV1": false, "video/VP9": true }, HARDWARE_VP9_START],
+    ["neither", { "video/AV1": false, "video/VP9": false }, NORMAL_START],
+    // H.264 hardware alone never moves the start.
+    ["H.264 only", { "video/H264": true }, NORMAL_START],
+  ])("with hardware %s, picks the right order", async (_, answers, expected) => {
+    for (const name of ["chrome", "edge", "opera"] as const) {
+      expect(await chooseStartOrder(name, CAPTURE, capabilities(answers))).toBe(expected);
+    }
+  });
+
+  it("names the reason for each order", () => {
+    expect(NORMAL_START.reason).toBe("preferred");
+    expect(HARDWARE_VP9_START.reason).toBe("hardware");
+    expect(HARDWARE_VP9_START.order.slice(0, 2)).toEqual(["video/vp9", "video/av1"]);
+  });
+
+  it("takes the normal order for Safari and others, and without mediaCapabilities", async () => {
+    const asked = capabilities({ "video/VP9": true });
+    expect(await chooseStartOrder("safari", CAPTURE, asked)).toBe(NORMAL_START);
+    expect(await chooseStartOrder("other", CAPTURE, asked)).toBe(NORMAL_START);
+    expect(asked.encodingInfo).not.toHaveBeenCalled();
+    expect(await chooseStartOrder("chrome", CAPTURE, undefined)).toBe(NORMAL_START);
+  });
+
+  it("takes the normal order when either answer is an error", async () => {
+    expect(
+      await chooseStartOrder(
+        "chrome",
+        CAPTURE,
+        capabilities({ "video/AV1": new Error("no"), "video/VP9": true }),
+      ),
+    ).toBe(NORMAL_START);
+    expect(
+      await chooseStartOrder(
+        "chrome",
+        CAPTURE,
+        capabilities({ "video/AV1": false, "video/VP9": new Error("no") }),
+      ),
+    ).toBe(NORMAL_START);
+  });
+
+  it("takes the normal order when an answer takes too long, and doesn't wait longer", async () => {
+    vi.useFakeTimers();
+    const chosen = chooseStartOrder(
+      "chrome",
+      CAPTURE,
+      capabilities({ "video/AV1": false, "video/VP9": "hang" }),
+      500,
+    );
+    await vi.advanceTimersByTimeAsync(499);
+    let settled = false;
+    void chosen.then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await chosen).toBe(NORMAL_START);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("leaves no timer behind when the answers come in time", async () => {
+    vi.useFakeTimers();
+    const chosen = chooseStartOrder("chrome", CAPTURE, capabilities({ "video/VP9": true }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await chosen).toBe(HARDWARE_VP9_START);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 

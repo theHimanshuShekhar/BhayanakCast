@@ -17,10 +17,11 @@
  * page's current numbers go the same way as one more connection event.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { chooseStartOrder } from "./codecs";
 import { getConnectionReporter } from "./connection-report";
 import { keepIceServersFresh } from "./ice";
 import { getIceServersFn } from "./ice.functions";
-import { Mesh, type PeerQuality, type PeerState, type QualityView } from "./mesh";
+import { captureOf, Mesh, type PeerQuality, type PeerState, type QualityView } from "./mesh";
 import { QualityReporter, sampleWindowMs } from "./quality-telemetry";
 import { reportQualityFn } from "./quality-telemetry.functions";
 import type { MediaSlot, RoomParticipant } from "./realtime";
@@ -28,6 +29,7 @@ import { getRealtimeClient } from "./realtime-client";
 import type { ReportSnapshot } from "./report-snapshot";
 import { answerSnapshotRequest, browserOf, buildSnapshot } from "./snapshot-builder";
 import { speakingContext, watchSpeaking } from "./speaking";
+import { StartOrders } from "./start-orders";
 
 /** One peer's tracks, by slot. */
 export type PeerTracks = Partial<Record<MediaSlot, MediaStreamTrack>>;
@@ -83,6 +85,14 @@ export function useRoomMesh(
   // last changed.
   const latest = useRef({ roster, own, shownCams, iceServers });
   latest.current = { roster, own, shownCams, iceServers };
+  // The order the share and the camera are sent in, chosen before their tracks reach a Mesh and
+  // kept while they are on, so a Mesh made during a share has it at once (ADR 2 addendum).
+  const [startOrders] = useState(
+    () =>
+      new StartOrders((slot, track) =>
+        chooseStartOrder(browserOf(navigator.userAgent).name, captureOf(slot, track)),
+      ),
+  );
 
   useEffect(() => {
     if (!meId || !active) return;
@@ -144,7 +154,18 @@ export function useRoomMesh(
         current.resend();
       }
     });
-    current.setLocalTracks({ ...latest.current.own });
+    // A share or camera whose start order isn't chosen yet is sent by its effect below when it
+    // is, a share's audio with its screen.
+    const { screen: shown, cam: camera, mic: voice, screenAudio: sound } = latest.current.own;
+    const screenOrder = startOrders.chosen("screen", shown);
+    const camOrder = startOrders.chosen("cam", camera);
+    if (screenOrder) current.setStartOrder("screen", screenOrder);
+    if (camOrder) current.setStartOrder("cam", camOrder);
+    current.setLocalTracks({
+      mic: voice,
+      ...(camOrder || !camera ? { cam: camera } : {}),
+      ...(screenOrder || !shown ? { screen: shown, screenAudio: sound } : {}),
+    });
     if (latest.current.roster) {
       showCams(current, meId, latest.current.roster, latest.current.shownCams);
       current.join(latest.current.roster);
@@ -158,7 +179,7 @@ export function useRoomMesh(
       setRemote({});
       setStates({});
     };
-  }, [roomId, meId, active, iceReady]);
+  }, [roomId, meId, active, iceReady, startOrders]);
 
   useEffect(() => {
     if (roster) mesh.current?.join(roster);
@@ -176,13 +197,23 @@ export function useRoomMesh(
     if (iceServers) mesh.current?.setIceServers(iceServers);
   }, [iceServers]);
 
-  useEffect(() => {
-    mesh.current?.setLocalTracks({ cam });
-  }, [cam]);
+  useEffect(
+    () =>
+      startOrders.whenChosen("cam", cam, (order) => {
+        if (order) mesh.current?.setStartOrder("cam", order);
+        mesh.current?.setLocalTracks({ cam });
+      }),
+    [cam, startOrders],
+  );
 
-  useEffect(() => {
-    mesh.current?.setLocalTracks({ screen, screenAudio });
-  }, [screen, screenAudio]);
+  useEffect(
+    () =>
+      startOrders.whenChosen("screen", screen, (order) => {
+        if (order) mesh.current?.setStartOrder("screen", order);
+        mesh.current?.setLocalTracks({ screen, screenAudio });
+      }),
+    [screen, screenAudio, startOrders],
+  );
 
   // A share audio track stays after its share ends (and through a share without sound), so
   // whether it has sound is whether its packets arrive.

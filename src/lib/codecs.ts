@@ -5,7 +5,13 @@
  * `setCodecPreferences`. What is left out here (a codec the peer can't decode) is also left out
  * of the offer, which keeps signalling small. Firefox has no AV1 or VP9 encode in some setups:
  * its capabilities simply lack them, and the pair falls back to the next codec both have.
+ *
+ * The streamer's own order can differ from that normal one (ADR 2, codecs addendum): a Firefox
+ * streamer sends only H.264 or VP8, and a Chromium streamer whose AV1 would be software but
+ * whose VP9 is hardware sends VP9 first. `chooseStartOrder` picks it before a share or camera
+ * starts, and `orderCodecs` takes it as input, so it stays pure.
  */
+import type { BrowserName, CodecReason } from "./quality-telemetry.ts";
 
 /** Best first. Codecs not listed (H.265, say) follow VP8. */
 export const VIDEO_CODEC_PREFERENCE = ["video/av1", "video/vp9", "video/h264", "video/vp8"];
@@ -22,19 +28,63 @@ const AUXILIARY = /^video\/(rtx|red|ulpfec|flexfec-03)$/i;
 const mime = (codec: { mimeType: string }) => codec.mimeType.toLowerCase();
 
 /**
- * `local` (what this side can send) in the order to offer them, only those `remote` (the MIME
- * types the peer can decode) also has. With no `remote` yet, or none in common, nothing is left
- * out (the browser negotiates what both really have).
+ * The order a streamer sends one kind of video (screen or camera) in, and why. Codecs not in
+ * `order` follow it, unless `excludeOthers`: then they are left out of what the streamer sends.
+ */
+export interface StartOrder {
+  /** MIME types, lower case, best first. */
+  order: readonly string[];
+  excludeOthers?: boolean;
+  reason: CodecReason;
+}
+
+/**
+ * The reason a sender's rows give for its codec: the `reason` its order had, but only while the
+ * codec it sends (`codec`, once known) is the one that reason is about. `hardware` is about VP9
+ * and `browser` about H.264 and VP8; a viewer that can't decode those leaves the sender on
+ * another codec, and the reason is then `preferred`.
+ */
+export function codecReasonOf(reason: CodecReason, codec?: string): CodecReason {
+  const type = codec?.toLowerCase();
+  if (reason === "hardware") return type === "video/vp9" ? reason : "preferred";
+  if (reason === "browser")
+    return type === "video/h264" || type === "video/vp8" ? reason : "preferred";
+  return reason;
+}
+
+/** AV1, VP9, H.264, VP8. */
+export const NORMAL_START: StartOrder = { order: VIDEO_CODEC_PREFERENCE, reason: "preferred" };
+/** VP9 first, for a Chromium streamer whose VP9 is hardware-encoded and AV1 is not. */
+export const HARDWARE_VP9_START: StartOrder = {
+  order: ["video/vp9", ...VIDEO_CODEC_PREFERENCE.filter((type) => type !== "video/vp9")],
+  reason: "hardware",
+};
+/** A Firefox streamer's: it encodes AV1 and VP9 in software only, and can't see a CPU limit. */
+export const FIREFOX_START: StartOrder = {
+  order: ["video/h264", "video/vp8"],
+  excludeOthers: true,
+  reason: "browser",
+};
+
+/**
+ * `local` (what this side can send) in the order to offer them, `start` first (the streamer's
+ * own order, the normal one by default), only those `remote` (the MIME types the peer can
+ * decode) also has. With no `remote` yet, or none in common, nothing is left out (the browser
+ * negotiates what both really have). A `start` that would leave out everything `local` has
+ * changes nothing.
  */
 export function orderCodecs<C extends { mimeType: string }>(
   local: readonly C[],
   remote?: readonly string[],
+  start: StartOrder = NORMAL_START,
 ): C[] {
   const rank = (codec: C) => {
-    const i = VIDEO_CODEC_PREFERENCE.indexOf(mime(codec));
-    return i === -1 ? VIDEO_CODEC_PREFERENCE.length : i;
+    const i = start.order.indexOf(mime(codec));
+    return i === -1 ? start.order.length : i;
   };
-  const media = local.filter((codec) => !AUXILIARY.test(codec.mimeType));
+  const all = local.filter((codec) => !AUXILIARY.test(codec.mimeType));
+  const sent = start.excludeOthers ? all.filter((codec) => start.order.includes(mime(codec))) : all;
+  const media = sent.length > 0 ? sent : all;
   const theirs = new Set(remote?.map((type) => type.toLowerCase()));
   const shared = remote ? media.filter((codec) => theirs.has(mime(codec))) : media;
   // A stable sort: the browser's order among a codec's variants (H.264 profiles) stays.
@@ -59,4 +109,66 @@ export function localVideoCodecs(): VideoCodecs | undefined {
   const send = RTCRtpSender.getCapabilities("video")?.codecs;
   const receive = RTCRtpReceiver.getCapabilities("video")?.codecs;
   return send && receive ? { send, receive: videoMimeTypes(receive) } : undefined;
+}
+
+/** What a share or camera captures, and the most it will be sent at: what an encoder is asked about. */
+export interface Capture {
+  width?: number;
+  height?: number;
+  frameRate?: number;
+  /** Bits per second. */
+  bitrate: number;
+}
+
+/** How long `chooseStartOrder` waits for the browser before taking the normal order. */
+export const START_ORDER_TIMEOUT_MS = 500;
+
+const CHROMIUM: readonly BrowserName[] = ["chrome", "edge", "opera"];
+
+/**
+ * The order a streamer on `browser` starts a share or camera in (ADR 2, codecs addendum).
+ * Firefox: H.264 or VP8 (by user agent: its `powerEfficient` is wrong). Chromium: it asks the
+ * browser whether encoding `capture` in AV1 and in VP9 is power efficient (hardware): AV1 does,
+ * the normal order; else VP9 does, VP9 first; else the normal order. H.264 never moves the
+ * start. Safari and other browsers, an error, and no answer within `timeoutMs`: the normal order.
+ */
+export async function chooseStartOrder(
+  browser: BrowserName,
+  capture: Capture,
+  capabilities: MediaCapabilities | undefined = typeof navigator === "undefined"
+    ? undefined
+    : navigator.mediaCapabilities,
+  timeoutMs = START_ORDER_TIMEOUT_MS,
+): Promise<StartOrder> {
+  if (browser === "firefox") return FIREFOX_START;
+  const { width, height, frameRate: framerate, bitrate } = capture;
+  if (
+    !CHROMIUM.includes(browser) ||
+    !capabilities?.encodingInfo ||
+    !width ||
+    !height ||
+    !framerate
+  ) {
+    return NORMAL_START;
+  }
+  const efficient = async (contentType: string) => {
+    const info = await capabilities.encodingInfo({
+      type: "webrtc",
+      video: { contentType, width, height, bitrate, framerate },
+    });
+    return info.supported && info.powerEfficient;
+  };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<StartOrder>((resolve) => {
+    timer = setTimeout(() => resolve(NORMAL_START), timeoutMs);
+  });
+  const asked = Promise.all([efficient("video/AV1"), efficient("video/VP9")]).then(
+    ([av1, vp9]) => (!av1 && vp9 ? HARDWARE_VP9_START : NORMAL_START),
+    () => NORMAL_START,
+  );
+  try {
+    return await Promise.race([asked, late]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
