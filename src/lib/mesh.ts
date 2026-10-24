@@ -69,7 +69,7 @@
  *
  * Local tracks belong to the caller (./local-media.ts): the Mesh never stops them.
  */
-import { localVideoCodecs, orderCodecs, type VideoCodecs } from "./codecs";
+import { localVideoCodecs, orderCodecs, type VideoCodecs, videoMimeTypes } from "./codecs";
 import {
   type ConnectionEvent,
   type NegotiationStep,
@@ -89,6 +89,7 @@ import {
   CAMERA_LADDER,
   type Claim,
   carryOver,
+  codecCap,
   DOWN_SAMPLES,
   FIRST_MINUTE_MS,
   feeds60,
@@ -105,6 +106,7 @@ import {
   type Rung,
   readSample,
   type StatsSample,
+  scaleSteps,
   screenSteps,
   seedBitrate,
   shedFirst,
@@ -343,8 +345,19 @@ const SLOTS: Record<VideoSlot, SlotPolicy> = {
   },
 };
 const isVideoSlot = (slot: MediaSlot): slot is VideoSlot => slot in SLOTS;
+/**
+ * The steps a sender moves along with the caps of the codec it actually sends (`scaleSteps`):
+ * every bitrate decision (the encoding, the budget, probes, telemetry) reads these, never the
+ * bare `state.steps`, whose `maxBitrate` is the AV1 and VP9 cap.
+ */
+const ladderOf = (state: Adaptation) => scaleSteps(state.steps, state.codec);
+/** Step `rung` of a sender's ladder, with its cap for the codec in use. */
+const stepAt = (state: Adaptation, rung: number): Rung => {
+  const step = state.steps[rung] as Rung;
+  return { ...step, maxBitrate: codecCap(step, state.codec) };
+};
 /** The step a sender is on, and its label and target bitrate for telemetry. */
-const stepOf = (state: Adaptation) => state.steps[state.rung] as Rung;
+const stepOf = (state: Adaptation) => stepAt(state, state.rung);
 const rungInfo = ({ label, maxBitrate }: Rung): RungInfo => ({ label, maxBitrate });
 const sameSteps = (a: readonly Rung[], b: readonly Rung[]) =>
   a.length === b.length && a.every((rung, i) => rung.label === b[i]?.label);
@@ -479,6 +492,29 @@ export function withStartBitrate(sdp: string, mids: ReadonlySet<string>, bitrate
   });
 }
 
+/**
+ * The codec the sender of the m-section whose mid is in `mids` will send, from the description
+ * the other side wrote: the first payload type on its `m=video` line that carries media (not rtx,
+ * red or ulpfec), as the MIME type its `a=rtpmap` names, like `video/H264`. Undefined if there is
+ * none. The other side lists its codecs in the order it wants them.
+ */
+export function sentCodecOf(sdp: string, mids: ReadonlySet<string>): string | undefined {
+  let codec: string | undefined;
+  editSections(sdp, mids, (lines) => {
+    const types = lines[0]?.startsWith("m=video ") ? lines[0].split(" ").slice(3) : [];
+    const names = new Map(
+      lines.flatMap((line) => {
+        const rtpmap = MEDIA_CODEC.exec(line);
+        return rtpmap ? [[rtpmap[1], /^a=rtpmap:\d+ ([^/]+)\//i.exec(line)?.[1]] as const] : [];
+      }),
+    );
+    const first = types.find((type) => names.has(type));
+    const name = first === undefined ? undefined : names.get(first);
+    if (name) codec = `video/${name}`;
+  });
+  return codec;
+}
+
 const newSession = () => Math.random().toString(36).slice(2, 12);
 
 type Step =
@@ -511,6 +547,10 @@ interface Adaptation extends LadderState {
   codecReason: CodecReason;
   /** The latest reading (the next one's `sendBitrate` is measured from it). */
   last?: StatsSample;
+  /**
+   * The codec it sends, from its negotiated parameters and then its stats: the caps of its
+   * steps are scaled by it (`ladderOf`).
+   */
   codec?: string;
   /** What the pressure was down to when it last stepped down under it (`limited` says it holds). */
   cause?: PressureCause;
@@ -1034,12 +1074,12 @@ export class Mesh {
           // Like a new pair: the highest step its allowance and its capture leave it.
           const rung = track
             ? fitRung(
-                state.steps,
+                ladderOf(state),
                 this.#allowance(link, slot),
                 Math.min(policy.start(state.steps), policy.cap(track, state.steps)),
               )
             : state.rung;
-          this.#rungChanged(link, slot, stepOf(state), state.steps[rung] as Rung, "resume");
+          this.#rungChanged(link, slot, stepOf(state), stepAt(state, rung), "resume");
           Object.assign(state, freshLadderState(rung), { readings: 0, last: undefined });
           this.#telemetry?.reset({ peerId: link.userId, slot, direction: "send" });
         }
@@ -1096,11 +1136,20 @@ export class Mesh {
     if (degradationPreference) this.#degradation.set(sender, degradationPreference);
   }
 
-  /** The step a new or resumed `slot` sender starts on: the highest its allowance and capture leave it. */
-  #startRung(link: Link, slot: VideoSlot, track: MediaStreamTrack, steps: readonly Rung[]): number {
+  /**
+   * The step a new `slot` sender starts on: the highest its allowance and capture leave it, on
+   * the caps of the `codec` it is known to send (if any).
+   */
+  #startRung(
+    link: Link,
+    slot: VideoSlot,
+    track: MediaStreamTrack,
+    steps: readonly Rung[],
+    codec?: string,
+  ): number {
     const policy = SLOTS[slot];
     const top = Math.min(policy.start(steps), policy.cap(track, steps));
-    return fitRung(steps, this.#allowance(link, slot), top);
+    return fitRung(scaleSteps(steps, codec), this.#allowance(link, slot), top);
   }
 
   /**
@@ -1115,20 +1164,40 @@ export class Mesh {
     const policy = SLOTS[slot];
     let state = link.quality[slot];
     const built = policy.steps(track, state?.sixty);
+    // The codec the sender is negotiated to send, once it is (a new sender has none until its
+    // description is applied: the first tune after it finds it); its first stats reading follows.
+    // Only where negotiation is settled: with a remote offer applied and no answer yet, the
+    // parameters list the browser's own capabilities (VP8 first), not what will be sent.
+    const codec =
+      link.pc.signalingState === "stable"
+        ? videoMimeTypes(link.own.get(slot)?.sender.getParameters().codecs ?? [])[0]
+        : undefined;
     if (!state) {
-      const rung = this.#startRung(link, slot, track, built.steps);
+      const rung = this.#startRung(link, slot, track, built.steps, codec);
       state = {
         ...freshLadderState(rung),
         ...built,
         readings: 0,
         startedAt: Date.now(),
         codecReason: "preferred",
+        ...(codec && { codec }),
       };
       link.quality[slot] = state;
-    } else if (!sameSteps(state.steps, built.steps)) {
+    } else if (!state.codec && codec) {
+      state.codec = codec;
+      // Nothing was read of it yet, so it started on caps that were not its codec's: start it
+      // again on the scaled ones, where it is not on the step they allow.
+      if (state.readings === 0) {
+        const rung = this.#startRung(link, slot, track, state.steps, codec);
+        if (rung !== state.rung) restart(state, rung);
+      }
+    }
+    if (state && !sameSteps(state.steps, built.steps)) {
       const from = stepOf(state);
-      const rung = carryOver(from, built.steps);
-      const to = built.steps[rung] as Rung;
+      // The cost `from` had, and the steps' own, are both at the codec in use.
+      const scaled = scaleSteps(built.steps, state.codec);
+      const rung = carryOver(from, scaled);
+      const to = scaled[rung] as Rung;
       if (to.label === from.label) Object.assign(state, { steps: built.steps, rung });
       else {
         this.#rungChanged(link, slot, from, to, "capture");
@@ -1274,7 +1343,7 @@ export class Mesh {
    * after a clean spell, which grows the budget to fit it (`probeClaim`).
    */
   #admit(link: Link, slot: VideoSlot, state: Adaptation, rung: number): boolean {
-    const next = (state.steps[rung] as Rung).maxBitrate;
+    const next = stepAt(state, rung).maxBitrate;
     const ceilings = this.#viewerCeilings(link);
     const claims: Claim[] = [...ceilings].map(([viewer, ceiling]) => ({
       camera: false,
@@ -1318,7 +1387,7 @@ export class Mesh {
       );
       if (first === undefined) return;
       const { link, slot, state, sender } = senders[first] as VideoSender;
-      this.#rungChanged(link, slot, stepOf(state), state.steps[state.rung - 1] as Rung, "budget");
+      this.#rungChanged(link, slot, stepOf(state), stepAt(state, state.rung - 1), "budget");
       restart(state, state.rung - 1);
       this.#tune(link, slot, sender);
     }
@@ -1453,6 +1522,8 @@ export class Mesh {
       }));
       if (!read) continue;
       const { sample, stream } = read;
+      // The codec first: its cap is the one this reading, and the step after it, are judged by.
+      if (sample.codec) state.codec = sample.codec;
       if (stream) {
         this.#telemetry?.observe(
           { peerId: link.userId, slot, direction: "send" },
@@ -1461,17 +1532,17 @@ export class Mesh {
         );
         if (slot === "screen") this.#viewSent(link, state, stream);
       }
-      if (sample.codec) state.codec = sample.codec;
       state.last = sample;
       const pace = this.#pace(slot, state);
       if (state.readings++ >= pace.warmup) {
         reading.strained = (reading.strained ?? false) || strained(sample);
         const max = SLOTS[slot].cap(track, state.steps);
         const options = { max, reserved: this.#reservedFor(link, slot), upSamples: pace.upSamples };
-        let next = step(state.steps, state, sample, options);
+        const ladder = ladderOf(state);
+        let next = step(ladder, state, sample, options);
         // A probe the budget refuses is no probe: the window carries on as it was.
         if (next.rung > state.rung && !this.#admit(link, slot, state, next.rung)) {
-          next = step(state.steps, state, sample, { ...options, max: state.rung });
+          next = step(ladder, state, sample, { ...options, max: state.rung });
         }
         // Down to the capture's cap when the capture shrank; otherwise the controller's call.
         const reason: RungReason =
@@ -1482,14 +1553,7 @@ export class Mesh {
           next.rung < state.rung && reason === "pressure"
             ? pressureCause(...[...state.window, sample].slice(-DOWN_SAMPLES))
             : undefined;
-        this.#rungChanged(
-          link,
-          slot,
-          stepOf(state),
-          state.steps[next.rung] as Rung,
-          reason,
-          pressure,
-        );
+        this.#rungChanged(link, slot, stepOf(state), ladder[next.rung] as Rung, reason, pressure);
         const held = next.rung < state.rung && reason === "pressure" ? pressure : state.cause;
         Object.assign(state, next, { cause: next.limited ? held : undefined });
       }
@@ -1609,7 +1673,7 @@ export class Mesh {
         limited: state.limited,
         cause: state.cause,
         pressure: state.last && pressureCause(state.last),
-        nextBitrate: state.steps[state.rung + 1]?.maxBitrate,
+        nextBitrate: ladderOf(state)[state.rung + 1]?.maxBitrate,
         ceiling: ceilings.get(link),
       }),
     };
@@ -1783,12 +1847,17 @@ export class Mesh {
     if (link.pc.remoteDescription || !screen?.mid || !track) return stereo;
     // The step this pair starts on (the one it is on, if it has begun), and no more than its
     // ceiling. Nothing is created or changed here: the ladder state is made when the sender is tuned.
+    // The cap is the one of the codec the sender will send: from its stats if it has sent, else
+    // the first codec the description being applied lists for it. A pair that has sent nothing
+    // yet starts on the step that codec's caps allow (`#adaptation` does the same once tuned).
     const state = link.quality.screen;
+    const codec = state?.codec ?? sentCodecOf(sdp, new Set([screen.mid]));
     const { steps } = SLOTS.screen.steps(track, state?.sixty);
-    const start = state
-      ? stepOf(state)
-      : (steps[this.#startRung(link, "screen", track, steps)] as Rung);
-    const seed = seedBitrate(start.maxBitrate, this.#viewerCeilings(link).get(link));
+    const start =
+      state && state.readings > 0
+        ? (state.steps[state.rung] as Rung)
+        : (steps[this.#startRung(link, "screen", track, steps, codec)] as Rung);
+    const seed = seedBitrate(codecCap(start, codec), this.#viewerCeilings(link).get(link));
     return withStartBitrate(stereo, new Set([screen.mid]), seed);
   }
 

@@ -10,6 +10,12 @@
 /** Best first. Codecs not listed (H.265, say) follow VP8. */
 export const VIDEO_CODEC_PREFERENCE = ["video/av1", "video/vp9", "video/h264", "video/vp8"];
 
+/**
+ * The codecs a pair needs more bitrate on (ADR 2 addendum: caps by codec): H.264 needs several
+ * times AV1's for the same sharpness, and VP8 is the other that falls behind. MIME types, lower case.
+ */
+export const COSTLY_CODECS = ["video/h264", "video/vp8"];
+
 /** Retransmission and redundancy formats: kept, last, whichever codec is chosen. */
 const AUXILIARY = /^video\/(rtx|red|ulpfec|flexfec-03)$/i;
 
