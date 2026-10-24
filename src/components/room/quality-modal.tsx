@@ -7,8 +7,22 @@ import { Dialog } from "@base-ui/react/dialog";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { fmtDuration } from "~/lib/format";
 import type { QualityView, StreamerQuality, ViewerQuality, ViewerRow } from "~/lib/mesh";
-import { HISTORY_MS, type QualityPoint, type StepChange } from "~/lib/quality-history";
-import { causeText, reasonText, type StepReason } from "~/lib/quality-reason";
+import {
+  type CodecChange,
+  HISTORY_MS,
+  type QualityPoint,
+  type StepChange,
+} from "~/lib/quality-history";
+import {
+  causeText,
+  codecLabel,
+  codecReasonText,
+  type ReasonSide,
+  reasonText,
+  type StepReason,
+  switchText,
+} from "~/lib/quality-reason";
+import type { CodecReason } from "~/lib/quality-telemetry";
 import { fmtMbps, Key, Panel } from "../chart-parts";
 import { Sheet } from "../overlays";
 import { TimelineChart, type TimelineSeries } from "../timeline-chart";
@@ -253,7 +267,7 @@ function ViewerBody({ view, streamer }: { view: ViewerQuality; streamer: string 
                   : [series("cap", "step cap", view.points, (p) => p.capBps, true)]),
               ].filter((s) => s.points.length > 0)}
               domain={domain}
-              marks={marksOf(view.changes, domain)}
+              marks={marksOf(view.changes, view.switches, domain)}
               fromEnd
               format={fmtMbps}
             />
@@ -269,7 +283,7 @@ function ViewerBody({ view, streamer }: { view: ViewerQuality; streamer: string 
               label={`Resolution of ${streamer}'s screen, last minute${last?.height === undefined ? "" : `: ${last.height} lines now`}`}
               points={view.points}
               domain={domain}
-              marks={marksOf(view.changes, domain)}
+              marks={marksOf(view.changes, view.switches, domain)}
             />
           </Panel>
         </Card>
@@ -281,7 +295,9 @@ function ViewerBody({ view, streamer }: { view: ViewerQuality; streamer: string 
         <Chip title="round trip">
           rtt {last?.rttMs === undefined ? "–" : `${Math.round(last.rttMs)} ms`}
         </Chip>
-        <Chip title="video codec">{last?.codec?.replace(/^video\//i, "") ?? "codec –"}</Chip>
+        <Chip title={codecTip(view.note?.codecReason, last?.codec, { side: "viewer" })}>
+          {last?.codec ? codecLabel(last.codec) : "codec –"}
+        </Chip>
         <Chip title="frames per second">
           {last?.fps === undefined ? "–" : Math.round(last.fps)} fps
         </Chip>
@@ -295,8 +311,8 @@ function ViewerBody({ view, streamer }: { view: ViewerQuality; streamer: string 
         </p>
       )}
 
-      <Section title="step changes">
-        <Timeline changes={view.changes} now={now} />
+      <Section title="quality changes">
+        <Timeline changes={view.changes} switches={view.switches} now={now} />
       </Section>
     </>
   );
@@ -341,7 +357,7 @@ function StreamerBody({ view, name }: { view: StreamerQuality; name: (id: string
               series("budget", "budget", view.uplink, (p) => p.capBps, true),
             ].filter((s) => s.points.length > 0)}
             domain={domain}
-            marks={marksOf(view.changes, domain)}
+            marks={marksOf(view.changes, view.switches, domain)}
             fromEnd
             format={fmtMbps}
           />
@@ -366,8 +382,8 @@ function StreamerBody({ view, name }: { view: StreamerQuality; name: (id: string
         )}
       </Section>
 
-      <Section title="step changes, all viewers">
-        <Timeline changes={view.changes} now={now} name={name} />
+      <Section title="quality changes, all viewers">
+        <Timeline changes={view.changes} switches={view.switches} now={now} name={name} />
       </Section>
     </>
   );
@@ -387,6 +403,8 @@ function ViewerRowView({
   const last = fresh(row.points, now);
   const text = reasonText(row.note?.reason, { side: "streamer", viewer: name });
   const connected = row.state === "connected" || row.state === "relayed";
+  const codec = last?.codec;
+  const codecWhy = codecTip(row.note?.codecReason, codec, { side: "streamer", viewer: name });
   return (
     <li className="grid grid-cols-[88px_1fr_minmax(150px,200px)] max-sm:grid-cols-[72px_1fr] items-center gap-3 px-3 py-2 rounded-[var(--radius-sm)] border border-border bg-canvas">
       <b className="text-[12.5px] truncate" title={name}>
@@ -415,7 +433,13 @@ function ViewerRowView({
             {connected ? "no step yet" : row.state === "failed" ? "can't connect" : "connecting…"}
           </span>
         )}
-        {row.path && <span className="text-[10.5px] text-muted">{row.path}</span>}
+        {(row.path || codec) && (
+          <span className="text-[10.5px] text-muted">
+            {row.path}
+            {row.path && codec && " · "}
+            {codec && <span title={codecWhy}>{codecLabel(codec)}</span>}
+          </span>
+        )}
       </span>
     </li>
   );
@@ -423,6 +447,10 @@ function ViewerRowView({
 
 // ---------------------------------------------------------------------------------------------
 // Pieces
+
+/** The codec chip's tooltip: why the sender is on its codec, else just what the chip is. */
+const codecTip = (reason: CodecReason | undefined, codec: string | undefined, side: ReasonSide) =>
+  codecReasonText(reason, side, codec) ?? "video codec";
 
 /** The newest of `points`, if it is recent enough to be "now". */
 function fresh<T extends QualityPoint>(points: T[], now: number): T | undefined {
@@ -450,9 +478,12 @@ function series(
   };
 }
 
-/** Where steps changed within the window: a hairline each, so the graphs line up with the list. */
-const marksOf = (changes: StepChange[], [from, to]: [number, number]) =>
-  changes.map((c) => c.at).filter((t) => t > from && t < to);
+/**
+ * Where steps changed, or the codec did, within the window: a hairline each, so the graphs line
+ * up with the list.
+ */
+const marksOf = (changes: StepChange[], switches: CodecChange[], [from, to]: [number, number]) =>
+  [...changes, ...switches].map((c) => c.at).filter((t) => t > from && t < to);
 
 function ResolutionChart({
   label,
@@ -564,42 +595,61 @@ function Sparkline({
   );
 }
 
+/** One line of the timeline: a step change, or the streamer's move to another codec. */
+type Entry =
+  | { kind: "step"; change: StepChange; userId?: string }
+  | { kind: "codec"; change: CodecChange; userId?: string };
+
 function Timeline({
   changes,
+  switches,
   now,
   name,
 }: {
   /** A streamer's carry the viewer they are about (and then `name` says who). */
   changes: (StepChange & { userId?: string })[];
+  switches: (CodecChange & { userId?: string })[];
   now: number;
   name?: (userId: string) => string;
 }) {
-  if (changes.length === 0) {
-    return <p className="m-0 text-[12px] text-muted">no step changes yet.</p>;
+  const entries: Entry[] = [
+    ...changes.map((change): Entry => ({ kind: "step", change, userId: change.userId })),
+    ...switches.map((change): Entry => ({ kind: "codec", change, userId: change.userId })),
+  ].sort((a, b) => a.change.at - b.change.at);
+  if (entries.length === 0) {
+    return <p className="m-0 text-[12px] text-muted">no quality changes yet.</p>;
   }
   return (
     <ol
-      aria-label="step changes, newest first"
+      aria-label="quality changes, newest first"
       className="m-0 p-0 list-none flex flex-col gap-1 max-h-[148px] overflow-auto text-[11.5px]"
     >
-      {[...changes].reverse().map((change) => {
-        const who = name && change.userId ? name(change.userId) : "";
+      {entries.reverse().map((entry) => {
+        const { change } = entry;
+        const who = name && entry.userId ? name(entry.userId) : "";
+        const side: ReasonSide = name ? { side: "streamer", viewer: who } : { side: "viewer" };
         // What made this change (not why the pair sits where it does now: that is the chip above).
+        // A codec switch is always the streamer's computer.
         const why =
-          change.cause &&
-          causeText(change.cause, name ? { side: "streamer", viewer: who } : { side: "viewer" });
+          entry.kind === "codec"
+            ? causeText("computer", side)
+            : entry.change.cause && causeText(entry.change.cause, side);
         const ago =
           now - change.at < 2_000 ? "just now" : `${fmtDuration((now - change.at) / 1_000)} ago`;
         return (
           <li
-            key={`${change.at}-${who}-${change.to}`}
+            key={`${change.at}-${who}-${entry.kind}`}
             className="grid grid-cols-[64px_1fr] gap-2 items-baseline"
           >
             <span className="text-muted tabular-nums">{ago}</span>
             <span className="min-w-0">
               {who && <b>{who} </b>}
               <span className="tabular-nums">
-                {change.from ? `${change.from} → ${change.to}` : `started at ${change.to}`}
+                {entry.kind === "codec"
+                  ? switchText(entry.change.to)
+                  : entry.change.from
+                    ? `${entry.change.from} → ${entry.change.to}`
+                    : `started at ${entry.change.to}`}
               </span>
               {why && <span className="text-muted"> &middot; {why}</span>}
             </span>

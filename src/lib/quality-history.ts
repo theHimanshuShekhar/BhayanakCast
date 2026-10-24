@@ -10,7 +10,7 @@
  * (a new track under the same key) only set a new baseline.
  */
 import { MAX_READING_GAP_MS } from "./quality-collector";
-import type { ChangeCause } from "./quality-reason";
+import type { ChangeCause, CodecSwitch } from "./quality-reason";
 import type { StreamReading } from "./quality-telemetry";
 
 /** How much of each stream is kept. */
@@ -50,6 +50,11 @@ export interface StepChange {
   cause?: ChangeCause;
 }
 
+/** The sender's move to another codec (the codec switch), with the codecs as MIME types. */
+export interface CodecChange extends CodecSwitch {
+  at: number;
+}
+
 /** A `StepChange` (before it is stamped) for a move from `from` (if known) to `to`. */
 export const stepChange = (
   from: string | undefined,
@@ -67,6 +72,7 @@ interface Stream {
   latest?: StreamReading;
   points: QualityPoint[];
   changes: StepChange[];
+  switches: CodecChange[];
 }
 
 /** The key of the stream of `peerId`'s screen: received from them, or sent to them. */
@@ -183,6 +189,15 @@ export class QualityHistory {
     return [...(this.#streams.get(key)?.changes ?? [])];
   }
 
+  /** `key`'s sender moved to another codec: noted at the time of the call. */
+  switched(key: string, codecs: CodecSwitch): void {
+    this.#stream(key).switches.push({ at: this.#now(), ...codecs });
+  }
+
+  switches(key: string): CodecChange[] {
+    return [...(this.#streams.get(key)?.switches ?? [])];
+  }
+
   /** The stream is over (the peer left, or the share ended): its points, changes and baseline go. */
   forget(key: string): void {
     this.#streams.delete(key);
@@ -191,7 +206,7 @@ export class QualityHistory {
   #stream(key: string): Stream {
     let stream = this.#streams.get(key);
     if (!stream) {
-      stream = { points: [], changes: [] };
+      stream = { points: [], changes: [], switches: [] };
       this.#streams.set(key, stream);
     }
     return stream;

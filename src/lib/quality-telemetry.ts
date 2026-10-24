@@ -69,6 +69,8 @@ export type BrowserName = (typeof BROWSERS)[number];
 /** A ladder label like `1080p30`, or the encoded size of a share that isn't 16:9: `2968×1242@60`. */
 const rungLabel = z.string().regex(/^[0-9a-z]{1,12}$|^[0-9]{1,5}×[0-9]{1,5}@[0-9]{2}$/);
 const CODEC = /^video\/[\w.+-]{1,32}$/;
+/** A video codec's MIME type like `video/H264`, as the stats and the step message name it. */
+export const codecType = z.string().regex(CODEC);
 /** An encoder's name as the browser says it (`libvpx`, `SimulcastEncoderAdapter (libvpx, libvpx)`). */
 const ENCODER = /^[\x20-\x7e]{1,128}$/;
 const bitrate = z.number().int().min(0).max(1_000_000_000).nullable();

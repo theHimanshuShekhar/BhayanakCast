@@ -35,6 +35,7 @@ const viewerView = (userId: string, overrides: Partial<QualityView> = {}): Quali
       },
     ],
     changes: [],
+    switches: [],
     ...overrides,
   }) as QualityView;
 
@@ -79,6 +80,7 @@ describe("buildSnapshot", () => {
       budgetMeasured: true,
       uplink: [],
       changes: [],
+      switches: [],
       viewers: [
         {
           userId: "bo",

@@ -8,6 +8,7 @@ import {
   audioBlockedEvent,
   CONNECTION_BATCH_MAX,
   type ConnectionEvent,
+  codecSwitchEvent,
   deviceErrorEvent,
   MAX_ERROR_MESSAGE,
   MAX_EVENT_AGE_MS,
@@ -112,12 +113,13 @@ describe("recording connection events", () => {
     expect(row?.at).toEqual(new Date(T0.getTime() - 4_000));
   });
 
-  it("keeps each kind's particulars in its details, and a device error has no target", async () => {
+  it("keeps each kind's particulars in its details, and a device error or a codec switch has no target", async () => {
     const ice = { local: [], remote: [] };
     const events = [
       aged(pathEvent("bo", ice, "connect")),
       aged(negotiationEvent("bo", "answer", new Error("boom"))),
       aged(audioBlockedEvent("bo", true)),
+      aged(codecSwitchEvent("video/AV1", "video/H264", "cpu")),
       aged(
         deviceErrorEvent(
           "camera",
@@ -130,6 +132,7 @@ describe("recording connection events", () => {
       ["pair_path", "bo", { change: "connect", path: "unknown" }],
       ["negotiation_error", "bo", { step: "answer", name: "Error", message: "boom" }],
       ["audio_blocked", "bo", { source: "share" }],
+      ["codec_switch", null, { from: "video/AV1", to: "video/H264", reason: "cpu" }],
       ["device_error", null, { device: "camera", name: "NotReadableError", message: "in use" }],
     ]);
   });

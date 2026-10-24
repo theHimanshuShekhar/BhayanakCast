@@ -37,6 +37,7 @@ const viewer: QualityView = {
     { at: NOW - 30_000, from: "1080p60", to: "2968×1242@60", cause: "capture" },
     { at: NOW - 20_000, from: "2968×1242@60", to: "1080p30", cause: "budget" },
   ],
+  switches: [],
 };
 
 describe("a viewer's modal", () => {
@@ -138,7 +139,7 @@ describe("a viewer's modal", () => {
     expect(out).toContain("collecting readings");
     expect(out).toContain("path unknown");
     expect(out).toContain("loss –");
-    expect(out).toContain("no step changes yet");
+    expect(out).toContain("no quality changes yet");
   });
 
   it("doesn't call stale readings 'now'", () => {
@@ -177,7 +178,69 @@ const streamer: QualityView = {
     { at: NOW - 10_000, userId: "mo", from: "1080p30", to: "900p30", cause: "connection" },
     { at: NOW - 5_000, userId: "kira", from: "2968×1242@60", to: "1440p30", cause: "budget" },
   ],
+  switches: [],
 };
+
+describe("the codec chip's tooltip", () => {
+  const withReason = (codecReason: "preferred" | "hardware" | "browser" | "cpu", codec: string) =>
+    html({
+      ...viewer,
+      points: [point(1, { codec })],
+      note: { seq: 1, step: "1080p30", maxBitrate: 3_000_000, reason: "shared", codecReason },
+    });
+
+  it("says why this codec, for the viewer", () => {
+    expect(withReason("cpu", "video/H264")).toContain(
+      'title="Lighter codec for the streamer&#x27;s computer"',
+    );
+    expect(withReason("hardware", "video/VP9")).toContain('title="Hardware encoder"');
+    expect(withReason("browser", "video/H264")).toContain('title="Firefox streams H.264"');
+    expect(withReason("browser", "video/VP8")).toContain('title="Firefox streams VP8"');
+  });
+
+  it("has nothing extra for the normal order, or a streamer who didn't say", () => {
+    expect(withReason("preferred", "video/AV1")).toContain('title="video codec"');
+    expect(html(viewer)).toContain('title="video codec"');
+  });
+});
+
+describe("a codec switch in the timeline", () => {
+  const moved = { at: NOW - 12_000, from: "video/AV1", to: "video/H264" };
+
+  it("is an entry, 'Switched to H.264', caused by the streamer's computer", () => {
+    const out = html({ ...viewer, switches: [moved] });
+    expect(out).toContain("Switched to H.264");
+    expect(out).toContain("Streamer&#x27;s computer");
+    // Among the quality changes, by time: newest first.
+    expect(out.indexOf("Switched to H.264")).toBeLessThan(out.indexOf("2968×1242@60 → 1080p30"));
+    expect(out).toContain("12s ago");
+  });
+
+  it("is an entry on its own, so the timeline isn't empty", () => {
+    expect(html({ ...viewer, changes: [], switches: [moved] })).not.toContain(
+      "no quality changes yet",
+    );
+    expect(html({ ...viewer, changes: [], switches: [] })).toContain("no quality changes yet");
+  });
+
+  it("is 'Your computer' on the streamer's side, naming the viewer it was for", () => {
+    const out = html({ ...streamer, switches: [{ ...moved, to: "video/VP8", userId: "kira" }] });
+    expect(out).toContain("Switched to VP8");
+    expect(out).toContain("<b>kira </b>");
+    expect(out).toContain("Your computer");
+  });
+
+  it("shows a streamer's viewer row the codec, with why it is on it", () => {
+    const out = html({
+      ...streamer,
+      viewers: streamer.viewers.map((row) => ({
+        ...row,
+        note: row.note && { ...row.note, codecReason: "cpu" as const },
+      })),
+    });
+    expect(out).toContain('title="Lighter codec for your computer"');
+  });
+});
 
 describe("a streamer's modal", () => {
   it("graphs the total upload against the video budget, called an estimate until it is measured", () => {

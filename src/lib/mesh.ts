@@ -89,6 +89,7 @@ import {
 } from "./codecs";
 import {
   type ConnectionEvent,
+  codecSwitchEvent,
   type NegotiationStep,
   negotiationEvent,
   pairStateEvent,
@@ -138,6 +139,7 @@ import {
 } from "./quality";
 import { QualityCollector, type RungInfo } from "./quality-collector";
 import {
+  type CodecChange,
   pathLabel,
   QualityHistory,
   type QualityPoint,
@@ -148,6 +150,7 @@ import {
 import {
   applyNote,
   type ChangeCause,
+  type CodecSwitch,
   causeOf,
   decodeNote,
   NoteSender,
@@ -156,6 +159,7 @@ import {
   reasonOf,
   type StepBody,
   type StepNote,
+  switchHeard,
 } from "./quality-reason";
 import {
   type CodecReason,
@@ -249,6 +253,8 @@ export interface ViewerQuality {
   /** The last minute, oldest first. */
   points: QualityPoint[];
   changes: StepChange[];
+  /** The streamer's codec switches this page heard of, oldest first. */
+  switches: CodecChange[];
 }
 
 /** One viewer of this page's share, in the streamer's modal. */
@@ -273,6 +279,8 @@ export interface StreamerQuality {
   viewers: ViewerRow[];
   /** Every viewer's step changes, oldest first. */
   changes: (StepChange & { userId: string })[];
+  /** Every viewer's codec switches, oldest first. */
+  switches: (CodecChange & { userId: string })[];
 }
 
 export type QualityView = ViewerQuality | StreamerQuality;
@@ -683,6 +691,8 @@ interface Link {
   stepNoted?: string;
   /** What made the screen sender's latest step change; it goes with every message till the next. */
   stepCause?: ChangeCause;
+  /** The codec switch this side's screen sender made in this share; it goes with every message. */
+  codecSwitch?: CodecSwitch;
 }
 
 export class Mesh {
@@ -696,6 +706,8 @@ export class Mesh {
   readonly #codecOrders: Partial<Record<VideoSlot, StartOrder>> = {};
   /** The codec switch: the passes that met its trigger, and whether it has happened in this share. */
   #codecWatch: CodecWatch = freshCodecWatch();
+  /** The switch was reported to the room timeline (once per share). */
+  #switchReported = false;
   /**
    * What the codec switch lasts as long as: the share, or the camera when only it was on when the
    * switch happened.
@@ -1041,6 +1053,7 @@ export class Mesh {
       ...(path && { path }),
       points: this.#history.points(key),
       changes: this.#history.changes(key),
+      switches: this.#history.switches(key),
     };
   }
 
@@ -1340,10 +1353,26 @@ export class Mesh {
         target.mimeType,
         "cpu",
       );
+      this.#switchNoted(link, slot, { from: state.codec as string, to: target.mimeType }, "cpu");
       this.#moved(state, target.mimeType, "cpu");
       moved.push(sender);
     }
     this.#stagger(moved);
+  }
+
+  /**
+   * `link`'s `slot` sender is moving from `codec.from` to `codec.to`: the room timeline hears of
+   * the switch once (it is the streamer's, for all their pairs), and a screen's pair is told of it
+   * (`#tell`) and keeps it for its own modal.
+   */
+  #switchNoted(link: Link, slot: VideoSlot, codec: CodecSwitch, reason: CodecReason): void {
+    if (!this.#switchReported) {
+      this.#switchReported = true;
+      this.#report(codecSwitchEvent(codec.from, codec.to, reason));
+    }
+    if (slot !== "screen") return;
+    link.codecSwitch = codec;
+    this.#history.switched(streamKey("send", link.userId), codec);
   }
 
   /**
@@ -1353,6 +1382,7 @@ export class Mesh {
    */
   #endCodecSwitch(): void {
     this.#codecWatch = freshCodecWatch();
+    this.#switchReported = false;
     for (const slot of VIDEO_SLOTS) this.#preferAll(slot);
     const back: VideoSender[] = [];
     for (const sender of this.#videoSenders()) {
@@ -1887,6 +1917,7 @@ export class Mesh {
       link.notes.reset();
       link.stepNoted = undefined;
       link.stepCause = undefined;
+      link.codecSwitch = undefined;
       this.#history.forget(streamKey("send", link.userId));
     }
     this.#history.forget(UPLINK);
@@ -1898,6 +1929,8 @@ export class Mesh {
     const now = applyNote(was, note);
     if (now === was) return;
     this.#notes.set(from, now);
+    const moved = switchHeard(was, now);
+    if (moved) this.#history.switched(streamKey("recv", from), moved);
     if (now.step === was?.step) return;
     // The first message heard isn't a change this page saw, so it has no cause to give.
     this.#history.changed(
@@ -1972,6 +2005,8 @@ export class Mesh {
       step: step.label,
       maxBitrate: step.maxBitrate,
       ...(link.stepCause && { cause: link.stepCause }),
+      codecReason: codecReasonOf(state.codecReason, state.codec),
+      ...(link.codecSwitch && { codecSwitch: link.codecSwitch }),
       reason: reasonOf({
         atTop: state.rung >= SLOTS.screen.cap(track, state.steps),
         probing: state.probing,
@@ -2018,6 +2053,11 @@ export class Mesh {
         .changes(streamKey("send", link.userId))
         .map((change) => ({ ...change, userId: link.userId })),
     );
+    const switches = links.flatMap((link) =>
+      this.#history
+        .switches(streamKey("send", link.userId))
+        .map((change) => ({ ...change, userId: link.userId })),
+    );
     return {
       side: "streamer",
       budget: this.#budget.limit,
@@ -2036,6 +2076,7 @@ export class Mesh {
         };
       }),
       changes: changes.sort((a, b) => a.at - b.at),
+      switches: switches.sort((a, b) => a.at - b.at),
     };
   }
 

@@ -286,6 +286,43 @@ describe("person lanes", () => {
   });
 });
 
+describe("a codec switch", () => {
+  const details = { from: "video/AV1", to: "video/H264", reason: "cpu" };
+
+  it("is a media row naming the streamer, both codecs and why", () => {
+    const rows = toRows(
+      room([ev(20, "share_start", "ana"), ev(45, "codec_switch", "ana", { details })]),
+    );
+    expect(rows.map((r) => [(r.t - T0) / SEC, r.category, r.kind, r.text, r.detail])).toEqual([
+      [20, "media", "share_start", "Ana started sharing", undefined],
+      [
+        45,
+        "media",
+        "codec_switch",
+        "Ana's video switched from AV1 to H.264",
+        "the streamer's computer could not keep up",
+      ],
+    ]);
+    expect(rows[1]?.people).toEqual(["ana"]);
+  });
+
+  it("copes with a row missing its codecs, and shows no reason it doesn't know", () => {
+    const [row] = toRows(room([ev(1, "codec_switch", "ana", { details: { reason: "luck" } })]));
+    expect(row?.text).toBe("Ana's video switched to another codec");
+    expect(row?.detail).toBeUndefined();
+  });
+
+  it("is a mark on the streamer's lane", () => {
+    const { lanes } = buildTimelineModel(
+      room([span("presence", "ana", 0, 600), ev(45, "codec_switch", "ana", { details })]),
+      NOW,
+    );
+    expect(lane(lanes, "person:ana").marks.map((m) => [m.kind, m.category, m.label])).toEqual([
+      ["codec", "media", "Ana's video switched from AV1 to H.264"],
+    ]);
+  });
+});
+
 describe("pair lanes", () => {
   const state = (sec: number, who: string, peer: string, s: string) =>
     ev(sec, "pair_state", who, { target: peer, details: { state: s } });

@@ -18,6 +18,7 @@ import {
   PROBLEM_CATEGORY_LABELS,
   type ProblemCategory,
 } from "./problem-report";
+import { codecLabel } from "./quality-reason";
 import type {
   RoomTimeline,
   RoomTimelineEntry,
@@ -75,6 +76,7 @@ const EVENT_CATEGORY: Record<TimelineEventKind, Category> = {
   mic_off: "media",
   device_error: "media",
   audio_blocked: "media",
+  codec_switch: "media",
   refusals: "refusals",
   slow_client: "refusals",
   flood_close: "refusals",
@@ -148,7 +150,8 @@ export type MarkKind =
   | "takeover"
   | "path"
   | "restart"
-  | "step";
+  | "step"
+  | "codec";
 
 /** An instant on a lane. */
 export interface Mark {
@@ -247,6 +250,10 @@ const LEAVE_WORDS: Record<string, string> = {
   taken_over: "taken over by another tab",
   joined_elsewhere: "joined another room",
   banned: "banned",
+};
+/** Why a codec switch happened, by its `reason`: the streamer's computer is the only one so far. */
+const SWITCH_WHY: Record<string, string> = {
+  cpu: "the streamer's computer could not keep up",
 };
 const REFUSAL_WORDS: Record<string, string> = {
   rate_limited: "rate limited",
@@ -357,6 +364,14 @@ function eventWords(
       return {
         text: `${a}: the browser blocked ${b}'s ${str(d, "source") ?? "audio"} until a click`,
       };
+    case "codec_switch": {
+      const from = str(d, "from");
+      const to = str(d, "to");
+      return {
+        text: `${a}'s video switched ${from ? `from ${codecLabel(from)} ` : ""}to ${to ? codecLabel(to) : "another codec"}`,
+        detail: SWITCH_WHY[str(d, "reason") ?? ""],
+      };
+    }
     case "refusals":
       return { text: `${a} had ${refusalWords(d)}` };
     case "slow_client":
@@ -760,6 +775,7 @@ export function buildTimelineModel(timeline: RoomTimeline, until?: number): Time
     if (e.kind === "takeover") mark(e.actorUserId, "takeover");
     else if (category === "moderation") mark(subjectOf(e), "moderation");
     else if (e.kind === "device_error" || e.kind === "audio_blocked") mark(e.actorUserId, "error");
+    else if (e.kind === "codec_switch") mark(e.actorUserId, "codec");
     else if (category === "refusals") mark(e.actorUserId, "refusal");
   }
 

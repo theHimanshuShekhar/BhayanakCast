@@ -101,6 +101,41 @@ describe("getRoomQuality", () => {
     expect(result.pairs).toHaveLength(1);
   });
 
+  it("shows a pair's codec switch, why it is on its codec, and its encoder", async () => {
+    await db.insert(qualitySamples).values([
+      row("r1", 30, { codec: "video/AV1", codecReason: "preferred" }),
+      row("r1", 45, {
+        trigger: "codec",
+        codec: "video/H264",
+        fromCodec: "video/AV1",
+        codecReason: "cpu",
+        qp: null,
+      }),
+      row("r1", 75, {
+        codec: "video/H264",
+        codecReason: "cpu",
+        encoderImplementation: "OpenH264",
+        powerEfficientEncoder: false,
+      }),
+    ]);
+    const [pair] = (await getRoomQuality(db, admin, { roomId: "r1" })).pairs;
+    expect(pair).toMatchObject({
+      codec: "video/H264",
+      switchedFrom: "video/AV1",
+      codecReason: "cpu",
+      encoder: { hardware: false, implementation: "OpenH264" },
+    });
+    const timeline = await getPairTimeline(db, admin, {
+      roomId: "r1",
+      streamerId: "ana",
+      viewerId: "bo",
+      slot: "screen",
+    });
+    expect(timeline.codecSwitches).toEqual([
+      { t: T0 + 45_000, from: "video/AV1", to: "video/H264" },
+    ]);
+  });
+
   it("is empty for a room without samples", async () => {
     expect(await getRoomQuality(db, admin, { roomId: "none" })).toEqual({
       roomKind: null,

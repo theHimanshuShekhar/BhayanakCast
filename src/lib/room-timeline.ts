@@ -60,6 +60,8 @@ export const TIMELINE_EVENT_KINDS = [
   "device_error",
   /** The browser would not play a peer's audio before a click. */
   "audio_blocked",
+  /** A streamer's video moved to a lighter codec: `details` has `from`, `to` (MIME types) and `reason`. */
+  "codec_switch",
   /** A person went over their cap of reported events; `details.count` were not recorded. */
   "events_dropped",
   // Problem reports (ADR 4 addendum): the actor is the reporter and the target the stream's owner.

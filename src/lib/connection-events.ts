@@ -15,6 +15,7 @@
  */
 import { z } from "zod";
 import { CANDIDATE_TYPES, type IcePath, isRelayed, RELAY_PROTOCOLS } from "./ice.ts";
+import { CODEC_REASONS, type CodecReason, codecType } from "./quality-telemetry.ts";
 import { reportId, reportSnapshot } from "./report-snapshot.ts";
 
 /** Events in one report: a full room's worth of pairs coming up, and some to spare. */
@@ -122,6 +123,18 @@ export const connectionEvent = z.discriminatedUnion("kind", [
     peerId,
     ageMs,
     source: z.enum(AUDIO_SOURCES),
+  }),
+  /**
+   * This browser's video moved to another codec (ADR 2 addendum: the codec switch): the
+   * streamer's own, for all their pairs at once, so it has no `peerId`. `from` and `to` are MIME
+   * types.
+   */
+  z.strictObject({
+    kind: z.literal("codec_switch"),
+    ageMs,
+    from: codecType,
+    to: codecType,
+    reason: z.enum(CODEC_REASONS),
   }),
   /**
    * This browser's snapshot for a problem report (ADR 4 addendum on problem reports), asked for
@@ -300,4 +313,9 @@ export function deviceErrorEvent(
 /** The browser would not play `peer`'s mic, or their share's sound, before a click. */
 export function audioBlockedEvent(peer: string, share: boolean): ConnectionEvent {
   return { kind: "audio_blocked", peerId: peer, source: share ? "share" : "mic" };
+}
+
+/** This browser's video moved from codec `from` to `to` (MIME types), for `reason`. */
+export function codecSwitchEvent(from: string, to: string, reason: CodecReason): ConnectionEvent {
+  return { kind: "codec_switch", from, to, reason };
 }
