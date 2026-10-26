@@ -48,6 +48,7 @@ describe("getHomeSummary", () => {
     expect(await getHomeSummary(db, visitor)).toEqual({
       rightNow: { liveRooms: 0, inRooms: 0, streaming: 0 },
       regulars: [],
+      records: { longestRoom: null, biggestRoom: null, mostViewers: null },
       community: { members: 6, hoursWatched: 0, hoursStreamed: 0, roomsHosted: 0 },
     });
   });
@@ -199,6 +200,254 @@ describe("getHomeSummary", () => {
         { id: "b", username: "b", image: null, hours: 2 },
         { id: "a", username: "a", image: null, hours: 0.5 },
       ]);
+    });
+  });
+
+  describe("records", () => {
+    const records = async (caller: Caller = visitor) => (await getHomeSummary(db, caller)).records;
+    const DAY = 24 * 60;
+    // One clock reading, so every span below has an exact length.
+    const clock = Date.now();
+    const ago = (minutes: number) => new Date(clock - minutes * 60_000);
+
+    /** An ended room that lasted from `startedAgo` to `endedAgo` (minutes before the clock). */
+    async function pastRoom(
+      name: string,
+      startedAgo: number,
+      endedAgo: number,
+      isPrivate = false,
+    ): Promise<string> {
+      const { id } = await createRoom(db, host, { ...baseInput, name, isPrivate });
+      await db
+        .update(rooms)
+        .set({ createdAt: ago(startedAgo), endedAt: ago(endedAgo) })
+        .where(eq(rooms.id, id));
+      return id;
+    }
+    const present = (roomId: string, userId: string, from: number, to: number) =>
+      db.insert(presenceIntervals).values({
+        roomId,
+        userId,
+        startedAt: ago(from),
+        endedAt: ago(to),
+        lastSeenAt: ago(to),
+      });
+    /** `ids` all present from `from` to `to` minutes ago. */
+    const together = (roomId: string, ids: string[], from: number, to: number) =>
+      Promise.all(ids.map((id) => present(roomId, id, from, to)));
+
+    it("is all null with no rooms and no stats, so the card has nothing to show", async () => {
+      expect(await records()).toEqual({ longestRoom: null, biggestRoom: null, mostViewers: null });
+      // A room that never had anyone, and a peak of zero, are no data either.
+      await pastRoom("empty", 30, 30);
+      await db.insert(userStats).values({ userId: "a", publicPeakViewers: 0 });
+      expect(await records()).toEqual({ longestRoom: null, biggestRoom: null, mostViewers: null });
+    });
+
+    describe("longest room", () => {
+      it("is the longest public past stream, by its creation to its end", async () => {
+        await pastRoom("short", 60, 30);
+        const long = await pastRoom("long", 500, 41);
+        await pastRoom("middle", 200, 10);
+        // Live rooms don't count.
+        await createRoom(db, host, { ...baseInput, name: "live" });
+        expect((await records()).longestRoom).toEqual({
+          id: long,
+          name: "long",
+          durationMinutes: 459,
+        });
+      });
+
+      it("skips a private room that would win, for every caller, admins included", async () => {
+        const publicId = await pastRoom("public", 100, 40);
+        await pastRoom("secret", 900, 10, true);
+        for (const caller of [visitor, host, asUser("stranger"), admin]) {
+          expect((await records(caller)).longestRoom).toMatchObject({
+            id: publicId,
+            name: "public",
+          });
+        }
+      });
+
+      it("skips a room that ended before the 30-day window, but not one still inside it", async () => {
+        await pastRoom("expired", 40 * DAY, 31 * DAY);
+        const inside = await pastRoom("inside", 29 * DAY + 600, 29 * DAY);
+        expect((await records()).longestRoom).toMatchObject({ id: inside, name: "inside" });
+      });
+
+      it("breaks a tie by the room that ended last, then the lowest id", async () => {
+        await pastRoom("earlier", 100, 40);
+        const later = await pastRoom("later", 70, 10);
+        expect((await records()).longestRoom?.id).toBe(later);
+
+        const [a, b] = [await pastRoom("twin a", 70, 10), await pastRoom("twin b", 70, 10)];
+        await db.delete(rooms).where(eq(rooms.id, later));
+        expect((await records()).longestRoom?.id).toBe([a, b].sort()[0]);
+      });
+    });
+
+    describe("biggest room", () => {
+      it("counts people present at once, not total joins", async () => {
+        // Three people one after the other: 3 joins, 1 at a time.
+        const sequential = await pastRoom("sequential", 300, 100);
+        await present(sequential, "a", 300, 250);
+        await present(sequential, "b", 250, 200);
+        await present(sequential, "member", 200, 150);
+        // Two people together: fewer joins, but 2 at once.
+        const overlapping = await pastRoom("overlapping", 300, 100);
+        await together(overlapping, ["a", "b"], 280, 200);
+        expect((await records()).biggestRoom).toEqual({
+          id: overlapping,
+          name: "overlapping",
+          people: 2,
+        });
+      });
+
+      it("takes the most at one instant when people come and go in waves", async () => {
+        const waves = await pastRoom("waves", 300, 100);
+        await present(waves, "a", 300, 200);
+        await present(waves, "b", 290, 250);
+        await present(waves, "member", 260, 220);
+        await present(waves, "stranger", 240, 210);
+        // 'a', 'member' and 'stranger' are together from 240 to 220; 'b' left at 250.
+        await present(waves, "admin", 150, 120);
+        expect((await records()).biggestRoom).toMatchObject({ id: waves, people: 3 });
+      });
+
+      it("does not count someone who leaves the moment another arrives", async () => {
+        const handover = await pastRoom("handover", 300, 100);
+        await present(handover, "a", 300, 200);
+        await present(handover, "b", 200, 100);
+        expect((await records()).biggestRoom).toMatchObject({ id: handover, people: 1 });
+      });
+
+      it("counts one person with several intervals once", async () => {
+        const rejoin = await pastRoom("rejoin", 300, 100);
+        await present(rejoin, "a", 300, 250);
+        await present(rejoin, "a", 240, 200);
+        await present(rejoin, "b", 260, 230);
+        expect((await records()).biggestRoom).toMatchObject({ id: rejoin, people: 2 });
+      });
+
+      it("ends an interval left open at its last-seen checkpoint, within the room's end", async () => {
+        const open = await pastRoom("open", 300, 100);
+        await db.insert(presenceIntervals).values([
+          { roomId: open, userId: "a", startedAt: ago(300), lastSeenAt: ago(120) },
+          { roomId: open, userId: "b", startedAt: ago(130), lastSeenAt: ago(110) },
+          // Seen after the room ended: clamped to its end, so it never meets 'a'.
+          { roomId: open, userId: "host", startedAt: ago(105), lastSeenAt: ago(0) },
+        ]);
+        // 'b' (130..110) meets 'a' (to 120) and, later, 'host' (from 105): never all three.
+        expect((await records()).biggestRoom).toMatchObject({ id: open, people: 2 });
+      });
+
+      it("skips a private room that would win, for every caller, admins included", async () => {
+        const publicId = await pastRoom("public", 300, 100);
+        await together(publicId, ["a", "b"], 280, 200);
+        const secret = await pastRoom("secret", 300, 100, true);
+        await together(secret, ["a", "b", "member", "stranger"], 280, 200);
+        for (const caller of [visitor, host, asUser("member"), admin]) {
+          expect((await records(caller)).biggestRoom).toMatchObject({ id: publicId, people: 2 });
+        }
+      });
+
+      it("skips a room that ended before the 30-day window", async () => {
+        const expired = await pastRoom("expired", 40 * DAY, 31 * DAY);
+        await together(expired, ["a", "b", "member"], 40 * DAY - 10, 31 * DAY + 10);
+        const inside = await pastRoom("inside", 29 * DAY + 100, 29 * DAY);
+        await together(inside, ["a", "b"], 29 * DAY + 90, 29 * DAY + 10);
+        expect((await records()).biggestRoom).toMatchObject({ id: inside, people: 2 });
+      });
+
+      it("skips a room still in progress", async () => {
+        const { id } = await createRoom(db, host, baseInput);
+        await db.insert(presenceIntervals).values(
+          ["a", "b"].map((userId) => ({
+            roomId: id,
+            userId,
+            startedAt: ago(20),
+            lastSeenAt: ago(0),
+          })),
+        );
+        expect((await records()).biggestRoom).toBeNull();
+      });
+
+      it("breaks a tie by the room that ended last, then the lowest id", async () => {
+        const earlier = await pastRoom("earlier", 300, 100);
+        await together(earlier, ["a", "b"], 280, 200);
+        const later = await pastRoom("later", 300, 50);
+        await together(later, ["a", "b"], 280, 200);
+        expect((await records()).biggestRoom?.id).toBe(later);
+
+        const twin = await pastRoom("twin", 300, 50);
+        await together(twin, ["a", "b"], 280, 200);
+        await db.delete(rooms).where(eq(rooms.id, earlier));
+        expect((await records()).biggestRoom?.id).toBe([later, twin].sort()[0]);
+      });
+    });
+
+    describe("most viewers on one stream", () => {
+      it("names the user with the highest public peak, all time", async () => {
+        await db.insert(userStats).values([
+          { userId: "a", peakViewers: 9, publicPeakViewers: 9 },
+          { userId: "b", peakViewers: 4, publicPeakViewers: 4 },
+        ]);
+        expect((await records()).mostViewers).toEqual({
+          streamer: { id: "a", username: "a", image: null },
+          viewers: 9,
+        });
+      });
+
+      it("is not moved by a private peak, for any caller", async () => {
+        await db.insert(userStats).values([
+          { userId: "a", peakViewers: 50, publicPeakViewers: 3 },
+          { userId: "b", peakViewers: 40, publicPeakViewers: 0 },
+        ]);
+        for (const caller of [visitor, host, admin]) {
+          expect((await records(caller)).mostViewers).toMatchObject({
+            streamer: { id: "a" },
+            viewers: 3,
+          });
+        }
+      });
+
+      it("counts a public room in progress", async () => {
+        await db.insert(userStats).values({ userId: "a", peakViewers: 1, publicPeakViewers: 1 });
+        const { id } = await createRoom(db, host, baseInput);
+        await db.insert(presenceIntervals).values(
+          ["host", "a", "b"].map((userId) => ({
+            roomId: id,
+            userId,
+            startedAt: ago(30),
+            lastSeenAt: ago(0),
+          })),
+        );
+        await db
+          .insert(streamIntervals)
+          .values({ roomId: id, userId: "host", startedAt: ago(30), lastSeenAt: ago(0) });
+        // Two others were with the host at once.
+        expect((await records()).mostViewers).toMatchObject({
+          streamer: { id: "host" },
+          viewers: 2,
+        });
+      });
+
+      it("breaks a tie by the lowest user id", async () => {
+        await db.insert(userStats).values([
+          { userId: "b", publicPeakViewers: 5 },
+          { userId: "a", publicPeakViewers: 5 },
+        ]);
+        expect((await records()).mostViewers?.streamer.id).toBe("a");
+      });
+    });
+
+    it("omits only the records with no data", async () => {
+      await db.insert(userStats).values({ userId: "a", publicPeakViewers: 2 });
+      expect(await records()).toEqual({
+        longestRoom: null,
+        biggestRoom: null,
+        mostViewers: { streamer: { id: "a", username: "a", image: null }, viewers: 2 },
+      });
     });
   });
 
