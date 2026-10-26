@@ -1,6 +1,6 @@
 /**
- * Home summary, server half: the sidebar's "Right Now" and "Community" numbers, and the "You" card.
- * Takes the database and the caller explicitly, like src/server/rooms.ts, so the
+ * Home summary, server half: the sidebar's "Right Now", "Regulars" and "Community" numbers, and
+ * the "You" card. Takes the database and the caller explicitly, like src/server/rooms.ts, so the
  * server function is a thin wrapper and tests call this against PGlite.
  *
  * "Right Now" counts over the live rooms the caller may see, the same way
@@ -8,26 +8,36 @@
  * so the panel agrees with the Live Now list. "Community" sums the persistent
  * per-user stats plus the rooms in progress over every room, private ones included
  * (`userStatsNow`): anonymous totals that name no room or user, so they're the same for
- * every caller (ADR 16 addendum). `getYouCard` is the caller's own figures, also over every
+ * every caller (ADR 16 addendum). "Regulars" names people, so it counts public rooms only
+ * (`publicUserStatsNow`) for every caller, admins included: one list for everyone, and the
+ * summary's cache key needs no user. `getYouCard` is the caller's own figures, also over every
  * room, read apart from the summary so they get a cache key of their own.
  */
 import { and, asc, count, desc, eq, isNull, ne, or, type SQLWrapper, sql } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import { presenceIntervals, rooms, streamIntervals, user } from "../db/schema/index.ts";
-import type { CommunityTotals, HomeSummary, RightNow, YouCard } from "../lib/home.ts";
+import {
+  type CommunityTotals,
+  type HomeSummary,
+  REGULARS_LIMIT,
+  type Regular,
+  type RightNow,
+  type YouCard,
+} from "../lib/home.ts";
 import { secondsToHours } from "../lib/profiles.ts";
 import type { Caller } from "./caller.ts";
 import { username } from "./profiles.ts";
-import { userCotimeNow, userStatsNow } from "./stats.ts";
+import { publicUserStatsNow, userCotimeNow, userStatsNow } from "./stats.ts";
 import { roomVisibleTo } from "./visibility.ts";
 
 /** The sidebar numbers as `caller` sees them. */
 export async function getHomeSummary(db: Db, caller: Caller): Promise<HomeSummary> {
-  const [rightNow, community] = await Promise.all([
+  const [rightNow, regulars, community] = await Promise.all([
     rightNowCounts(db, caller),
+    topRegulars(db),
     communityTotals(db),
   ]);
-  return { rightNow, community };
+  return { rightNow, regulars, community };
 }
 
 async function rightNowCounts(db: Db, caller: Caller): Promise<RightNow> {
@@ -47,6 +57,23 @@ async function rightNowCounts(db: Db, caller: Caller): Promise<RightNow> {
     openIn(streamIntervals),
   ]);
   return { liveRooms: live?.n ?? 0, inRooms, streaming };
+}
+
+/**
+ * The `REGULARS_LIMIT` people with the most public-room time (hours streamed plus watched),
+ * rooms in progress included, most first; ties go to the lowest id. Nobody without public time.
+ */
+async function topRegulars(db: Db): Promise<Regular[]> {
+  const stats = publicUserStatsNow;
+  const seconds = sql<number>`coalesce(${stats.secondsStreamed}, 0) + coalesce(${stats.secondsWatched}, 0)`;
+  const rows = await db
+    .select({ id: user.id, username, image: user.image, seconds: seconds.mapWith(Number) })
+    .from(stats.from)
+    .innerJoin(user, eq(user.id, stats.userId))
+    .where(sql`${seconds} > 0`)
+    .orderBy(desc(seconds), asc(user.id))
+    .limit(REGULARS_LIMIT);
+  return rows.map(({ seconds, ...person }) => ({ ...person, hours: secondsToHours(seconds) }));
 }
 
 /** Postgres sums integers as bigint/numeric (a string on the wire); read it as a number. */

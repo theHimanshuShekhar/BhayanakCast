@@ -21,12 +21,28 @@ export interface CommunityTotals {
   roomsHosted: number;
 }
 
+/** How many people "Regulars" lists. */
+export const REGULARS_LIMIT = 5;
+
+/** Someone in "Regulars": their public-room hours, streamed plus watched. */
+export interface Regular {
+  id: string;
+  username: string;
+  image: string | null;
+  hours: number;
+}
+
 /**
  * The home sidebar's numbers. The online count isn't here: it comes from the
  * realtime server (spec #3).
  */
 export interface HomeSummary {
   rightNow: RightNow;
+  /**
+   * The top people by hours in public rooms (rooms in progress included), most first. The same
+   * list for every caller, admins included: it names people, so private rooms stay out.
+   */
+  regulars: Regular[];
   community: CommunityTotals;
 }
 

@@ -13,6 +13,7 @@ import { type SignInErrorSearch, validateSignInErrorSearch } from "~/lib/ban";
 import { useCurrentSession } from "~/lib/current-user";
 import { homeMeta, roomMeta, unavailableRoomMeta } from "~/lib/embed";
 import { formatCotime } from "~/lib/format";
+import type { Regular } from "~/lib/home";
 import { homeSummaryQuery, youCardQuery } from "~/lib/home.queries";
 import { useOnlineCount } from "~/lib/lobby-live";
 import {
@@ -209,6 +210,47 @@ const YouPanel = ({ userId }: { userId: string }) => {
   );
 };
 
+/**
+ * The most active people in public rooms (ADR 16 addendum): the same list for every viewer, so
+ * its figures never include a private room. A room is named only when it is one of the live
+ * rooms this viewer was sent, so a private room they can't see is never shown.
+ */
+const RegularsPanel = ({
+  regulars,
+  liveRoomOf,
+}: {
+  regulars: Regular[];
+  liveRoomOf: (userId: string) => LiveRoomCard | undefined;
+}) => (
+  <section aria-label="Regulars" className={panelCls}>
+    <PanelHead icon={Icon.Clock}>Regulars</PanelHead>
+    {regulars.map((p) => {
+      const liveRoom = liveRoomOf(p.id);
+      return (
+        <Link
+          key={p.id}
+          to="/profile/$userId"
+          params={{ userId: p.id }}
+          className="w-[calc(100%+1rem)] flex items-center gap-2.5 p-2 -mx-2 rounded-lg !text-fg hover:no-underline hover:bg-surface"
+        >
+          <Avatar name={p.username} image={p.image} size="md" ring={!!liveRoom} />
+          <div className="flex-1 min-w-0">
+            <div className="text-xs font-medium truncate">{p.username}</div>
+            {liveRoom && (
+              <div className="text-[10.5px] text-muted truncate">
+                in <span className="text-fg-muted font-medium">{liveRoom.name}</span>
+              </div>
+            )}
+          </div>
+          <span className="shrink-0 text-[10.5px] font-semibold px-1.5 py-0.5 rounded-md bg-surface-2 text-fg-muted tabular-nums">
+            {p.hours.toFixed(1)}h
+          </span>
+        </Link>
+      );
+    })}
+  </section>
+);
+
 const UserResult = ({
   user,
   liveRoom,
@@ -300,7 +342,7 @@ function HomePage() {
   const { data: rooms } = useSuspenseQuery(liveRoomsQuery());
   const { data: pastRooms } = useSuspenseQuery(pastRoomsQuery());
   const {
-    data: { rightNow, community },
+    data: { rightNow, regulars, community },
   } = useSuspenseQuery(homeSummaryQuery());
   const [q, setQ] = useState("");
   // The rooms on the first render (server and hydration agree on them). Any other room went
@@ -578,6 +620,8 @@ function HomePage() {
             ))}
           </section>
         )}
+
+        {regulars.length > 0 && <RegularsPanel regulars={regulars} liveRoomOf={liveRoomOf} />}
 
         <section aria-label="Community" className={panelCls}>
           <PanelHead icon={Icon.Users}>Community</PanelHead>
