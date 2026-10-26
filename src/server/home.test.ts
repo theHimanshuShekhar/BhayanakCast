@@ -7,11 +7,12 @@ import {
   rooms,
   streamIntervals,
   user,
+  userCotime,
   userStats,
 } from "../db/schema/index.ts";
 import { createTestDb } from "../db/test-db.ts";
 import type { Caller } from "./caller.ts";
-import { getHomeSummary } from "./home.ts";
+import { getHomeSummary, getYouCard } from "./home.ts";
 import { createRoom } from "./rooms.ts";
 
 let db: Db;
@@ -150,5 +151,95 @@ describe("getHomeSummary", () => {
       hoursWatched: 3,
       roomsHosted: 1,
     });
+  });
+});
+
+describe("getYouCard", () => {
+  const me = asUser("a");
+  const together = async (x: string, y: string, seconds: number, publicSeconds = seconds) => {
+    const [userA, userB] = x < y ? [x, y] : [y, x];
+    await db
+      .insert(userCotime)
+      .values({ userA, userB, secondsTogether: seconds, publicSecondsTogether: publicSeconds });
+  };
+
+  it("gives a visitor nothing", async () => {
+    await db.insert(userStats).values({ userId: "a", secondsWatched: HOUR });
+    expect(await getYouCard(db, visitor)).toBeNull();
+  });
+
+  it("is empty for a user with no time in any room", async () => {
+    expect(await getYouCard(db, me)).toEqual({
+      hoursWatched: 0,
+      hoursStreamed: 0,
+      roomsJoined: 0,
+      topCoUser: null,
+    });
+  });
+
+  it("shows the stats without a co-user when nobody shared time", async () => {
+    await db
+      .insert(userStats)
+      .values({ userId: "a", secondsWatched: 3 * HOUR, secondsStreamed: HOUR / 2, roomsJoined: 4 });
+    expect(await getYouCard(db, me)).toEqual({
+      hoursWatched: 3,
+      hoursStreamed: 0.5,
+      roomsJoined: 4,
+      topCoUser: null,
+    });
+  });
+
+  it("counts every room, private ones included, and the stored figures with the live ones", async () => {
+    // Rolled up from a private room: the public columns stay at zero, as a profile would show.
+    await db.insert(userStats).values({
+      userId: "a",
+      secondsWatched: 2 * HOUR,
+      roomsJoined: 1,
+      publicSecondsWatched: 0,
+      publicRoomsJoined: 0,
+    });
+    await together("a", "stranger", 4 * HOUR, 0);
+
+    // And a private room in progress: a for an hour, b for the last half hour of it.
+    const { id } = await createRoom(db, host, { ...baseInput, isPrivate: true });
+    const clock = Date.now();
+    const ago = (minutes: number) => new Date(clock - minutes * 60_000);
+    await db.insert(presenceIntervals).values([
+      { roomId: id, userId: "a", startedAt: ago(60), lastSeenAt: ago(0) },
+      { roomId: id, userId: "b", startedAt: ago(30), lastSeenAt: ago(0) },
+    ]);
+
+    expect(await getYouCard(db, me)).toEqual({
+      hoursWatched: 3,
+      hoursStreamed: 0,
+      roomsJoined: 2,
+      topCoUser: { id: "stranger", username: "stranger", image: null, secondsTogether: 4 * HOUR },
+    });
+  });
+
+  it("names the co-user with the most time together on either side of the pair", async () => {
+    await together("a", "host", HOUR);
+    await together("b", "a", 2 * HOUR);
+    await together("stranger", "member", 9 * HOUR);
+    expect((await getYouCard(db, me))?.topCoUser).toMatchObject({
+      id: "b",
+      secondsTogether: 2 * HOUR,
+    });
+  });
+
+  it("breaks a tie by the lowest user id, whatever the insertion order", async () => {
+    await together("a", "stranger", HOUR);
+    await together("a", "host", HOUR);
+    await together("a", "member", HOUR);
+    expect((await getYouCard(db, me))?.topCoUser?.id).toBe("host");
+  });
+
+  it("only ever reads the caller's own figures", async () => {
+    await db.insert(userStats).values([
+      { userId: "a", secondsWatched: HOUR },
+      { userId: "b", secondsWatched: 7 * HOUR },
+    ]);
+    await together("b", "host", 5 * HOUR);
+    expect(await getYouCard(db, me)).toMatchObject({ hoursWatched: 1, topCoUser: null });
   });
 });

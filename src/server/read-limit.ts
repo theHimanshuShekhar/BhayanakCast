@@ -14,8 +14,11 @@ export const PUBLIC_READ_WINDOW_MS = 60_000;
 
 /**
  * At most this many reads of each kind per IP in any `PUBLIC_READ_WINDOW_MS`. A page load costs
- * one profile or home read, and the pages refetch about once a minute (`STATS_REFRESH_MS`) or
- * when the lobby changes; search runs once typing pauses, so it gets the smallest budget. A room
+ * one profile read, or one home read (two when signed in: the summary and the "You" card), and
+ * the pages refetch about once a minute (`STATS_REFRESH_MS`) or when the lobby changes (the
+ * summary, at most 12 a minute per tab; the "You" card only when a room ends). That is about 2
+ * home reads a minute per tab at rest and 14 on a busy lobby, so 120 covers 8 busy tabs from one
+ * IP, or dozens at rest. Search runs once typing pauses, so it gets the smallest budget. A room
  * card (`/api/og/room/<id>.png`, ADR 22) is fetched by link unfurlers, a few times per pasted
  * link; drawing one costs about 150 ms of CPU, so its budget is as small as search's.
  */
