@@ -63,14 +63,14 @@
  * share and the others leave room for, a probe up has to fit it, and when most pairs show
  * strain at once the budget drops towards what was being sent and senders step down, cameras
  * first, until the targets fit (ADR 2 addenda). Each side also tells the other which video
- * codecs it can decode (in `hello` and every description), and orders its own senders' codecs
- * best first, AV1 > VP9 > H.264 > VP8, among those (./codecs.ts). A streamer's own order can
- * differ (Firefox sends H.264, a hardware VP9 goes first): the caller chooses it when a share or
+ * codecs it can decode (in `hello` and every description), and orders its own senders' codecs best
+ * first, AV1 > VP9 > H.264 > VP8, among those (./codecs.ts). A streamer's own order can differ
+ * (Firefox sends H.264, a hardware VP9 or H.264 goes first): the caller chooses it when a share or
  * camera turns on (`chooseStartOrder`) and gives it with `setStartOrder` before the tracks, so no
- * sender is made before it; it is kept for that kind until the kind turns off. A codec
- * preference takes effect in the next offer, which browsers version as they do any other. When
- * the encoder reports a CPU limit on half the pairs (`watchCodec`), all the streamer's video
- * moves, once per share, to H.264 or VP8 with `setParameters` (`#moveSenders`).
+ * sender is made before it; it is kept for that kind until the kind turns off. A codec preference
+ * takes effect in the next offer, which browsers version as they do any other. When the encoder
+ * reports a CPU limit on half the pairs (`watchCodec`), all the streamer's video moves, once per
+ * share, to H.264 or VP8 with `setParameters` (`#moveSenders`).
  *
  * Local tracks belong to the caller (./local-media.ts): the Mesh never stops them.
  */

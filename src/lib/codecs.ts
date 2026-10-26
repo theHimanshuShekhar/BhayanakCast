@@ -7,9 +7,9 @@
  * its capabilities simply lack them, and the pair falls back to the next codec both have.
  *
  * The streamer's own order can differ from that normal one (ADR 2, codecs addendum): a Firefox
- * streamer sends only H.264 or VP8, and a Chromium streamer whose AV1 would be software but
- * whose VP9 is hardware sends VP9 first. `chooseStartOrder` picks it before a share or camera
- * starts, and `orderCodecs` takes it as input, so it stays pure.
+ * streamer sends only H.264 or VP8, and a Chromium streamer whose AV1 would be software sends
+ * a hardware VP9 first, or else a hardware H.264. `chooseStartOrder` picks it before a share or
+ * camera starts, and `orderCodecs` takes it as input, so it stays pure.
  */
 import type { BrowserName, CodecReason } from "./quality-telemetry.ts";
 
@@ -51,15 +51,16 @@ export interface StartOrder {
 /**
  * The reason a sender's rows give for its codec: the `reason` its order had, but only while the
  * codec it sends (`codec`, once known) is the one that reason is about. `hardware` is about VP9
- * and `browser` about H.264 and VP8; a viewer that can't decode those leaves the sender on
- * another codec, and the reason is then `preferred`. `cpu` (the codec switch) is about the codec
+ * or H.264 and `browser` about H.264 and VP8; a viewer that can't decode those leaves the sender
+ * on another codec, and the reason is then `preferred`. `cpu` (the codec switch) is about the codec
  * the switch moves to: a reading still on AV1 or VP9 (the stats lag the change by a pass, or the
  * pick was reverted) is `preferred`.
  */
 export function codecReasonOf(reason: CodecReason, codec?: string): CodecReason {
   const type = codec?.toLowerCase();
   if (reason === "cpu") return canSwitchFrom(type) ? "preferred" : reason;
-  if (reason === "hardware") return type === "video/vp9" ? reason : "preferred";
+  if (reason === "hardware")
+    return type === "video/vp9" || type === "video/h264" ? reason : "preferred";
   if (reason === "browser")
     return type === "video/h264" || type === "video/vp8" ? reason : "preferred";
   return reason;
@@ -76,6 +77,11 @@ export const NORMAL_START: StartOrder = { order: VIDEO_CODEC_PREFERENCE, reason:
 /** VP9 first, for a Chromium streamer whose VP9 is hardware-encoded and AV1 is not. */
 export const HARDWARE_VP9_START: StartOrder = {
   order: ["video/vp9", ...VIDEO_CODEC_PREFERENCE.filter((type) => type !== "video/vp9")],
+  reason: "hardware",
+};
+/** H.264 first, for a Chromium streamer whose H.264 is hardware-encoded and AV1 and VP9 are not. */
+export const HARDWARE_H264_START: StartOrder = {
+  order: ["video/h264", ...VIDEO_CODEC_PREFERENCE.filter((type) => type !== "video/h264")],
   reason: "hardware",
 };
 /** A Firefox streamer's: it encodes AV1 and VP9 in software only, and can't see a CPU limit. */
@@ -162,9 +168,9 @@ const CHROMIUM: readonly BrowserName[] = ["chrome", "edge", "opera"];
 /**
  * The order a streamer on `browser` starts a share or camera in (ADR 2, codecs addendum).
  * Firefox: H.264 or VP8 (by user agent: its `powerEfficient` is wrong). Chromium: it asks the
- * browser whether encoding `capture` in AV1 and in VP9 is power efficient (hardware): AV1 does,
- * the normal order; else VP9 does, VP9 first; else the normal order. H.264 never moves the
- * start. Safari and other browsers, an error, and no answer within `timeoutMs`: the normal order.
+ * browser whether encoding `capture` in AV1, VP9 and H.264 is power efficient (hardware): AV1
+ * does, the normal order; else VP9 does, VP9 first; else H.264 does, H.264 first; else the normal
+ * order. Safari and other browsers, an error, and no answer within `timeoutMs`: the normal order.
  */
 export async function chooseStartOrder(
   browser: BrowserName,
@@ -196,8 +202,13 @@ export async function chooseStartOrder(
   const late = new Promise<StartOrder>((resolve) => {
     timer = setTimeout(() => resolve(NORMAL_START), timeoutMs);
   });
-  const asked = Promise.all([efficient("video/AV1"), efficient("video/VP9")]).then(
-    ([av1, vp9]) => (!av1 && vp9 ? HARDWARE_VP9_START : NORMAL_START),
+  const asked = Promise.all([
+    efficient("video/AV1"),
+    efficient("video/VP9"),
+    efficient("video/H264"),
+  ]).then(
+    ([av1, vp9, h264]) =>
+      av1 ? NORMAL_START : vp9 ? HARDWARE_VP9_START : h264 ? HARDWARE_H264_START : NORMAL_START,
     () => NORMAL_START,
   );
   try {
