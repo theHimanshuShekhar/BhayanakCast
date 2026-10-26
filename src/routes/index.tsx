@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useMemo, useState } from "react";
 import { HomeNotice } from "~/components/home-notice";
 import { Icon, type IconComponent } from "~/components/icons";
@@ -12,7 +12,8 @@ import { useAppActions } from "~/lib/app-actions";
 import { type SignInErrorSearch, validateSignInErrorSearch } from "~/lib/ban";
 import { useCurrentSession } from "~/lib/current-user";
 import { homeMeta, roomMeta, unavailableRoomMeta } from "~/lib/embed";
-import { homeSummaryQuery } from "~/lib/home.queries";
+import { formatCotime } from "~/lib/format";
+import { homeSummaryQuery, youCardQuery } from "~/lib/home.queries";
 import { useOnlineCount } from "~/lib/lobby-live";
 import {
   READ_RATE_LIMITED_MESSAGE,
@@ -47,10 +48,11 @@ export const Route = createFileRoute("/")({
   loaderDeps: ({ search }) => ({ join: search.join }),
   loader: async ({ context, deps }) => {
     const { queryClient, session } = context;
-    const [, , , joinRoom] = await Promise.all([
+    const [, , , , joinRoom] = await Promise.all([
       queryClient.ensureQueryData(liveRoomsQuery()),
       queryClient.ensureQueryData(pastRoomsQuery()),
       queryClient.ensureQueryData(homeSummaryQuery()),
+      session.user ? queryClient.ensureQueryData(youCardQuery(session.user.id)) : null,
       // The shell's "sign in to join" prompt names this room.
       !session.user && deps.join ? queryClient.ensureQueryData(roomQuery(deps.join)) : null,
     ]);
@@ -148,6 +150,64 @@ const CommunityRow = ({
     </span>
   </div>
 );
+
+/**
+ * The signed-in user's own lifetime figures. They count every room, private ones included
+ * (ADR 16 addendum), so this is only ever read for the caller and keyed by their id.
+ */
+const YouPanel = ({ userId }: { userId: string }) => {
+  const { data: you } = useSuspenseQuery(youCardQuery(userId));
+  if (!you) return null;
+  const { hoursWatched, hoursStreamed, roomsJoined, topCoUser } = you;
+  return (
+    <section aria-label="You" className={panelCls}>
+      <Link
+        to="/profile/$userId"
+        params={{ userId }}
+        className="block !text-fg-muted hover:no-underline hover:!text-fg"
+      >
+        <PanelHead icon={Icon.Activity}>You</PanelHead>
+      </Link>
+      {roomsJoined === 0 && hoursWatched === 0 && hoursStreamed === 0 ? (
+        <p className="m-0 text-[12px] text-muted">
+          Join or start a room and your hours show up here.
+        </p>
+      ) : (
+        <>
+          <CommunityRow
+            icon={Icon.Eye}
+            label="Hours Watched"
+            value={`${hoursWatched.toFixed(1)}h`}
+          />
+          <CommunityRow
+            icon={Icon.Broadcast}
+            label="Hours Streamed"
+            value={`${hoursStreamed.toFixed(1)}h`}
+          />
+          <CommunityRow icon={Icon.Plus} label="Rooms Joined" value={roomsJoined} />
+          {topCoUser && (
+            // The name shortens before the hours do.
+            <div className="flex items-center justify-between gap-2 py-2 border-t border-dashed border-border-subtle">
+              <span className="min-w-0 text-[11.5px] text-fg-muted truncate">
+                most time with{" "}
+                <Link
+                  to="/profile/$userId"
+                  params={{ userId: topCoUser.id }}
+                  className="font-semibold !text-fg"
+                >
+                  {topCoUser.username}
+                </Link>
+              </span>
+              <span className="shrink-0 text-[12.5px] font-semibold px-2 py-0.5 rounded-md bg-surface-2 text-fg tabular-nums">
+                {formatCotime(topCoUser.secondsTogether)}
+              </span>
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+};
 
 const UserResult = ({
   user,
@@ -487,6 +547,8 @@ function HomePage() {
             <StatMini icon={Icon.Screen} label="Streaming" value={rightNow.streaming} />
           </div>
         </section>
+
+        {user && <YouPanel userId={user.id} />}
 
         {/* Hidden with no live rooms: the main column already says so. */}
         {/* Only once the grid is longer than a glance: with a few rooms it repeats the cards. */}

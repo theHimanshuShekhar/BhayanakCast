@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 import { signIn } from "./auth";
 import { expect, newPage, test } from "./fixtures";
 import { createUser, uniqueUsername } from "./profiles";
-import { createRoomOnPage, uniqueRoomName } from "./rooms";
+import { createRoomOnPage, createUsers, minutesAgo, seedRoom, uniqueRoomName } from "./rooms";
 
 const HOUR = 3600;
 
@@ -70,4 +70,63 @@ test("every Right Now tile shows a number, the online count from the lobby socke
   for (const label of ["Online", "Watching", "Streaming"]) {
     expect(Number.isInteger(await rightNow(page, label)), label).toBe(true);
   }
+});
+
+test("a visitor gets no You card, and keeps the sign-in intro", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("region", { name: "Sign in" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Community" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "You" })).toHaveCount(0);
+});
+
+test("a new user's You card nudges them into a room", async ({ page, context }) => {
+  await signIn(context, { username: uniqueUsername("you.new") });
+  await page.goto("/");
+  const you = page.getByRole("region", { name: "You" });
+  await expect(you.getByText("Join or start a room")).toBeVisible();
+  await expect(you.getByText("most time with")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Sign in" })).toHaveCount(0);
+});
+
+test("the You card counts a private room and links to the co-user and the profile", async ({
+  page,
+  context,
+  browser,
+}) => {
+  const friend = uniqueUsername("you.friend");
+  const myId = await signIn(context, { username: uniqueUsername("you.me") });
+  const [friendId = ""] = await createUsers(browser, [friend]);
+  // A private room that ended 20 minutes ago, with both of them in it for three hours. A profile
+  // leaves it out; the You card, which only its owner sees, counts it.
+  // One reading of the clock each, so the span is exactly three hours.
+  const [startedAt, endedAt] = [minutesAgo(200), minutesAgo(20)];
+  const span = (userId: string) => ({ userId, startedAt, endedAt });
+  await seedRoom(context, {
+    name: uniqueRoomName("you private"),
+    hostUserId: friendId,
+    isPrivate: true,
+    createdAt: minutesAgo(210),
+    endedAt,
+    members: [{ userId: myId }],
+    presence: [span(friendId), span(myId)],
+  });
+
+  await page.goto("/");
+  const you = page.getByRole("region", { name: "You" });
+  const row = (label: string) =>
+    you.getByText(label, { exact: true }).locator("xpath=following-sibling::span");
+  await expect(row("Hours Watched")).toHaveText("3.0h");
+  await expect(row("Hours Streamed")).toHaveText("0.0h");
+  await expect(row("Rooms Joined")).toHaveText("1");
+  await expect(you).toContainText("most time with");
+  await expect(you).toContainText("3h 0m");
+
+  await you.getByRole("link", { name: friend }).click();
+  await expect(page).toHaveURL(`/profile/${friendId}`);
+
+  await page.goto("/");
+  await page.getByRole("link", { name: "You", exact: true }).click();
+  await expect(page).toHaveURL(`/profile/${myId}`);
+  // Their own profile counts public rooms only, so the private room is not on it.
+  await expect(page.getByText("no shared time yet")).toBeVisible();
 });

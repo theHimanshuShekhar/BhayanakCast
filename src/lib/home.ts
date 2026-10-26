@@ -2,6 +2,7 @@
  * Home, client-safe half: the view the home-summary server function returns
  * (src/server/home.ts). No server-only imports.
  */
+import type { CoUser } from "./profiles.ts";
 
 /** Live counts over the rooms the caller may see ("Right Now"). */
 export interface RightNow {
@@ -27,4 +28,16 @@ export interface CommunityTotals {
 export interface HomeSummary {
   rightNow: RightNow;
   community: CommunityTotals;
+}
+
+/**
+ * The signed-in caller's own lifetime figures ("You"). Unlike a profile they count every room,
+ * private ones included, because only their owner is ever sent them (ADR 16 addendum).
+ */
+export interface YouCard {
+  hoursWatched: number;
+  hoursStreamed: number;
+  roomsJoined: number;
+  /** Who they've spent the most time with, or null with no shared time yet. */
+  topCoUser: CoUser | null;
 }
