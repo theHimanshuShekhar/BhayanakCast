@@ -47,6 +47,7 @@ describe("getHomeSummary", () => {
   it("returns zeros for an empty platform, except the members", async () => {
     expect(await getHomeSummary(db, visitor)).toEqual({
       rightNow: { liveRooms: 0, inRooms: 0, streaming: 0 },
+      regulars: [],
       community: { members: 6, hoursWatched: 0, hoursStreamed: 0, roomsHosted: 0 },
     });
   });
@@ -109,6 +110,95 @@ describe("getHomeSummary", () => {
       const everything = { liveRooms: 2, inRooms: 4, streaming: 2 };
       expect((await getHomeSummary(db, asUser("member"))).rightNow).toEqual(everything);
       expect((await getHomeSummary(db, admin)).rightNow).toEqual(everything);
+    });
+  });
+
+  describe("regulars", () => {
+    const regulars = async (caller: Caller) => (await getHomeSummary(db, caller)).regulars;
+
+    it("is empty on an empty platform, and for people with no public time", async () => {
+      expect(await regulars(visitor)).toEqual([]);
+      await db.insert(userStats).values({ userId: "a", publicSecondsWatched: 0 });
+      expect(await regulars(visitor)).toEqual([]);
+    });
+
+    it("ranks by hours streamed plus watched, most first, ties to the lowest id", async () => {
+      await db.insert(userStats).values([
+        { userId: "stranger", secondsWatched: HOUR, publicSecondsWatched: HOUR },
+        {
+          userId: "b",
+          secondsWatched: 2 * HOUR,
+          secondsStreamed: HOUR,
+          publicSecondsWatched: 2 * HOUR,
+          publicSecondsStreamed: HOUR,
+        },
+        { userId: "member", secondsStreamed: 3 * HOUR, publicSecondsStreamed: 3 * HOUR },
+        { userId: "a", secondsWatched: 1.5 * HOUR, publicSecondsWatched: 1.5 * HOUR },
+      ]);
+      expect(await regulars(visitor)).toEqual([
+        { id: "b", username: "b", image: null, hours: 3 },
+        { id: "member", username: "member", image: null, hours: 3 },
+        { id: "a", username: "a", image: null, hours: 1.5 },
+        { id: "stranger", username: "stranger", image: null, hours: 1 },
+      ]);
+    });
+
+    it("lists at most five people", async () => {
+      await db
+        .insert(user)
+        .values(["c", "d"].map((id) => ({ id, name: id, email: `${id}@discord.invalid` })));
+      const ids = ["host", "member", "stranger", "a", "b", "c", "d"];
+      await db.insert(userStats).values(
+        ids.map((userId, i) => ({
+          userId,
+          secondsWatched: (i + 1) * HOUR,
+          publicSecondsWatched: (i + 1) * HOUR,
+        })),
+      );
+      expect((await regulars(visitor)).map((r) => r.id)).toEqual(["d", "c", "b", "a", "stranger"]);
+    });
+
+    it("counts public rooms only: nobody with only private time appears, for any caller", async () => {
+      await db.insert(userStats).values([
+        // Nine hours in private rooms, one in public.
+        {
+          userId: "a",
+          secondsWatched: 10 * HOUR,
+          publicSecondsWatched: HOUR,
+        },
+        // Private rooms only.
+        { userId: "b", secondsStreamed: 20 * HOUR, publicSecondsStreamed: 0 },
+      ]);
+      // A private room in progress with b and the host in it.
+      const { id } = await createRoom(db, host, { ...baseInput, isPrivate: true });
+      await db.insert(presenceIntervals).values([
+        { roomId: id, userId: "b", startedAt: t(120), lastSeenAt: t(0) },
+        { roomId: id, userId: "host", startedAt: t(120), lastSeenAt: t(0) },
+      ]);
+      for (const caller of [visitor, asUser("stranger"), asUser("b"), host, admin]) {
+        expect(await regulars(caller)).toEqual([{ id: "a", username: "a", image: null, hours: 1 }]);
+      }
+    });
+
+    it("counts a public room in progress", async () => {
+      const { id } = await createRoom(db, host, baseInput);
+      const clock = Date.now();
+      const ago = (minutes: number) => new Date(clock - minutes * 60_000);
+      await db.insert(presenceIntervals).values({
+        roomId: id,
+        userId: "b",
+        startedAt: ago(120),
+        lastSeenAt: ago(0),
+      });
+      await db.insert(userStats).values({
+        userId: "a",
+        secondsWatched: HOUR / 2,
+        publicSecondsWatched: HOUR / 2,
+      });
+      expect(await regulars(visitor)).toEqual([
+        { id: "b", username: "b", image: null, hours: 2 },
+        { id: "a", username: "a", image: null, hours: 0.5 },
+      ]);
     });
   });
 

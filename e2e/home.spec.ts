@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { signIn } from "./auth";
+import { E2E_ADMIN_DISCORD_ID, signIn } from "./auth";
 import { expect, newPage, test } from "./fixtures";
 import { createUser, uniqueUsername } from "./profiles";
 import { createRoomOnPage, createUsers, minutesAgo, seedRoom, uniqueRoomName } from "./rooms";
@@ -129,4 +129,74 @@ test("the You card counts a private room and links to the co-user and the profil
   await expect(page).toHaveURL(`/profile/${myId}`);
   // Their own profile counts public rooms only, so the private room is not on it.
   await expect(page.getByText("no shared time yet")).toBeVisible();
+});
+
+/**
+ * Lifetime seconds that put a test's user at the top of Regulars. Every test shares one database
+ * and its users stay in it, so the figure rises with the clock: whoever a test seeds is above
+ * those seeded before it, and only the few tests running alongside can be above them.
+ */
+const topRegularSeconds = () => 1_000_000 * HOUR + Math.floor(Date.now() / 1000);
+
+test("Regulars shows a regular in their live room and links to their profile", async ({
+  page,
+  context,
+  browser,
+}) => {
+  const regular = await createUser(browser, uniqueUsername("regular.live"), {
+    stats: { secondsWatched: topRegularSeconds() },
+  });
+  const roomName = uniqueRoomName("regular room");
+  await seedRoom(context, {
+    name: roomName,
+    hostUserId: regular.id,
+    createdAt: minutesAgo(15),
+    presence: [{ userId: regular.id, startedAt: minutesAgo(15) }],
+  });
+
+  // Visitors get the card too.
+  await page.goto("/");
+  const row = page
+    .getByRole("region", { name: "Regulars" })
+    .getByRole("link", { name: regular.username });
+  await expect(row).toContainText(`in ${roomName}`);
+  await expect(row).toContainText(/\d+\.\dh$/);
+
+  await row.click();
+  await expect(page).toHaveURL(`/profile/${regular.id}`);
+});
+
+test("Regulars names a private room only to someone who can see it", async ({ page, browser }) => {
+  const regular = await createUser(browser, uniqueUsername("regular.priv"), {
+    stats: { secondsWatched: topRegularSeconds() },
+  });
+  const roomName = uniqueRoomName("regular private");
+  const admin = await browser.newContext();
+  try {
+    await signIn(admin, { discordId: E2E_ADMIN_DISCORD_ID, username: "admin_jpg" });
+    await seedRoom(admin, {
+      name: roomName,
+      hostUserId: regular.id,
+      isPrivate: true,
+      createdAt: minutesAgo(15),
+      presence: [{ userId: regular.id, startedAt: minutesAgo(15) }],
+    });
+    const regularsRow = (viewer: Page) =>
+      viewer
+        .getByRole("region", { name: "Regulars" })
+        .getByRole("link", { name: regular.username });
+
+    // The visitor sees the person, with no room and no ring, and the name is nowhere on the page.
+    await page.goto("/");
+    await expect(regularsRow(page)).toBeVisible();
+    await expect(regularsRow(page)).not.toContainText("in ");
+    await expect(page.getByText(roomName)).toHaveCount(0);
+
+    // An admin can see every room, so the same row names it.
+    const adminPage = await newPage(admin);
+    await adminPage.goto("/");
+    await expect(regularsRow(adminPage)).toContainText(`in ${roomName}`);
+  } finally {
+    await admin.close();
+  }
 });
