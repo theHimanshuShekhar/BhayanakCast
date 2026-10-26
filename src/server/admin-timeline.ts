@@ -10,7 +10,7 @@
  * bound, so the merged list's latest `limit` entries are exact: what a diagnosis wants is the
  * recent end, and `truncated` says older entries were left out.
  */
-import { and, desc, eq, gte, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, or } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import {
   hostIntervals,
@@ -77,23 +77,13 @@ export async function getRoomTimeline(
     db
       .select()
       .from(presenceIntervals)
-      .where(
-        and(
-          eq(presenceIntervals.roomId, roomId),
-          gte(sql`coalesce(${presenceIntervals.endedAt}, ${presenceIntervals.lastSeenAt})`, since),
-        ),
-      )
+      .where(and(eq(presenceIntervals.roomId, roomId), endedSince(presenceIntervals, since)))
       .orderBy(desc(presenceIntervals.startedAt))
       .limit(take),
     db
       .select()
       .from(streamIntervals)
-      .where(
-        and(
-          eq(streamIntervals.roomId, roomId),
-          gte(sql`coalesce(${streamIntervals.endedAt}, ${streamIntervals.lastSeenAt})`, since),
-        ),
-      )
+      .where(and(eq(streamIntervals.roomId, roomId), endedSince(streamIntervals, since)))
       .orderBy(desc(streamIntervals.startedAt))
       .limit(take),
     db
@@ -167,6 +157,15 @@ export async function getRoomTimeline(
     ids.map((id) => [id, found.get(id) ?? { id, username: id, image: null }]),
   );
   return { entries, people, truncated };
+}
+
+/**
+ * An interval that ended, or was last seen, at `since` or later. On the typed columns, not a
+ * `coalesce`: a parameter compared with raw SQL skips the column's encoding, and postgres-js
+ * (production; PGlite tolerates it) refuses the bare `Date`.
+ */
+function endedSince(table: typeof presenceIntervals | typeof streamIntervals, since: Date) {
+  return or(gte(table.endedAt, since), and(isNull(table.endedAt), gte(table.lastSeenAt, since)));
 }
 
 function interval(
