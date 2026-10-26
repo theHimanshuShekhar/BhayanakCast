@@ -12,8 +12,8 @@ import { useAppActions } from "~/lib/app-actions";
 import { type SignInErrorSearch, validateSignInErrorSearch } from "~/lib/ban";
 import { useCurrentSession } from "~/lib/current-user";
 import { homeMeta, roomMeta, unavailableRoomMeta } from "~/lib/embed";
-import { formatCotime } from "~/lib/format";
-import type { Regular } from "~/lib/home";
+import { fmtMins, formatCotime } from "~/lib/format";
+import type { Records, Regular } from "~/lib/home";
 import { homeSummaryQuery, youCardQuery } from "~/lib/home.queries";
 import { useOnlineCount } from "~/lib/lobby-live";
 import {
@@ -251,6 +251,86 @@ const RegularsPanel = ({
   </section>
 );
 
+/** A record row, like a Regulars row: the whole row links. */
+const recordRowCls =
+  "w-[calc(100%+1rem)] block p-2 -mx-2 rounded-lg !text-fg hover:no-underline hover:bg-surface";
+
+/**
+ * What a record names and its figure, with its kind and period under both so a long label has
+ * the full width. The name shortens before the figure does.
+ */
+const RecordBody = ({
+  name,
+  label,
+  period,
+  value,
+}: {
+  name: string;
+  label: string;
+  period: string;
+  value: string;
+}) => (
+  <>
+    <div className="flex items-center gap-2.5">
+      <div className="flex-1 min-w-0 text-xs font-medium truncate">{name}</div>
+      <span className="shrink-0 text-[10.5px] font-semibold px-1.5 py-0.5 rounded-md bg-surface-2 text-fg-muted tabular-nums">
+        {value}
+      </span>
+    </div>
+    <div className="mt-0.5 text-[10.5px] text-muted truncate">
+      {label} <span className="text-subtle">&middot; {period}</span>
+    </div>
+  </>
+);
+
+/**
+ * The standout public-room numbers (ADR 16 addendum): the same for every viewer, so a private
+ * room is never named or linked. A record with no data is skipped, and with none the card is
+ * not rendered.
+ */
+const RecordsPanel = ({ records }: { records: Records }) => {
+  const { longestRoom, biggestRoom, mostViewers } = records;
+  return (
+    <section aria-label="Records" className={panelCls}>
+      <PanelHead icon={Icon.Pin}>Records</PanelHead>
+      {longestRoom && (
+        <Link to="/past/$roomId" params={{ roomId: longestRoom.id }} className={recordRowCls}>
+          <RecordBody
+            name={longestRoom.name}
+            label="Longest room"
+            period="last 30 days"
+            value={fmtMins(longestRoom.durationMinutes)}
+          />
+        </Link>
+      )}
+      {biggestRoom && (
+        <Link to="/past/$roomId" params={{ roomId: biggestRoom.id }} className={recordRowCls}>
+          <RecordBody
+            name={biggestRoom.name}
+            label="Biggest room"
+            period="last 30 days"
+            value={`${biggestRoom.people} ${biggestRoom.people === 1 ? "person" : "people"}`}
+          />
+        </Link>
+      )}
+      {mostViewers && (
+        <Link
+          to="/profile/$userId"
+          params={{ userId: mostViewers.streamer.id }}
+          className={recordRowCls}
+        >
+          <RecordBody
+            name={mostViewers.streamer.username}
+            label="Most viewers on one stream"
+            period="all time"
+            value={`${mostViewers.viewers} ${mostViewers.viewers === 1 ? "viewer" : "viewers"}`}
+          />
+        </Link>
+      )}
+    </section>
+  );
+};
+
 const UserResult = ({
   user,
   liveRoom,
@@ -342,7 +422,7 @@ function HomePage() {
   const { data: rooms } = useSuspenseQuery(liveRoomsQuery());
   const { data: pastRooms } = useSuspenseQuery(pastRoomsQuery());
   const {
-    data: { rightNow, regulars, community },
+    data: { rightNow, regulars, records, community },
   } = useSuspenseQuery(homeSummaryQuery());
   const [q, setQ] = useState("");
   // The rooms on the first render (server and hydration agree on them). Any other room went
@@ -622,6 +702,10 @@ function HomePage() {
         )}
 
         {regulars.length > 0 && <RegularsPanel regulars={regulars} liveRoomOf={liveRoomOf} />}
+
+        {(records.longestRoom || records.biggestRoom || records.mostViewers) && (
+          <RecordsPanel records={records} />
+        )}
 
         <section aria-label="Community" className={panelCls}>
           <PanelHead icon={Icon.Users}>Community</PanelHead>

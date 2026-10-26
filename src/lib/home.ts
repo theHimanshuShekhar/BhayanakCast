@@ -32,6 +32,25 @@ export interface Regular {
   hours: number;
 }
 
+/** A public past stream named by a record, which links to its recap. */
+interface RecordRoom {
+  id: string;
+  name: string;
+}
+
+/**
+ * The standout numbers ("Records"). Each is null with no data. They count public rooms only,
+ * for every caller, admins included (ADR 16 addendum).
+ */
+export interface Records {
+  /** Longest public past stream in the last 30 days, creation to end. */
+  longestRoom: (RecordRoom & { durationMinutes: number }) | null;
+  /** Public past stream in the last 30 days with the most people present at once. */
+  biggestRoom: (RecordRoom & { people: number }) | null;
+  /** The highest public peak viewers of any user, all time, rooms in progress included. */
+  mostViewers: { streamer: Pick<Regular, "id" | "username" | "image">; viewers: number } | null;
+}
+
 /**
  * The home sidebar's numbers. The online count isn't here: it comes from the
  * realtime server (spec #3).
@@ -43,6 +62,8 @@ export interface HomeSummary {
    * list for every caller, admins included: it names people, so private rooms stay out.
    */
   regulars: Regular[];
+  /** Standout public-room numbers, the same for every caller like `regulars`. */
+  records: Records;
   community: CommunityTotals;
 }
 

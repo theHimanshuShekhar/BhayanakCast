@@ -15,6 +15,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { THUMBNAIL_HEIGHT, THUMBNAIL_WIDTH } from "../lib/thumbnails.ts";
 import { getRoomTimeline } from "../server/admin-timeline.ts";
 import type { Caller } from "../server/caller.ts";
+import { getHomeSummary } from "../server/home.ts";
 import { getProfile, searchUsers } from "../server/profiles.ts";
 import { createRoom, listLiveRooms } from "../server/rooms.ts";
 import { getUserSettings, saveUserSettings } from "../server/settings.ts";
@@ -319,6 +320,27 @@ describe("the app's queries on a migrated database", () => {
       ["stream", "a"],
       ["presence", "b"],
     ]);
+  });
+
+  it("reads the home records through the driver (the 30-day window, presence sweep, public peak)", async () => {
+    await endedRoom("r1", T0);
+    await rollupEndedRoom(db, "r1");
+    // Ended 45 days before `now` and longer: only the window keeps it out.
+    const old = at(-45 * 24 * 60);
+    await db.insert(rooms).values({
+      id: "old",
+      name: "old",
+      createdBy: "a",
+      hostUserId: "a",
+      createdAt: old,
+      endedAt: at(600, old),
+    });
+    const { records } = await getHomeSummary(db, visitor, at(90));
+    expect(records).toEqual({
+      longestRoom: { id: "r1", name: "r1", durationMinutes: 60 },
+      biggestRoom: { id: "r1", name: "r1", people: 2 },
+      mostViewers: { streamer: { id: "a", username: "ana", image: null }, viewers: 1 },
+    });
   });
 
   it("round-trips a user's settings as jsonb", async () => {
