@@ -4,6 +4,7 @@ import {
   chooseStartOrder,
   codecReasonOf,
   FIREFOX_START,
+  HARDWARE_H264_START,
   HARDWARE_VP9_START,
   NORMAL_START,
   orderCodecs,
@@ -122,6 +123,14 @@ describe("orderCodecs with the streamer's own order", () => {
     ]);
   });
 
+  it("puts H.264 first for a streamer on hardware H.264, and a viewer without H.264 gets AV1", () => {
+    expect(
+      types(orderCodecs(CHROMIUM, videoMimeTypes(CHROMIUM), HARDWARE_H264_START)).slice(0, 2),
+    ).toEqual(["video/H264", "video/H264"]);
+    const noH264 = ["video/AV1", "video/VP9", "video/VP8"];
+    expect(types(orderCodecs(CHROMIUM, noH264, HARDWARE_H264_START))[0]).toBe("video/AV1");
+  });
+
   it("sends only H.264 and VP8 from Firefox, H.264 first", () => {
     expect(types(orderCodecs(CHROMIUM, videoMimeTypes(CHROMIUM), FIREFOX_START))).toEqual([
       "video/H264",
@@ -223,7 +232,9 @@ function capabilities(answers: Record<string, boolean | Error | "hang">) {
 describe("codecReasonOf", () => {
   it("gives the reason of an order only while the codec sent is the one it is about", () => {
     expect(codecReasonOf("hardware", "video/VP9")).toBe("hardware");
+    expect(codecReasonOf("hardware", "video/H264")).toBe("hardware");
     expect(codecReasonOf("hardware", "video/AV1")).toBe("preferred");
+    expect(codecReasonOf("hardware", "video/VP8")).toBe("preferred");
     expect(codecReasonOf("browser", "video/H264")).toBe("browser");
     expect(codecReasonOf("browser", "video/vp8")).toBe("browser");
     expect(codecReasonOf("browser", "video/VP9")).toBe("preferred");
@@ -256,7 +267,7 @@ describe("chooseStartOrder", () => {
     expect(asked.encodingInfo).not.toHaveBeenCalled();
   });
 
-  it("asks Chromium about AV1 and VP9 at the capture's size, frame rate and bitrate", async () => {
+  it("asks Chromium about AV1, VP9 and H.264 at the capture's size, frame rate and bitrate", async () => {
     const asked = capabilities({});
     await chooseStartOrder("chrome", CAPTURE, asked);
     expect(asked.encodingInfo.mock.calls.map(([config]) => config)).toEqual([
@@ -280,6 +291,16 @@ describe("chooseStartOrder", () => {
           framerate: 30,
         },
       },
+      {
+        type: "webrtc",
+        video: {
+          contentType: "video/H264",
+          width: 1920,
+          height: 1080,
+          bitrate: 3_000_000,
+          framerate: 30,
+        },
+      },
     ]);
   });
 
@@ -287,9 +308,10 @@ describe("chooseStartOrder", () => {
     ["AV1 and VP9", { "video/AV1": true, "video/VP9": true }, NORMAL_START],
     ["AV1 only", { "video/AV1": true, "video/VP9": false }, NORMAL_START],
     ["VP9 only", { "video/AV1": false, "video/VP9": true }, HARDWARE_VP9_START],
-    ["neither", { "video/AV1": false, "video/VP9": false }, NORMAL_START],
-    // H.264 hardware alone never moves the start.
-    ["H.264 only", { "video/H264": true }, NORMAL_START],
+    ["VP9 and H.264", { "video/VP9": true, "video/H264": true }, HARDWARE_VP9_START],
+    ["AV1 and H.264", { "video/AV1": true, "video/H264": true }, NORMAL_START],
+    ["H.264 only", { "video/H264": true }, HARDWARE_H264_START],
+    ["none", { "video/AV1": false, "video/VP9": false, "video/H264": false }, NORMAL_START],
   ])("with hardware %s, picks the right order", async (_, answers, expected) => {
     for (const name of ["chrome", "edge", "opera"] as const) {
       expect(await chooseStartOrder(name, CAPTURE, capabilities(answers))).toBe(expected);
@@ -300,6 +322,13 @@ describe("chooseStartOrder", () => {
     expect(NORMAL_START.reason).toBe("preferred");
     expect(HARDWARE_VP9_START.reason).toBe("hardware");
     expect(HARDWARE_VP9_START.order.slice(0, 2)).toEqual(["video/vp9", "video/av1"]);
+    expect(HARDWARE_H264_START.reason).toBe("hardware");
+    expect(HARDWARE_H264_START.order).toEqual([
+      "video/h264",
+      "video/av1",
+      "video/vp9",
+      "video/vp8",
+    ]);
   });
 
   it("takes the normal order for Safari and others, and without mediaCapabilities", async () => {
@@ -323,6 +352,13 @@ describe("chooseStartOrder", () => {
         "chrome",
         CAPTURE,
         capabilities({ "video/AV1": false, "video/VP9": new Error("no") }),
+      ),
+    ).toBe(NORMAL_START);
+    expect(
+      await chooseStartOrder(
+        "chrome",
+        CAPTURE,
+        capabilities({ "video/AV1": false, "video/VP9": false, "video/H264": new Error("no") }),
       ),
     ).toBe(NORMAL_START);
   });

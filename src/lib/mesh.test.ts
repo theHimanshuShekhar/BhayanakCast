@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   FIREFOX_START,
+  HARDWARE_H264_START,
   HARDWARE_VP9_START,
   NORMAL_START,
   type StartOrder,
@@ -1173,6 +1174,9 @@ describe("Mesh quality telemetry (ADR 2 addendum)", () => {
       [HARDWARE_VP9_START, "video/VP9", "hardware"],
       // A viewer without VP9 leaves the sender on AV1.
       [HARDWARE_VP9_START, "video/AV1", "preferred"],
+      [HARDWARE_H264_START, "video/H264", "hardware"],
+      // A viewer without H.264 leaves the sender on AV1.
+      [HARDWARE_H264_START, "video/AV1", "preferred"],
       [FIREFOX_START, "video/H264", "browser"],
       [FIREFOX_START, "video/VP8", "browser"],
     ] as const) {

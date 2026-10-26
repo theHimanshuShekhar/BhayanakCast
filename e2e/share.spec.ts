@@ -625,8 +625,10 @@ test("a share starts on the codec its streamer's browser picks (ADR 2 addendum: 
       expect(sent).toEqual([offered.includes("video/h264") ? "video/h264" : "video/vp8"]);
     } else {
       // No hardware encoder in CI: the normal order, AV1 first. (Where the machine has hardware
-      // VP9 and no hardware AV1, VP9 goes first, which the rows' reason says.)
-      expect(sent).toEqual([sent[0] === "video/vp9" ? "video/vp9" : "video/av1"]);
+      // VP9, or else hardware H.264, and no hardware AV1, that goes first, which the rows' reason
+      // says.)
+      const hardware = ["video/vp9", "video/h264"].includes(sent[0] ?? "");
+      expect(sent).toEqual([hardware ? sent[0] : "video/av1"]);
     }
     // Its rows say the same, once a window has gone out.
     await expect.poll(() => rows.some((row) => row.windowMs), { timeout: 45_000 }).toBe(true);

@@ -13,6 +13,7 @@ import { eq } from "drizzle-orm";
 import postgres from "postgres";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { THUMBNAIL_HEIGHT, THUMBNAIL_WIDTH } from "../lib/thumbnails.ts";
+import { getRoomTimeline } from "../server/admin-timeline.ts";
 import type { Caller } from "../server/caller.ts";
 import { getProfile, searchUsers } from "../server/profiles.ts";
 import { createRoom, listLiveRooms } from "../server/rooms.ts";
@@ -308,6 +309,16 @@ describe("the app's queries on a migrated database", () => {
     expect(read?.mime).toBe("image/jpeg");
     expect(read?.capturedAt).toEqual(T0);
     expect([...(read?.image ?? [])]).toEqual([...bytes]);
+  });
+
+  it("reads a room's timeline with its presence and stream intervals (timestamptz bounds)", async () => {
+    await endedRoom("r1", T0);
+    const { entries } = await getRoomTimeline(db, adminCaller, { roomId: "r1" }, { now: at(90) });
+    expect(entries.map((e) => [e.source, "userId" in e ? e.userId : null])).toEqual([
+      ["presence", "a"],
+      ["stream", "a"],
+      ["presence", "b"],
+    ]);
   });
 
   it("round-trips a user's settings as jsonb", async () => {
