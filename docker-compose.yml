@@ -64,7 +64,7 @@ services:
 
   db:
     # Pinned by digest, the same as backup/Dockerfile's base so pg_dump matches the server.
-    image: postgres:17-alpine@sha256:1bcc18d81671b02906296aad470ec9778a6b71016ce953092024b680bad007b0
+    image: postgres:17-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-bhayanakcast}
       # No `:?` guard (Dockhand can't stop/redeploy stacks that use it); the postgres image
